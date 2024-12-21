@@ -70,7 +70,8 @@ impl Engine {
         //     &mesh, &asset, &device
         // );
 
-        let (document, buffers, _images) = gltf::import("assets/Box.glb").unwrap();
+        let (document, buffers, _images) =
+            gltf::import("assets/Triangle.gltf").unwrap();
 
         let mut primitive_manager =
             PrimitiveManager::new(&device, &[Some(swapchain_format.into())]);

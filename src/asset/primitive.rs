@@ -117,33 +117,33 @@ impl PrimitiveManager {
             "only mode 4 currently supported"
         );
 
-        let indices = gltf_primitive
-            .indices()
-            .expect("only indexed primitive are currently supported");
-        let index_format = match indices.data_type() {
-            gltf::accessor::DataType::U16 => wgpu::IndexFormat::Uint16,
-            gltf::accessor::DataType::U32 => wgpu::IndexFormat::Uint32,
-            _ => panic!("unsupported index format"),
-        };
-        let vertices_count = indices.count() as u32;
-        let indices = self.create_buffer_slice(&indices, false, device, buffers);
+        if let Some(positions) = gltf_primitive.get(&gltf::Semantic::Positions) {
+            let (indices, vertices_count) = if let Some(indices) = gltf_primitive.indices() {
+                let index_format = match indices.data_type() {
+                    gltf::accessor::DataType::U16 => wgpu::IndexFormat::Uint16,
+                    gltf::accessor::DataType::U32 => wgpu::IndexFormat::Uint32,
+                    _ => panic!("unsupported index format"),
+                };
+                let vertices_count = indices.count() as u32;
+                let buffer_slice = self.create_buffer_slice(&indices, false, device, buffers);
+                (Some((buffer_slice, index_format)), vertices_count)
+            } else {
+                (None, positions.count() as u32)
+            };
 
-        let positions = gltf_primitive
-            .get(&gltf::Semantic::Positions)
-            .expect("primitive should have a POSITION attribute");
-        let positions = self.create_buffer_slice(&positions, true, device, buffers);
+            let positions = self.create_buffer_slice(&positions, true, device, buffers);
 
-        let material = gltf_primitive.material();
-        self.init_material(&material, device);
-        let material = material.index();
+            let material = gltf_primitive.material();
+            self.init_material(&material, device);
+            let material = material.index();
 
-        self.primitives.push(Primitive {
-            indices,
-            index_format,
-            vertices: positions,
-            vertices_count,
-            material,
-        });
+            self.primitives.push(Primitive {
+                indices,
+                positions,
+                vertices_count,
+                material,
+            });
+        }
     }
 
     fn create_buffer_slice(
@@ -249,9 +249,8 @@ impl VecBufferExt for HashMap<usize, wgpu::Buffer> {
 }
 
 pub struct Primitive {
-    indices: BufferSlice,
-    index_format: wgpu::IndexFormat,
-    vertices: BufferSlice,
+    indices: Option<(BufferSlice, wgpu::IndexFormat)>,
+    positions: BufferSlice,
     vertices_count: u32,
     material: Option<usize>,
 }
@@ -266,12 +265,16 @@ impl<'a> DrawPrimitives for wgpu::RenderPass<'a> {
         self.set_bind_group(1, camera.bind_group(), &[]);
         for primitive in manager.primitives.iter() {
             self.set_bind_group(0, &manager.materials[&primitive.material], &[]);
-            self.set_index_buffer(
-                manager.indices.slice(&primitive.indices),
-                primitive.index_format,
-            );
-            self.set_vertex_buffer(0, manager.vertices.slice(&primitive.vertices));
-            self.draw_indexed(0..primitive.vertices_count, 0, 0..1);
+            self.set_vertex_buffer(0, manager.vertices.slice(&primitive.positions));
+            match &primitive.indices {
+                Some((indices, format)) => {
+                    self.set_index_buffer(manager.indices.slice(&indices), *format);
+                    self.draw_indexed(0..primitive.vertices_count, 0, 0..1);
+                }
+                None => {
+                    self.draw(0..primitive.vertices_count, 0..1);
+                }
+            }
         }
     }
 }

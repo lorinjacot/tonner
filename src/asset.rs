@@ -1,8 +1,3 @@
-// use std::{collections::HashMap, path::Path};
-
-// use wgpu::util::DeviceExt;
-
-// // mod mesh;
 pub mod primitive;
 
 // pub struct Asset {

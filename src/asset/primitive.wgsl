@@ -10,7 +10,9 @@ struct Camera {
     view_projection: mat4x4f,
 }
 
-@group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(0) var<uniform> base_color_factor: vec4f;
+
+@group(1) @binding(0) var<uniform> camera: Camera;
 
 @vertex
 fn vs_main(
@@ -26,5 +28,5 @@ fn vs_main(
 fn fs_main(
     vertex: VertexOutput
 ) -> @location(0) vec4f {
-    return vec4f(1.0, 0.0, 0.0, 1.0);
+    return base_color_factor;
 }

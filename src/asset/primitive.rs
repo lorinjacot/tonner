@@ -6,14 +6,30 @@ use crate::camera::Camera;
 
 pub struct PrimitiveManager {
     pipeline: wgpu::RenderPipeline,
-    buffers_mapping: HashMap<usize, usize>,
-    indices: Vec<wgpu::Buffer>,
-    vertices: Vec<wgpu::Buffer>,
+    indices: HashMap<usize, wgpu::Buffer>,
+    vertices: HashMap<usize, wgpu::Buffer>,
+    materials: HashMap<Option<usize>, wgpu::BindGroup>,
+    material_bind_group_layout: wgpu::BindGroupLayout,
     primitives: Vec<Primitive>,
 }
 
 impl PrimitiveManager {
     pub fn new(device: &wgpu::Device, targets: &[Option<wgpu::ColorTargetState>]) -> Self {
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Matrial bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Primitive camera bind group layout"),
@@ -33,7 +49,7 @@ impl PrimitiveManager {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Primitive pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&material_bind_group_layout, &camera_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -81,9 +97,10 @@ impl PrimitiveManager {
 
         Self {
             pipeline,
-            buffers_mapping: HashMap::new(),
-            indices: Vec::new(),
-            vertices: Vec::new(),
+            indices: HashMap::new(),
+            vertices: HashMap::new(),
+            materials: HashMap::new(),
+            material_bind_group_layout,
             primitives: Vec::new(),
         }
     }
@@ -116,11 +133,16 @@ impl PrimitiveManager {
             .expect("primitive should have a POSITION attribute");
         let positions = self.create_buffer_slice(&positions, true, device, buffers);
 
+        let material = gltf_primitive.material();
+        self.init_material(&material, device);
+        let material = material.index();
+
         self.primitives.push(Primitive {
             indices,
             index_format,
             vertices: positions,
             vertices_count,
+            material,
         });
     }
 
@@ -141,10 +163,14 @@ impl PrimitiveManager {
         {
             panic!("only dense attributes buffer are currently supported");
         };
-        let buffer = self.init_buffer(&buffer_view, is_vertex, device, buffers);
+        self.init_buffer(&buffer_view, is_vertex, device, buffers);
         let start = accessor.offset() as u64;
         let end = start + (accessor.count() * accessor.size()) as u64;
-        BufferSlice { buffer, start, end }
+        BufferSlice {
+            buffer: buffer_view.index(),
+            start,
+            end,
+        }
     }
 
     fn init_buffer(
@@ -152,36 +178,56 @@ impl PrimitiveManager {
         buffer_view: &gltf::buffer::View,
         is_vertex: bool,
         device: &wgpu::Device,
-        buffers: &Vec<gltf::buffer::Data>,
-    ) -> usize {
-        *self
-            .buffers_mapping
-            .entry(buffer_view.index())
-            .or_insert_with(|| {
-                let offset = buffer_view.offset();
-                let (index, vec, usage) = if is_vertex {
-                    (
-                        self.vertices.len(),
-                        &mut self.vertices,
-                        wgpu::BufferUsages::VERTEX,
-                    )
-                } else {
-                    (
-                        self.indices.len(),
-                        &mut self.indices,
-                        wgpu::BufferUsages::INDEX,
-                    )
-                };
-                vec.push(
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("bufferViews[{}]", buffer_view.index())),
-                        contents: &buffers[buffer_view.buffer().index()].0
-                            [offset..offset + buffer_view.length()],
-                        usage,
-                    }),
-                );
-                index
+        gltf_buffers: &Vec<gltf::buffer::Data>,
+    ) {
+        let index = buffer_view.index();
+        let buffers = if is_vertex {
+            &mut self.vertices
+        } else {
+            &mut self.indices
+        };
+        buffers.entry(index).or_insert_with(|| {
+            let offset = buffer_view.offset();
+            let usage = if is_vertex {
+                wgpu::BufferUsages::VERTEX
+            } else {
+                wgpu::BufferUsages::INDEX
+            };
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("bufferViews[{}] buffer", index)),
+                contents: &gltf_buffers[buffer_view.buffer().index()].0
+                    [offset..offset + buffer_view.length()],
+                usage,
             })
+        });
+    }
+
+    fn init_material(&mut self, gltf_material: &gltf::Material, device: &wgpu::Device) {
+        let index = gltf_material.index();
+        self.materials.entry(index).or_insert_with(|| {
+            let name = if let Some(index) = index {
+                &format!("materials[{index}]")
+            } else {
+                "default material"
+            };
+
+            let pbr_metallic_roughness = gltf_material.pbr_metallic_roughness();
+
+            let base_color_factor = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{name} base color factor buffer")),
+                contents: bytemuck::cast_slice(&[pbr_metallic_roughness.base_color_factor()]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("{name} bind group")),
+                layout: &self.material_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: base_color_factor.as_entire_binding(),
+                }],
+            })
+        });
     }
 }
 
@@ -196,17 +242,18 @@ trait VecBufferExt {
     fn slice(&self, slice: &BufferSlice) -> wgpu::BufferSlice<'_>;
 }
 
-impl VecBufferExt for Vec<wgpu::Buffer> {
+impl VecBufferExt for HashMap<usize, wgpu::Buffer> {
     fn slice(&self, slice: &BufferSlice) -> wgpu::BufferSlice<'_> {
-        self[slice.buffer].slice(slice.start..slice.end)
+        self[&slice.buffer].slice(slice.start..slice.end)
     }
 }
 
-struct Primitive {
+pub struct Primitive {
     indices: BufferSlice,
     index_format: wgpu::IndexFormat,
     vertices: BufferSlice,
     vertices_count: u32,
+    material: Option<usize>,
 }
 
 pub trait DrawPrimitives {
@@ -216,8 +263,9 @@ pub trait DrawPrimitives {
 impl<'a> DrawPrimitives for wgpu::RenderPass<'a> {
     fn draw_primitives(&mut self, manager: &PrimitiveManager, camera: &Camera) {
         self.set_pipeline(&manager.pipeline);
-        self.set_bind_group(0, camera.bind_group(), &[]);
+        self.set_bind_group(1, camera.bind_group(), &[]);
         for primitive in manager.primitives.iter() {
+            self.set_bind_group(0, &manager.materials[&primitive.material], &[]);
             self.set_index_buffer(
                 manager.indices.slice(&primitive.indices),
                 primitive.index_format,

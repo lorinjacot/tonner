@@ -1,10 +1,104 @@
-pub mod primitive;
+mod primitive;
+pub mod scene;
 
 // pub struct Asset {
-//     document: gltf::Document,
-//     buffers: Vec<gltf::buffer::Data>,
-//     images: Vec<gltf::image::Data>,
-//     index_buffers: HashMap<usize, wgpu::Buffer>,
+//     gltf_document: gltf::Document,
+//     gltf_buffers: Vec<gltf::buffer::Data>,
+//     gltf_images: Vec<gltf::image::Data>,
+//     meshes: MeshManager,
+//     primitive_pipeline: wgpu::RenderPipeline,
+// }
+
+// impl Asset {
+//     pub fn load<P: AsRef<Path>>(
+//         path: P,
+//         device: &wgpu::Device,
+//         targets: &[Option<wgpu::ColorTargetState>],
+//     ) -> Self {
+//         let (gltf_document, gltf_buffers, gltf_images) =
+//             gltf::import(path).expect("failed to open asset");
+
+//         let nodes = NodeManager::new();
+//         let meshes = MeshManager::new(device);
+
+//         let camera_bind_group_layout =
+//             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+//                 label: Some("Primitive camera bind group layout"),
+//                 entries: &[wgpu::BindGroupLayoutEntry {
+//                     binding: 0,
+//                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+//                     ty: wgpu::BindingType::Buffer {
+//                         ty: wgpu::BufferBindingType::Uniform,
+//                         has_dynamic_offset: false,
+//                         min_binding_size: None,
+//                     },
+//                     count: None,
+//                 }],
+//             });
+
+//         let module = device.create_shader_module(wgpu::include_wgsl!("asset/primitive.wgsl"));
+
+//         let primitive_pipeline_layout =
+//             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+//                 label: Some("Primitive pipeline layout"),
+//                 bind_group_layouts: &[
+//                     meshes.material_bind_group_layout(),
+//                     &camera_bind_group_layout,
+//                 ],
+//                 push_constant_ranges: &[],
+//             });
+
+//         let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+//             label: Some("Primitive pipeline"),
+//             layout: Some(&primitive_pipeline_layout),
+//             vertex: wgpu::VertexState {
+//                 module: &module,
+//                 entry_point: Some("vs_main"),
+//                 compilation_options: wgpu::PipelineCompilationOptions::default(),
+//                 buffers: &[wgpu::VertexBufferLayout {
+//                     array_stride: 3 * 4,
+//                     step_mode: wgpu::VertexStepMode::Vertex,
+//                     attributes: &[wgpu::VertexAttribute {
+//                         format: wgpu::VertexFormat::Float32x3,
+//                         offset: 0,
+//                         shader_location: 0,
+//                     }],
+//                 }],
+//             },
+//             primitive: wgpu::PrimitiveState {
+//                 topology: wgpu::PrimitiveTopology::TriangleList,
+//                 strip_index_format: None,
+//                 front_face: wgpu::FrontFace::Ccw,
+//                 cull_mode: None,
+//                 unclipped_depth: false,
+//                 polygon_mode: wgpu::PolygonMode::Fill,
+//                 conservative: false,
+//             },
+//             depth_stencil: None,
+//             multisample: wgpu::MultisampleState {
+//                 count: 1,
+//                 mask: !0,
+//                 alpha_to_coverage_enabled: false,
+//             },
+//             fragment: Some(wgpu::FragmentState {
+//                 module: &module,
+//                 entry_point: Some("fs_main"),
+//                 compilation_options: wgpu::PipelineCompilationOptions::default(),
+//                 targets,
+//             }),
+//             multiview: None,
+//             cache: None,
+//         });
+
+//         Self {
+//             gltf_document,
+//             gltf_buffers,
+//             gltf_images,
+//             nodes,
+//             meshes,
+//             primitive_pipeline,
+//         }
+//     }
 // }
 
 // impl Asset {

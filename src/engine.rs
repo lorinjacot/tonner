@@ -5,7 +5,6 @@ use glam::vec3;
 use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
 use winit::window::Window;
 
-use crate::asset::primitive::{DrawPrimitives, PrimitiveManager};
 use crate::camera::{Camera, CameraController};
 
 pub struct Engine {
@@ -17,7 +16,6 @@ pub struct Engine {
     last_frame: Instant,
     camera: Camera,
     camera_controller: CameraController,
-    primitive_manager: PrimitiveManager,
 }
 
 impl Engine {
@@ -64,26 +62,6 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
-        // let asset = Asset::import("assets/Box.glb").expect("Failed to import Box.glb");
-        // let mesh = asset.document.meshes().next().unwrap().primitives().next().unwrap();
-        // let mesh = mesh::MeshPrimitive::from_gltf(
-        //     &mesh, &asset, &device
-        // );
-
-        let (document, buffers, _images) =
-            gltf::import("assets/Triangle.gltf").unwrap();
-
-        let mut primitive_manager =
-            PrimitiveManager::new(&device, &[Some(swapchain_format.into())]);
-        let primitive = document
-            .meshes()
-            .next()
-            .unwrap()
-            .primitives()
-            .next()
-            .unwrap();
-        primitive_manager.load(&primitive, &device, &buffers);
-
         let camera = Camera::new(
             vec3(0.0, 0.0, -10.0),
             config.width as f32 / config.height as f32,
@@ -103,7 +81,6 @@ impl Engine {
             last_frame,
             camera,
             camera_controller,
-            primitive_manager,
         }
     }
 
@@ -114,9 +91,9 @@ impl Engine {
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::RedrawRequested => {
+                self.window.request_redraw();
                 self.update();
                 self.draw();
-                self.window.request_redraw();
                 true
             }
             WindowEvent::Resized(new_size) => {
@@ -193,8 +170,6 @@ impl Engine {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-
-            render_pass.draw_primitives(&self.primitive_manager, &self.camera);
         }
 
         self.queue.submit(Some(encoder.finish()));

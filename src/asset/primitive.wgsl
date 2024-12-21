@@ -10,9 +10,11 @@ struct Camera {
     view_projection: mat4x4f,
 }
 
-@group(0) @binding(0) var<uniform> base_color_factor: vec4f;
+@group(0) @binding(0) var<uniform> models: array<mat4x4f>;
 
-@group(1) @binding(0) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> base_color_factor: vec4f;
+
+@group(2) @binding(0) var<uniform> camera: Camera;
 
 @vertex
 fn vs_main(

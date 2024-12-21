@@ -4,17 +4,35 @@ use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
 
+use super::scene::Scene;
+
 pub struct PrimitiveManager {
     pipeline: wgpu::RenderPipeline,
+    node_bind_group_layout: wgpu::BindGroupLayout,
     indices: HashMap<usize, wgpu::Buffer>,
     vertices: HashMap<usize, wgpu::Buffer>,
     materials: HashMap<Option<usize>, wgpu::BindGroup>,
     material_bind_group_layout: wgpu::BindGroupLayout,
-    primitives: Vec<Primitive>,
+    primitives: HashMap<usize, Vec<Primitive>>,
 }
 
 impl PrimitiveManager {
     pub fn new(device: &wgpu::Device, targets: &[Option<wgpu::ColorTargetState>]) -> Self {
+        let node_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Node bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Matrial bind group layout"),
@@ -49,7 +67,11 @@ impl PrimitiveManager {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Primitive pipeline layout"),
-            bind_group_layouts: &[&material_bind_group_layout, &camera_bind_group_layout],
+            bind_group_layouts: &[
+                &node_bind_group_layout,
+                &material_bind_group_layout,
+                &camera_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -97,52 +119,67 @@ impl PrimitiveManager {
 
         Self {
             pipeline,
+            node_bind_group_layout,
             indices: HashMap::new(),
             vertices: HashMap::new(),
             materials: HashMap::new(),
             material_bind_group_layout,
-            primitives: Vec::new(),
+            primitives: HashMap::new(),
         }
     }
 
-    pub fn load(
+    pub fn node_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.node_bind_group_layout
+    }
+
+    pub fn init_mesh(
         &mut self,
-        gltf_primitive: &gltf::Primitive,
+        mesh: &gltf::Mesh,
         device: &wgpu::Device,
         buffers: &Vec<gltf::buffer::Data>,
     ) {
-        assert_eq!(
-            gltf_primitive.mode(),
-            gltf::mesh::Mode::Triangles,
-            "only mode 4 currently supported"
-        );
+        let mesh_index = mesh.index();
+        if self.primitives.contains_key(&mesh_index) {
+            return;
+        }
 
-        if let Some(positions) = gltf_primitive.get(&gltf::Semantic::Positions) {
-            let (indices, vertices_count) = if let Some(indices) = gltf_primitive.indices() {
-                let index_format = match indices.data_type() {
-                    gltf::accessor::DataType::U16 => wgpu::IndexFormat::Uint16,
-                    gltf::accessor::DataType::U32 => wgpu::IndexFormat::Uint32,
-                    _ => panic!("unsupported index format"),
+        for primitive in mesh.primitives() {
+            assert_eq!(
+                primitive.mode(),
+                gltf::mesh::Mode::Triangles,
+                "only mode 4 currently supported"
+            );
+
+            if let Some(positions) = primitive.get(&gltf::Semantic::Positions) {
+                let (indices, vertices_count) = if let Some(indices) = primitive.indices() {
+                    let index_format = match indices.data_type() {
+                        gltf::accessor::DataType::U16 => wgpu::IndexFormat::Uint16,
+                        gltf::accessor::DataType::U32 => wgpu::IndexFormat::Uint32,
+                        _ => panic!("unsupported index format"),
+                    };
+                    let vertices_count = indices.count() as u32;
+                    let buffer_slice = self.create_buffer_slice(&indices, false, device, buffers);
+                    (Some((buffer_slice, index_format)), vertices_count)
+                } else {
+                    (None, positions.count() as u32)
                 };
-                let vertices_count = indices.count() as u32;
-                let buffer_slice = self.create_buffer_slice(&indices, false, device, buffers);
-                (Some((buffer_slice, index_format)), vertices_count)
-            } else {
-                (None, positions.count() as u32)
-            };
 
-            let positions = self.create_buffer_slice(&positions, true, device, buffers);
+                let positions = self.create_buffer_slice(&positions, true, device, buffers);
 
-            let material = gltf_primitive.material();
-            self.init_material(&material, device);
-            let material = material.index();
+                let material = primitive.material();
+                self.init_material(&material, device);
+                let material = material.index();
 
-            self.primitives.push(Primitive {
-                indices,
-                positions,
-                vertices_count,
-                material,
-            });
+                self.primitives
+                    .entry(mesh_index)
+                    .or_default()
+                    .push(Primitive {
+                        indices,
+                        positions,
+                        vertices_count,
+                        material,
+                    });
+            }
         }
     }
 
@@ -249,30 +286,33 @@ impl VecBufferExt for HashMap<usize, wgpu::Buffer> {
 }
 
 pub struct Primitive {
+    vertices_count: u32,
     indices: Option<(BufferSlice, wgpu::IndexFormat)>,
     positions: BufferSlice,
-    vertices_count: u32,
     material: Option<usize>,
 }
 
 pub trait DrawPrimitives {
-    fn draw_primitives(&mut self, manager: &PrimitiveManager, camera: &Camera);
+    fn draw_primitives(&mut self, manager: &PrimitiveManager, scene: &Scene, camera: &Camera);
 }
 
 impl<'a> DrawPrimitives for wgpu::RenderPass<'a> {
-    fn draw_primitives(&mut self, manager: &PrimitiveManager, camera: &Camera) {
+    fn draw_primitives(&mut self, manager: &PrimitiveManager, scene: &Scene, camera: &Camera) {
         self.set_pipeline(&manager.pipeline);
-        self.set_bind_group(1, camera.bind_group(), &[]);
-        for primitive in manager.primitives.iter() {
-            self.set_bind_group(0, &manager.materials[&primitive.material], &[]);
-            self.set_vertex_buffer(0, manager.vertices.slice(&primitive.positions));
-            match &primitive.indices {
-                Some((indices, format)) => {
-                    self.set_index_buffer(manager.indices.slice(&indices), *format);
-                    self.draw_indexed(0..primitive.vertices_count, 0, 0..1);
-                }
-                None => {
-                    self.draw(0..primitive.vertices_count, 0..1);
+        self.set_bind_group(0, scene.nodes_bind_group(), &[]);
+        self.set_bind_group(2, camera.bind_group(), &[]);
+        for mesh in manager.primitives.values() {
+            for primitive in mesh.iter() {
+                self.set_bind_group(1, &manager.materials[&primitive.material], &[]);
+                self.set_vertex_buffer(0, manager.vertices.slice(&primitive.positions));
+                match &primitive.indices {
+                    Some((indices, format)) => {
+                        self.set_index_buffer(manager.indices.slice(&indices), *format);
+                        self.draw_indexed(0..primitive.vertices_count, 0, 0..1);
+                    }
+                    None => {
+                        self.draw(0..primitive.vertices_count, 0..1);
+                    }
                 }
             }
         }

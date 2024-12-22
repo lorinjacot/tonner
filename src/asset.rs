@@ -1,5 +1,24 @@
-mod primitive;
-pub mod scene;
+use std::path::Path;
+
+pub struct Asset {
+    pub document: gltf::Document,
+    pub buffers: Vec<gltf::buffer::Data>,
+    _images: Vec<gltf::image::Data>,
+}
+
+impl Asset {
+    pub fn load<P: AsRef<Path>>(path: P) -> Self {
+        let (document, buffers, _images) = gltf::import(path).unwrap();
+        Self {
+            document,
+            buffers,
+            _images,
+        }
+    }
+}
+
+// mod primitive;
+// pub mod scene;
 
 // pub struct Asset {
 //     gltf_document: gltf::Document,

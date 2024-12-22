@@ -5,7 +5,9 @@ use glam::vec3;
 use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
 use winit::window::Window;
 
+use crate::asset::Asset;
 use crate::camera::{Camera, CameraController};
+use crate::scene::{DrawScene, Scene};
 
 pub struct Engine {
     device: wgpu::Device,
@@ -14,8 +16,8 @@ pub struct Engine {
     config: wgpu::SurfaceConfiguration,
     window: Arc<Window>,
     last_frame: Instant,
-    camera: Camera,
     camera_controller: CameraController,
+    scene: Scene,
 }
 
 impl Engine {
@@ -72,6 +74,19 @@ impl Engine {
 
         let last_frame = Instant::now();
 
+        let asset = Asset::load("assets/SimpleMeshes.gltf");
+        let gltf_scene = asset
+            .document
+            .default_scene()
+            .unwrap_or(asset.document.scenes().next().unwrap());
+        let scene = Scene::load(
+            &gltf_scene,
+            &asset,
+            &device,
+            &[Some(swapchain_format.into())],
+            camera,
+        );
+
         Self {
             device,
             queue,
@@ -79,8 +94,8 @@ impl Engine {
             config,
             window,
             last_frame,
-            camera,
             camera_controller,
+            scene,
         }
     }
 
@@ -101,7 +116,8 @@ impl Engine {
                 self.config.height = new_size.height.max(1);
                 self.surface.configure(&self.device, &self.config);
 
-                self.camera
+                self.scene
+                    .camera
                     .set_aspect_ration(self.config.width as f32 / self.config.height as f32);
 
                 self.window.request_redraw();
@@ -135,7 +151,7 @@ impl Engine {
         self.last_frame = Instant::now();
 
         self.camera_controller
-            .update(&mut self.camera, delta_time, &self.queue);
+            .update(&mut self.scene.camera, delta_time, &self.queue);
     }
 
     fn draw(&mut self) {
@@ -170,6 +186,8 @@ impl Engine {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+
+            render_pass.draw_scene(&self.scene);
         }
 
         self.queue.submit(Some(encoder.finish()));

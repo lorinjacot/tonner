@@ -9,7 +9,8 @@ use winit::window::{Window, WindowId};
 // mod asset;
 mod camera;
 mod engine;
-mod storm;
+mod scene;
+mod asset;
 
 #[derive(Default)]
 struct App {

@@ -8,7 +8,6 @@ use super::{DrawScene, Node};
 
 pub struct MeshManager {
     nodes_bind_group_layout: wgpu::BindGroupLayout,
-    camera_bind_group_layout: wgpu::BindGroupLayout,
     primitive_pipeline: wgpu::RenderPipeline,
 
     gltf_mesh_mapping: HashMap<usize, usize>,
@@ -111,7 +110,6 @@ impl MeshManager {
 
         Self {
             nodes_bind_group_layout,
-            camera_bind_group_layout,
             primitive_pipeline,
             gltf_mesh_mapping: HashMap::new(),
             meshes: Vec::new(),
@@ -120,10 +118,6 @@ impl MeshManager {
 
     pub fn nodes_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.nodes_bind_group_layout
-    }
-
-    pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.camera_bind_group_layout
     }
 
     pub fn add_mesh_to_nodes(

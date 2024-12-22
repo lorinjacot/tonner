@@ -74,7 +74,7 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let asset = Asset::load("assets/SimpleMeshes.gltf");
+        let asset = Asset::load("assets/AnimatedTriangle.gltf");
         let gltf_scene = asset
             .document
             .default_scene()
@@ -152,6 +152,7 @@ impl Engine {
 
         self.camera_controller
             .update(&mut self.scene.camera, delta_time, &self.queue);
+        self.scene.update(delta_time, &self.queue);
     }
 
     fn draw(&mut self) {

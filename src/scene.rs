@@ -1,17 +1,20 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
+use animation::AnimationManager;
 use glam::{Mat4, Quat, Vec3};
 use mesh::MeshManager;
 use wgpu::util::DeviceExt;
 
 use crate::{asset::Asset, camera::Camera};
 
+mod animation;
 mod mesh;
 
 pub struct Scene {
     nodes: Vec<Node>,
     nodes_bind_group: wgpu::BindGroup,
     meshes: MeshManager,
+    animations: AnimationManager,
     pub camera: Camera,
 }
 
@@ -23,6 +26,7 @@ impl Scene {
         targets: &[Option<wgpu::ColorTargetState>],
         camera: Camera,
     ) -> Self {
+        let mut nodes_mapping = HashMap::new();
         let mut mesh_node_mapping = HashMap::new();
         let mut nodes = Vec::new();
 
@@ -31,11 +35,13 @@ impl Scene {
                 &gltf_node,
                 &Mat4::IDENTITY,
                 &mut nodes,
+                &mut nodes_mapping,
                 &mut mesh_node_mapping,
             );
         }
 
         let mut meshes = MeshManager::new(device, targets);
+
         for gltf_mesh in asset.document.meshes() {
             if let Some(nodes_id) = mesh_node_mapping.remove(&gltf_mesh.index()) {
                 meshes.add_mesh_to_nodes(&gltf_mesh, &nodes_id, &mut nodes, device, asset);
@@ -46,7 +52,7 @@ impl Scene {
             .iter()
             .map(|node| node.global_transform)
             .collect::<Vec<_>>();
-        
+
         let nodes_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Nodes buffer"),
             contents: bytemuck::cast_slice(&nodes_values),
@@ -62,12 +68,19 @@ impl Scene {
             }],
         });
 
+        let animations = AnimationManager::load(asset, nodes_mapping);
+
         Self {
             nodes,
             nodes_bind_group,
             meshes,
+            animations,
             camera,
         }
+    }
+
+    pub fn update(&mut self, delta_time: Duration, queue: &wgpu::Queue) {
+        self.animations.update(delta_time, queue);
     }
 }
 
@@ -75,6 +88,7 @@ fn load_node(
     gltf_node: &gltf::Node,
     parent_transform: &Mat4,
     nodes: &mut Vec<Node>,
+    nodes_mapping: &mut HashMap<usize, usize>,
     mesh_node_mapping: &mut HashMap<usize, Vec<usize>>,
 ) -> usize {
     let node_id = nodes.len();
@@ -85,9 +99,9 @@ fn load_node(
             rotation,
             scale,
         } => {
-            let scale = Vec3::from_array(scale);
-            let rotation = Quat::from_array(rotation);
             let translation = Vec3::from_array(translation);
+            let rotation = Quat::from_array(rotation);
+            let scale = Vec3::from_array(scale);
             Mat4::from_scale_rotation_translation(scale, rotation, translation)
         }
         gltf::scene::Transform::Matrix { matrix } => Mat4::from_cols_array_2d(&matrix),
@@ -97,7 +111,15 @@ fn load_node(
 
     let children = gltf_node
         .children()
-        .map(|child| load_node(&child, &global_transform, nodes, mesh_node_mapping))
+        .map(|child| {
+            load_node(
+                &child,
+                &global_transform,
+                nodes,
+                nodes_mapping,
+                mesh_node_mapping,
+            )
+        })
         .collect();
 
     nodes.push(Node {
@@ -107,6 +129,7 @@ fn load_node(
         global_transform,
         mesh: None,
     });
+    nodes_mapping.insert(gltf_node.index(), node_id);
 
     if let Some(gltf_mesh) = gltf_node.mesh() {
         mesh_node_mapping

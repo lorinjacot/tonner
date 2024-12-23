@@ -12,6 +12,7 @@ mod mesh;
 
 pub struct Scene {
     nodes: Vec<Node>,
+    nodes_buffer: wgpu::Buffer,
     nodes_bind_group: wgpu::BindGroup,
     meshes: MeshManager,
     animations: AnimationManager,
@@ -33,6 +34,7 @@ impl Scene {
         for gltf_node in gltf_scene.nodes() {
             load_node(
                 &gltf_node,
+                None,
                 &Mat4::IDENTITY,
                 &mut nodes,
                 &mut nodes_mapping,
@@ -56,7 +58,7 @@ impl Scene {
         let nodes_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Nodes buffer"),
             contents: bytemuck::cast_slice(&nodes_values),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
         let nodes_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -72,6 +74,7 @@ impl Scene {
 
         Self {
             nodes,
+            nodes_buffer,
             nodes_bind_group,
             meshes,
             animations,
@@ -80,12 +83,39 @@ impl Scene {
     }
 
     pub fn update(&mut self, delta_time: Duration, queue: &wgpu::Queue) {
-        self.animations.update(delta_time, queue);
+        self.animations.update(delta_time, &mut self.nodes);
+
+        let nodes_values = self
+            .nodes
+            .iter()
+            .map(|node| node.global_transform)
+            .collect::<Vec<_>>();
+
+        queue.write_buffer(&self.nodes_buffer, 0, bytemuck::cast_slice(&nodes_values));
+    }
+}
+
+fn set_node_local_transform(node: usize, transform: Mat4, nodes: &mut Vec<Node>) {
+    nodes[node].local_transform = transform;
+    update_node_global_transform(node, nodes);
+}
+
+fn update_node_global_transform(node: usize, nodes: &mut Vec<Node>) {
+    let parent_transform = match nodes[node].parent {
+        Some(parent_id) => nodes[parent_id].global_transform,
+        None => Mat4::IDENTITY,
+    };
+    let node = &mut nodes[node];
+    node.global_transform = parent_transform * node.local_transform;
+    let children = node.children.iter().copied().collect::<Vec<_>>();
+    for child in children {
+        update_node_global_transform(child, nodes);
     }
 }
 
 fn load_node(
     gltf_node: &gltf::Node,
+    parent_node: Option<usize>,
     parent_transform: &Mat4,
     nodes: &mut Vec<Node>,
     nodes_mapping: &mut HashMap<usize, usize>,
@@ -114,6 +144,7 @@ fn load_node(
         .map(|child| {
             load_node(
                 &child,
+                Some(node_id),
                 &global_transform,
                 nodes,
                 nodes_mapping,
@@ -124,6 +155,7 @@ fn load_node(
 
     nodes.push(Node {
         id: node_id,
+        parent: parent_node,
         children,
         local_transform,
         global_transform,
@@ -143,6 +175,7 @@ fn load_node(
 
 struct Node {
     id: usize,
+    parent: Option<usize>,
     children: Vec<usize>,
     local_transform: Mat4,
     global_transform: Mat4,

@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    iter::FusedIterator,
     marker::PhantomData,
     ops::{Index, IndexMut},
 };
@@ -12,7 +13,7 @@ pub struct Id<T> {
 
 impl<T> Debug for Id<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Id")
+        f.debug_struct(&format!("Id<{}>", std::any::type_name::<T>()))
             .field("element", &self.element)
             .field("version", &self.version)
             .finish()
@@ -158,7 +159,52 @@ impl<T> Storage<T> {
             _ => false,
         }
     }
+
+    pub fn values(&self) -> Values<'_, T> {
+        Values(self.dense.iter())
+    }
+
+    pub fn positions_u32(&self, ids: impl IntoIterator<Item = Id<T>>) -> Vec<u32> {
+        ids.into_iter()
+            .map(|id| self.sparse[id.element].pos as u32)
+            .collect()
+    }
 }
+
+pub struct Values<'a, T>(std::slice::Iter<'a, DenseElement<T>>);
+
+impl<'a, T> Iterator for Values<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<&'a T> {
+        self.0.next().map(|dense_element| &dense_element.value)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.0.len()
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.0
+            .fold(init, |acc, dense_element| f(acc, &dense_element.value))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Values<'a, T> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a, T> FusedIterator for Values<'a, T> {}
 
 impl<T> Index<Id<T>> for Storage<T> {
     type Output = T;

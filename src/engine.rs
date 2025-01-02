@@ -74,18 +74,10 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let asset = Asset::load("assets/AnimatedTriangle.gltf");
-        let gltf_scene = asset
-            .document
-            .default_scene()
-            .unwrap_or(asset.document.scenes().next().unwrap());
-        let scene = Scene::load(
-            &gltf_scene,
-            &asset,
-            &device,
-            &[Some(swapchain_format.into())],
-            camera,
-        );
+        let asset = Asset::open("assets/AnimatedTriangle.gltf").unwrap();
+        let scene = asset
+            .create_scene(asset.document.default_scene().unwrap(), &device, camera)
+            .unwrap();
 
         Self {
             device,
@@ -152,7 +144,6 @@ impl Engine {
 
         self.camera_controller
             .update(&mut self.scene.camera, delta_time, &self.queue);
-        self.scene.update(delta_time, &self.queue);
     }
 
     fn draw(&mut self) {

@@ -1,7 +1,3 @@
-struct Node {
-    model: mat4x4f,
-}
-
 struct Attributes {
     @location(1) position: vec3f,
 }
@@ -14,7 +10,7 @@ struct VertexOutput {
     @builtin(position) position: vec4f,
 }
 
-@group(0) @binding(0) var<storage, read> nodes: array<Node>;
+@group(0) @binding(0) var<storage, read> models: array<mat4x4f>;
 
 @group(1) @binding(0) var<uniform> camera: Camera;
 
@@ -24,7 +20,7 @@ fn vs_main(
     attributes: Attributes
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.position = camera.view_projection * nodes[node_id].model * vec4f(attributes.position, 1.0);
+    out.position = camera.view_projection * models[node_id] * vec4f(attributes.position, 1.0);
     return out;
 }
 

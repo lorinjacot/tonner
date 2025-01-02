@@ -1,25 +1,25 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use glam::{Mat4, Quat, Vec3};
 
 use crate::{
     camera::Camera,
-    scene::{NodeBuilder, NodeTransform, Scene},
+    scene::{MeshBuilder, MeshId, NodeBuilder, NodeTransform, PrimitiveBuilder, Scene},
 };
 
 pub struct Asset {
     pub document: gltf::Document,
-    pub _buffers: Vec<gltf::buffer::Data>,
+    buffers: Vec<gltf::buffer::Data>,
     _images: Vec<gltf::image::Data>,
 }
 
 impl Asset {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, gltf::Error> {
-        let (document, _buffers, _images) = gltf::import(path)?;
+        let (document, buffers, images) = gltf::import(path)?;
         Ok(Self {
             document,
-            _buffers,
-            _images,
+            buffers,
+            _images: images,
         })
     }
 
@@ -28,16 +28,63 @@ impl Asset {
         gltf_scene: gltf::Scene,
         device: &wgpu::Device,
         camera: Camera,
+        targets: &[Option<wgpu::ColorTargetState>],
     ) -> Result<Scene, ()> {
-        let mut scene = Scene::new(device, camera);
+        let mut scene = Scene::new(device, camera, targets);
+        let mut mesh_mapping = HashMap::new();
 
-        let nodes = gltf_scene.nodes().map(|node| self.create_node(&node));
+        let mut nodes = Vec::with_capacity(gltf_scene.nodes().len());
+        for node in gltf_scene.nodes() {
+            nodes.push(self.create_node(&node, &mut scene, &mut mesh_mapping, device)?);
+        }
         scene.create_node(nodes, device)?;
 
         Ok(scene)
     }
 
-    fn create_node(&self, gltf_node: &gltf::Node) -> NodeBuilder {
+    fn create_mesh(&self, gltf_mesh: &gltf::Mesh) -> MeshBuilder {
+        let mut primitives = Vec::with_capacity(gltf_mesh.primitives().len());
+        for primitive in gltf_mesh.primitives() {
+            let reader = primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
+
+            if let Some(positions) = reader.read_positions() {
+                let positions: Vec<_> = positions
+                    .map(|position| Vec3::from_array(position))
+                    .collect();
+
+                let indices: Option<Vec<_>> = reader.read_indices().map(|indices| match indices {
+                    gltf::mesh::util::ReadIndices::U16(indices) => {
+                        indices.map(|index| index as u32).collect()
+                    }
+                    gltf::mesh::util::ReadIndices::U32(indices) => indices.collect(),
+                    gltf::mesh::util::ReadIndices::U8(indices) => {
+                        indices.map(|index| index as u32).collect()
+                    }
+                });
+
+                primitives.push(
+                    PrimitiveBuilder::new()
+                        .set_indices(indices)
+                        .set_positions(positions),
+                );
+            }
+
+            // PrimitiveBuilder::new()
+            //     .set_attributes(attributes)
+            //     .set_indices(buffer, format)
+            //     .set_vertex_count(count)
+        }
+
+        MeshBuilder::new().set_primitives(primitives)
+    }
+
+    fn create_node(
+        &self,
+        gltf_node: &gltf::Node,
+        scene: &mut Scene,
+        meshes_mapping: &mut HashMap<usize, MeshId>,
+        device: &wgpu::Device,
+    ) -> Result<NodeBuilder, ()> {
         let transform = match gltf_node.transform() {
             gltf::scene::Transform::Decomposed {
                 translation,
@@ -53,13 +100,25 @@ impl Asset {
             }
         };
 
-        let children = gltf_node
-            .children()
-            .map(|child| self.create_node(&child))
-            .collect();
+        let mesh = match gltf_node.mesh() {
+            Some(mesh) => Some(match meshes_mapping.entry(mesh.index()) {
+                std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let mesh = self.create_mesh(&mesh);
+                    *entry.insert(scene.create_mesh(mesh, device)?)
+                }
+            }),
+            None => None,
+        };
 
-        NodeBuilder::new()
+        let mut children = Vec::with_capacity(gltf_node.children().len());
+        for child in gltf_node.children() {
+            children.push(self.create_node(&child, scene, meshes_mapping, device)?);
+        }
+
+        Ok(NodeBuilder::new()
             .set_transform(transform)
             .set_children(children)
+            .set_mesh(mesh))
     }
 }

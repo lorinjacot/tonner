@@ -74,9 +74,14 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let asset = Asset::open("assets/AnimatedTriangle.gltf").unwrap();
+        let asset = Asset::open("assets/SimpleMeshes.gltf").unwrap();
         let scene = asset
-            .create_scene(asset.document.default_scene().unwrap(), &device, camera)
+            .create_scene(
+                asset.document.default_scene().unwrap(),
+                &device,
+                camera,
+                &[Some(swapchain_format.into())],
+            )
             .unwrap();
 
         Self {

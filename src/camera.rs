@@ -148,6 +148,7 @@ pub struct Camera {
     pitch: f32,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl Camera {
@@ -210,6 +211,7 @@ impl Camera {
             z_far,
             buffer,
             bind_group,
+            bind_group_layout,
         };
 
         camera.update_buffer(queue);
@@ -219,6 +221,10 @@ impl Camera {
 
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
+    }
+
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
     }
 
     pub fn set_aspect_ration(&mut self, aspect_ration: f32) {

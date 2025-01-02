@@ -1,7 +1,14 @@
+use std::{
+    collections::HashMap,
+    ops::{Index, IndexMut},
+};
+
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::storage::{Id, Storage};
+
+use super::mesh::MeshId;
 
 pub struct NodeManager {
     nodes: Storage<Node>,
@@ -42,21 +49,31 @@ impl NodeManager {
         }
     }
 
+    pub fn bind_group(&self) -> &Option<wgpu::BindGroup> {
+        &self.bind_group
+    }
+
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
+
     pub fn create(
         &mut self,
-        nodes: impl IntoIterator<Item = Builder>,
+        nodes: impl IntoIterator<Item = NodeBuilder>,
         device: &wgpu::Device,
-    ) -> Result<Vec<NodeId>, ()> {
-        let nodes_id = self.create_recursive(nodes)?;
+    ) -> Result<(Vec<NodeId>, HashMap<MeshId, Vec<NodeId>>), ()> {
+        let mut mesh_nodes_mapping = HashMap::new();
+        let nodes_id = self.create_recursive(nodes, &mut mesh_nodes_mapping)?;
 
         self.create_buffer(device);
 
-        Ok(nodes_id)
+        Ok((nodes_id, mesh_nodes_mapping))
     }
 
     fn create_recursive(
         &mut self,
-        nodes: impl IntoIterator<Item = Builder>,
+        nodes: impl IntoIterator<Item = NodeBuilder>,
+        mesh_nodes_mapping: &mut HashMap<MeshId, Vec<NodeId>>,
     ) -> Result<Vec<NodeId>, ()> {
         let nodes = nodes.into_iter();
         let mut nodes_id = Vec::with_capacity(nodes.size_hint().0);
@@ -82,15 +99,20 @@ impl NodeManager {
                 global_transform,
                 parent: node.parent,
                 children: Vec::new(),
+                mesh: None,
             });
             nodes_id.push(node_id);
+
+            if let Some(mesh) = node.mesh {
+                mesh_nodes_mapping.entry(mesh).or_default().push(node_id);
+            }
 
             let children: Vec<_> = node
                 .children
                 .into_iter()
                 .map(|node| node.set_parent(node_id))
                 .collect();
-            let children = self.create_recursive(children)?;
+            let children = self.create_recursive(children, mesh_nodes_mapping)?;
             self.nodes[node_id].children = children;
         }
 
@@ -120,6 +142,24 @@ impl NodeManager {
             }],
         }));
     }
+
+    pub fn dense_indices_u32(&self, ids: impl IntoIterator<Item = NodeId>) -> Vec<u32> {
+        self.nodes.dense_indices_u32(ids)
+    }
+}
+
+impl Index<NodeId> for NodeManager {
+    type Output = Node;
+
+    fn index(&self, index: NodeId) -> &Self::Output {
+        &self.nodes[index]
+    }
+}
+
+impl IndexMut<NodeId> for NodeManager {
+    fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
+        &mut self.nodes[index]
+    }
 }
 
 pub struct Node {
@@ -127,22 +167,25 @@ pub struct Node {
     global_transform: Mat4,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
+    pub(super) mesh: Option<MeshId>,
 }
 
 pub type NodeId = Id<Node>;
 
-pub struct Builder {
+pub struct NodeBuilder {
     local_transform: Transform,
     parent: Option<NodeId>,
-    children: Vec<Builder>,
+    children: Vec<NodeBuilder>,
+    mesh: Option<MeshId>,
 }
 
-impl Builder {
+impl NodeBuilder {
     pub fn new() -> Self {
         Self {
             local_transform: Transform::Matrix(Mat4::IDENTITY),
             parent: None,
             children: Vec::new(),
+            mesh: None,
         }
     }
 
@@ -156,8 +199,13 @@ impl Builder {
         self
     }
 
-    pub fn set_children(mut self, children: Vec<Builder>) -> Self {
+    pub fn set_children(mut self, children: Vec<NodeBuilder>) -> Self {
         self.children = children;
+        self
+    }
+
+    pub fn set_mesh(mut self, mesh: Option<MeshId>) -> Self {
+        self.mesh = mesh;
         self
     }
 }

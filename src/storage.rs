@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    hash::Hash,
     iter::FusedIterator,
     marker::PhantomData,
     ops::{Index, IndexMut},
@@ -35,6 +36,15 @@ impl<T> Copy for Id<T> {}
 impl<T> PartialEq for Id<T> {
     fn eq(&self, other: &Self) -> bool {
         self.element == other.element && self.version == other.version
+    }
+}
+
+impl<T> Eq for Id<T> {}
+
+impl<T> Hash for Id<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.element.hash(state);
+        self.version.hash(state);
     }
 }
 
@@ -164,7 +174,7 @@ impl<T> Storage<T> {
         Values(self.dense.iter())
     }
 
-    pub fn positions_u32(&self, ids: impl IntoIterator<Item = Id<T>>) -> Vec<u32> {
+    pub fn dense_indices_u32(&self, ids: impl IntoIterator<Item = Id<T>>) -> Vec<u32> {
         ids.into_iter()
             .map(|id| self.sparse[id.element].pos as u32)
             .collect()

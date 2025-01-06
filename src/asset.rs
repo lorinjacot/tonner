@@ -4,7 +4,7 @@ use glam::{Mat4, Quat, Vec3};
 
 use crate::{
     camera::Camera,
-    scene::{MeshBuilder, MeshId, NodeBuilder, NodeTransform, PrimitiveBuilder, Scene},
+    scene::{MeshBuilder, MeshId, NodeDescriptor, NodeTransform, PrimitiveBuilder, Scene},
 };
 
 pub struct Asset {
@@ -37,7 +37,7 @@ impl Asset {
         for node in gltf_scene.nodes() {
             nodes.push(self.create_node(&node, &mut scene, &mut mesh_mapping, device)?);
         }
-        scene.create_node(nodes, device)?;
+        scene.create_node(nodes, device).or(Err(()))?;
 
         Ok(scene)
     }
@@ -84,8 +84,8 @@ impl Asset {
         scene: &mut Scene,
         meshes_mapping: &mut HashMap<usize, MeshId>,
         device: &wgpu::Device,
-    ) -> Result<NodeBuilder, ()> {
-        let transform = match gltf_node.transform() {
+    ) -> Result<NodeDescriptor, ()> {
+        let local_transform = match gltf_node.transform() {
             gltf::scene::Transform::Decomposed {
                 translation,
                 rotation,
@@ -116,9 +116,10 @@ impl Asset {
             children.push(self.create_node(&child, scene, meshes_mapping, device)?);
         }
 
-        Ok(NodeBuilder::new()
-            .set_transform(transform)
-            .set_children(children)
-            .set_mesh(mesh))
+        Ok(NodeDescriptor {
+            local_transform,
+            children,
+            mesh,
+        })
     }
 }

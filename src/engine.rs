@@ -74,7 +74,7 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let asset = Asset::open("assets/SimpleMeshes.gltf").unwrap();
+        let asset = Asset::open("assets/Box.gltf").unwrap();
         let scene = asset
             .create_scene(
                 asset.document.default_scene().unwrap(),

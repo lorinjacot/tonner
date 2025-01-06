@@ -135,6 +135,14 @@ impl MeshManager {
 
         Ok(mesh_id)
     }
+
+    pub fn get(&self, mesh: MeshId) -> Option<&Mesh> {
+        self.meshes.get(mesh)
+    }
+
+    pub fn get_mut(&mut self, mesh: MeshId) -> Option<&mut Mesh> {
+        self.meshes.get_mut(mesh)
+    }
 }
 
 impl Index<MeshId> for MeshManager {

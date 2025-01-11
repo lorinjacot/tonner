@@ -1,10 +1,15 @@
 use std::{collections::HashMap, path::Path};
 
 use glam::{Mat4, Quat, Vec3};
+use thiserror::Error;
+use wgpu::util::DeviceExt;
 
 use crate::{
     camera::Camera,
-    scene::{MeshBuilder, MeshId, NodeDescriptor, NodeTransform, PrimitiveBuilder, Scene},
+    scene::{
+        MeshCreationError, MeshDescriptor, MeshId, NodeCreationError, NodeDescriptor,
+        NodeTransform, PrimitiveAttributes, PrimitiveDescriptor, PrimitiveIndices, Scene,
+    },
 };
 
 pub struct Asset {
@@ -28,7 +33,7 @@ impl Asset {
         gltf_scene: gltf::Scene,
         device: &wgpu::Device,
         camera: Camera,
-    ) -> Result<Scene, ()> {
+    ) -> Result<Scene, SceneCreationError> {
         let mut scene = Scene::new(device, camera);
         let mut mesh_mapping = HashMap::new();
 
@@ -36,45 +41,88 @@ impl Asset {
         for node in gltf_scene.nodes() {
             nodes.push(self.create_node(&node, &mut scene, &mut mesh_mapping, device)?);
         }
-        scene.create_node(nodes, device).or(Err(()))?;
+        scene.create_node(nodes, device)?;
 
         Ok(scene)
     }
 
-    fn create_mesh(&self, gltf_mesh: &gltf::Mesh) -> MeshBuilder {
+    fn create_mesh(
+        &self,
+        gltf_mesh: &gltf::Mesh,
+        device: &wgpu::Device,
+    ) -> Result<MeshDescriptor, SceneCreationError> {
         let mut primitives = Vec::with_capacity(gltf_mesh.primitives().len());
         for primitive in gltf_mesh.primitives() {
             let reader = primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
 
             if let Some(positions) = reader.read_positions() {
-                let positions: Vec<_> = positions
-                    .map(|position| Vec3::from_array(position))
+                let mut vertex_count = positions.len() as u32;
+
+                let indices = match reader.read_indices() {
+                    Some(indices) => match indices {
+                        gltf::mesh::util::ReadIndices::U8(_) => {
+                            return Err(SceneCreationError::Unsupported(
+                                "Only u16 and u32 index format are supported".to_string(),
+                            ))
+                        }
+                        gltf::mesh::util::ReadIndices::U16(indices) => {
+                            let indices: Vec<_> = indices.collect();
+                            vertex_count = indices.len() as u32;
+                            Some(PrimitiveIndices {
+                                buffer: device.create_buffer_init(
+                                    &wgpu::util::BufferInitDescriptor {
+                                        label: Some("Index buffer"),
+                                        contents: bytemuck::cast_slice(&indices),
+                                        usage: wgpu::BufferUsages::INDEX,
+                                    },
+                                ),
+                                format: wgpu::IndexFormat::Uint16,
+                            })
+                        }
+                        gltf::mesh::util::ReadIndices::U32(indices) => {
+                            let indices: Vec<_> = indices.collect();
+                            vertex_count = indices.len() as u32;
+                            Some(PrimitiveIndices {
+                                buffer: device.create_buffer_init(
+                                    &wgpu::util::BufferInitDescriptor {
+                                        label: Some("Index buffer"),
+                                        contents: bytemuck::cast_slice(&indices),
+                                        usage: wgpu::BufferUsages::INDEX,
+                                    },
+                                ),
+                                format: wgpu::IndexFormat::Uint32,
+                            })
+                        }
+                    },
+                    None => None,
+                };
+
+                let normals = reader
+                    .read_normals()
+                    .ok_or(SceneCreationError::Unsupported(
+                        "Attributes NORMALS is required".to_string(),
+                    ))?;
+
+                let attributes: Vec<_> = positions
+                    .zip(normals)
+                    .map(|(position, normal)| PrimitiveAttributes { position, normal })
                     .collect();
 
-                let indices: Option<Vec<_>> = reader.read_indices().map(|indices| match indices {
-                    gltf::mesh::util::ReadIndices::U16(indices) => {
-                        indices.map(|index| index as u32).collect()
-                    }
-                    gltf::mesh::util::ReadIndices::U32(indices) => indices.collect(),
-                    gltf::mesh::util::ReadIndices::U8(indices) => {
-                        indices.map(|index| index as u32).collect()
-                    }
+                let attributes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Attributes buffer"),
+                    contents: bytemuck::cast_slice(&attributes),
+                    usage: wgpu::BufferUsages::VERTEX,
                 });
 
-                primitives.push(
-                    PrimitiveBuilder::new()
-                        .set_indices(indices)
-                        .set_positions(positions),
-                );
+                primitives.push(PrimitiveDescriptor {
+                    vertex_count,
+                    indices,
+                    attributes,
+                });
             }
-
-            // PrimitiveBuilder::new()
-            //     .set_attributes(attributes)
-            //     .set_indices(buffer, format)
-            //     .set_vertex_count(count)
         }
 
-        MeshBuilder::new().set_primitives(primitives)
+        Ok(MeshDescriptor { primitives })
     }
 
     fn create_node(
@@ -83,7 +131,7 @@ impl Asset {
         scene: &mut Scene,
         meshes_mapping: &mut HashMap<usize, MeshId>,
         device: &wgpu::Device,
-    ) -> Result<NodeDescriptor, ()> {
+    ) -> Result<NodeDescriptor, SceneCreationError> {
         let local_transform = match gltf_node.transform() {
             gltf::scene::Transform::Decomposed {
                 translation,
@@ -103,7 +151,7 @@ impl Asset {
             Some(mesh) => Some(match meshes_mapping.entry(mesh.index()) {
                 std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
                 std::collections::hash_map::Entry::Vacant(entry) => {
-                    let mesh = self.create_mesh(&mesh);
+                    let mesh = self.create_mesh(&mesh, device)?;
                     *entry.insert(scene.create_mesh(mesh, device)?)
                 }
             }),
@@ -121,4 +169,15 @@ impl Asset {
             mesh,
         })
     }
+}
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum SceneCreationError {
+    #[error(transparent)]
+    NodeCreationError(#[from] NodeCreationError),
+    #[error(transparent)]
+    MeshCreationError(#[from] MeshCreationError),
+    #[error("unsupported: {0}")]
+    Unsupported(String),
 }

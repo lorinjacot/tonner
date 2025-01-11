@@ -1,4 +1,4 @@
-use glam::{vec3, Mat4, Quat};
+use glam::{vec3, Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
 pub struct LightManager {
@@ -12,10 +12,17 @@ pub struct LightManager {
 impl LightManager {
     pub fn new(device: &wgpu::Device, camera_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
         let light_color = vec3(1.0, 1.0, 1.0);
+        let light_position = vec3(1.2, 1.0, -2.0);
+        let light_uniform = LightUniform {
+            color: light_color,
+            _pad: 0.0,
+            position: light_position,
+            _pad2: 0.0,
+        };
 
         let light_color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light color buffer"),
-            contents: bytemuck::cast_slice(&[light_color]),
+            contents: bytemuck::cast_slice(&[light_uniform]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
@@ -159,11 +166,8 @@ impl LightManager {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let model = Mat4::from_scale_rotation_translation(
-            [0.2; 3].into(),
-            Quat::IDENTITY,
-            vec3(1.2, 1.0, -2.0),
-        );
+        let model =
+            Mat4::from_scale_rotation_translation([0.2; 3].into(), Quat::IDENTITY, light_position);
 
         let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light model buffer"),
@@ -196,6 +200,15 @@ impl LightManager {
     pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct LightUniform {
+    color: Vec3,
+    _pad: f32,
+    position: Vec3,
+    _pad2: f32,
 }
 
 pub trait DrawLights {

@@ -8,7 +8,10 @@ mod light;
 mod mesh;
 mod node;
 
-pub use mesh::{MeshBuilder, MeshId, PrimitiveBuilder};
+pub use mesh::{
+    MeshCreationError, MeshDescriptor, MeshId, PrimitiveAttributes, PrimitiveDescriptor,
+    PrimitiveIndices,
+};
 pub use node::{NodeCreationError, NodeDescriptor, NodeId, Transform as NodeTransform};
 
 pub struct Scene {
@@ -44,7 +47,11 @@ impl Scene {
         self.nodes.create(nodes, &mut self.meshes, device)
     }
 
-    pub fn create_mesh(&mut self, mesh: MeshBuilder, device: &wgpu::Device) -> Result<MeshId, ()> {
+    pub fn create_mesh(
+        &mut self,
+        mesh: MeshDescriptor,
+        device: &wgpu::Device,
+    ) -> Result<MeshId, MeshCreationError> {
         self.meshes.create(mesh, device)
     }
 }

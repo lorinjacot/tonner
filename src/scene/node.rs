@@ -3,7 +3,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3, Vec3Swizzles};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -13,19 +13,18 @@ use super::mesh::{MeshId, MeshManager};
 
 pub struct NodeManager {
     nodes: Storage<Node>,
-    global_transform_buffer: wgpu::Buffer,
+    transform_buffer: wgpu::Buffer,
     bind_group: Option<wgpu::BindGroup>,
     bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl NodeManager {
     pub fn new(device: &wgpu::Device) -> Self {
-        let global_transform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Nodes local transform buffer"),
-                contents: &[],
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-            });
+        let transform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Nodes local transform buffer"),
+            contents: &[],
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Nodes bind group layout"),
@@ -45,7 +44,7 @@ impl NodeManager {
 
         Self {
             nodes: Storage::new(),
-            global_transform_buffer,
+            transform_buffer,
             bind_group,
             bind_group_layout,
         }
@@ -134,25 +133,41 @@ impl NodeManager {
     }
 
     fn create_buffer(&mut self, device: &wgpu::Device) {
-        let global_transforms = self
+        let transforms: Vec<_> = self
             .nodes
             .values()
-            .map(|node| node.global_transform)
-            .collect::<Vec<_>>();
-        let contents = bytemuck::cast_slice(&global_transforms);
-        self.global_transform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Nodes local transform buffer"),
-                contents,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-            });
+            .map(|node| {
+                let normal = Mat3::from_mat4(node.global_transform).inverse().transpose();
+                TransformStorage {
+                    model: node.global_transform.to_cols_array_2d(),
+                    normal: [
+                        normal.x_axis.xyzz().to_array(),
+                        normal.y_axis.xyzz().to_array(),
+                        normal.z_axis.xyzz().to_array(),
+                    ],
+                }
+            })
+            .collect();
+        // let global_transform: Vec<_> = self
+        //     .nodes
+        //     .values()
+        //     .map(|node| node.global_transform.to_cols_array())
+        //     .collect();
+        // dbg!(&transforms, &global_transform);
+
+        let contents = bytemuck::cast_slice(&transforms);
+        self.transform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Nodes local transform buffer"),
+            contents,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        });
 
         self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Nodes bind group"),
             layout: &self.bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: self.global_transform_buffer.as_entire_binding(),
+                resource: self.transform_buffer.as_entire_binding(),
             }],
         }));
     }
@@ -216,4 +231,11 @@ impl Default for Transform {
     fn default() -> Self {
         Transform::Matrix(Mat4::IDENTITY)
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct TransformStorage {
+    model: [[f32; 4]; 4],
+    normal: [[f32; 4]; 3],
 }

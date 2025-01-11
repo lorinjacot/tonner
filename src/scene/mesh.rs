@@ -3,7 +3,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use glam::Vec3;
+use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::storage::{Id, Storage};
@@ -53,13 +53,20 @@ impl MeshManager {
                         }],
                     },
                     wgpu::VertexBufferLayout {
-                        array_stride: 3 * 4,
+                        array_stride: 3 * 4 + 3 * 4,
                         step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Float32x3,
-                            offset: 0,
-                            shader_location: 1,
-                        }],
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x3,
+                                offset: 0,
+                                shader_location: 1,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x3,
+                                offset: 3 * 4,
+                                shader_location: 2,
+                            },
+                        ],
                     },
                 ],
             },
@@ -100,37 +107,20 @@ impl MeshManager {
         }
     }
 
-    pub fn create(&mut self, mesh: MeshBuilder, device: &wgpu::Device) -> Result<MeshId, ()> {
-        let mut primitives = Vec::with_capacity(mesh.primitives.len());
-        for primitive in mesh.primitives {
-            let positions = primitive.positions.ok_or(())?;
-
-            let (vertex_count, indices) = match primitive.indices {
-                Some(indices) => (
-                    indices.len() as u32,
-                    Some(
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Primitive indices buffer"),
-                            contents: bytemuck::cast_slice(&indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        }),
-                    ),
-                ),
-                None => (positions.len() as u32, None),
-            };
-
-            let attributes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Primitive attributes buffer"),
-                contents: bytemuck::cast_slice(&positions),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-            primitives.push(Primitive {
-                vertex_count,
-                indices,
-                attributes,
-            });
-        }
+    pub fn create(
+        &mut self,
+        mesh: MeshDescriptor,
+        device: &wgpu::Device,
+    ) -> Result<MeshId, MeshCreationError> {
+        let primitives = mesh
+            .primitives
+            .into_iter()
+            .map(|primitive| Primitive {
+                vertex_count: primitive.vertex_count,
+                indices: primitive.indices,
+                attributes: primitive.attributes,
+            })
+            .collect();
 
         let nodes_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Nodes buffer"),
@@ -189,50 +179,35 @@ pub type MeshId = Id<Mesh>;
 
 struct Primitive {
     vertex_count: u32,
-    indices: Option<wgpu::Buffer>,
+    indices: Option<PrimitiveIndices>,
     attributes: wgpu::Buffer,
 }
 
-pub struct MeshBuilder {
-    primitives: Vec<PrimitiveBuilder>,
+pub struct PrimitiveIndices {
+    pub buffer: wgpu::Buffer,
+    pub format: wgpu::IndexFormat,
 }
 
-impl MeshBuilder {
-    pub fn new() -> Self {
-        Self {
-            primitives: Vec::new(),
-        }
-    }
-
-    pub fn set_primitives(mut self, primitives: Vec<PrimitiveBuilder>) -> Self {
-        self.primitives = primitives;
-        self
-    }
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PrimitiveAttributes {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
 }
 
-pub struct PrimitiveBuilder {
-    indices: Option<Vec<u32>>,
-    positions: Option<Vec<Vec3>>,
+pub struct MeshDescriptor {
+    pub primitives: Vec<PrimitiveDescriptor>,
 }
 
-impl PrimitiveBuilder {
-    pub fn new() -> Self {
-        Self {
-            indices: None,
-            positions: None,
-        }
-    }
-
-    pub fn set_indices(mut self, indices: Option<Vec<u32>>) -> Self {
-        self.indices = indices;
-        self
-    }
-
-    pub fn set_positions(mut self, positions: Vec<Vec3>) -> Self {
-        self.positions = Some(positions);
-        self
-    }
+pub struct PrimitiveDescriptor {
+    pub vertex_count: u32,
+    pub indices: Option<PrimitiveIndices>,
+    pub attributes: wgpu::Buffer,
 }
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum MeshCreationError {}
 
 pub trait DrawMeshes {
     fn draw_meshes(
@@ -264,8 +239,8 @@ impl<'a> DrawMeshes for wgpu::RenderPass<'a> {
             for primitive in &mesh.primitives {
                 self.set_vertex_buffer(1, primitive.attributes.slice(..));
                 match &primitive.indices {
-                    Some(index_buffer) => {
-                        self.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    Some(indices) => {
+                        self.set_index_buffer(indices.buffer.slice(..), indices.format);
                         self.draw_indexed(0..primitive.vertex_count, 0, 0..instance_count);
                     }
                     None => {

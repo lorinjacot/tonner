@@ -290,6 +290,7 @@ impl Engine {
                 occlusion_query_set: None,
             });
 
+            // render_pass.draw
             render_pass.draw_scene(&self.scene);
         }
 

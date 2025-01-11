@@ -3,7 +3,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use glam::{Mat3, Mat4, Quat, Vec3, Vec3Swizzles};
+use glam::{Mat3, Mat4, Quat, Vec3, Vec4};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -139,11 +139,11 @@ impl NodeManager {
             .map(|node| {
                 let normal = Mat3::from_mat4(node.global_transform).inverse().transpose();
                 TransformStorage {
-                    model: node.global_transform.to_cols_array_2d(),
+                    model: node.global_transform,
                     normal: [
-                        normal.x_axis.xyzz().to_array(),
-                        normal.y_axis.xyzz().to_array(),
-                        normal.z_axis.xyzz().to_array(),
+                        normal.x_axis.extend(0.0),
+                        normal.y_axis.extend(0.0),
+                        normal.z_axis.extend(0.0),
                     ],
                 }
             })
@@ -236,6 +236,6 @@ impl Default for Transform {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct TransformStorage {
-    model: [[f32; 4]; 4],
-    normal: [[f32; 4]; 3],
+    model: Mat4,
+    normal: [Vec4; 3],
 }

@@ -10,6 +10,7 @@ struct Transform {
 
 struct Camera {
     view_projection: mat4x4f,
+    world_position: vec3f,
 }
 
 struct VertexOutput {
@@ -55,6 +56,12 @@ fn fs_main(
     let diff = max(dot(norm, light_dir), 0.0);
     let diffuse = diff * light.color;
 
-    let result = (ambient + diffuse) * object_color;
+    let specular_strength = 0.5;
+    let view_dir = normalize(camera.world_position - in.world_position);
+    let reflect_dir = reflect(-light_dir, norm);
+    let spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+    let specular = specular_strength * spec * light.color;
+
+    let result = (ambient + diffuse + specular) * object_color;
     return vec4f(result, 1.0);
 }

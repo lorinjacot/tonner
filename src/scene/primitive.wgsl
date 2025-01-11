@@ -14,6 +14,8 @@ struct VertexOutput {
 
 @group(1) @binding(0) var<uniform> camera: Camera;
 
+@group(2) @binding(0) var<uniform> light_color: vec3f;
+
 @vertex
 fn vs_main(
     @location(0) node_id: u32,
@@ -28,5 +30,12 @@ fn vs_main(
 fn fs_main(
     in: VertexOutput
 ) -> @location(0) vec4f {
-    return vec4f(1.0, 0.0, 0.0, 1.0);
+    let object_color = vec3f(1.0, 0.0, 0.0);
+
+    let ambientStrength = 0.1;
+
+    let ambient = ambientStrength * light_color;
+
+    let result = ambient * object_color;
+    return vec4f(result, 1.0);
 }

@@ -20,13 +20,18 @@ impl MeshManager {
         device: &wgpu::Device,
         nodes_bind_group_layout: &wgpu::BindGroupLayout,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
+        lights_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let primitive_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Primitive pipeline layout"),
-                bind_group_layouts: &[nodes_bind_group_layout, camera_bind_group_layout],
+                bind_group_layouts: &[
+                    nodes_bind_group_layout,
+                    camera_bind_group_layout,
+                    lights_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -235,6 +240,7 @@ pub trait DrawMeshes {
         meshes: &MeshManager,
         nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
+        light_bind_group: &wgpu::BindGroup,
     );
 }
 
@@ -244,10 +250,12 @@ impl<'a> DrawMeshes for wgpu::RenderPass<'a> {
         meshes_manager: &MeshManager,
         nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
+        light_bind_group: &wgpu::BindGroup,
     ) {
         self.set_pipeline(&meshes_manager.primitive_pipeline);
         self.set_bind_group(0, nodes_bind_group, &[]);
         self.set_bind_group(1, camera_bind_group, &[]);
+        self.set_bind_group(2, light_bind_group, &[]);
 
         for mesh in meshes_manager.meshes.values() {
             let instance_count = mesh.nodes.len() as u32;

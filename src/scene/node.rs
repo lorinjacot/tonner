@@ -173,10 +173,13 @@ impl IndexMut<NodeId> for NodeManager {
 }
 
 pub struct Node {
+    #[allow(dead_code)]
     local_transform: Transform,
     global_transform: Mat4,
+    #[allow(dead_code)]
     parent: Option<NodeId>,
     children: Vec<NodeId>,
+    #[allow(dead_code)]
     mesh: Option<MeshId>,
 }
 

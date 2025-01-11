@@ -2,6 +2,8 @@ use glam::{vec3, Mat4, Quat};
 use wgpu::util::DeviceExt;
 
 pub struct LightManager {
+    bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout,
     light_pipeline: wgpu::RenderPipeline,
     positions_buffer: wgpu::Buffer,
     model_bind_group: wgpu::BindGroup,
@@ -9,6 +11,37 @@ pub struct LightManager {
 
 impl LightManager {
     pub fn new(device: &wgpu::Device, camera_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
+        let light_color = vec3(1.0, 1.0, 1.0);
+
+        let light_color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Light color buffer"),
+            contents: bytemuck::cast_slice(&[light_color]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Light bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Light bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: light_color_buffer.as_entire_binding(),
+            }],
+        });
+
         let light_module = device.create_shader_module(wgpu::include_wgsl!("light.wgsl"));
 
         let model_bind_group_layout =
@@ -129,7 +162,7 @@ impl LightManager {
         let model = Mat4::from_scale_rotation_translation(
             [0.2; 3].into(),
             Quat::IDENTITY,
-            vec3(1.2, 1.0, 2.0),
+            vec3(1.2, 1.0, -2.0),
         );
 
         let model_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -148,10 +181,20 @@ impl LightManager {
         });
 
         Self {
+            bind_group,
+            bind_group_layout,
             light_pipeline,
             positions_buffer,
             model_bind_group,
         }
+    }
+
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
     }
 }
 

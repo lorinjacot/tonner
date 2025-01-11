@@ -21,12 +21,13 @@ pub struct Scene {
 impl Scene {
     pub fn new(device: &wgpu::Device, camera: Camera) -> Self {
         let nodes = NodeManager::new(device);
+        let lights = LightManager::new(device, camera.bind_group_layout());
         let meshes = MeshManager::new(
             device,
             nodes.bind_group_layout(),
             camera.bind_group_layout(),
+            lights.bind_group_layout(),
         );
-        let lights = LightManager::new(device, camera.bind_group_layout());
         Self {
             nodes,
             meshes,
@@ -57,7 +58,12 @@ impl<'a> DrawScene for wgpu::RenderPass<'a> {
         self.draw_lights(&scene.lights, scene.camera.bind_group());
 
         if let Some(nodes_bind_group) = scene.nodes.bind_group() {
-            self.draw_meshes(&scene.meshes, nodes_bind_group, scene.camera.bind_group());
+            self.draw_meshes(
+                &scene.meshes,
+                nodes_bind_group,
+                scene.camera.bind_group(),
+                scene.lights.bind_group(),
+            );
         }
     }
 }

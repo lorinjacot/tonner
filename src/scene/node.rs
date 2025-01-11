@@ -156,10 +156,6 @@ impl NodeManager {
             }],
         }));
     }
-
-    pub fn dense_indices_u32(&self, ids: impl IntoIterator<Item = NodeId>) -> Vec<u32> {
-        self.nodes.dense_indices_u32(ids)
-    }
 }
 
 impl Index<NodeId> for NodeManager {
@@ -181,7 +177,7 @@ pub struct Node {
     global_transform: Mat4,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
-    pub(super) mesh: Option<MeshId>,
+    mesh: Option<MeshId>,
 }
 
 pub type NodeId = Id<Node>;

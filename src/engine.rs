@@ -10,11 +10,14 @@ use crate::camera::{Camera, CameraController};
 use crate::scene::{DrawScene, Scene};
 
 pub struct Engine {
+    window: Arc<Window>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    window: Arc<Window>,
+    hdr_texture_view: wgpu::TextureView,
+    hdr_bind_group: wgpu::BindGroup,
+    hdr_pipeline: wgpu::RenderPipeline,
     last_frame: Instant,
     camera_controller: CameraController,
     scene: Scene,
@@ -64,6 +67,114 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
+        let hdr_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("frame buffer texture"),
+            size: wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let hdr_texture_view = hdr_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let hdr_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("HDR sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let hdr_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("HDR bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let hdr_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("HDR bind group"),
+            layout: &hdr_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&hdr_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&hdr_sampler),
+                },
+            ],
+        });
+
+        let hdr_module = device.create_shader_module(wgpu::include_wgsl!("hdr.wgsl"));
+
+        let hdr_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("HDR render pipeline layout"),
+            bind_group_layouts: &[&hdr_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let hdr_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("HDR render pipeline"),
+            layout: Some(&hdr_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &hdr_module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &hdr_module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(swapchain_format.add_srgb_suffix().into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
         let camera = Camera::new(
             vec3(0.0, 0.0, -10.0),
             config.width as f32 / config.height as f32,
@@ -76,20 +187,18 @@ impl Engine {
 
         let asset = Asset::open("assets/Box.gltf").unwrap();
         let scene = asset
-            .create_scene(
-                asset.document.default_scene().unwrap(),
-                &device,
-                camera,
-                &[Some(swapchain_format.into())],
-            )
+            .create_scene(asset.document.default_scene().unwrap(), &device, camera)
             .unwrap();
 
         Self {
+            window,
             device,
             queue,
             surface,
             config,
-            window,
+            hdr_texture_view,
+            hdr_bind_group,
+            hdr_pipeline,
             last_frame,
             camera_controller,
             scene,
@@ -156,14 +265,39 @@ impl Engine {
             .surface
             .get_current_texture()
             .expect("Failed to acquire next swap chain texture");
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.hdr_texture_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.1,
+                            b: 0.1,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            render_pass.draw_scene(&self.scene);
+        }
+
+        {
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -184,7 +318,9 @@ impl Engine {
                 occlusion_query_set: None,
             });
 
-            render_pass.draw_scene(&self.scene);
+            render_pass.set_pipeline(&self.hdr_pipeline);
+            render_pass.set_bind_group(0, Some(&self.hdr_bind_group), &[]);
+            render_pass.draw(0..3, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));

@@ -20,7 +20,6 @@ impl MeshManager {
         device: &wgpu::Device,
         nodes_bind_group_layout: &wgpu::BindGroupLayout,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        targets: &[Option<wgpu::ColorTargetState>],
     ) -> Self {
         let primitive_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
@@ -78,7 +77,7 @@ impl MeshManager {
                 module: &primitive_module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets,
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
             }),
             multiview: None,
             cache: None,

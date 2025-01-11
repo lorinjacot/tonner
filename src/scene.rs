@@ -1,8 +1,10 @@
+use light::LightManager;
 use mesh::{DrawMeshes, MeshManager};
 use node::NodeManager;
 
 use crate::camera::Camera;
 
+mod light;
 mod mesh;
 mod node;
 
@@ -12,6 +14,7 @@ pub use node::{NodeCreationError, NodeDescriptor, NodeId, Transform as NodeTrans
 pub struct Scene {
     nodes: NodeManager,
     meshes: MeshManager,
+    lights: LightManager,
     pub camera: Camera,
 }
 
@@ -19,18 +22,18 @@ impl Scene {
     pub fn new(
         device: &wgpu::Device,
         camera: Camera,
-        targets: &[Option<wgpu::ColorTargetState>],
     ) -> Self {
         let nodes = NodeManager::new(device);
         let meshes = MeshManager::new(
             device,
             nodes.bind_group_layout(),
             camera.bind_group_layout(),
-            targets,
         );
+        let lights = LightManager::new();
         Self {
             nodes,
             meshes,
+            lights,
             camera,
         }
     }

@@ -28,9 +28,8 @@ impl Asset {
         gltf_scene: gltf::Scene,
         device: &wgpu::Device,
         camera: Camera,
-        targets: &[Option<wgpu::ColorTargetState>],
     ) -> Result<Scene, ()> {
-        let mut scene = Scene::new(device, camera, targets);
+        let mut scene = Scene::new(device, camera);
         let mut mesh_mapping = HashMap::new();
 
         let mut nodes = Vec::with_capacity(gltf_scene.nodes().len());

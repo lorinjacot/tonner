@@ -16,7 +16,10 @@ pub struct Engine {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     hdr_texture_view: wgpu::TextureView,
+    depth_texture_view: wgpu::TextureView,
     hdr_bind_group: wgpu::BindGroup,
+    hdr_bind_group_layout: wgpu::BindGroupLayout,
+    hdr_sampler: wgpu::Sampler,
     hdr_pipeline: wgpu::RenderPipeline,
     last_frame: Instant,
     camera_controller: CameraController,
@@ -67,13 +70,15 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+
         let hdr_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("frame buffer texture"),
-            size: wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            },
+            label: Some("HDR texture"),
+            size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -81,8 +86,19 @@ impl Engine {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-
         let hdr_texture_view = hdr_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth24Plus,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let hdr_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("HDR sampler"),
@@ -197,7 +213,10 @@ impl Engine {
             surface,
             config,
             hdr_texture_view,
+            depth_texture_view,
             hdr_bind_group,
+            hdr_bind_group_layout,
+            hdr_sampler,
             hdr_pipeline,
             last_frame,
             camera_controller,
@@ -221,6 +240,41 @@ impl Engine {
                 self.config.width = new_size.width.max(1);
                 self.config.height = new_size.height.max(1);
                 self.surface.configure(&self.device, &self.config);
+
+                let size = wgpu::Extent3d {
+                    width: self.config.width,
+                    height: self.config.height,
+                    depth_or_array_layers: 1,
+                };
+
+                let hdr_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("frame buffer texture"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                self.hdr_texture_view =
+                    hdr_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                self.hdr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("HDR bind group"),
+                    layout: &self.hdr_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&self.hdr_texture_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&self.hdr_sampler),
+                        },
+                    ],
+                });
 
                 self.scene
                     .camera
@@ -285,12 +339,18 @@ impl Engine {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
-            // render_pass.draw
             render_pass.draw_scene(&self.scene);
         }
 

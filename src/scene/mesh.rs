@@ -67,7 +67,13 @@ impl MeshManager {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -135,9 +141,9 @@ impl MeshManager {
         Ok(mesh_id)
     }
 
-    pub fn get(&self, mesh: MeshId) -> Option<&Mesh> {
-        self.meshes.get(mesh)
-    }
+    // pub fn get(&self, mesh: MeshId) -> Option<&Mesh> {
+    //     self.meshes.get(mesh)
+    // }
 
     pub fn get_mut(&mut self, mesh: MeshId) -> Option<&mut Mesh> {
         self.meshes.get_mut(mesh)

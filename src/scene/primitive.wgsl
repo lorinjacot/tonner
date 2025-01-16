@@ -51,15 +51,15 @@ fn fs_main(
     let ambientStrength = 0.1;
     let ambient = ambientStrength * light.color;
 
-    let norm = normalize(in.world_normal);
+    let normal = normalize(in.world_normal);
     let light_dir = normalize(light.position - in.world_position);
-    let diff = max(dot(norm, light_dir), 0.0);
+    let diff = max(dot(normal, light_dir), 0.0);
     let diffuse = diff * light.color;
 
     let specular_strength = 0.5;
     let view_dir = normalize(camera.world_position - in.world_position);
-    let reflect_dir = reflect(-light_dir, norm);
-    let spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0);
+    let halfwar_dir = normalize(light_dir + view_dir);
+    let spec = pow(max(dot(normal, halfwar_dir), 0.0), 32.0);
     let specular = specular_strength * spec * light.color;
 
     let result = (ambient + diffuse + specular) * object_color;

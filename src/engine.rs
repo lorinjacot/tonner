@@ -202,9 +202,18 @@ impl Engine {
         let last_frame = Instant::now();
 
         let asset = Asset::open("assets/Box.gltf").unwrap();
+        
+        log::debug!("Creating scene ...");
         let scene = asset
-            .create_scene(asset.document.default_scene().unwrap(), &device, camera)
+            .create_scene(
+                asset.document.default_scene().unwrap(),
+                camera,
+                &device,
+                &queue,
+            )
             .unwrap();
+        log::debug!("Scene created");
+
 
         Self {
             window,

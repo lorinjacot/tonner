@@ -8,7 +8,9 @@ use wgpu::util::DeviceExt;
 
 use crate::storage::{Id, Storage};
 
-use super::NodeId;
+use super::{material::MaterialManager, MaterialId, NodeId};
+
+pub const TEX_COORDS_LEN: usize = 2;
 
 pub struct MeshManager {
     meshes: Storage<Mesh>,
@@ -21,8 +23,10 @@ impl MeshManager {
         nodes_bind_group_layout: &wgpu::BindGroupLayout,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         lights_bind_group_layout: &wgpu::BindGroupLayout,
+        material_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let primitive_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
+        log::debug!("primitive module created");
 
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -31,9 +35,11 @@ impl MeshManager {
                     nodes_bind_group_layout,
                     camera_bind_group_layout,
                     lights_bind_group_layout,
+                    material_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
+        log::debug!("primitive pipeline layout created");
 
         let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Primitive pipeline"),
@@ -53,7 +59,7 @@ impl MeshManager {
                         }],
                     },
                     wgpu::VertexBufferLayout {
-                        array_stride: 3 * 4 + 3 * 4,
+                        array_stride: 3 * 4 + 3 * 4 + 2 * 4 + 2 * 4,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[
                             wgpu::VertexAttribute {
@@ -65,6 +71,16 @@ impl MeshManager {
                                 format: wgpu::VertexFormat::Float32x3,
                                 offset: 3 * 4,
                                 shader_location: 2,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 2 * 4,
+                                shader_location: 3,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x2,
+                                offset: 2 * 4,
+                                shader_location: 4,
                             },
                         ],
                     },
@@ -100,6 +116,7 @@ impl MeshManager {
             multiview: None,
             cache: None,
         });
+        log::debug!("primitive pipeline created");
 
         Self {
             meshes: Storage::new(),
@@ -119,6 +136,7 @@ impl MeshManager {
                 vertex_count: primitive.vertex_count,
                 indices: primitive.indices,
                 attributes: primitive.attributes,
+                material: primitive.material,
             })
             .collect();
 
@@ -181,6 +199,7 @@ struct Primitive {
     vertex_count: u32,
     indices: Option<PrimitiveIndices>,
     attributes: wgpu::Buffer,
+    material: MaterialId,
 }
 
 pub struct PrimitiveIndices {
@@ -193,6 +212,7 @@ pub struct PrimitiveIndices {
 pub struct PrimitiveAttributes {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    pub tex_coords: [[f32; 2]; TEX_COORDS_LEN],
 }
 
 pub struct MeshDescriptor {
@@ -203,6 +223,7 @@ pub struct PrimitiveDescriptor {
     pub vertex_count: u32,
     pub indices: Option<PrimitiveIndices>,
     pub attributes: wgpu::Buffer,
+    pub material: MaterialId,
 }
 
 #[derive(Debug, Error)]
@@ -213,6 +234,7 @@ pub trait DrawMeshes {
     fn draw_meshes(
         &mut self,
         meshes: &MeshManager,
+        materials: &MaterialManager,
         nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
         light_bind_group: &wgpu::BindGroup,
@@ -223,6 +245,7 @@ impl<'a> DrawMeshes for wgpu::RenderPass<'a> {
     fn draw_meshes(
         &mut self,
         meshes_manager: &MeshManager,
+        materials: &MaterialManager,
         nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
         light_bind_group: &wgpu::BindGroup,
@@ -237,6 +260,7 @@ impl<'a> DrawMeshes for wgpu::RenderPass<'a> {
             self.set_vertex_buffer(0, mesh.nodes_buffer.slice(..));
 
             for primitive in &mesh.primitives {
+                self.set_bind_group(3, materials[primitive.material].bind_group(), &[]);
                 self.set_vertex_buffer(1, primitive.attributes.slice(..));
                 match &primitive.indices {
                     Some(indices) => {

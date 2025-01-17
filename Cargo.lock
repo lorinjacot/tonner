@@ -880,6 +880,7 @@ dependencies = [
  "env_logger",
  "glam",
  "gltf",
+ "image",
  "log",
  "pollster",
  "thiserror 2.0.9",

@@ -201,19 +201,15 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let asset = Asset::open("assets/Box.gltf").unwrap();
-        
-        log::debug!("Creating scene ...");
-        let scene = asset
-            .create_scene(
-                asset.document.default_scene().unwrap(),
-                camera,
-                &device,
-                &queue,
-            )
-            .unwrap();
-        log::debug!("Scene created");
+        let (mut asset, document) = Asset::open("assets/CompareBaseColor.gltf").unwrap();
 
+        let scene_id = 0;
+        let mut scene = Scene::new(camera, &device, &queue);
+
+        let gltf_scene = document.default_scene().unwrap();
+        asset
+            .create_scene(gltf_scene, scene_id, &mut scene, &device, &queue)
+            .unwrap();
 
         Self {
             window,

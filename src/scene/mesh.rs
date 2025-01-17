@@ -26,7 +26,6 @@ impl MeshManager {
         material_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let primitive_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
-        log::debug!("primitive module created");
 
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -39,7 +38,6 @@ impl MeshManager {
                 ],
                 push_constant_ranges: &[],
             });
-        log::debug!("primitive pipeline layout created");
 
         let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Primitive pipeline"),

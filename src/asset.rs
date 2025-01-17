@@ -1,414 +1,248 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    path::Path,
+};
 
 use glam::{Mat4, Quat, Vec3};
+use image::{DynamicImage, RgbImage};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
-use crate::{
-    camera::Camera,
-    scene::{
-        MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId,
-        NodeCreationError, NodeDescriptor, NodeTransform, PrimitiveAttributes, PrimitiveDescriptor,
-        PrimitiveIndices, Scene,
-    },
+use crate::scene::{
+    MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId, NodeCreationError,
+    NodeDescriptor, NodeId, NodeTransform, PrimitiveAttributes, PrimitiveDescriptor,
+    PrimitiveIndices, Scene, TextureDescriptor, TEX_COORDS_LEN,
 };
 
 pub struct Asset {
-    pub document: gltf::Document,
     buffers: Vec<gltf::buffer::Data>,
     images: Vec<gltf::image::Data>,
+    scenes_mapping: HashMap<usize, SceneMapping>,
+    textures: HashMap<usize, Texture>,
 }
 
 impl Asset {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, gltf::Error> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<(Self, gltf::Document), gltf::Error> {
         let (document, buffers, images) = gltf::import(path)?;
-        Ok(Self {
+
+        Ok((
+            Self {
+                buffers,
+                images,
+                scenes_mapping: HashMap::new(),
+                textures: HashMap::new(),
+            },
             document,
-            buffers,
-            images,
-        })
+        ))
     }
 
     pub fn create_scene(
-        &self,
+        &mut self,
         gltf_scene: gltf::Scene,
-        camera: Camera,
+        scene_id: usize,
+        scene: &mut Scene,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<Scene, SceneCreationError> {
-        log::debug!("Creating empty scene...");
-        let mut scene = Scene::new(device, camera);
-        log::debug!("Empty scene created");
+    ) -> Result<(), CreationError> {
+        for gltf_node in gltf_scene.nodes() {
+            self.create_node(&gltf_node, None, scene_id, scene, device, queue)?;
+        }
 
-        let mut mesh_mapping = HashMap::new();
-        let mut material_mapping = HashMap::new();
+        Ok(())
+    }
 
-        log::debug!("Creating nodes descriptors...");
-        let mut nodes = Vec::with_capacity(gltf_scene.nodes().len());
-        for node in gltf_scene.nodes() {
-            nodes.push(self.create_node(
-                &node,
-                &mut scene,
-                &mut mesh_mapping,
-                &mut material_mapping,
+    pub fn create_texture(
+        &mut self,
+        label: Option<&str>,
+        format: wgpu::TextureFormat,
+        gltf_texture: &gltf::Texture,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), CreationError> {
+        match self.textures.entry(gltf_texture.index()) {
+            Entry::Occupied(_) => Ok(()),
+            Entry::Vacant(entry) => {
+                let image = self
+                    .images
+                    .get(gltf_texture.source().index())
+                    .ok_or(CreationError::InvalidAsset)?;
+
+                let texture_descriptor = wgpu::TextureDescriptor {
+                    label,
+                    size: wgpu::Extent3d {
+                        width: image.width,
+                        height: image.height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                };
+
+                let texture = match (format, image.format) {
+                    (wgpu::TextureFormat::Rgba8UnormSrgb, gltf::image::Format::R8G8B8A8) => device
+                        .create_texture_with_data(
+                            queue,
+                            &texture_descriptor,
+                            wgpu::util::TextureDataOrder::LayerMajor,
+                            &image.pixels,
+                        ),
+                    (wgpu::TextureFormat::Rgba8UnormSrgb, gltf::image::Format::R8G8B8) => {
+                        let image = DynamicImage::ImageRgb8(
+                            RgbImage::from_vec(image.width, image.height, image.pixels.clone())
+                                .ok_or(CreationError::InvalidAsset)?,
+                        );
+                        device.create_texture_with_data(
+                            queue,
+                            &texture_descriptor,
+                            wgpu::util::TextureDataOrder::LayerMajor,
+                            &image.into_rgba8(),
+                        )
+                    }
+                    _ => {
+                        return Err(CreationError::Unsupported(format!(
+                            "Format pair ({:?},{:?})",
+                            format, image.format
+                        )))
+                    }
+                };
+
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                let gltf_sampler = gltf_texture.sampler();
+                let address_mode_u = match gltf_sampler.wrap_s() {
+                    gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+                    gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+                    gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+                };
+                let address_mode_v = match gltf_sampler.wrap_t() {
+                    gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+                    gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+                    gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+                };
+                let mag_filter = match gltf_sampler.mag_filter() {
+                    Some(gltf::texture::MagFilter::Nearest) => wgpu::FilterMode::Nearest,
+                    Some(gltf::texture::MagFilter::Linear) | None => wgpu::FilterMode::Linear,
+                };
+                let (min_filter, mipmap_filter) = match gltf_sampler.min_filter() {
+                    Some(
+                        gltf::texture::MinFilter::Linear
+                        | gltf::texture::MinFilter::LinearMipmapLinear,
+                    )
+                    | None => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
+                    Some(gltf::texture::MinFilter::LinearMipmapNearest) => {
+                        (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
+                    }
+                    Some(
+                        gltf::texture::MinFilter::Nearest
+                        | gltf::texture::MinFilter::NearestMipmapLinear,
+                    ) => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
+                    Some(gltf::texture::MinFilter::NearestMipmapNearest) => {
+                        (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
+                    }
+                };
+                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                    label,
+                    address_mode_u,
+                    address_mode_v,
+                    mag_filter,
+                    min_filter,
+                    mipmap_filter,
+                    ..Default::default()
+                });
+
+                entry.insert(Texture { view, sampler });
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn create_material(
+        &mut self,
+        gltf_material: &gltf::Material,
+        scene_id: usize,
+        scene: &mut Scene,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<MaterialId, CreationError> {
+        if let Some(material) = self
+            .scenes_mapping
+            .entry(scene_id)
+            .or_default()
+            .materials
+            .get(&gltf_material.index())
+        {
+            return Ok(*material);
+        }
+
+        let pbr_metallic_roughness = gltf_material.pbr_metallic_roughness();
+        if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
+            self.create_texture(
+                Some("Material base color texture"),
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+                &base_color_texture.texture(),
                 device,
                 queue,
-            )?);
+            )?;
         }
-        log::debug!("Creating nodes...");
-        scene.create_node(nodes, device)?;
 
-        Ok(scene)
-    }
+        let base_color_texture = pbr_metallic_roughness.base_color_texture().map(|info| {
+            let texture = &self.textures[&info.texture().index()];
+            TextureDescriptor {
+                view: &texture.view,
+                sampler: &texture.sampler,
+                tex_coord: info.tex_coord(),
+            }
+        });
 
-    fn create_material(
-        &self,
-        gltf_material: &gltf::Material,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<MaterialDescriptor, SceneCreationError> {
-        let (base_color_texture, base_color_sampler, base_color_tex_coord) =
-            match gltf_material.pbr_metallic_roughness().base_color_texture() {
-                Some(info) => {
-                    let texture = info.texture();
-                    let image = &self.images[texture.source().index()];
-
-                    (
-                        self.create_texture_view(
-                            Some("Base color texture"),
-                            &image.pixels,
-                            image.width,
-                            image.height,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            device,
-                            queue,
-                        ),
-                        self.create_sampler(
-                            &texture.sampler(),
-                            Some("Material base color sampler"),
-                            device,
-                        ),
-                        info.tex_coord(),
-                    )
-                }
-                None => (
-                    self.create_texture_view(
-                        Some("Material default base color texture"),
-                        &[255, 255, 255, 255],
-                        1,
-                        1,
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
-                        device,
-                        queue,
-                    ),
-                    device.create_sampler(&wgpu::SamplerDescriptor {
-                        label: Some("Material default base color sampler"),
-                        ..Default::default()
-                    }),
-                    0,
-                ),
-            };
-
-        let (metallic_roughness_texture, metallic_roughness_sampler, metallic_roughness_tex_coord) =
-            match gltf_material
-                .pbr_metallic_roughness()
-                .metallic_roughness_texture()
-            {
-                Some(info) => {
-                    let texture = info.texture();
-                    let image = &self.images[texture.source().index()];
-
-                    let format = match image.format {
-                        gltf::image::Format::R8G8B8A8 => wgpu::TextureFormat::Rgba8Unorm,
-                        gltf::image::Format::R16G16B16A16 => wgpu::TextureFormat::Rgba16Unorm,
-                        gltf::image::Format::R32G32B32A32FLOAT => wgpu::TextureFormat::Rgba32Float,
-                        _ => return Err(SceneCreationError::InvalidAsset),
-                    };
-
-                    (
-                        self.create_texture_view(
-                            Some("Material metallic roughness texture"),
-                            &image.pixels,
-                            image.width,
-                            image.height,
-                            format,
-                            device,
-                            queue,
-                        ),
-                        self.create_sampler(
-                            &texture.sampler(),
-                            Some("Material metallic roughness sampler"),
-                            device,
-                        ),
-                        info.tex_coord(),
-                    )
-                }
-                None => (
-                    self.create_texture_view(
-                        Some("Material default metallic roughness texture"),
-                        &[255, 255, 255, 255],
-                        1,
-                        1,
-                        wgpu::TextureFormat::Rgba8Unorm,
-                        device,
-                        queue,
-                    ),
-                    device.create_sampler(&wgpu::SamplerDescriptor {
-                        label: Some("Material default metallic roughness sampler"),
-                        ..Default::default()
-                    }),
-                    0,
-                ),
-            };
-
-        let (normal_texture, normal_sampler, normal_tex_coord, normal_texture_scale) =
-            match gltf_material.normal_texture() {
-                Some(_gltf_normal_texture) => {
-                    todo!()
-                }
-                None => {
-                    let contents: [f32; 4] = [0.0, 0.0, 1.0, 0.0];
-                    (
-                        self.create_texture_view(
-                            Some("Material default normal texture"),
-                            bytemuck::cast_slice(&contents),
-                            1,
-                            1,
-                            wgpu::TextureFormat::Rgba32Float,
-                            device,
-                            queue,
-                        ),
-                        device.create_sampler(&wgpu::SamplerDescriptor {
-                            label: Some("Material default normal sampler"),
-                            ..Default::default()
-                        }),
-                        0,
-                        1.0,
-                    )
-                }
-            };
-
-        let (occlusion_texture, occlusion_sampler, occlusion_tex_coord, occlusion_strength) =
-            match gltf_material.occlusion_texture() {
-                Some(gltf_occlusion_texture) => {
-                    let texture = gltf_occlusion_texture.texture();
-                    let image = &self.images[texture.source().index()];
-
-                    let format = match image.format {
-                        gltf::image::Format::R8 => wgpu::TextureFormat::R8Unorm,
-                        gltf::image::Format::R16 => wgpu::TextureFormat::R16Unorm,
-                        _ => {
-                            return Err(SceneCreationError::Unsupported(
-                                "occlusion texture image format".to_string(),
-                            ))
-                        }
-                    };
-
-                    (
-                        self.create_texture_view(
-                            Some("Material occlusion texture"),
-                            &image.pixels,
-                            image.width,
-                            image.height,
-                            format,
-                            device,
-                            queue,
-                        ),
-                        self.create_sampler(
-                            &texture.sampler(),
-                            Some("Material occlusion sampler"),
-                            device,
-                        ),
-                        gltf_occlusion_texture.tex_coord(),
-                        gltf_occlusion_texture.strength(),
-                    )
-                }
-                None => (
-                    self.create_texture_view(
-                        Some("Material default occlusion texture"),
-                        &[0],
-                        1,
-                        1,
-                        wgpu::TextureFormat::R8Unorm,
-                        device,
-                        queue,
-                    ),
-                    device.create_sampler(&wgpu::SamplerDescriptor {
-                        label: Some("Material default occlusion sampler"),
-                        ..Default::default()
-                    }),
-                    0,
-                    1.0,
-                ),
-            };
-
-        let (emissive_texture, emissive_sampler, emissive_tex_coord) =
-            match gltf_material.emissive_texture() {
-                Some(info) => {
-                    let texture = info.texture();
-                    let image = &self.images[texture.source().index()];
-
-                    (
-                        self.create_texture_view(
-                            Some("Material emissive texture"),
-                            &image.pixels,
-                            image.width,
-                            image.height,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            device,
-                            queue,
-                        ),
-                        self.create_sampler(
-                            &texture.sampler(),
-                            Some("Material emissive sampler"),
-                            device,
-                        ),
-                        info.tex_coord(),
-                    )
-                }
-                None => (
-                    self.create_texture_view(
-                        Some("Material default emissive texture"),
-                        &[0, 0, 0, 0],
-                        1,
-                        1,
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
-                        device,
-                        queue,
-                    ),
-                    device.create_sampler(&wgpu::SamplerDescriptor {
-                        label: Some("Material default emissive sampler"),
-                        ..Default::default()
-                    }),
-                    0,
-                ),
-            };
-
-        Ok(MaterialDescriptor {
-            base_color_factor: gltf_material.pbr_metallic_roughness().base_color_factor(),
-            base_color_tex_coord,
+        let material = MaterialDescriptor {
+            base_color_factor: pbr_metallic_roughness.base_color_factor(),
             base_color_texture,
-            base_color_sampler,
-            metallic_factor: gltf_material.pbr_metallic_roughness().metallic_factor(),
-            roughness_factor: gltf_material.pbr_metallic_roughness().roughness_factor(),
-            metallic_roughness_tex_coord,
-            metallic_roughness_texture,
-            metallic_roughness_sampler,
-            normal_texture_scale,
-            normal_tex_coord,
-            normal_texture,
-            normal_sampler,
-            occlusion_strength,
-            occlusion_tex_coord,
-            occlusion_texture,
-            occlusion_sampler,
-            emissive_tex_coord,
-            emissive_factor: gltf_material.emissive_factor(),
-            emissive_texture,
-            emissive_sampler,
-        })
+        };
+
+        let material = scene.create_material(&material, device);
+        self.scenes_mapping
+            .get_mut(&scene_id)
+            .unwrap()
+            .materials
+            .insert(gltf_material.index(), material);
+        Ok(material)
     }
 
-    fn create_texture_view(
-        &self,
-        label: Option<&str>,
-        pixels: &[u8],
-        width: u32,
-        height: u32,
-        format: wgpu::TextureFormat,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> wgpu::TextureView {
-        let texture = device.create_texture_with_data(
-            queue,
-            &wgpu::TextureDescriptor {
-                label,
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            },
-            wgpu::util::TextureDataOrder::LayerMajor,
-            pixels,
-        );
-
-        texture.create_view(&wgpu::TextureViewDescriptor::default())
-    }
-
-    fn create_sampler(
-        &self,
-        gltf_sampler: &gltf::texture::Sampler,
-        label: Option<&str>,
-        device: &wgpu::Device,
-    ) -> wgpu::Sampler {
-        let address_mode_u = match gltf_sampler.wrap_s() {
-            gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
-            gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
-            gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
-        };
-        let address_mode_v = match gltf_sampler.wrap_t() {
-            gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
-            gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
-            gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
-        };
-        let mag_filter = match gltf_sampler.mag_filter() {
-            Some(gltf::texture::MagFilter::Nearest) => wgpu::FilterMode::Nearest,
-            Some(gltf::texture::MagFilter::Linear) | None => wgpu::FilterMode::Linear,
-        };
-        let (min_filter, mipmap_filter) = match gltf_sampler.min_filter() {
-            Some(
-                gltf::texture::MinFilter::Linear | gltf::texture::MinFilter::LinearMipmapLinear,
-            )
-            | None => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
-            Some(gltf::texture::MinFilter::LinearMipmapNearest) => {
-                (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
-            }
-            Some(
-                gltf::texture::MinFilter::Nearest | gltf::texture::MinFilter::NearestMipmapLinear,
-            ) => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
-            Some(gltf::texture::MinFilter::NearestMipmapNearest) => {
-                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
-            }
-        };
-        device.create_sampler(&wgpu::SamplerDescriptor {
-            label,
-            address_mode_u,
-            address_mode_v,
-            mag_filter,
-            min_filter,
-            mipmap_filter,
-            ..Default::default()
-        })
-    }
-
-    fn create_mesh(
-        &self,
+    pub fn create_mesh(
+        &mut self,
         gltf_mesh: &gltf::Mesh,
+        scene_id: usize,
         scene: &mut Scene,
-        material_mapping: &mut HashMap<Option<usize>, MaterialId>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<MeshDescriptor, SceneCreationError> {
-        let mut primitives = Vec::with_capacity(gltf_mesh.primitives().len());
-        for primitive in gltf_mesh.primitives() {
-            let reader = primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
+    ) -> Result<MeshId, CreationError> {
+        if let Some(mesh) = self
+            .scenes_mapping
+            .entry(scene_id)
+            .or_default()
+            .meshes
+            .get(&gltf_mesh.index())
+        {
+            return Ok(*mesh);
+        }
 
-            dbg!("Creating primitives");
+        let gltf_primitives = gltf_mesh.primitives();
+        let mut primitives = Vec::with_capacity(gltf_primitives.len());
+        for gltf_primitive in gltf_primitives {
+            let reader = gltf_primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
 
-            if let Some(positions) = reader.read_positions() {
+            if let Some(mut positions) = reader.read_positions() {
                 let mut vertex_count = positions.len() as u32;
 
                 let indices = match reader.read_indices() {
                     Some(indices) => match indices {
                         gltf::mesh::util::ReadIndices::U8(_) => {
-                            return Err(SceneCreationError::Unsupported(
+                            return Err(CreationError::Unsupported(
                                 "Only u16 and u32 index format are supported".to_string(),
                             ))
                         }
@@ -444,20 +278,35 @@ impl Asset {
                     None => None,
                 };
 
-                let normals = reader
-                    .read_normals()
-                    .ok_or(SceneCreationError::Unsupported(
-                        "Attributes NORMALS is required".to_string(),
-                    ))?;
+                let mut normals = reader.read_normals().ok_or(CreationError::Unsupported(
+                    "Attributes NORMALS is required".to_string(),
+                ))?;
 
-                let attributes: Vec<_> = positions
-                    .zip(normals)
-                    .map(|(position, normal)| PrimitiveAttributes {
-                        position,
-                        normal,
-                        tex_coords: [[0.0, 0.0], [0.0, 0.0]],
-                    })
-                    .collect();
+                let mut tex_coords: Vec<Box<dyn Iterator<Item = [f32; 2]>>> =
+                    Vec::with_capacity(TEX_COORDS_LEN);
+                for set in 0..TEX_COORDS_LEN as u32 {
+                    tex_coords.push(
+                        reader
+                            .read_tex_coords(set)
+                            .map_or(Box::new(std::iter::repeat([0.0, 0.0])), |tex_coord| {
+                                Box::new(tex_coord.into_f32())
+                            }),
+                    );
+                }
+
+                let mut attributes = Vec::with_capacity(vertex_count as usize);
+                for _ in 0..vertex_count {
+                    attributes.push(PrimitiveAttributes {
+                        position: positions.next().ok_or(CreationError::InvalidAsset)?,
+                        normal: normals.next().ok_or(CreationError::InvalidAsset)?,
+                        tex_coords: [
+                            tex_coords[0].next().ok_or(CreationError::InvalidAsset)?,
+                            tex_coords[1].next().ok_or(CreationError::InvalidAsset)?,
+                        ],
+                    });
+                }
+
+                drop(tex_coords);
 
                 let attributes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Attributes buffer"),
@@ -465,19 +314,13 @@ impl Asset {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
-                dbg!("attributes created");
-
-                let material = primitive.material();
-                let material = match material_mapping.entry(material.index()) {
-                    std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        let material = scene.create_material(
-                            self.create_material(&primitive.material(), device, queue)?,
-                            device,
-                        );
-                        *entry.insert(material)
-                    }
-                };
+                let material = self.create_material(
+                    &gltf_primitive.material(),
+                    scene_id,
+                    scene,
+                    device,
+                    queue,
+                )?;
 
                 primitives.push(PrimitiveDescriptor {
                     vertex_count,
@@ -488,18 +331,30 @@ impl Asset {
             }
         }
 
-        Ok(MeshDescriptor { primitives })
+        let mesh = MeshDescriptor { primitives };
+
+        Ok(scene.create_mesh(mesh, device)?)
     }
 
-    fn create_node(
-        &self,
+    pub fn create_node(
+        &mut self,
         gltf_node: &gltf::Node,
+        parent: Option<NodeId>,
+        scene_id: usize,
         scene: &mut Scene,
-        meshes_mapping: &mut HashMap<usize, MeshId>,
-        material_mapping: &mut HashMap<Option<usize>, MaterialId>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<NodeDescriptor, SceneCreationError> {
+    ) -> Result<NodeId, CreationError> {
+        if let Some(node) = self
+            .scenes_mapping
+            .entry(scene_id)
+            .or_default()
+            .nodes
+            .get(&gltf_node.index())
+        {
+            return Ok(*node);
+        }
+
         let local_transform = match gltf_node.transform() {
             gltf::scene::Transform::Decomposed {
                 translation,
@@ -516,41 +371,28 @@ impl Asset {
         };
 
         let mesh = match gltf_node.mesh() {
-            Some(mesh) => Some(match meshes_mapping.entry(mesh.index()) {
-                std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    let mesh = self.create_mesh(&mesh, scene, material_mapping, device, queue)?;
-                    *entry.insert(scene.create_mesh(mesh, device)?)
-                }
-            }),
+            Some(gltf_mesh) => Some(self.create_mesh(&gltf_mesh, scene_id, scene, device, queue)?),
             None => None,
         };
 
-        dbg!("Mesh created");
+        let node = NodeDescriptor {
+            local_transform,
+            parent,
+            mesh,
+        };
+        let node = scene.create_node(&node, device)?;
 
-        let mut children = Vec::with_capacity(gltf_node.children().len());
-        for child in gltf_node.children() {
-            children.push(self.create_node(
-                &child,
-                scene,
-                meshes_mapping,
-                material_mapping,
-                device,
-                queue,
-            )?);
+        for child_node in gltf_node.children() {
+            self.create_node(&child_node, Some(node), scene_id, scene, device, queue)?;
         }
 
-        Ok(NodeDescriptor {
-            local_transform,
-            children,
-            mesh,
-        })
+        Ok(node)
     }
 }
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum SceneCreationError {
+pub enum CreationError {
     #[error(transparent)]
     NodeCreationError(#[from] NodeCreationError),
     #[error(transparent)]
@@ -559,4 +401,16 @@ pub enum SceneCreationError {
     InvalidAsset,
     #[error("unsupported: {0}")]
     Unsupported(String),
+}
+
+#[derive(Debug, Default)]
+struct SceneMapping {
+    nodes: HashMap<usize, NodeId>,
+    meshes: HashMap<usize, MeshId>,
+    materials: HashMap<Option<usize>, MaterialId>,
+}
+
+struct Texture {
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
 }

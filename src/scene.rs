@@ -10,10 +10,10 @@ mod material;
 mod mesh;
 mod node;
 
-pub use material::{MaterialDescriptor, MaterialId};
+pub use material::{MaterialDescriptor, MaterialId, TextureDescriptor};
 pub use mesh::{
     MeshCreationError, MeshDescriptor, MeshId, PrimitiveAttributes, PrimitiveDescriptor,
-    PrimitiveIndices,
+    PrimitiveIndices, TEX_COORDS_LEN,
 };
 pub use node::{NodeCreationError, NodeDescriptor, NodeId, Transform as NodeTransform};
 
@@ -26,14 +26,13 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn new(device: &wgpu::Device, camera: Camera) -> Self {
+    pub fn new(camera: Camera, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let nodes = NodeManager::new(device);
-        
+
         let lights = LightManager::new(device, camera.bind_group_layout());
-        
-        let materials = MaterialManager::new(device);
-        
-        log::debug!("Creating meshes manager...");
+
+        let materials = MaterialManager::new(device, queue);
+
         let meshes = MeshManager::new(
             device,
             nodes.bind_group_layout(),
@@ -41,7 +40,6 @@ impl Scene {
             lights.bind_group_layout(),
             materials.bind_group_layout(),
         );
-        log::debug!("Meshes manager created");
 
         Self {
             nodes,
@@ -54,10 +52,10 @@ impl Scene {
 
     pub fn create_node(
         &mut self,
-        nodes: impl IntoIterator<Item = NodeDescriptor>,
+        node: &NodeDescriptor,
         device: &wgpu::Device,
-    ) -> Result<Vec<NodeId>, NodeCreationError> {
-        self.nodes.create(nodes, &mut self.meshes, device)
+    ) -> Result<NodeId, NodeCreationError> {
+        self.nodes.create(node, &mut self.meshes, device)
     }
 
     pub fn create_mesh(
@@ -70,7 +68,7 @@ impl Scene {
 
     pub fn create_material(
         &mut self,
-        material: MaterialDescriptor,
+        material: &MaterialDescriptor,
         device: &wgpu::Device,
     ) -> MaterialId {
         self.materials.create(material, device)

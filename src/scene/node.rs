@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::{Index, IndexMut},
-};
+use std::ops::{Index, IndexMut};
 
 use glam::{Mat3, Mat4, Quat, Vec3, Vec4};
 use thiserror::Error;
@@ -60,36 +57,9 @@ impl NodeManager {
 
     pub fn create(
         &mut self,
-        nodes: impl IntoIterator<Item = NodeDescriptor>,
+        node: &NodeDescriptor,
         meshes: &mut MeshManager,
         device: &wgpu::Device,
-    ) -> Result<Vec<NodeId>, NodeCreationError> {
-        let nodes = nodes.into_iter();
-        let mut nodes_id = Vec::with_capacity(nodes.size_hint().0);
-        let mut meshes_nodes = HashMap::new();
-
-        for node in nodes {
-            nodes_id.push(self.create_as_child(node, None, &mut meshes_nodes)?);
-        }
-
-        self.create_buffer(device);
-
-        for (mesh, nodes) in meshes_nodes {
-            let mesh = meshes
-                .get_mut(mesh)
-                .ok_or(NodeCreationError::InvalidMesh(mesh))?;
-            mesh.nodes.extend(&nodes);
-            mesh.update_nodes_buffer(self.nodes.dense_indices_u32(nodes), device);
-        }
-
-        Ok(nodes_id)
-    }
-
-    fn create_as_child(
-        &mut self,
-        node: NodeDescriptor,
-        parent: Option<NodeId>,
-        meshes_nodes: &mut HashMap<MeshId, Vec<NodeId>>,
     ) -> Result<NodeId, NodeCreationError> {
         let local_matrix = match node.local_transform {
             Transform::Matrix(matrix) => matrix,
@@ -103,12 +73,12 @@ impl NodeManager {
         let node_id = self.nodes.add(Node {
             local_transform: node.local_transform,
             global_transform: local_matrix,
-            parent,
+            parent: node.parent,
             children: Vec::new(),
             mesh: node.mesh,
         });
 
-        if let Some(parent_id) = parent {
+        if let Some(parent_id) = node.parent {
             let parent = self
                 .nodes
                 .get_mut(parent_id)
@@ -117,17 +87,18 @@ impl NodeManager {
             self.nodes[node_id].global_transform = parent.global_transform * local_matrix;
         }
 
-        if node.children.len() > 0 {
-            let mut children = Vec::with_capacity(node.children.len());
-            for child in node.children {
-                children.push(self.create_as_child(child, Some(node_id), meshes_nodes)?);
-            }
-            self.nodes[node_id].children = children;
+        if let Some(mesh) = node.mesh {
+            let mesh = meshes
+                .get_mut(mesh)
+                .ok_or(NodeCreationError::InvalidMesh(mesh))?;
+            mesh.nodes.insert(node_id);
+            mesh.update_nodes_buffer(
+                self.nodes.dense_indices_u32(mesh.nodes.iter().copied()),
+                device,
+            );
         }
 
-        if let Some(mesh_id) = node.mesh {
-            meshes_nodes.entry(mesh_id).or_default().push(node_id);
-        }
+        self.create_buffer(device);
 
         Ok(node_id)
     }
@@ -204,7 +175,7 @@ pub type NodeId = Id<Node>;
 #[non_exhaustive]
 pub struct NodeDescriptor {
     pub local_transform: Transform,
-    pub children: Vec<NodeDescriptor>,
+    pub parent: Option<NodeId>,
     pub mesh: Option<MeshId>,
 }
 

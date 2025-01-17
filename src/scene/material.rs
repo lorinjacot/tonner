@@ -7,10 +7,12 @@ use crate::storage::{Id, Storage};
 pub struct MaterialManager {
     materials: Storage<Material>,
     bind_group_layout: wgpu::BindGroupLayout,
+    default_sampler: wgpu::Sampler,
+    default_base_texture_view: wgpu::TextureView,
 }
 
 impl MaterialManager {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Material bind group layout"),
             entries: &[
@@ -33,70 +35,6 @@ impl MaterialManager {
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 8,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 9,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 10,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -107,9 +45,39 @@ impl MaterialManager {
             ],
         });
 
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Material default sampler"),
+            ..Default::default()
+        });
+
+        const WHITE_PIXEL: [u8; 4] = [255, 255, 255, 255];
+        let default_base_texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("Material default base texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &WHITE_PIXEL,
+        );
+        let default_base_texture_view =
+            default_base_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         Self {
             materials: Storage::new(),
             bind_group_layout,
+            default_sampler,
+            default_base_texture_view,
         }
     }
 
@@ -117,19 +85,20 @@ impl MaterialManager {
         &self.bind_group_layout
     }
 
-    pub fn create(&mut self, material: MaterialDescriptor, device: &wgpu::Device) -> MaterialId {
+    pub fn create(&mut self, material: &MaterialDescriptor, device: &wgpu::Device) -> MaterialId {
+        let base_color_texture = match material.base_color_texture.as_ref() {
+            Some(texture) => texture,
+            None => &TextureDescriptor {
+                view: &self.default_base_texture_view,
+                sampler: &self.default_sampler,
+                tex_coord: 0,
+            },
+        };
+
         let material_uniform = MaterialUniform {
             base_color_factor: material.base_color_factor,
-            base_color_tex_coord: material.base_color_tex_coord,
-            metallic_factor: material.metallic_factor,
-            roughness_factor: material.roughness_factor,
-            metallic_roughness_tex_coord: material.metallic_roughness_tex_coord,
-            normal_texture_scale: material.normal_texture_scale,
-            normal_tex_coord: material.normal_tex_coord,
-            occlusion_strength: material.occlusion_strength,
-            occlusion_tex_coord: material.occlusion_tex_coord,
-            emissive_factor: material.emissive_factor,
-            emissive_tex_coord: material.emissive_tex_coord,
+            base_color_tex_coord: base_color_texture.tex_coord,
+            _padding: [0.0; 3],
         };
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Material uniform buffer"),
@@ -143,48 +112,14 @@ impl MaterialManager {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&material.base_color_texture),
+                    resource: wgpu::BindingResource::TextureView(&base_color_texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&material.base_color_sampler),
+                    resource: wgpu::BindingResource::Sampler(&base_color_texture.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(
-                        &material.metallic_roughness_texture,
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&material.metallic_roughness_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&material.normal_texture),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(&material.normal_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&material.occlusion_texture),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&material.occlusion_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: wgpu::BindingResource::TextureView(&material.emissive_texture),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 9,
-                    resource: wgpu::BindingResource::Sampler(&material.emissive_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 10,
                     resource: material_buffer.as_entire_binding(),
                 },
             ],
@@ -225,37 +160,16 @@ impl Material {
 struct MaterialUniform {
     base_color_factor: [f32; 4],
     base_color_tex_coord: u32,
-    metallic_factor: f32,
-    roughness_factor: f32,
-    metallic_roughness_tex_coord: u32,
-    normal_texture_scale: f32,
-    normal_tex_coord: u32,
-    occlusion_strength: f32,
-    occlusion_tex_coord: u32,
-    emissive_factor: [f32; 3],
-    emissive_tex_coord: u32,
+    _padding: [f32; 3],
 }
 
-pub struct MaterialDescriptor {
+pub struct TextureDescriptor<'a> {
+    pub view: &'a wgpu::TextureView,
+    pub sampler: &'a wgpu::Sampler,
+    pub tex_coord: u32,
+}
+
+pub struct MaterialDescriptor<'a> {
     pub base_color_factor: [f32; 4],
-    pub base_color_tex_coord: u32,
-    pub base_color_texture: wgpu::TextureView,
-    pub base_color_sampler: wgpu::Sampler,
-    pub metallic_factor: f32,
-    pub roughness_factor: f32,
-    pub metallic_roughness_tex_coord: u32,
-    pub metallic_roughness_texture: wgpu::TextureView,
-    pub metallic_roughness_sampler: wgpu::Sampler,
-    pub normal_texture_scale: f32,
-    pub normal_tex_coord: u32,
-    pub normal_texture: wgpu::TextureView,
-    pub normal_sampler: wgpu::Sampler,
-    pub occlusion_strength: f32,
-    pub occlusion_tex_coord: u32,
-    pub occlusion_texture: wgpu::TextureView,
-    pub occlusion_sampler: wgpu::Sampler,
-    pub emissive_tex_coord: u32,
-    pub emissive_texture: wgpu::TextureView,
-    pub emissive_sampler: wgpu::Sampler,
-    pub emissive_factor: [f32; 3],
+    pub base_color_texture: Option<TextureDescriptor<'a>>,
 }

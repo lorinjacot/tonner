@@ -192,7 +192,7 @@ impl Engine {
         });
 
         let camera = Camera::new(
-            vec3(0.0, 0.0, -10.0),
+            vec3(0.0, 0.0, 10.0),
             config.width as f32 / config.height as f32,
             &device,
             &queue,

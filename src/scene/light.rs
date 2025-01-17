@@ -12,7 +12,7 @@ pub struct LightManager {
 impl LightManager {
     pub fn new(device: &wgpu::Device, camera_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
         let light_color = vec3(1.0, 1.0, 1.0);
-        let light_position = vec3(1.2, 1.0, -2.0);
+        let light_position = vec3(1.2, 1.0, 2.0);
         let light_uniform = LightUniform {
             color: light_color,
             _pad: 0.0,

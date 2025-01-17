@@ -158,12 +158,12 @@ impl Camera {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self {
-        let front = Vec3::Z;
-        let left = Vec3::X;
+        let front = -Vec3::Z;
+        let left = -Vec3::X;
         let up = Vec3::Y;
 
         let pitch = FRAC_PI_2;
-        let yaw = 0.0;
+        let yaw = PI;
         let fov = FRAC_PI_4;
         let z_near = 0.1;
         let z_far = 100.0;

@@ -3,6 +3,7 @@ struct Attributes {
     @location(2) normal: vec3f,
     @location(3) tex_coord_0: vec2f,
     @location(4) tex_coord_1: vec2f,
+    @location(5) color_0: vec4f,
 }
 
 struct Transform {
@@ -21,6 +22,7 @@ struct Fragment {
     @location(1) world_normal: vec3f,
     @location(2) tex_coord_0: vec2f,
     @location(3) tex_coord_1: vec2f,
+    @location(4) color_0: vec4f,
 }
 
 struct Light {
@@ -54,6 +56,7 @@ fn vs_main(
     fragment.world_normal = transforms[node_id].normal * attributes.normal;
     fragment.tex_coord_0 = attributes.tex_coord_0;
     fragment.tex_coord_1 = attributes.tex_coord_1;
+    fragment.color_0 = attributes.color_0;
     return fragment;
 }
 
@@ -66,7 +69,7 @@ fn fs_main(
         fragment.tex_coord_1,
     );
 
-    let object_color = (material.base_color_factor * textureSample(
+    let object_color = (material.base_color_factor * fragment.color_0 * textureSample(
         base_color_texture, base_color_sampler, tex_coords[material.base_color_tex_coord]
     )).rgb;
 

@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 use crate::scene::{
     MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId, NodeCreationError,
     NodeDescriptor, NodeId, NodeTransform, PrimitiveAttributes, PrimitiveDescriptor,
-    PrimitiveIndices, Scene, TextureDescriptor, TEX_COORDS_LEN,
+    PrimitiveIndices, Scene, TextureDescriptor, COLORS_LEN, TEX_COORDS_LEN,
 };
 
 pub struct Asset {
@@ -294,6 +294,15 @@ impl Asset {
                     );
                 }
 
+                let mut colors: Vec<Box<dyn Iterator<Item = [f32; 4]>>> =
+                    Vec::with_capacity(COLORS_LEN);
+                for set in 0..COLORS_LEN as u32 {
+                    colors.push(reader.read_colors(set).map_or(
+                        Box::new(std::iter::repeat([1.0, 1.0, 1.0, 1.0])),
+                        |colors| Box::new(colors.into_rgba_f32()),
+                    ));
+                }
+
                 let mut attributes = Vec::with_capacity(vertex_count as usize);
                 for _ in 0..vertex_count {
                     attributes.push(PrimitiveAttributes {
@@ -303,10 +312,12 @@ impl Asset {
                             tex_coords[0].next().ok_or(CreationError::InvalidAsset)?,
                             tex_coords[1].next().ok_or(CreationError::InvalidAsset)?,
                         ],
+                        colors: [colors[0].next().ok_or(CreationError::InvalidAsset)?],
                     });
                 }
 
                 drop(tex_coords);
+                drop(colors);
 
                 let attributes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Attributes buffer"),

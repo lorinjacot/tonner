@@ -13,7 +13,7 @@ mod node;
 pub use material::{MaterialDescriptor, MaterialId, TextureDescriptor};
 pub use mesh::{
     MeshCreationError, MeshDescriptor, MeshId, PrimitiveAttributes, PrimitiveDescriptor,
-    PrimitiveIndices, TEX_COORDS_LEN,
+    PrimitiveIndices, COLORS_LEN, TEX_COORDS_LEN,
 };
 pub use node::{NodeCreationError, NodeDescriptor, NodeId, Transform as NodeTransform};
 

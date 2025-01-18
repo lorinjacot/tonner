@@ -11,6 +11,7 @@ use crate::storage::{Id, Storage};
 use super::{material::MaterialManager, MaterialId, NodeId};
 
 pub const TEX_COORDS_LEN: usize = 2;
+pub const COLORS_LEN: usize = 1;
 
 pub struct MeshManager {
     meshes: Storage<Mesh>,
@@ -39,6 +40,13 @@ impl MeshManager {
                 push_constant_ranges: &[],
             });
 
+        let primitive_attributes = wgpu::vertex_attr_array![
+            1 => Float32x3,
+            2 => Float32x3,
+            3 => Float32x2,
+            4 => Float32x2,
+            5 => Float32x4,
+        ];
         let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Primitive pipeline"),
             layout: Some(&primitive_pipeline_layout),
@@ -57,30 +65,9 @@ impl MeshManager {
                         }],
                     },
                     wgpu::VertexBufferLayout {
-                        array_stride: 3 * 4 + 3 * 4 + 2 * 4 + 2 * 4,
+                        array_stride: size_of::<PrimitiveAttributes>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 0,
-                                shader_location: 1,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 3 * 4,
-                                shader_location: 2,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 2 * 4,
-                                shader_location: 3,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 2 * 4,
-                                shader_location: 4,
-                            },
-                        ],
+                        attributes: &primitive_attributes,
                     },
                 ],
             },
@@ -211,6 +198,7 @@ pub struct PrimitiveAttributes {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub tex_coords: [[f32; 2]; TEX_COORDS_LEN],
+    pub colors: [[f32; 4]; COLORS_LEN],
 }
 
 pub struct MeshDescriptor {

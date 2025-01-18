@@ -202,6 +202,8 @@ impl Asset {
         let material = MaterialDescriptor {
             base_color_factor: pbr_metallic_roughness.base_color_factor(),
             base_color_texture,
+            metallic_factor: pbr_metallic_roughness.metallic_factor(),
+            roughness_factor: pbr_metallic_roughness.roughness_factor(),
         };
 
         let material = scene.create_material(&material, device);

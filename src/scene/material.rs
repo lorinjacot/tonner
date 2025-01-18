@@ -98,7 +98,9 @@ impl MaterialManager {
         let material_uniform = MaterialUniform {
             base_color_factor: material.base_color_factor,
             base_color_tex_coord: base_color_texture.tex_coord,
-            _padding: [0.0; 3],
+            metallic_factor: material.metallic_factor,
+            roughness_factor: material.roughness_factor,
+            _padding: [0.0; 1],
         };
         let material_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Material uniform buffer"),
@@ -160,7 +162,9 @@ impl Material {
 struct MaterialUniform {
     base_color_factor: [f32; 4],
     base_color_tex_coord: u32,
-    _padding: [f32; 3],
+    metallic_factor: f32,
+    roughness_factor: f32,
+    _padding: [f32; 1],
 }
 
 pub struct TextureDescriptor<'a> {
@@ -172,4 +176,6 @@ pub struct TextureDescriptor<'a> {
 pub struct MaterialDescriptor<'a> {
     pub base_color_factor: [f32; 4],
     pub base_color_texture: Option<TextureDescriptor<'a>>,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
 }

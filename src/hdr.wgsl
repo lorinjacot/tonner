@@ -31,11 +31,11 @@ fn vs_main(
 fn fs_main(
     in: VertexOutput
 ) -> @location(0) vec4f {
-    let exposure = 1.0;
-
     let hdr_color = textureSample(hdr_texture, hdr_sampler, in.tex_coord).rgb;
 
+    let exposure = 1.0;
     let ldr_color = vec3(1.0) - exp(-hdr_color * exposure);
+    // let ldr_color = hdr_color / (hdr_color + vec3f(1.0));
 
     return vec4f(ldr_color, 1.0);
 }

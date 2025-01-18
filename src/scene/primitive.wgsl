@@ -1,4 +1,5 @@
 const pi: f32 = 3.14159;
+const exposure: f32 = 1.0;
 
 struct Attributes {
     @location(1) position: vec3f,
@@ -89,12 +90,16 @@ fn fs_main(
     let light_dir = normalize(light.world_position - fragment.world_position);
     let halfway_dir = normalize(light_dir + view_dir);
 
+    let distance = length(light.world_position - fragment.world_position);
+    let attenuation = 1.0 / (distance * distance);
+    let radiance = light.color * attenuation;
+
     let f = fresnel(f0, dot(view_dir, halfway_dir));
 
     let f_diffuse = (vec3f(1.0) - f) * diffuse_brdf(c_diff);
     let f_specular = f * specular_brdf(roughness * roughness, normal, halfway_dir, light_dir, view_dir);
 
-    let material = f_diffuse + f_specular;
+    let material = (f_diffuse + f_specular) * radiance * max(dot(normal, light_dir), 0.0);
 
     return vec4f(material, base_color.a);
 }

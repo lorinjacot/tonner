@@ -239,7 +239,8 @@ impl Asset {
             let reader = gltf_primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
 
             if let Some(mut positions) = reader.read_positions() {
-                let mut vertex_count = positions.len() as u32;
+                let attributes_count = positions.len();
+                let mut vertex_count = attributes_count as u32;
 
                 let indices = match reader.read_indices() {
                     Some(indices) => match indices {
@@ -305,8 +306,8 @@ impl Asset {
                     ));
                 }
 
-                let mut attributes = Vec::with_capacity(vertex_count as usize);
-                for _ in 0..vertex_count {
+                let mut attributes = Vec::with_capacity(attributes_count);
+                for _ in 0..attributes_count {
                     attributes.push(PrimitiveAttributes {
                         position: positions.next().ok_or(CreationError::InvalidAsset)?,
                         normal: normals.next().ok_or(CreationError::InvalidAsset)?,

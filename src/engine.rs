@@ -2,12 +2,15 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use glam::vec3;
+use wgpu::util::DeviceExt;
 use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
 use winit::window::Window;
 
 use crate::asset::Asset;
 use crate::camera::{Camera, CameraController};
 use crate::scene::{DrawScene, Scene};
+
+const EXPOSURE: f32 = 1.0;
 
 pub struct Engine {
     window: Arc<Window>,
@@ -17,6 +20,7 @@ pub struct Engine {
     config: wgpu::SurfaceConfiguration,
     hdr_texture_view: wgpu::TextureView,
     depth_texture_view: wgpu::TextureView,
+    exposure_buffer: wgpu::Buffer,
     hdr_bind_group: wgpu::BindGroup,
     hdr_bind_group_layout: wgpu::BindGroupLayout,
     hdr_sampler: wgpu::Sampler,
@@ -111,6 +115,12 @@ impl Engine {
             ..Default::default()
         });
 
+        let exposure_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("HDR exposure buffer"),
+            contents: bytemuck::cast_slice(&[EXPOSURE]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
         let hdr_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("HDR bind group layout"),
@@ -131,6 +141,16 @@ impl Engine {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -145,6 +165,10 @@ impl Engine {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&hdr_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: exposure_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -201,7 +225,7 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let (mut asset, document) = Asset::open("assets/SimpleMeshes.gltf").unwrap();
+        let (mut asset, document) = Asset::open("assets/CompareBaseColor.gltf").unwrap();
 
         let scene_id = 0;
         let mut scene = Scene::new(camera, &device, &queue);
@@ -219,6 +243,7 @@ impl Engine {
             config,
             hdr_texture_view,
             depth_texture_view,
+            exposure_buffer,
             hdr_bind_group,
             hdr_bind_group_layout,
             hdr_sampler,
@@ -278,6 +303,10 @@ impl Engine {
                             binding: 1,
                             resource: wgpu::BindingResource::Sampler(&self.hdr_sampler),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: self.exposure_buffer.as_entire_binding(),
+                        },
                     ],
                 });
 
@@ -336,9 +365,9 @@ impl Engine {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.1,
+                            r: -f64::ln(1.0 - 0.1) / EXPOSURE as f64,
+                            g: -f64::ln(1.0 - 0.1) / EXPOSURE as f64,
+                            b: -f64::ln(1.0 - 0.1) / EXPOSURE as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

@@ -5,6 +5,7 @@ struct VertexOutput {
 
 @group(0) @binding(0) var hdr_texture: texture_2d<f32>;
 @group(0) @binding(1) var hdr_sampler: sampler;
+@group(0) @binding(2) var<uniform> exposure: f32;
 
 @vertex
 fn vs_main(
@@ -33,7 +34,6 @@ fn fs_main(
 ) -> @location(0) vec4f {
     let hdr_color = textureSample(hdr_texture, hdr_sampler, in.tex_coord).rgb;
 
-    let exposure = 1.0;
     let ldr_color = vec3(1.0) - exp(-hdr_color * exposure);
     // let ldr_color = hdr_color / (hdr_color + vec3f(1.0));
 

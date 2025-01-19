@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use glam::vec3;
 use wgpu::util::DeviceExt;
-use winit::event::{DeviceEvent, ElementState, MouseButton, WindowEvent};
+use winit::event::{DeviceEvent, WindowEvent};
 use winit::window::Window;
 
 use crate::asset::Asset;
@@ -18,8 +18,7 @@ pub struct Engine {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    egui_ctx: egui::Context,
-    egui_input: egui::RawInput,
+    egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
     hdr_texture_view: wgpu::TextureView,
     depth_texture_view: wgpu::TextureView,
@@ -78,13 +77,8 @@ impl Engine {
         surface.configure(&device, &config);
 
         let egui_ctx = egui::Context::default();
-        let egui_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_x_y_ranges(
-                0.0..=config.width as f32,
-                0.0..=config.height as f32,
-            )),
-            ..Default::default()
-        };
+        let viewport_id = egui_ctx.viewport_id();
+        let egui_state = egui_winit::State::new(egui_ctx, viewport_id, &window, None, None, None);
 
         let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
 
@@ -255,8 +249,7 @@ impl Engine {
             queue,
             surface,
             config,
-            egui_ctx,
-            egui_input,
+            egui_state,
             egui_renderer,
             hdr_texture_view,
             depth_texture_view,
@@ -276,80 +269,21 @@ impl Engine {
     }
 
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
+        if self
+            .egui_state
+            .on_window_event(&self.window, event)
+            .consumed
+        {
+            return true;
+        }
         match event {
             WindowEvent::RedrawRequested => {
-                self.window.request_redraw();
-                self.update();
                 self.draw();
+                self.window.request_redraw();
                 true
             }
             WindowEvent::Resized(new_size) => {
-                self.config.width = new_size.width.max(1);
-                self.config.height = new_size.height.max(1);
-                self.surface.configure(&self.device, &self.config);
-
-                self.egui_input.screen_rect = Some(egui::Rect::from_x_y_ranges(
-                    0.0..=self.config.width as f32,
-                    0.0..=self.config.height as f32,
-                ));
-
-                let size = wgpu::Extent3d {
-                    width: self.config.width,
-                    height: self.config.height,
-                    depth_or_array_layers: 1,
-                };
-
-                let hdr_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("frame buffer texture"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
-                self.hdr_texture_view =
-                    hdr_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-                self.hdr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("HDR bind group"),
-                    layout: &self.hdr_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&self.hdr_texture_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&self.hdr_sampler),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: self.exposure_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-
-                let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("Depth texture"),
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Depth24Plus,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                });
-                self.depth_texture_view =
-                    depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-                self.scene
-                    .camera
-                    .set_aspect_ration(self.config.width as f32 / self.config.height as f32);
-
-                self.window.request_redraw();
+                self.resize(new_size);
                 true
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -357,53 +291,113 @@ impl Engine {
             }
             WindowEvent::MouseInput {
                 state,
-                button: MouseButton::Left,
+                button: winit::event::MouseButton::Left,
                 ..
-            } => self
-                .camera_controller
-                .mouse_input(*state == ElementState::Pressed),
+            } => self.camera_controller.mouse_input(state.is_pressed()),
             _ => false,
         }
     }
 
     pub fn device_event(&mut self, event: &DeviceEvent) -> bool {
         match event {
-            DeviceEvent::MouseMotion { delta } => self
-                .camera_controller
-                .mouse_move(delta.0 as f32, delta.1 as f32),
+            DeviceEvent::MouseMotion { delta } => {
+                self.egui_state.on_mouse_motion(*delta);
+                self.camera_controller
+                    .mouse_move(delta.0 as f32, delta.1 as f32)
+            }
             _ => false,
         }
     }
 
-    fn update(&mut self) {
+    fn resize(&mut self, new_size: &winit::dpi::PhysicalSize<u32>) {
+        self.config.width = new_size.width.max(1);
+        self.config.height = new_size.height.max(1);
+        self.surface.configure(&self.device, &self.config);
+
+        let size = wgpu::Extent3d {
+            width: self.config.width,
+            height: self.config.height,
+            depth_or_array_layers: 1,
+        };
+
+        let hdr_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("frame buffer texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        self.hdr_texture_view = hdr_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.hdr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("HDR bind group"),
+            layout: &self.hdr_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.hdr_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.hdr_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.exposure_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth24Plus,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        self.depth_texture_view =
+            depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.scene
+            .camera
+            .set_aspect_ration(self.config.width as f32 / self.config.height as f32);
+
+        self.window.request_redraw();
+    }
+
+    fn draw(&mut self) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
         let delta_time = self.last_frame.elapsed();
         self.last_frame = Instant::now();
 
         self.camera_controller
             .update(&mut self.scene.camera, delta_time, &self.queue);
-    }
 
-    fn draw(&mut self) {
-        let frame = self
-            .surface
-            .get_current_texture()
-            .expect("Failed to acquire next swap chain texture");
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        let full_output = self.egui_ctx.run(self.egui_input.take(), |ctx| {
+        let new_input = self.egui_state.take_egui_input(&self.window);
+        let full_output = self.egui_state.egui_ctx().run(new_input, |ctx| {
             egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-                ui.label(format!("dbg: {:?}", self.egui_input.viewport().inner_rect));
+                ui.label("Hello world!");
             });
             egui::SidePanel::right("display_panel").show(ctx, |ui| {
                 ui.label("Hello world!");
             });
         });
         // handle_platform_output(full_output.platform_output);
+        self.egui_state
+            .handle_platform_output(&self.window, full_output.platform_output);
 
         let clipped_primitives = self
-            .egui_ctx
+            .egui_state
+            .egui_ctx()
             .tessellate(full_output.shapes, full_output.pixels_per_point);
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
@@ -452,6 +446,11 @@ impl Engine {
 
             render_pass.draw_scene(&self.scene);
         }
+
+        let frame = self
+            .surface
+            .get_current_texture()
+            .expect("Failed to acquire next swap chain texture");
 
         {
             let view = frame

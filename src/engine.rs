@@ -18,6 +18,9 @@ pub struct Engine {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    egui_ctx: egui::Context,
+    egui_input: egui::RawInput,
+    egui_renderer: egui_wgpu::Renderer,
     hdr_texture_view: wgpu::TextureView,
     depth_texture_view: wgpu::TextureView,
     exposure_buffer: wgpu::Buffer,
@@ -73,6 +76,17 @@ impl Engine {
             .get_default_config(&adapter, size.width, size.height)
             .unwrap();
         surface.configure(&device, &config);
+
+        let egui_ctx = egui::Context::default();
+        let egui_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_x_y_ranges(
+                0.0..=config.width as f32,
+                0.0..=config.height as f32,
+            )),
+            ..Default::default()
+        };
+
+        let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
 
         let size = wgpu::Extent3d {
             width: config.width,
@@ -241,6 +255,9 @@ impl Engine {
             queue,
             surface,
             config,
+            egui_ctx,
+            egui_input,
+            egui_renderer,
             hdr_texture_view,
             depth_texture_view,
             exposure_buffer,
@@ -270,6 +287,11 @@ impl Engine {
                 self.config.width = new_size.width.max(1);
                 self.config.height = new_size.height.max(1);
                 self.surface.configure(&self.device, &self.config);
+
+                self.egui_input.screen_rect = Some(egui::Rect::from_x_y_ranges(
+                    0.0..=self.config.width as f32,
+                    0.0..=self.config.height as f32,
+                ));
 
                 let size = wgpu::Extent3d {
                     width: self.config.width,
@@ -309,6 +331,19 @@ impl Engine {
                         },
                     ],
                 });
+
+                let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Depth texture"),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                });
+                self.depth_texture_view =
+                    depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
                 self.scene
                     .camera
@@ -356,6 +391,36 @@ impl Engine {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        let full_output = self.egui_ctx.run(self.egui_input.take(), |ctx| {
+            egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
+                ui.label(format!("dbg: {:?}", self.egui_input.viewport().inner_rect));
+            });
+            egui::SidePanel::right("display_panel").show(ctx, |ui| {
+                ui.label("Hello world!");
+            });
+        });
+        // handle_platform_output(full_output.platform_output);
+
+        let clipped_primitives = self
+            .egui_ctx
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+
+        for (id, image_delta) in full_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, id, &image_delta);
+        }
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &clipped_primitives,
+            &screen_descriptor,
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -416,9 +481,15 @@ impl Engine {
             render_pass.set_pipeline(&self.hdr_pipeline);
             render_pass.set_bind_group(0, Some(&self.hdr_bind_group), &[]);
             render_pass.draw(0..3, 0..1);
+
+            self.egui_renderer.render(
+                &mut render_pass.forget_lifetime(),
+                &clipped_primitives,
+                &screen_descriptor,
+            );
         }
 
-        self.queue.submit(Some(encoder.finish()));
+        self.queue.submit([encoder.finish()]);
         frame.present();
     }
 }

@@ -10,7 +10,15 @@ use crate::asset::Asset;
 use crate::camera::{Camera, CameraController};
 use crate::scene::{DrawScene, Scene};
 
-const EXPOSURE: f32 = 1.0;
+struct DisplaySettings {
+    exposure: f32,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self { exposure: 1.0 }
+    }
+}
 
 pub struct Engine {
     window: Arc<Window>,
@@ -20,6 +28,7 @@ pub struct Engine {
     config: wgpu::SurfaceConfiguration,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
+    display_settings: DisplaySettings,
     hdr_texture_view: wgpu::TextureView,
     depth_texture_view: wgpu::TextureView,
     exposure_buffer: wgpu::Buffer,
@@ -79,8 +88,9 @@ impl Engine {
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
         let egui_state = egui_winit::State::new(egui_ctx, viewport_id, &window, None, None, None);
-
         let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
+
+        let display_settings = DisplaySettings::default();
 
         let size = wgpu::Extent3d {
             width: config.width,
@@ -125,8 +135,8 @@ impl Engine {
 
         let exposure_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("HDR exposure buffer"),
-            contents: bytemuck::cast_slice(&[EXPOSURE]),
-            usage: wgpu::BufferUsages::UNIFORM,
+            contents: bytemuck::cast_slice(&[display_settings.exposure]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         let hdr_bind_group_layout =
@@ -251,6 +261,7 @@ impl Engine {
             config,
             egui_state,
             egui_renderer,
+            display_settings,
             hdr_texture_view,
             depth_texture_view,
             exposure_buffer,
@@ -384,11 +395,23 @@ impl Engine {
 
         let new_input = self.egui_state.take_egui_input(&self.window);
         let full_output = self.egui_state.egui_ctx().run(new_input, |ctx| {
-            egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
-                ui.label("Hello world!");
-            });
-            egui::SidePanel::right("display_panel").show(ctx, |ui| {
-                ui.label("Hello world!");
+            egui::SidePanel::left("display_panel").show(ctx, |ui| {
+                ui.heading(egui::RichText::new("Display").size(32.0));
+                ui.heading("Lighting");
+                ui.label("Exposure");
+                if ui
+                    .add(
+                        egui::Slider::new(&mut self.display_settings.exposure, 0.0..=64.0)
+                            .logarithmic(true),
+                    )
+                    .changed()
+                {
+                    self.queue.write_buffer(
+                        &self.exposure_buffer,
+                        0,
+                        bytemuck::cast_slice(&[self.display_settings.exposure]),
+                    );
+                };
             });
         });
         // handle_platform_output(full_output.platform_output);
@@ -424,9 +447,9 @@ impl Engine {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: -f64::ln(1.0 - 0.1) / EXPOSURE as f64,
-                            g: -f64::ln(1.0 - 0.1) / EXPOSURE as f64,
-                            b: -f64::ln(1.0 - 0.1) / EXPOSURE as f64,
+                            r: -f64::ln(1.0 - 0.1) / self.display_settings.exposure as f64,
+                            g: -f64::ln(1.0 - 0.1) / self.display_settings.exposure as f64,
+                            b: -f64::ln(1.0 - 0.1) / self.display_settings.exposure as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

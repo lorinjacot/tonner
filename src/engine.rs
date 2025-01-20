@@ -8,6 +8,7 @@ use winit::window::Window;
 
 use crate::asset::Asset;
 use crate::camera::{Camera, CameraController};
+use crate::environment::{DrawEnvironment, EnvironmentMap};
 use crate::scene::{DrawScene, Scene};
 
 struct DisplaySettings {
@@ -39,6 +40,7 @@ pub struct Engine {
     last_frame: Instant,
     camera_controller: CameraController,
     scene: Scene,
+    environment: EnvironmentMap,
 }
 
 impl Engine {
@@ -253,6 +255,18 @@ impl Engine {
             .create_scene(gltf_scene, scene_id, &mut scene, &device, &queue)
             .unwrap();
 
+        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
+            .unwrap()
+            .decode()
+            .unwrap();
+
+        let environment = EnvironmentMap::from_equirectangular(
+            &environment_image.into_rgba32f(),
+            scene.camera.bind_group_layout(),
+            &device,
+            &queue,
+        );
+
         Self {
             window,
             device,
@@ -272,6 +286,7 @@ impl Engine {
             last_frame,
             camera_controller,
             scene,
+            environment,
         }
     }
 
@@ -468,6 +483,7 @@ impl Engine {
             });
 
             render_pass.draw_scene(&self.scene);
+            render_pass.draw_environment(&self.environment, self.scene.camera.bind_group());
         }
 
         let frame = self

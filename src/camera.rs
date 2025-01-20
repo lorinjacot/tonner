@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable};
-use glam::{vec3, Mat4, Vec3, Vec4};
+use glam::{vec3, Mat4, Vec3};
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{KeyCode, PhysicalKey},
@@ -170,7 +170,7 @@ impl Camera {
 
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera uniform buffer"),
-            size: 4 * 4 * 4 + 4 * 4,
+            size: size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -235,9 +235,12 @@ impl Camera {
         let view = Mat4::look_to_rh(self.position, self.front, self.up);
         let projection =
             Mat4::perspective_rh(self.fov, self.aspect_ration, self.z_near, self.z_far);
+        let view_projection = projection * view;
         let uniform = CameraUniform {
-            view_projection: projection * view,
-            world_position: self.position.extend(0.0),
+            view_projection,
+            view_projection_inverse: view_projection.inverse(),
+            world_position: self.position,
+            _padding: 0.0,
         };
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
@@ -247,5 +250,7 @@ impl Camera {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_projection: Mat4,
-    world_position: Vec4,
+    view_projection_inverse: Mat4,
+    world_position: Vec3,
+    _padding: f32,
 }

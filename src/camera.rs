@@ -238,7 +238,8 @@ impl Camera {
         let view_projection = projection * view;
         let uniform = CameraUniform {
             view_projection,
-            view_projection_inverse: view_projection.inverse(),
+            projection_inverse: projection.inverse(),
+            view,
             world_position: self.position,
             _padding: 0.0,
         };
@@ -250,7 +251,8 @@ impl Camera {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_projection: Mat4,
-    view_projection_inverse: Mat4,
+    projection_inverse: Mat4,
+    view: Mat4,
     world_position: Vec3,
     _padding: f32,
 }

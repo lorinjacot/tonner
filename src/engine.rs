@@ -255,7 +255,7 @@ impl Engine {
             .create_scene(gltf_scene, scene_id, &mut scene, &device, &queue)
             .unwrap();
 
-        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
+        let environment_image = image::ImageReader::open("assets/environments/newport_loft.hdr")
             .unwrap()
             .decode()
             .unwrap();

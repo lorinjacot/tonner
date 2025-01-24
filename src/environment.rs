@@ -4,7 +4,7 @@ use glam::{vec3, Mat4, Vec3};
 use image::EncodableLayout;
 use wgpu::util::DeviceExt;
 
-const ENVIRONMENT_MAP_SIZE: u32 = 1024;
+const ENVIRONMENT_MAP_SIZE: u32 = 512;
 
 const POSITIONS: &[Vec3] = &[
     vec3(-1.0, 1.0, -1.0),
@@ -147,7 +147,7 @@ impl EnvironmentMap {
                     module: &equirectangular_to_cubemap_module,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::TextureFormat::Rgba32Float.into())],
+                    targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
                 }),
                 multiview: None,
                 cache: None,
@@ -163,10 +163,10 @@ impl EnvironmentMap {
         let views = [
             Mat4::look_at_rh(Vec3::ZERO, Vec3::X, -Vec3::Y),
             Mat4::look_at_rh(Vec3::ZERO, -Vec3::X, -Vec3::Y),
-            Mat4::look_at_rh(Vec3::ZERO, Vec3::Y, Vec3::Z),
             Mat4::look_at_rh(Vec3::ZERO, -Vec3::Y, -Vec3::Z),
+            Mat4::look_at_rh(Vec3::ZERO, Vec3::Y, Vec3::Z),
             Mat4::look_at_rh(Vec3::ZERO, Vec3::Z, -Vec3::Y),
-            Mat4::look_at_rh(Vec3::ZERO, Vec3::Z, -Vec3::Y),
+            Mat4::look_at_rh(Vec3::ZERO, -Vec3::Z, -Vec3::Y),
         ];
 
         let equirectangular_texture = device.create_texture_with_data(
@@ -198,6 +198,7 @@ impl EnvironmentMap {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
 
@@ -227,7 +228,7 @@ impl EnvironmentMap {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -237,9 +238,9 @@ impl EnvironmentMap {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
 
@@ -313,7 +314,7 @@ impl EnvironmentMap {
                         binding: 0,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
                             view_dimension: wgpu::TextureViewDimension::Cube,
                             multisampled: false,
                         },
@@ -322,7 +323,7 @@ impl EnvironmentMap {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                 ],

@@ -13,11 +13,15 @@ use crate::scene::{DrawScene, Scene};
 
 struct DisplaySettings {
     exposure: f32,
+    background_blur: bool,
 }
 
 impl Default for DisplaySettings {
     fn default() -> Self {
-        Self { exposure: 1.0 }
+        Self {
+            exposure: 1.0,
+            background_blur: true,
+        }
     }
 }
 
@@ -255,7 +259,7 @@ impl Engine {
             .create_scene(gltf_scene, scene_id, &mut scene, &device, &queue)
             .unwrap();
 
-        let environment_image = image::ImageReader::open("assets/environments/newport_loft.hdr")
+        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
             .unwrap()
             .decode()
             .unwrap();
@@ -427,6 +431,9 @@ impl Engine {
                         bytemuck::cast_slice(&[self.display_settings.exposure]),
                     );
                 };
+
+                ui.heading("Background");
+                ui.checkbox(&mut self.display_settings.background_blur, "Blur");
             });
         });
         // handle_platform_output(full_output.platform_output);
@@ -483,7 +490,11 @@ impl Engine {
             });
 
             render_pass.draw_scene(&self.scene);
-            render_pass.draw_environment(&self.environment, self.scene.camera.bind_group());
+            render_pass.draw_environment(
+                &self.environment,
+                self.display_settings.background_blur,
+                self.scene.camera.bind_group(),
+            );
         }
 
         let frame = self

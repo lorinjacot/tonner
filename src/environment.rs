@@ -47,7 +47,7 @@ const POSITIONS: &[Vec3] = &[
 
 pub struct EnvironmentMap {
     skybox_pipeline: wgpu::RenderPipeline,
-    skybox_bind_group: wgpu::BindGroup,
+    environment_map_bind_group: wgpu::BindGroup,
 }
 
 impl EnvironmentMap {
@@ -57,14 +57,11 @@ impl EnvironmentMap {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self {
-        let equirectangular_to_cubemap_module =
-            device.create_shader_module(wgpu::include_wgsl!("equirectangular_to_cubemap.wgsl"));
+        let module = device.create_shader_module(wgpu::include_wgsl!("environment.wgsl"));
 
-        let equirectangular_to_cubemap_view_projection_bind_group_layout = device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some(
-                    "Environment map equirectangular to cubemap view projection bind group layout",
-                ),
+        let view_projection_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Environment view projection bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -77,9 +74,9 @@ impl EnvironmentMap {
                 }],
             });
 
-        let equirectangular_to_cubemap_texture_bind_group_layout =
+        let equirectangular_texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Environment map equirectangular to cubemap texture bind group layout"),
+                label: Some("Environment equirectangular texture bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -100,12 +97,35 @@ impl EnvironmentMap {
                 ],
             });
 
+        let environment_map_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Environment map bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+            });
+
         let equirectangular_to_cubemap_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Environment map equirectangular to cubemap pipeline layout"),
+                label: Some("Environment equirectangular to cubemap pipeline layout"),
                 bind_group_layouts: &[
-                    &equirectangular_to_cubemap_view_projection_bind_group_layout,
-                    &equirectangular_to_cubemap_texture_bind_group_layout,
+                    &view_projection_bind_group_layout,
+                    &equirectangular_texture_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -115,8 +135,8 @@ impl EnvironmentMap {
                 label: Some("Environment map equirectangular to cubemap pipeline"),
                 layout: Some(&equirectangular_to_cubemap_pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &equirectangular_to_cubemap_module,
-                    entry_point: Some("vs_main"),
+                    module: &module,
+                    entry_point: Some("vs_cube"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<Vec3>() as u64,
@@ -144,17 +164,17 @@ impl EnvironmentMap {
                     alpha_to_coverage_enabled: false,
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &equirectangular_to_cubemap_module,
-                    entry_point: Some("fs_main"),
+                    module: &module,
+                    entry_point: Some("fs_environment_map"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                    targets: &[Some(wgpu::TextureFormat::Rgba32Float.into())],
                 }),
                 multiview: None,
                 cache: None,
             });
 
-        let positions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Environment map positions buffer"),
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Environment cube vertex buffer"),
             contents: bytemuck::cast_slice(POSITIONS),
             usage: wgpu::BufferUsages::VERTEX,
         });
@@ -172,7 +192,7 @@ impl EnvironmentMap {
         let equirectangular_texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
-                label: Some("Environment map equirectangular texture"),
+                label: Some("Environment equirectangular texture"),
                 size: wgpu::Extent3d {
                     width: equirectangular_map.width(),
                     height: equirectangular_map.height(),
@@ -204,8 +224,8 @@ impl EnvironmentMap {
 
         let equirectangular_to_cubemap_texture_bind_group =
             device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Environment map equirectangar to cubemap texture bind group"),
-                layout: &equirectangular_to_cubemap_texture_bind_group_layout,
+                label: Some("Environment equirectangular to cubemap texture bind group"),
+                layout: &equirectangular_texture_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -218,8 +238,8 @@ impl EnvironmentMap {
                 ],
             });
 
-        let cubemap_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Environment map cubemap texture"),
+        let environment_map_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Environment map texture"),
             size: wgpu::Extent3d {
                 width: ENVIRONMENT_MAP_SIZE,
                 height: ENVIRONMENT_MAP_SIZE,
@@ -228,33 +248,52 @@ impl EnvironmentMap {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 
-        let cubemap_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Environment map cubemap sampler"),
+        let environment_map_texture_view =
+            environment_map_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("Environment map texture view"),
+                dimension: Some(wgpu::TextureViewDimension::Cube),
+                ..Default::default()
+            });
+
+        let enviroment_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Environment map sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
 
+        let environment_map_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Environment map bind group"),
+            layout: &environment_map_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&environment_map_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&enviroment_map_sampler),
+                },
+            ],
+        });
+
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Environment map equirectangular to cubemap command encoder"),
+            label: Some("Environment map sampler command encoder"),
         });
         for base_array_layer in 0..6 {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Environment map equirectangular to cubemap render pass"),
+                label: Some("Environment equirectangular to cubemap render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
-                        label: Some(
-                            "Environment map cubemap texture view for equirectangular to cubemap",
-                        ),
+                    view: &environment_map_texture.create_view(&wgpu::TextureViewDescriptor {
                         dimension: Some(wgpu::TextureViewDimension::D2),
                         base_array_layer,
                         array_layer_count: Some(1),
@@ -274,14 +313,14 @@ impl EnvironmentMap {
             let view_projection = projection * views[base_array_layer as usize];
             let view_projection_buffer =
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Environment map view projection buffer"),
+                    label: Some("Environment view projection buffer"),
                     contents: bytemuck::cast_slice(&[view_projection]),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
 
             let view_projection_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Environment map equirectangar to cubemap view projection bind group"),
-                layout: &equirectangular_to_cubemap_view_projection_bind_group_layout,
+                label: Some("Environment view projection bind group"),
+                layout: &view_projection_bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: view_projection_buffer.as_entire_binding(),
@@ -289,59 +328,30 @@ impl EnvironmentMap {
             });
 
             render_pass.set_pipeline(&equirectangular_to_cubemap_pipeline);
-            render_pass.set_bind_group(
-                0,
-                Some(&view_projection_bind_group),
-                &[],
-            );
+            render_pass.set_bind_group(0, Some(&view_projection_bind_group), &[]);
             render_pass.set_bind_group(
                 1,
                 Some(&equirectangular_to_cubemap_texture_bind_group),
                 &[],
             );
-            render_pass.set_vertex_buffer(0, positions_buffer.slice(..));
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.draw(0..POSITIONS.len() as u32, 0..1);
         }
         queue.submit([encoder.finish()]);
 
-        let skybox_module = device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
-
-        let skybox_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Skybox bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::Cube,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
-
         let skybox_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Skybox pipeline layout"),
-                bind_group_layouts: &[&skybox_bind_group_layout, camera_bind_group_layout],
+                label: Some("Environment skybox pipeline layout"),
+                bind_group_layouts: &[camera_bind_group_layout, &environment_map_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
         let skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Skybox pipeline"),
+            label: Some("Environment skybox pipeline"),
             layout: Some(&skybox_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &skybox_module,
-                entry_point: Some("vs_main"),
+                module: &module,
+                entry_point: Some("vs_screen"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[],
             },
@@ -367,8 +377,8 @@ impl EnvironmentMap {
                 alpha_to_coverage_enabled: false,
             },
             fragment: Some(wgpu::FragmentState {
-                module: &skybox_module,
-                entry_point: Some("fs_main"),
+                module: &module,
+                entry_point: Some("fs_skybox"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
             }),
@@ -376,29 +386,9 @@ impl EnvironmentMap {
             cache: None,
         });
 
-        let skybox_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Skybox bind group"),
-            layout: &skybox_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&cubemap_texture.create_view(
-                        &wgpu::TextureViewDescriptor {
-                            dimension: Some(wgpu::TextureViewDimension::Cube),
-                            ..Default::default()
-                        },
-                    )),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&cubemap_sampler),
-                },
-            ],
-        });
-
         Self {
             skybox_pipeline,
-            skybox_bind_group,
+            environment_map_bind_group,
         }
     }
 }
@@ -418,8 +408,8 @@ impl<'a> DrawEnvironment for wgpu::RenderPass<'a> {
         camera_bind_group: &wgpu::BindGroup,
     ) {
         self.set_pipeline(&environment.skybox_pipeline);
-        self.set_bind_group(0, Some(&environment.skybox_bind_group), &[]);
-        self.set_bind_group(1, Some(camera_bind_group), &[]);
+        self.set_bind_group(0, Some(camera_bind_group), &[]);
+        self.set_bind_group(1, Some(&environment.environment_map_bind_group), &[]);
         self.draw(0..3, 0..1);
     }
 }

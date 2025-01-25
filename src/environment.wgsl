@@ -38,7 +38,7 @@ fn vs_cube_camera(
 ) -> Fragment {
     var fragment: Fragment;
     fragment.position = (camera.normal_view_projection * vec4f(position, 1.0)).xyww;
-    fragment.tex_coord = position;
+    fragment.tex_coord = vec3f(position.x, position.y, -position.z);
     return fragment;
 }
 

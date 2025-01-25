@@ -8,7 +8,7 @@ use winit::window::Window;
 
 use crate::asset::Asset;
 use crate::camera::{Camera, CameraController};
-use crate::environment::{DrawEnvironment, EnvironmentMap};
+use crate::environment::{DrawEnvironment, Environment};
 use crate::scene::{DrawScene, Scene};
 
 struct DisplaySettings {
@@ -44,7 +44,7 @@ pub struct Engine {
     last_frame: Instant,
     camera_controller: CameraController,
     scene: Scene,
-    environment: EnvironmentMap,
+    environment: Environment,
 }
 
 impl Engine {
@@ -305,7 +305,7 @@ impl Engine {
         ];
 
         let environment =
-            EnvironmentMap::from_faces(&faces, scene.camera.bind_group_layout(), &device, &queue)
+            Environment::from_faces(&faces, scene.camera.bind_group_layout(), &device, &queue)
                 .unwrap();
 
         Self {

@@ -8,47 +8,51 @@ const ENVIRONMENT_MAP_SIZE: u32 = 512;
 const IRRADIANCE_MAP_SIZE: u32 = 256;
 
 const POSITIONS: &[Vec3] = &[
-    vec3(-1.0, 1.0, -1.0),
-    vec3(-1.0, -1.0, -1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(1.0, 1.0, -1.0),
-    vec3(-1.0, 1.0, -1.0),
-    vec3(-1.0, -1.0, 1.0),
-    vec3(-1.0, -1.0, -1.0),
-    vec3(-1.0, 1.0, -1.0),
-    vec3(-1.0, 1.0, -1.0),
+    // front face
     vec3(-1.0, 1.0, 1.0),
     vec3(-1.0, -1.0, 1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(1.0, -1.0, 1.0),
-    vec3(1.0, 1.0, 1.0),
-    vec3(1.0, 1.0, 1.0),
-    vec3(1.0, 1.0, -1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(-1.0, -1.0, 1.0),
-    vec3(-1.0, 1.0, 1.0),
-    vec3(1.0, 1.0, 1.0),
     vec3(1.0, 1.0, 1.0),
     vec3(1.0, -1.0, 1.0),
-    vec3(-1.0, -1.0, 1.0),
-    vec3(-1.0, 1.0, -1.0),
+    // right face
     vec3(1.0, 1.0, -1.0),
     vec3(1.0, 1.0, 1.0),
-    vec3(1.0, 1.0, 1.0),
-    vec3(-1.0, 1.0, 1.0),
+    vec3(1.0, -1.0, -1.0),
+    vec3(1.0, -1.0, 1.0),
+    // back face
+    vec3(1.0, 1.0, -1.0),
+    vec3(1.0, -1.0, -1.0),
     vec3(-1.0, 1.0, -1.0),
     vec3(-1.0, -1.0, -1.0),
+    // left face
+    vec3(-1.0, 1.0, 1.0),
+    vec3(-1.0, 1.0, -1.0),
     vec3(-1.0, -1.0, 1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(-1.0, -1.0, 1.0),
+    vec3(-1.0, -1.0, -1.0),
+    // bottom face
     vec3(1.0, -1.0, 1.0),
+    vec3(-1.0, -1.0, 1.0),
+    vec3(1.0, -1.0, -1.0),
+    vec3(-1.0, -1.0, -1.0),
+    // top face
+    vec3(-1.0, 1.0, 1.0),
+    vec3(1.0, 1.0, 1.0),
+    vec3(-1.0, 1.0, -1.0),
+    vec3(1.0, 1.0, -1.0),
+];
+
+const INDICES: &[u16] = &[
+    0, 1, 2, 2, 1, 3, // front
+    4, 5, 6, 6, 5, 7, // right
+    8, 9, 10, 10, 9, 11, // back
+    12, 13, 14, 14, 13, 15, // left
+    16, 17, 18, 18, 17, 19, // bottom
+    20, 21, 22, 22, 21, 23, // top
 ];
 
 pub struct EnvironmentMap {
     skybox_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
     environment_map_bind_group: wgpu::BindGroup,
     irradiance_map_bind_group: wgpu::BindGroup,
 }
@@ -215,7 +219,7 @@ impl EnvironmentMap {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some("fs_skybox"),
+                    entry_point: Some("fs_diffuse_irradiance"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
                 }),
@@ -227,6 +231,12 @@ impl EnvironmentMap {
             label: Some("Environment cube vertex buffer"),
             contents: bytemuck::cast_slice(POSITIONS),
             usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Environment cube index buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: wgpu::BufferUsages::INDEX,
         });
 
         let equirectangular_texture = device.create_texture_with_data(
@@ -398,6 +408,7 @@ impl EnvironmentMap {
             &equirectangular_texture_bind_group,
             &view_projection_bind_group_layout,
             &vertex_buffer,
+            &index_buffer,
             &equirectangular_to_cubemap_pipeline,
             device,
             &mut encoder,
@@ -407,6 +418,7 @@ impl EnvironmentMap {
             &environment_map_bind_group,
             &view_projection_bind_group_layout,
             &vertex_buffer,
+            &index_buffer,
             &irradiance_map_pipeline,
             device,
             &mut encoder,
@@ -463,6 +475,7 @@ impl EnvironmentMap {
         Self {
             skybox_pipeline,
             vertex_buffer,
+            index_buffer,
             environment_map_bind_group,
             irradiance_map_bind_group,
         }
@@ -473,6 +486,7 @@ impl EnvironmentMap {
         source_texture_bind_group: &wgpu::BindGroup,
         view_projection_bind_group_layout: &wgpu::BindGroupLayout,
         vertex_buffer: &wgpu::Buffer,
+        index_buffer: &wgpu::Buffer,
         pipeline: &wgpu::RenderPipeline,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
@@ -530,7 +544,8 @@ impl EnvironmentMap {
             render_pass.set_bind_group(0, Some(&view_projection_bind_group), &[]);
             render_pass.set_bind_group(1, Some(source_texture_bind_group), &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            render_pass.draw(0..POSITIONS.len() as u32, 0..1);
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
         }
     }
 }
@@ -559,6 +574,10 @@ impl<'a> DrawEnvironment for wgpu::RenderPass<'a> {
             self.set_bind_group(1, Some(&environment.environment_map_bind_group), &[]);
         }
         self.set_vertex_buffer(0, environment.vertex_buffer.slice(..));
-        self.draw(0..POSITIONS.len() as u32, 0..1);
+        self.set_index_buffer(
+            environment.index_buffer.slice(..),
+            wgpu::IndexFormat::Uint16,
+        );
+        self.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
     }
 }

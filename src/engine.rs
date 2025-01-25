@@ -20,7 +20,7 @@ impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
             exposure: 1.0,
-            background_blur: true,
+            background_blur: false,
         }
     }
 }
@@ -259,17 +259,54 @@ impl Engine {
             .create_scene(gltf_scene, scene_id, &mut scene, &device, &queue)
             .unwrap();
 
-        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
-            .unwrap()
-            .decode()
-            .unwrap();
+        // let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
+        //     .unwrap()
+        //     .decode()
+        //     .unwrap();
 
-        let environment = EnvironmentMap::from_equirectangular(
-            &environment_image.into_rgba32f(),
-            scene.camera.bind_group_layout(),
-            &device,
-            &queue,
-        );
+        // let environment = EnvironmentMap::from_equirectangular(
+        //     &environment_image.into_rgba32f(),
+        //     scene.camera.bind_group_layout(),
+        //     &device,
+        //     &queue,
+        // );
+
+        let faces = [
+            image::ImageReader::open("assets/environments/skybox/right.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/left.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/top.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/bottom.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/front.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/back.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+        ];
+
+        let environment =
+            EnvironmentMap::from_faces(&faces, scene.camera.bind_group_layout(), &device, &queue)
+                .unwrap();
 
         Self {
             window,

@@ -5,7 +5,7 @@ use image::EncodableLayout;
 use wgpu::util::DeviceExt;
 
 const ENVIRONMENT_MAP_SIZE: u32 = 512;
-const IRRADIANCE_MAP_SIZE: u32 = 32;
+const IRRADIANCE_MAP_SIZE: u32 = 256;
 
 const POSITIONS: &[Vec3] = &[
     vec3(-1.0, 1.0, -1.0),
@@ -48,6 +48,7 @@ const POSITIONS: &[Vec3] = &[
 
 pub struct EnvironmentMap {
     skybox_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
     environment_map_bind_group: wgpu::BindGroup,
     irradiance_map_bind_group: wgpu::BindGroup,
 }
@@ -148,7 +149,7 @@ impl EnvironmentMap {
                 layout: Some(&equirectangular_to_cubemap_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &module,
-                    entry_point: Some("vs_cube"),
+                    entry_point: Some("vs_cube_view_projection"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &vertex_buffers,
                 },
@@ -193,7 +194,7 @@ impl EnvironmentMap {
                 layout: Some(&irradiance_map_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &module,
-                    entry_point: Some("vs_cube"),
+                    entry_point: Some("vs_cube_view_projection"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &vertex_buffers,
                 },
@@ -214,7 +215,7 @@ impl EnvironmentMap {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: Some("fs_diffuse_irradiance"),
+                    entry_point: Some("fs_skybox"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
                 }),
@@ -276,6 +277,35 @@ impl EnvironmentMap {
                     },
                 ],
             });
+
+        // let environment_map_bytes = include_bytes!("../assets/environments/rgba8.ktx2");
+        // let environment_map_reader = ktx2::Reader::new(environment_map_bytes).unwrap();
+
+        // let mut image = Vec::with_capacity(environment_map_reader.data().len());
+        // for level in environment_map_reader.levels() {
+        //     image.extend_from_slice(level);
+        // }
+        // let header = environment_map_reader.header();
+
+        // let environment_map_texture = device.create_texture_with_data(
+        //     queue,
+        //     &wgpu::TextureDescriptor {
+        //         label: Some("Environment map texture"),
+        //         size: wgpu::Extent3d {
+        //             width: 256,
+        //             height: 256,
+        //             depth_or_array_layers: 6,
+        //         },
+        //         mip_level_count: header.level_count,
+        //         sample_count: 1,
+        //         dimension: wgpu::TextureDimension::D2,
+        //         format: wgpu::TextureFormat::Rgba8Unorm,
+        //         usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        //         view_formats: &[],
+        //     },
+        //     wgpu::util::TextureDataOrder::MipMajor,
+        //     &image,
+        // );
 
         let environment_map_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Environment map texture"),
@@ -395,9 +425,9 @@ impl EnvironmentMap {
             layout: Some(&skybox_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &module,
-                entry_point: Some("vs_screen"),
+                entry_point: Some("vs_cube_camera"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
+                buffers: &vertex_buffers,
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -432,6 +462,7 @@ impl EnvironmentMap {
 
         Self {
             skybox_pipeline,
+            vertex_buffer,
             environment_map_bind_group,
             irradiance_map_bind_group,
         }
@@ -449,12 +480,12 @@ impl EnvironmentMap {
         let projection = Mat4::perspective_rh(FRAC_PI_2, 1.0, 0.1, 10.0);
 
         let views = [
-            Mat4::look_at_rh(Vec3::ZERO, Vec3::X, -Vec3::Y),
-            Mat4::look_at_rh(Vec3::ZERO, -Vec3::X, -Vec3::Y),
-            Mat4::look_at_rh(Vec3::ZERO, -Vec3::Y, -Vec3::Z),
-            Mat4::look_at_rh(Vec3::ZERO, Vec3::Y, Vec3::Z),
-            Mat4::look_at_rh(Vec3::ZERO, Vec3::Z, -Vec3::Y),
-            Mat4::look_at_rh(Vec3::ZERO, -Vec3::Z, -Vec3::Y),
+            Mat4::look_to_lh(Vec3::ZERO, Vec3::X, -Vec3::Y),
+            Mat4::look_to_lh(Vec3::ZERO, -Vec3::X, -Vec3::Y),
+            Mat4::look_to_lh(Vec3::ZERO, Vec3::Y, Vec3::Z),
+            Mat4::look_to_lh(Vec3::ZERO, -Vec3::Y, -Vec3::Z),
+            Mat4::look_to_lh(Vec3::ZERO, Vec3::Z, -Vec3::Y),
+            Mat4::look_to_lh(Vec3::ZERO, -Vec3::Z, -Vec3::Y),
         ];
 
         for base_array_layer in 0..6 {
@@ -527,6 +558,7 @@ impl<'a> DrawEnvironment for wgpu::RenderPass<'a> {
         } else {
             self.set_bind_group(1, Some(&environment.environment_map_bind_group), &[]);
         }
-        self.draw(0..3, 0..1);
+        self.set_vertex_buffer(0, environment.vertex_buffer.slice(..));
+        self.draw(0..POSITIONS.len() as u32, 0..1);
     }
 }

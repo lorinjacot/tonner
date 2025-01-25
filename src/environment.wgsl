@@ -8,8 +8,7 @@ struct Fragment {
 
 struct Camera {
     view_projection: mat4x4f,
-    projection_inverse: mat4x4f,
-    view: mat4x4f,
+    normal_view_projection: mat4x4f,
     world_position: vec3f,
 }
 
@@ -24,7 +23,7 @@ struct Camera {
 @group(1) @binding(1) var environment_map_sampler: sampler;
 
 @vertex
-fn vs_cube(
+fn vs_cube_view_projection(
     @location(0) position: vec3f,
 ) -> Fragment {
     var fragment: Fragment;
@@ -34,25 +33,12 @@ fn vs_cube(
 }
 
 @vertex
-fn vs_screen(
-    @builtin(vertex_index) vertex_index: u32,
+fn vs_cube_camera(
+    @location(0) position: vec3f,
 ) -> Fragment {
-    let positions = array(
-        vec2f(-1.0,  3.0),
-        vec2f(-1.0, -1.0),
-        vec2f( 3.0, -1.0),
-    );
-    
-    let position = vec4f(positions[vertex_index], 1.0, 1.0);
-    let view_inverse = transpose(mat3x3f(
-        camera.view.x.xyz,
-        camera.view.y.xyz,
-        camera.view.z.xyz,
-    ));
-
     var fragment: Fragment;
-    fragment.position = position;
-    fragment.tex_coord = view_inverse * (camera.projection_inverse * position).xyz;
+    fragment.position = (camera.normal_view_projection * vec4f(position, 1.0)).xyww;
+    fragment.tex_coord = position;
     return fragment;
 }
 

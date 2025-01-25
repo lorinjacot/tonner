@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable};
-use glam::{vec3, Mat4, Vec3};
+use glam::{vec3, Mat3, Mat4, Vec3};
 use winit::{
     event::{ElementState, KeyEvent},
     keyboard::{KeyCode, PhysicalKey},
@@ -233,13 +233,12 @@ impl Camera {
 
     fn update_buffer(&self, queue: &wgpu::Queue) {
         let view = Mat4::look_to_rh(self.position, self.front, self.up);
+        let normal_view = Mat4::from_mat3(Mat3::from_mat4(view.inverse().transpose()));
         let projection =
             Mat4::perspective_rh(self.fov, self.aspect_ration, self.z_near, self.z_far);
-        let view_projection = projection * view;
         let uniform = CameraUniform {
-            view_projection,
-            projection_inverse: projection.inverse(),
-            view,
+            view_projection: projection * view,
+            normal_view_projection: projection * normal_view,
             world_position: self.position,
             _padding: 0.0,
         };
@@ -251,8 +250,7 @@ impl Camera {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_projection: Mat4,
-    projection_inverse: Mat4,
-    view: Mat4,
+    normal_view_projection: Mat4,
     world_position: Vec3,
     _padding: f32,
 }

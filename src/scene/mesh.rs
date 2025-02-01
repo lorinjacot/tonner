@@ -101,7 +101,6 @@ impl MeshManager {
             multiview: None,
             cache: None,
         });
-        log::debug!("primitive pipeline created");
 
         Self {
             meshes: Storage::new(),

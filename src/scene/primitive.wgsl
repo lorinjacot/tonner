@@ -51,6 +51,9 @@ struct Material {
 @group(3) @binding(1) var base_color_sampler: sampler;
 @group(3) @binding(2) var<uniform> material: Material;
 
+@group(4) @binding(0) var irradiance_map_texture: texture_cube<f32>;
+@group(4) @binding(1) var irradiance_map_sampler: sampler;
+
 @vertex
 fn vs_main(
     @location(0) node_id: u32,
@@ -81,28 +84,49 @@ fn fs_main(
 
     let metallic = material.metallic_factor;
     let roughness = material.roughness_factor;
+    let alpha = roughness * roughness;
+    let alpha_2 = alpha * alpha;
+
+    let occlusion = 1.0;
 
     let c_diff = base_color.rgb * (1.0 - metallic);
-    let f0 = mix(vec3f(0.04), base_color.rgb, metallic);
-    let alpha = roughness * roughness;
+    let f0 = mix(0.04, base_color.rgb, metallic);
 
     let normal = normalize(fragment.world_normal);
     let view_dir = normalize(camera.world_position - fragment.world_position);
-    let light_dir = normalize(light.world_position - fragment.world_position);
-    let halfway_dir = normalize(light_dir + view_dir);
 
-    let distance = length(light.world_position - fragment.world_position);
-    let attenuation = 1.0 / (distance * distance);
-    let radiance = light.color * attenuation;
+    // L_e: emitted radiance
+    let emitted_l = vec3f(0.0);
 
-    let f = fresnel(f0, dot(view_dir, halfway_dir));
+    // ambient lighting (environment map)
+    let f = fresnel_roughness(f0, max(dot(normal, view_dir), 0.0), roughness);
+    let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
+    let ambient_l = (1.0 - f) * irradiance * base_color.rgb * occlusion;
 
-    let f_diffuse = (vec3f(1.0) - f) * diffuse_brdf(c_diff);
-    let f_specular = f * specular_brdf(roughness * roughness, normal, halfway_dir, light_dir, view_dir);
+    // L_r: reflected radiance
+    var reflected_l: vec3f = ambient_l;
 
-    let material = (f_diffuse + f_specular) * radiance * max(dot(normal, light_dir), 0.0);
+    // for each light
+    {
+        let light_dir = normalize(light.world_position - fragment.world_position);
+        let halfway_dir = normalize(light_dir + view_dir);
 
-    return vec4f(material, base_color.a);
+        let distance = length(light.world_position - fragment.world_position);
+        let attenuation = 1.0 / (distance * distance);
+        let light_radiance = light.color * attenuation;
+
+        let f = fresnel(f0, dot(view_dir, halfway_dir));
+
+        let f_diffuse = (1.0 - f) * diffuse_brdf(c_diff);
+        let f_specular = f * specular_brdf(alpha_2, normal, halfway_dir, light_dir, view_dir);
+        
+        reflected_l += (f_diffuse + f_specular) * light_radiance * max(dot(normal, light_dir), 0.0);
+    }
+
+    // L_0: outgoing radiance
+    let outgoing_l = emitted_l + reflected_l;
+
+    return vec4f(outgoing_l, base_color.a);
 }
 
 /**
@@ -117,9 +141,7 @@ fn diffuse_brdf(color: vec3f) -> vec3f {
  * G = Smith joint masking-shadowing function
  * D = Trowbridge-Reitz/GGX microfacet distribution
  */
-fn specular_brdf(alpha: f32, normal: vec3f, halfway_dir: vec3f, light_dir: vec3f, view_dir: vec3f) -> f32 {
-    let alpha_2 = alpha * alpha;
-
+fn specular_brdf(alpha_2: f32, normal: vec3f, halfway_dir: vec3f, light_dir: vec3f, view_dir: vec3f) -> f32 {
     let v = visibility(alpha_2, dot(normal, light_dir), dot(halfway_dir, light_dir))
             * visibility(alpha_2, dot(normal, view_dir), dot(halfway_dir, view_dir));
     let d = distribution(alpha_2, dot(normal, halfway_dir));
@@ -162,4 +184,8 @@ fn distribution(alpha_2: f32, n_dot_h: f32) -> f32 {
  */
 fn fresnel(f0: vec3f, v_dot_h: f32) -> vec3f {
     return f0 + (vec3f(1.0) - f0) * pow(1.0 - abs(v_dot_h), 5.0);
+}
+
+fn fresnel_roughness(f0: vec3f, v_dot_h: f32, roughness: f32) -> vec3f {
+    return f0 + (max(vec3f(1.0 - roughness), f0) - f0) * pow(1.0 - abs(v_dot_h), 5.0);
 }

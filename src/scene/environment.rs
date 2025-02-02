@@ -53,6 +53,7 @@ pub struct Environment {
     skybox_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    cubemap_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group: wgpu::BindGroup,
     irradiance_map_bind_group: wgpu::BindGroup,
 }
@@ -476,6 +477,7 @@ impl Environment {
             skybox_pipeline,
             vertex_buffer,
             index_buffer,
+            cubemap_bind_group_layout: environment_map_bind_group_layout,
             skybox_bind_group: environment_map_bind_group,
             irradiance_map_bind_group,
         }
@@ -757,9 +759,18 @@ impl Environment {
             skybox_pipeline,
             vertex_buffer,
             index_buffer,
+            cubemap_bind_group_layout,
             skybox_bind_group,
             irradiance_map_bind_group,
         })
+    }
+
+    pub fn irradiance_map_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.cubemap_bind_group_layout   
+    }
+
+    pub fn irradiance_map_bind_group(&self) -> &wgpu::BindGroup {
+        &self.irradiance_map_bind_group
     }
 
     fn create_cubemap(

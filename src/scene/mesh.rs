@@ -25,6 +25,7 @@ impl MeshManager {
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         lights_bind_group_layout: &wgpu::BindGroupLayout,
         material_bind_group_layout: &wgpu::BindGroupLayout,
+        irradiance_map_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let primitive_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
@@ -36,6 +37,7 @@ impl MeshManager {
                     camera_bind_group_layout,
                     lights_bind_group_layout,
                     material_bind_group_layout,
+                    irradiance_map_bind_group_layout,
                 ],
                 push_constant_ranges: &[],
             });
@@ -223,6 +225,7 @@ pub trait DrawMeshes {
         nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
         light_bind_group: &wgpu::BindGroup,
+        irradiance_map_bind_group: &wgpu::BindGroup,
     );
 }
 
@@ -234,11 +237,13 @@ impl<'a> DrawMeshes for wgpu::RenderPass<'a> {
         nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
         light_bind_group: &wgpu::BindGroup,
+        irradiance_map_bind_group: &wgpu::BindGroup,
     ) {
         self.set_pipeline(&meshes_manager.primitive_pipeline);
         self.set_bind_group(0, nodes_bind_group, &[]);
         self.set_bind_group(1, camera_bind_group, &[]);
         self.set_bind_group(2, light_bind_group, &[]);
+        self.set_bind_group(4, irradiance_map_bind_group, &[]);
 
         for mesh in meshes_manager.meshes.values() {
             let instance_count = mesh.nodes.len() as u32;

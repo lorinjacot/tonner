@@ -1,10 +1,12 @@
+use environment::{DrawEnvironment, Environment};
 use light::{DrawLights, LightManager};
 use material::MaterialManager;
 use mesh::{DrawMeshes, MeshManager};
 use node::NodeManager;
 
-use crate::camera::Camera;
+use crate::{camera::Camera, engine::DisplaySettings};
 
+mod environment;
 mod light;
 mod material;
 mod mesh;
@@ -23,6 +25,7 @@ pub struct Scene {
     materials: MaterialManager,
     lights: LightManager,
     pub camera: Camera,
+    environment: Environment,
 }
 
 impl Scene {
@@ -30,6 +33,54 @@ impl Scene {
         let nodes = NodeManager::new(device);
 
         let lights = LightManager::new(device, camera.bind_group_layout());
+
+        // let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
+        //     .unwrap()
+        //     .decode()
+        //     .unwrap();
+
+        // let environment = EnvironmentMap::from_equirectangular(
+        //     &environment_image.into_rgba32f(),
+        //     scene.camera.bind_group_layout(),
+        //     &device,
+        //     &queue,
+        // );
+
+        let faces = [
+            image::ImageReader::open("assets/environments/skybox/right.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/left.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/top.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/bottom.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/front.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/back.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+        ];
+
+        let environment =
+            Environment::from_faces(&faces, camera.bind_group_layout(), &device, &queue).unwrap();
 
         let materials = MaterialManager::new(device, queue);
 
@@ -39,6 +90,7 @@ impl Scene {
             camera.bind_group_layout(),
             lights.bind_group_layout(),
             materials.bind_group_layout(),
+            environment.irradiance_map_bind_group_layout(),
         );
 
         Self {
@@ -47,6 +99,7 @@ impl Scene {
             materials,
             lights,
             camera,
+            environment,
         }
     }
 
@@ -76,11 +129,11 @@ impl Scene {
 }
 
 pub trait DrawScene {
-    fn draw_scene(&mut self, scene: &Scene);
+    fn draw_scene(&mut self, scene: &Scene, display_setting: &DisplaySettings);
 }
 
 impl<'a> DrawScene for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, scene: &Scene) {
+    fn draw_scene(&mut self, scene: &Scene, display_setting: &DisplaySettings) {
         self.draw_lights(&scene.lights, scene.camera.bind_group());
 
         if let Some(nodes_bind_group) = scene.nodes.bind_group() {
@@ -90,7 +143,14 @@ impl<'a> DrawScene for wgpu::RenderPass<'a> {
                 nodes_bind_group,
                 scene.camera.bind_group(),
                 scene.lights.bind_group(),
+                scene.environment.irradiance_map_bind_group(),
             );
         }
+
+        self.draw_environment(
+            &scene.environment,
+            display_setting.background_blur,
+            scene.camera.bind_group(),
+        );
     }
 }

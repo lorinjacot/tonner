@@ -56,7 +56,7 @@ fn fs_environment_map(
 }
 
 @fragment
-fn fs_diffuse_irradiance(
+fn fs_irradiance(
     fragment: Fragment
 ) -> @location(0) vec4f {
     let normal = normalize(fragment.tex_coord);
@@ -83,11 +83,7 @@ fn fs_diffuse_irradiance(
     }
     irradiance = pi * irradiance / sample_count;
 
-    // return vec4f(irradiance, 1.0);
-    let tex_coord = fragment.tex_coord * vec3f(1, 1, -1);
-    let color = textureSample(environment_map_texture, environment_map_sampler, tex_coord).rgb;
-
-    return vec4f(color, 1.0);
+    return vec4f(irradiance, 1.0);
 }
 
 @fragment

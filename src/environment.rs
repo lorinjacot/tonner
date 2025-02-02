@@ -5,7 +5,7 @@ use image::EncodableLayout;
 use wgpu::util::DeviceExt;
 
 const ENVIRONMENT_MAP_SIZE: u32 = 512;
-const IRRADIANCE_MAP_SIZE: u32 = 256;
+const IRRADIANCE_MAP_SIZE: u32 = 32;
 
 const POSITIONS: &[Vec3] = &[
     // front face
@@ -620,7 +620,7 @@ impl Environment {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
-                entry_point: Some("fs_skybox"),
+                entry_point: Some("fs_irradiance"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
             }),

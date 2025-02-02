@@ -54,7 +54,7 @@ impl Engine {
         size.height = size.height.max(1);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: wgpu::Backends::PRIMARY & !wgpu::Backends::VULKAN,
             ..Default::default()
         });
 

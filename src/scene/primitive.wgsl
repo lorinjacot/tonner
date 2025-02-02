@@ -44,6 +44,8 @@ struct Material {
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
+    emissive_factor: vec3f,
+    emissive_tex_coord: u32,
 }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -52,7 +54,9 @@ struct Material {
 
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(2) @binding(1) var base_color_sampler: sampler;
-@group(2) @binding(2) var<uniform> material: Material;
+@group(2) @binding(2) var emissive_texture: texture_2d<f32>;
+@group(2) @binding(3) var emissive_sampler: sampler;
+@group(2) @binding(4) var<uniform> material: Material;
 
 @group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
 @group(3) @binding(1) var irradiance_map_sampler: sampler;
@@ -112,7 +116,9 @@ fn fs_main(
     let view_dir = normalize(camera.world_position - fragment.world_position);
 
     // L_e: emitted radiance
-    let emitted_l = vec3f(0.0);
+    let emitted_l = material.emissive_factor * textureSample(
+        emissive_texture, emissive_sampler, tex_coords[material.emissive_tex_coord]
+    ).rgb;
 
     // ambient lighting (environment map)
     let f = fresnel_roughness(f0, max(dot(normal, view_dir), 0.0), roughness);

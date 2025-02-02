@@ -446,6 +446,8 @@ impl Engine {
             &screen_descriptor,
         );
 
+        self.scene.update_buffers(&self.queue);
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,

@@ -3,12 +3,13 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+use glam::{Mat3, Mat4};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::storage::{Id, Storage};
 
-use super::{material::MaterialManager, MaterialId, NodeId};
+use super::{material::MaterialManager, node::NodeManager, MaterialId, NodeId};
 
 pub const TEX_COORDS_LEN: usize = 2;
 pub const COLORS_LEN: usize = 1;
@@ -21,7 +22,6 @@ pub struct MeshManager {
 impl MeshManager {
     pub fn new(
         device: &wgpu::Device,
-        nodes_bind_group_layout: &wgpu::BindGroupLayout,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         lights_bind_group_layout: &wgpu::BindGroupLayout,
         material_bind_group_layout: &wgpu::BindGroupLayout,
@@ -33,7 +33,6 @@ impl MeshManager {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Primitive pipeline layout"),
                 bind_group_layouts: &[
-                    nodes_bind_group_layout,
                     camera_bind_group_layout,
                     lights_bind_group_layout,
                     material_bind_group_layout,
@@ -42,12 +41,21 @@ impl MeshManager {
                 push_constant_ranges: &[],
             });
 
+        let primitive_transform = wgpu::vertex_attr_array![
+            0 => Float32x4,
+            1 => Float32x4,
+            2 => Float32x4,
+            3 => Float32x4,
+            4 => Float32x3,
+            5 => Float32x3,
+            6 => Float32x3,
+        ];
         let primitive_attributes = wgpu::vertex_attr_array![
-            1 => Float32x3,
-            2 => Float32x3,
-            3 => Float32x2,
-            4 => Float32x2,
-            5 => Float32x4,
+            7 => Float32x3,
+            8 => Float32x3,
+            9 => Float32x4,
+            10 => Float32x2,
+            11 => Float32x2,
         ];
         let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Primitive pipeline"),
@@ -58,13 +66,9 @@ impl MeshManager {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[
                     wgpu::VertexBufferLayout {
-                        array_stride: 4,
+                        array_stride: size_of::<MeshTransform>() as u64,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &[wgpu::VertexAttribute {
-                            format: wgpu::VertexFormat::Uint32,
-                            offset: 0,
-                            shader_location: 0,
-                        }],
+                        attributes: &primitive_transform,
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: size_of::<PrimitiveAttributes>() as u64,
@@ -126,18 +130,33 @@ impl MeshManager {
             })
             .collect();
 
-        let nodes_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Nodes buffer"),
+        let transforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Nodes transforms buffer"),
             contents: &[],
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
         let mesh_id = self.meshes.add(Mesh {
             nodes: HashSet::new(),
-            nodes_buffer,
+            transforms_buffer,
             primitives,
         });
 
         Ok(mesh_id)
+    }
+
+    pub fn update_transforms(&mut self, nodes: &NodeManager, queue: &wgpu::Queue) {
+        for mesh in self.meshes.values_mut() {
+            let mut transforms = Vec::with_capacity(mesh.nodes.len());
+            for node_id in &mesh.nodes {
+                transforms.push(MeshTransform::from(nodes[*node_id].global_transform()));
+            }
+
+            queue.write_buffer(
+                &mesh.transforms_buffer,
+                0,
+                bytemuck::cast_slice(&transforms),
+            );
+        }
     }
 
     // pub fn get(&self, mesh: MeshId) -> Option<&Mesh> {
@@ -164,17 +183,19 @@ impl IndexMut<MeshId> for MeshManager {
 }
 
 pub struct Mesh {
-    pub(super) nodes: HashSet<NodeId>,
-    nodes_buffer: wgpu::Buffer,
+    nodes: HashSet<NodeId>,
+    transforms_buffer: wgpu::Buffer,
     primitives: Vec<Primitive>,
 }
 
 impl Mesh {
-    pub(super) fn update_nodes_buffer(&mut self, dense_indices: Vec<u32>, device: &wgpu::Device) {
-        self.nodes_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Nodes buffer"),
-            contents: bytemuck::cast_slice(&dense_indices),
-            usage: wgpu::BufferUsages::VERTEX,
+    pub(super) fn add_node(&mut self, node: NodeId, device: &wgpu::Device) {
+        self.nodes.insert(node);
+        self.transforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Mesh transforms buffer"),
+            size: (self.nodes.len() * size_of::<MeshTransform>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
     }
 }
@@ -198,8 +219,26 @@ pub struct PrimitiveIndices {
 pub struct PrimitiveAttributes {
     pub position: [f32; 3],
     pub normal: [f32; 3],
-    pub tex_coords: [[f32; 2]; TEX_COORDS_LEN],
     pub colors: [[f32; 4]; COLORS_LEN],
+    pub tex_coords: [[f32; 2]; TEX_COORDS_LEN],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct MeshTransform {
+    point: [[f32; 4]; 4],
+    vector: [f32; 9],
+}
+
+impl From<Mat4> for MeshTransform {
+    fn from(value: Mat4) -> Self {
+        let vector = Mat3::from_mat4(value.inverse().transpose());
+
+        Self {
+            point: value.to_cols_array_2d(),
+            vector: vector.to_cols_array(),
+        }
+    }
 }
 
 pub struct MeshDescriptor {
@@ -222,7 +261,6 @@ pub trait DrawMeshes {
         &mut self,
         meshes: &MeshManager,
         materials: &MaterialManager,
-        nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
         light_bind_group: &wgpu::BindGroup,
         irradiance_map_bind_group: &wgpu::BindGroup,
@@ -234,23 +272,21 @@ impl<'a> DrawMeshes for wgpu::RenderPass<'a> {
         &mut self,
         meshes_manager: &MeshManager,
         materials: &MaterialManager,
-        nodes_bind_group: &wgpu::BindGroup,
         camera_bind_group: &wgpu::BindGroup,
         light_bind_group: &wgpu::BindGroup,
         irradiance_map_bind_group: &wgpu::BindGroup,
     ) {
         self.set_pipeline(&meshes_manager.primitive_pipeline);
-        self.set_bind_group(0, nodes_bind_group, &[]);
-        self.set_bind_group(1, camera_bind_group, &[]);
-        self.set_bind_group(2, light_bind_group, &[]);
-        self.set_bind_group(4, irradiance_map_bind_group, &[]);
+        self.set_bind_group(0, camera_bind_group, &[]);
+        self.set_bind_group(1, light_bind_group, &[]);
+        self.set_bind_group(3, irradiance_map_bind_group, &[]);
 
         for mesh in meshes_manager.meshes.values() {
             let instance_count = mesh.nodes.len() as u32;
-            self.set_vertex_buffer(0, mesh.nodes_buffer.slice(..));
+            self.set_vertex_buffer(0, mesh.transforms_buffer.slice(..));
 
             for primitive in &mesh.primitives {
-                self.set_bind_group(3, materials[primitive.material].bind_group(), &[]);
+                self.set_bind_group(2, materials[primitive.material].bind_group(), &[]);
                 self.set_vertex_buffer(1, primitive.attributes.slice(..));
                 match &primitive.indices {
                     Some(indices) => {

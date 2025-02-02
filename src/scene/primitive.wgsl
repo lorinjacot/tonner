@@ -1,17 +1,22 @@
 const pi: f32 = 3.14159;
 const exposure: f32 = 1.0;
 
-struct Attributes {
-    @location(1) position: vec3f,
-    @location(2) normal: vec3f,
-    @location(3) tex_coord_0: vec2f,
-    @location(4) tex_coord_1: vec2f,
-    @location(5) color_0: vec4f,
+struct Transform {
+    @location(0) point_col_x: vec4f,
+    @location(1) point_col_y: vec4f,
+    @location(2) point_col_z: vec4f,
+    @location(3) point_col_w: vec4f,
+    @location(4) vector_col_x: vec3f,
+    @location(5) vector_col_y: vec3f,
+    @location(6) vector_col_z: vec3f,
 }
 
-struct Transform {
-    model: mat4x4f,
-    normal: mat3x3f,
+struct Attributes {
+    @location(7) position: vec3f,
+    @location(8) normal: vec3f,
+    @location(9) color_0: vec4f,
+    @location(10) tex_coord_0: vec2f,
+    @location(11) tex_coord_1: vec2f,
 }
 
 struct Camera {
@@ -41,28 +46,39 @@ struct Material {
     roughness_factor: f32,
 }
 
-@group(0) @binding(0) var<storage, read> transforms: array<Transform>;
+@group(0) @binding(0) var<uniform> camera: Camera;
 
-@group(1) @binding(0) var<uniform> camera: Camera;
+@group(1) @binding(0) var<uniform> light: Light;
 
-@group(2) @binding(0) var<uniform> light: Light;
+@group(2) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(2) @binding(1) var base_color_sampler: sampler;
+@group(2) @binding(2) var<uniform> material: Material;
 
-@group(3) @binding(0) var base_color_texture: texture_2d<f32>;
-@group(3) @binding(1) var base_color_sampler: sampler;
-@group(3) @binding(2) var<uniform> material: Material;
-
-@group(4) @binding(0) var irradiance_map_texture: texture_cube<f32>;
-@group(4) @binding(1) var irradiance_map_sampler: sampler;
+@group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
+@group(3) @binding(1) var irradiance_map_sampler: sampler;
 
 @vertex
 fn vs_main(
-    @location(0) node_id: u32,
+    transform: Transform,
     attributes: Attributes
 ) -> Fragment {
+    let world_position = mat4x4f(
+        transform.point_col_x,
+        transform.point_col_y,
+        transform.point_col_z,
+        transform.point_col_w,
+    ) * vec4f(attributes.position, 1.0);
+
+    let world_normal = mat3x3f(
+        transform.vector_col_x,
+        transform.vector_col_y,
+        transform.vector_col_z,
+    ) * attributes.normal;
+
     var fragment: Fragment;
-    fragment.position = camera.view_projection * transforms[node_id].model * vec4f(attributes.position, 1.0);
-    fragment.world_position = (transforms[node_id].model * vec4f(attributes.position, 1.0)).xyz;
-    fragment.world_normal = transforms[node_id].normal * attributes.normal;
+    fragment.position = camera.view_projection * world_position;
+    fragment.world_position = world_position.xyz;
+    fragment.world_normal = world_normal;
     fragment.tex_coord_0 = attributes.tex_coord_0;
     fragment.tex_coord_1 = attributes.tex_coord_1;
     fragment.color_0 = attributes.color_0;
@@ -90,7 +106,7 @@ fn fs_main(
     let occlusion = 1.0;
 
     let c_diff = base_color.rgb * (1.0 - metallic);
-    let f0 = mix(0.04, base_color.rgb, metallic);
+    let f0 = mix(vec3f(0.04), base_color.rgb, metallic);
 
     let normal = normalize(fragment.world_normal);
     let view_dir = normalize(camera.world_position - fragment.world_position);

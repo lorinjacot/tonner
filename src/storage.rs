@@ -174,6 +174,11 @@ impl<T> Storage<T> {
         Values(self.dense.iter())
     }
 
+    pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
+        ValuesMut(self.dense.iter_mut())
+    }
+
+    #[allow(dead_code)]
     pub fn dense_indices_u32(&self, ids: impl IntoIterator<Item = Id<T>>) -> Vec<u32> {
         ids.into_iter()
             .map(|id| self.sparse[id.element].pos as u32)
@@ -215,6 +220,41 @@ impl<'a, T> ExactSizeIterator for Values<'a, T> {
 }
 
 impl<'a, T> FusedIterator for Values<'a, T> {}
+
+pub struct ValuesMut<'a, T>(std::slice::IterMut<'a, DenseElement<T>>);
+
+impl<'a, T> Iterator for ValuesMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<&'a mut T> {
+        self.0.next().map(|dense_element| &mut dense_element.value)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.0.len()
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.0
+            .fold(init, |acc, dense_element| f(acc, &mut dense_element.value))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ValuesMut<'a, T> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a, T> FusedIterator for ValuesMut<'a, T> {}
 
 impl<T> Index<Id<T>> for Storage<T> {
     type Output = T;

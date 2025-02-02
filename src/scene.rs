@@ -30,7 +30,7 @@ pub struct Scene {
 
 impl Scene {
     pub fn new(camera: Camera, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let nodes = NodeManager::new(device);
+        let nodes = NodeManager::new();
 
         let lights = LightManager::new(device, camera.bind_group_layout());
 
@@ -86,7 +86,6 @@ impl Scene {
 
         let meshes = MeshManager::new(
             device,
-            nodes.bind_group_layout(),
             camera.bind_group_layout(),
             lights.bind_group_layout(),
             materials.bind_group_layout(),
@@ -126,6 +125,10 @@ impl Scene {
     ) -> MaterialId {
         self.materials.create(material, device)
     }
+
+    pub fn update_buffers(&mut self, queue: &wgpu::Queue) {
+        self.meshes.update_transforms(&self.nodes, queue);
+    }
 }
 
 pub trait DrawScene {
@@ -136,16 +139,13 @@ impl<'a> DrawScene for wgpu::RenderPass<'a> {
     fn draw_scene(&mut self, scene: &Scene, display_setting: &DisplaySettings) {
         self.draw_lights(&scene.lights, scene.camera.bind_group());
 
-        if let Some(nodes_bind_group) = scene.nodes.bind_group() {
-            self.draw_meshes(
-                &scene.meshes,
-                &scene.materials,
-                nodes_bind_group,
-                scene.camera.bind_group(),
-                scene.lights.bind_group(),
-                scene.environment.irradiance_map_bind_group(),
-            );
-        }
+        self.draw_meshes(
+            &scene.meshes,
+            &scene.materials,
+            scene.camera.bind_group(),
+            scene.lights.bind_group(),
+            scene.environment.irradiance_map_bind_group(),
+        );
 
         self.draw_environment(
             &scene.environment,

@@ -271,51 +271,42 @@ impl Engine {
         //     &queue,
         // );
 
-        let faces = {
-            profiling::scope!("Loading faces");
-
-            [
-                image::ImageReader::open("assets/environments/skybox/right.jpg")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
-                image::ImageReader::open("assets/environments/skybox/left.jpg")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
-                image::ImageReader::open("assets/environments/skybox/top.jpg")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
-                image::ImageReader::open("assets/environments/skybox/bottom.jpg")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
-                image::ImageReader::open("assets/environments/skybox/front.jpg")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
-                image::ImageReader::open("assets/environments/skybox/back.jpg")
-                    .unwrap()
-                    .decode()
-                    .unwrap()
-                    .to_rgba8(),
-            ]
-        };
-
-        let environment = {
-            profiling::scope!("Creating skybox");
-
-            Environment::from_faces(&faces, scene.camera.bind_group_layout(), &device, &queue)
+        let faces = [
+            image::ImageReader::open("assets/environments/skybox/right.jpg")
                 .unwrap()
-        };
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/left.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/top.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/bottom.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/front.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+            image::ImageReader::open("assets/environments/skybox/back.jpg")
+                .unwrap()
+                .decode()
+                .unwrap()
+                .to_rgba8(),
+        ];
 
-        profiling::finish_frame!();
+        let environment =
+            Environment::from_faces(&faces, scene.camera.bind_group_layout(), &device, &queue)
+                .unwrap();
 
         Self {
             window,
@@ -482,6 +473,7 @@ impl Engine {
                 ui.checkbox(&mut self.display_settings.background_blur, "Blur");
             });
         });
+        // handle_platform_output(full_output.platform_output);
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
 
@@ -585,7 +577,5 @@ impl Engine {
 
         self.queue.submit([encoder.finish()]);
         frame.present();
-        
-        profiling::finish_frame!();
     }
 }

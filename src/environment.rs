@@ -512,10 +512,35 @@ impl Environment {
                 ],
             });
 
+        let view_projection_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Enrionment view projection bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let skybox_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Environment skybox pipeline layout"),
                 bind_group_layouts: &[camera_bind_group_layout, &cubemap_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let irradiance_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Environment irrandiance pipeline layout"),
+                bind_group_layouts: &[
+                    &view_projection_bind_group_layout,
+                    &cubemap_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -554,6 +579,40 @@ impl Environment {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_skybox"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let irradiance_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Environment irradiance pipeline"),
+            layout: Some(&irradiance_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_cube_view_projection"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &index_buffers,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -644,18 +703,48 @@ impl Environment {
             ],
         });
 
+        let irradiance_map_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Environment irrandiance map texture"),
+            size: wgpu::Extent3d {
+                width: IRRADIANCE_MAP_SIZE,
+                height: IRRADIANCE_MAP_SIZE,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Environment command encoder"),
+        });
+        Self::create_cubemap(
+            &irradiance_map_texture,
+            &skybox_bind_group,
+            &view_projection_bind_group_layout,
+            &vertex_buffer,
+            &index_buffer,
+            &irradiance_pipeline,
+            device,
+            &mut encoder,
+        );
+        queue.submit([encoder.finish()]);
+
         let irradiance_map_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Environment irradiance bind group"),
             layout: &cubemap_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&skybox_texture.create_view(
-                        &wgpu::TextureViewDescriptor {
+                    resource: wgpu::BindingResource::TextureView(
+                        &irradiance_map_texture.create_view(&wgpu::TextureViewDescriptor {
                             dimension: Some(wgpu::TextureViewDimension::Cube),
                             ..Default::default()
-                        },
-                    )),
+                        }),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -686,17 +775,17 @@ impl Environment {
         let projection = Mat4::perspective_rh(FRAC_PI_2, 1.0, 0.1, 10.0);
 
         let views = [
-            Mat4::look_to_lh(Vec3::ZERO, Vec3::X, -Vec3::Y),
-            Mat4::look_to_lh(Vec3::ZERO, -Vec3::X, -Vec3::Y),
-            Mat4::look_to_lh(Vec3::ZERO, Vec3::Y, Vec3::Z),
-            Mat4::look_to_lh(Vec3::ZERO, -Vec3::Y, -Vec3::Z),
-            Mat4::look_to_lh(Vec3::ZERO, Vec3::Z, -Vec3::Y),
-            Mat4::look_to_lh(Vec3::ZERO, -Vec3::Z, -Vec3::Y),
+            Mat4::look_to_rh(Vec3::ZERO, Vec3::X, Vec3::Y),
+            Mat4::look_to_rh(Vec3::ZERO, -Vec3::X, Vec3::Y),
+            Mat4::look_to_rh(Vec3::ZERO, Vec3::Y, Vec3::Z),
+            Mat4::look_to_rh(Vec3::ZERO, -Vec3::Y, -Vec3::Z),
+            Mat4::look_to_rh(Vec3::ZERO, -Vec3::Z, Vec3::Y), // the z-axis of wgpu is our -z
+            Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y),
         ];
 
         for base_array_layer in 0..6 {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Environment equirectangular to cubemap render pass"),
+                label: Some("Environment create cubemap render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &target_texture.create_view(&wgpu::TextureViewDescriptor {
                         dimension: Some(wgpu::TextureViewDimension::D2),

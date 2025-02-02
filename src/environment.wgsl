@@ -28,7 +28,7 @@ fn vs_cube_view_projection(
 ) -> Fragment {
     var fragment: Fragment;
     fragment.position = view_projection * vec4f(position, 1.0);
-    fragment.tex_coord = position;
+    fragment.tex_coord = vec3f(position.x, position.y, -position.z);
     return fragment;
 }
 

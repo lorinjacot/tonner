@@ -4,7 +4,7 @@ use material::MaterialManager;
 use mesh::{DrawMeshes, MeshManager};
 use node::NodeManager;
 
-use crate::{camera::Camera, engine::DisplaySettings};
+use crate::{camera::Camera, engine::DisplaySettings, texture::TextureManager};
 
 mod environment;
 mod light;
@@ -30,6 +30,8 @@ pub struct Scene {
 
 impl Scene {
     pub fn new(camera: Camera, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let mut textures = TextureManager::new(device, queue);
+
         let nodes = NodeManager::new();
 
         let lights = LightManager::new(device, camera.bind_group_layout());
@@ -50,37 +52,37 @@ impl Scene {
             image::ImageReader::open("assets/environments/skybox/right.jpg")
                 .unwrap()
                 .decode()
-                .unwrap()
-                .to_rgba8(),
+                .unwrap(),
             image::ImageReader::open("assets/environments/skybox/left.jpg")
                 .unwrap()
                 .decode()
-                .unwrap()
-                .to_rgba8(),
+                .unwrap(),
             image::ImageReader::open("assets/environments/skybox/top.jpg")
                 .unwrap()
                 .decode()
-                .unwrap()
-                .to_rgba8(),
+                .unwrap(),
             image::ImageReader::open("assets/environments/skybox/bottom.jpg")
                 .unwrap()
                 .decode()
-                .unwrap()
-                .to_rgba8(),
+                .unwrap(),
             image::ImageReader::open("assets/environments/skybox/front.jpg")
                 .unwrap()
                 .decode()
-                .unwrap()
-                .to_rgba8(),
+                .unwrap(),
             image::ImageReader::open("assets/environments/skybox/back.jpg")
                 .unwrap()
                 .decode()
-                .unwrap()
-                .to_rgba8(),
+                .unwrap(),
         ];
 
-        let environment =
-            Environment::from_faces(&faces, camera.bind_group_layout(), &device, &queue).unwrap();
+        let environment = Environment::from_faces(
+            &faces,
+            camera.bind_group_layout(),
+            &mut textures,
+            &device,
+            &queue,
+        )
+        .unwrap();
 
         let materials = MaterialManager::new(device, queue);
 

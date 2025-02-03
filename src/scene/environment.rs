@@ -4,6 +4,8 @@ use glam::{vec3, Mat4, Vec3};
 use image::EncodableLayout;
 use wgpu::util::DeviceExt;
 
+use crate::texture::{TextureCube, TextureManager};
+
 const ENVIRONMENT_MAP_SIZE: u32 = 512;
 const IRRADIANCE_MAP_SIZE: u32 = 32;
 
@@ -494,8 +496,9 @@ impl Environment {
     }
 
     pub fn from_faces(
-        faces: &[image::RgbaImage; 6],
+        faces: &[image::DynamicImage; 6],
         camera_bind_group_layout: &wgpu::BindGroupLayout,
+        textures: &mut TextureManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<Self, ()> {
@@ -534,25 +537,16 @@ impl Environment {
             }
         }
 
-        let skybox_texture = device.create_texture_with_data(
-            queue,
-            &wgpu::TextureDescriptor {
-                label: Some("Environment skybox texture"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 6,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            },
-            wgpu::util::TextureDataOrder::LayerMajor,
-            &bytes,
-        );
+        let skybox_texture = textures
+            .create_texture_cube_from_faces(
+                Some("Environment skybox texture"),
+                faces,
+                true,
+                wgpu::TextureUsages::TEXTURE_BINDING,
+                device,
+                queue,
+            )
+            .map_err(|_| ())?;
         let skybox_bind_group = create_skybox_bind_group(
             &skybox_texture,
             &cubemap_sampler,
@@ -841,7 +835,7 @@ fn create_cubemap_sampler(device: &wgpu::Device) -> wgpu::Sampler {
 }
 
 fn create_skybox_bind_group(
-    skybox_texture: &wgpu::Texture,
+    skybox_texture: &TextureCube,
     cubemap_sampler: &wgpu::Sampler,
     cubemap_bind_group_layout: &wgpu::BindGroupLayout,
     device: &wgpu::Device,
@@ -852,12 +846,7 @@ fn create_skybox_bind_group(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&skybox_texture.create_view(
-                    &wgpu::TextureViewDescriptor {
-                        dimension: Some(wgpu::TextureViewDimension::Cube),
-                        ..Default::default()
-                    },
-                )),
+                resource: wgpu::BindingResource::TextureView(skybox_texture.view()),
             },
             wgpu::BindGroupEntry {
                 binding: 1,

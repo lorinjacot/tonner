@@ -12,6 +12,7 @@ mod camera;
 mod engine;
 mod scene;
 mod storage;
+mod texture;
 
 #[derive(Default)]
 struct App {

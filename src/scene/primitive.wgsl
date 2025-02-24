@@ -93,7 +93,7 @@ fn vs_main(
 fn fs_main(
     fragment: Fragment
 ) -> @location(0) vec4f {
-    let tex_coords = array(
+    var tex_coords = array(
         fragment.tex_coord_0,
         fragment.tex_coord_1,
     );

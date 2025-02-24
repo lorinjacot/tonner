@@ -495,6 +495,7 @@ impl Environment {
         }
     }
 
+    #[profiling::function]
     pub fn from_faces(
         faces: &[image::DynamicImage; 6],
         camera_bind_group_layout: &wgpu::BindGroupLayout,

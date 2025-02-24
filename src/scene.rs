@@ -29,6 +29,7 @@ pub struct Scene {
 }
 
 impl Scene {
+    #[profiling::function]
     pub fn new(camera: Camera, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let mut textures = TextureManager::new(device, queue);
 

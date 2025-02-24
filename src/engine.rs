@@ -53,8 +53,8 @@ impl Engine {
         size.width = size.width.max(1);
         size.height = size.height.max(1);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY & !wgpu::Backends::VULKAN,
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
 
@@ -295,6 +295,7 @@ impl Engine {
             WindowEvent::RedrawRequested => {
                 self.draw();
                 self.window.request_redraw();
+                profiling::finish_frame!();
                 true
             }
             WindowEvent::Resized(new_size) => {

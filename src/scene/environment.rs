@@ -506,7 +506,6 @@ impl Environment {
         let module = device.create_shader_module(wgpu::include_wgsl!("environment.wgsl"));
 
         let cubemap_bind_group_layout = create_cubemap_bind_group_layout(device);
-        let view_projection_bind_group_layout = create_view_projection_bind_group_layout(device);
 
         let skybox_pipeline = create_skybox_pipeline(
             camera_bind_group_layout,
@@ -515,7 +514,7 @@ impl Environment {
             device,
         );
         let irradiance_pipeline = create_irradiance_pipeline(
-            &view_projection_bind_group_layout,
+            textures.view_projection_bind_group_layout(),
             &cubemap_bind_group_layout,
             &module,
             device,
@@ -540,7 +539,7 @@ impl Environment {
 
         let skybox_texture = textures
             .create_texture_cube_from_faces(
-                Some("Environment skybox texture"),
+                Some("Skybox texture"),
                 faces,
                 true,
                 wgpu::TextureUsages::TEXTURE_BINDING,
@@ -555,7 +554,19 @@ impl Environment {
             device,
         );
 
-        let irradiance_map_texture = create_irradiance_map_texture(device);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Environment command encoder"),
+        });
+
+        let irradiance_map_texture = textures.create_cubemap_with_pipeline(
+            Some("Irrandiance map texture"),
+            IRRADIANCE_MAP_SIZE,
+            IRRADIANCE_MAP_SIZE,
+            wgpu::TextureFormat::Rgba16Float,
+            &irradiance_pipeline,
+            &skybox_bind_group,
+            &mut encoder,
+        );
         let irradiance_map_bind_group = create_irradiance_map_bind_group(
             &irradiance_map_texture,
             &cubemap_sampler,
@@ -563,19 +574,6 @@ impl Environment {
             device,
         );
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Environment command encoder"),
-        });
-        Self::create_cubemap(
-            &irradiance_map_texture,
-            &skybox_bind_group,
-            &view_projection_bind_group_layout,
-            &vertex_buffer,
-            &index_buffer,
-            &irradiance_pipeline,
-            device,
-            &mut encoder,
-        );
         queue.submit([encoder.finish()]);
 
         Ok(Self {
@@ -686,22 +684,6 @@ fn create_cubemap_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLay
                 count: None,
             },
         ],
-    })
-}
-
-fn create_view_projection_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Enrionment view projection bind group layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
     })
 }
 
@@ -857,25 +839,8 @@ fn create_skybox_bind_group(
     })
 }
 
-fn create_irradiance_map_texture(device: &wgpu::Device) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Environment irrandiance map texture"),
-        size: wgpu::Extent3d {
-            width: IRRADIANCE_MAP_SIZE,
-            height: IRRADIANCE_MAP_SIZE,
-            depth_or_array_layers: 6,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    })
-}
-
 fn create_irradiance_map_bind_group(
-    irradiance_map_texture: &wgpu::Texture,
+    irradiance_map_texture: &TextureCube,
     cubemap_sampler: &wgpu::Sampler,
     cubemap_bind_group_layout: &wgpu::BindGroupLayout,
     device: &wgpu::Device,
@@ -886,12 +851,7 @@ fn create_irradiance_map_bind_group(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&irradiance_map_texture.create_view(
-                    &wgpu::TextureViewDescriptor {
-                        dimension: Some(wgpu::TextureViewDimension::Cube),
-                        ..Default::default()
-                    },
-                )),
+                resource: wgpu::BindingResource::TextureView(irradiance_map_texture.view()),
             },
             wgpu::BindGroupEntry {
                 binding: 1,

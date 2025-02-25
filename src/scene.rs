@@ -4,7 +4,7 @@ use material::MaterialManager;
 use mesh::{DrawMeshes, MeshManager};
 use node::NodeManager;
 
-use crate::{camera::Camera, engine::DisplaySettings, texture::TextureManager};
+use crate::{camera::Camera, engine::DisplaySettings, texture::{Texture2dSampler, TextureManager}};
 
 mod environment;
 mod light;
@@ -37,53 +37,67 @@ impl Scene {
 
         let lights = LightManager::new(device, camera.bind_group_layout());
 
-        // let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
-        //     .unwrap()
-        //     .decode()
-        //     .unwrap();
+        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
+            .unwrap()
+            .decode()
+            .unwrap();
+        let environment_texture = textures
+            .create_from_image(
+                Some("Environment texture"),
+                wgpu::TextureUsages::TEXTURE_BINDING,
+                &environment_image,
+                false,
+            )
+            .unwrap();
+        let environment_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let equirectangular = Texture2dSampler {
+            texture: environment_texture,
+            sampler: environment_sampler
+        };
 
-        // let environment = EnvironmentMap::from_equirectangular(
-        //     &environment_image.into_rgba32f(),
-        //     scene.camera.bind_group_layout(),
-        //     &device,
-        //     &queue,
-        // );
-
-        let faces = [
-            image::ImageReader::open("assets/environments/skybox/right.jpg")
-                .unwrap()
-                .decode()
-                .unwrap(),
-            image::ImageReader::open("assets/environments/skybox/left.jpg")
-                .unwrap()
-                .decode()
-                .unwrap(),
-            image::ImageReader::open("assets/environments/skybox/top.jpg")
-                .unwrap()
-                .decode()
-                .unwrap(),
-            image::ImageReader::open("assets/environments/skybox/bottom.jpg")
-                .unwrap()
-                .decode()
-                .unwrap(),
-            image::ImageReader::open("assets/environments/skybox/front.jpg")
-                .unwrap()
-                .decode()
-                .unwrap(),
-            image::ImageReader::open("assets/environments/skybox/back.jpg")
-                .unwrap()
-                .decode()
-                .unwrap(),
-        ];
-
-        let environment = Environment::from_faces(
-            &faces,
+        let environment = Environment::from_equirectangular(
+            &equirectangular,
             camera.bind_group_layout(),
             &mut textures,
             &device,
             &queue,
-        )
-        .unwrap();
+        );
+
+        // let faces = [
+        //     image::ImageReader::open("assets/environments/skybox/right.jpg")
+        //         .unwrap()
+        //         .decode()
+        //         .unwrap(),
+        //     image::ImageReader::open("assets/environments/skybox/left.jpg")
+        //         .unwrap()
+        //         .decode()
+        //         .unwrap(),
+        //     image::ImageReader::open("assets/environments/skybox/top.jpg")
+        //         .unwrap()
+        //         .decode()
+        //         .unwrap(),
+        //     image::ImageReader::open("assets/environments/skybox/bottom.jpg")
+        //         .unwrap()
+        //         .decode()
+        //         .unwrap(),
+        //     image::ImageReader::open("assets/environments/skybox/front.jpg")
+        //         .unwrap()
+        //         .decode()
+        //         .unwrap(),
+        //     image::ImageReader::open("assets/environments/skybox/back.jpg")
+        //         .unwrap()
+        //         .decode()
+        //         .unwrap(),
+        // ];
+
+        // let environment = Environment::from_faces(
+        //     &faces,
+        //     camera.bind_group_layout(),
+        //     &mut textures,
+        //     &device,
+        //     &queue,
+        // )
+        // .unwrap();
 
         let materials = MaterialManager::new(device, queue);
 

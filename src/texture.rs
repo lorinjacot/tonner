@@ -5,7 +5,7 @@ use image::EncodableLayout;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
-const VERTICES: &[Vec3] = &[
+pub const CUBE_VERTICES: &[Vec3] = &[
     // front face
     vec3(-1.0, 1.0, 1.0),
     vec3(-1.0, -1.0, 1.0),
@@ -38,7 +38,7 @@ const VERTICES: &[Vec3] = &[
     vec3(1.0, 1.0, -1.0),
 ];
 
-const INDICES: &[u16] = &[
+pub const CUBE_INDICES: &[u16] = &[
     0, 1, 2, 2, 1, 3, // front
     4, 5, 6, 6, 5, 7, // right
     8, 9, 10, 10, 9, 11, // back
@@ -49,15 +49,14 @@ const INDICES: &[u16] = &[
 
 pub struct TextureManager {
     device: wgpu::Device,
-    queue: wgpu::Queue,
     view_projection_bind_group_layout: wgpu::BindGroupLayout,
     view_projection_bind_groups: [wgpu::BindGroup; 6],
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
+    cube_vertex_buffer: wgpu::Buffer,
+    cube_index_buffer: wgpu::Buffer,
 }
 
 impl TextureManager {
-    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    pub fn new(device: wgpu::Device, _queue: wgpu::Queue) -> Self {
         let projection = Mat4::perspective_rh(FRAC_PI_2, 1.0, 0.1, 10.0);
         let view_projection_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -98,30 +97,37 @@ impl TextureManager {
             create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y)),
         ];
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Texture manager vertex buffer"),
-            contents: bytemuck::cast_slice(&VERTICES),
+            contents: bytemuck::cast_slice(&CUBE_VERTICES),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let cube_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Texture manager index buffer"),
-            contents: bytemuck::cast_slice(&INDICES),
+            contents: bytemuck::cast_slice(&CUBE_INDICES),
             usage: wgpu::BufferUsages::INDEX,
         });
 
         Self {
             device,
-            queue,
             view_projection_bind_group_layout,
             view_projection_bind_groups,
-            vertex_buffer,
-            index_buffer,
+            cube_vertex_buffer,
+            cube_index_buffer,
         }
     }
 
     pub fn view_projection_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.view_projection_bind_group_layout
+    }
+
+    pub fn cube_vertex_buffer(&self) -> &wgpu::Buffer {
+        &self.cube_vertex_buffer
+    }
+
+    pub fn cube_index_buffer(&self) -> &wgpu::Buffer {
+        &self.cube_index_buffer
     }
 
     #[profiling::function]
@@ -246,9 +252,9 @@ impl TextureManager {
                 &[],
             );
             render_pass.set_bind_group(1, source_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
+            render_pass.set_vertex_buffer(0, self.cube_vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.cube_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
         }
 
         TextureCube {

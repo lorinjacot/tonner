@@ -4,52 +4,10 @@ use glam::{vec3, Mat4, Vec3};
 use image::EncodableLayout;
 use wgpu::util::DeviceExt;
 
-use crate::texture::{TextureCube, TextureManager};
+use crate::texture::{TextureCube, TextureManager, CUBE_INDICES, CUBE_VERTICES};
 
 const ENVIRONMENT_MAP_SIZE: u32 = 512;
 const IRRADIANCE_MAP_SIZE: u32 = 32;
-
-const POSITIONS: &[Vec3] = &[
-    // front face
-    vec3(-1.0, 1.0, 1.0),
-    vec3(-1.0, -1.0, 1.0),
-    vec3(1.0, 1.0, 1.0),
-    vec3(1.0, -1.0, 1.0),
-    // right face
-    vec3(1.0, 1.0, -1.0),
-    vec3(1.0, 1.0, 1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(1.0, -1.0, 1.0),
-    // back face
-    vec3(1.0, 1.0, -1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(-1.0, 1.0, -1.0),
-    vec3(-1.0, -1.0, -1.0),
-    // left face
-    vec3(-1.0, 1.0, 1.0),
-    vec3(-1.0, 1.0, -1.0),
-    vec3(-1.0, -1.0, 1.0),
-    vec3(-1.0, -1.0, -1.0),
-    // bottom face
-    vec3(1.0, -1.0, 1.0),
-    vec3(-1.0, -1.0, 1.0),
-    vec3(1.0, -1.0, -1.0),
-    vec3(-1.0, -1.0, -1.0),
-    // top face
-    vec3(-1.0, 1.0, 1.0),
-    vec3(1.0, 1.0, 1.0),
-    vec3(-1.0, 1.0, -1.0),
-    vec3(1.0, 1.0, -1.0),
-];
-
-const INDICES: &[u16] = &[
-    0, 1, 2, 2, 1, 3, // front
-    4, 5, 6, 6, 5, 7, // right
-    8, 9, 10, 10, 9, 11, // back
-    12, 13, 14, 14, 13, 15, // left
-    16, 17, 18, 18, 17, 19, // bottom
-    20, 21, 22, 22, 21, 23, // top
-];
 
 const VERTEX_BUFFERS_LAYOUT: &[wgpu::VertexBufferLayout] = &[wgpu::VertexBufferLayout {
     array_stride: size_of::<Vec3>() as u64,
@@ -71,9 +29,11 @@ pub struct Environment {
 }
 
 impl Environment {
+    #[profiling::function]
     pub fn from_equirectangular(
         equirectangular_map: &image::Rgba32FImage,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
+        textures: &mut TextureManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self {
@@ -240,17 +200,8 @@ impl Environment {
                 cache: None,
             });
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Environment cube vertex buffer"),
-            contents: bytemuck::cast_slice(POSITIONS),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Environment cube index buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = textures.cube_vertex_buffer();
+        let index_buffer = textures.cube_index_buffer();
 
         let equirectangular_texture = device.create_texture_with_data(
             queue,
@@ -487,8 +438,8 @@ impl Environment {
 
         Self {
             skybox_pipeline,
-            vertex_buffer,
-            index_buffer,
+            vertex_buffer: vertex_buffer.clone(),
+            index_buffer: index_buffer.clone(),
             cubemap_bind_group_layout: environment_map_bind_group_layout,
             skybox_bind_group: environment_map_bind_group,
             irradiance_map_bind_group,
@@ -519,9 +470,6 @@ impl Environment {
             &module,
             device,
         );
-
-        let vertex_buffer = create_vertex_buffer(device);
-        let index_buffer = create_index_buffer(device);
 
         let cubemap_sampler = create_cubemap_sampler(device);
 
@@ -578,8 +526,8 @@ impl Environment {
 
         Ok(Self {
             skybox_pipeline,
-            vertex_buffer,
-            index_buffer,
+            vertex_buffer: textures.cube_vertex_buffer().clone(),
+            index_buffer: textures.cube_index_buffer().clone(),
             cubemap_bind_group_layout,
             skybox_bind_group,
             irradiance_map_bind_group,
@@ -658,7 +606,7 @@ impl Environment {
             render_pass.set_bind_group(1, Some(source_texture_bind_group), &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
+            render_pass.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
         }
     }
 }
@@ -788,22 +736,6 @@ fn create_irradiance_pipeline(
     })
 }
 
-fn create_vertex_buffer(device: &wgpu::Device) -> wgpu::Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Environment vertex buffer"),
-        contents: bytemuck::cast_slice(&POSITIONS),
-        usage: wgpu::BufferUsages::VERTEX,
-    })
-}
-
-fn create_index_buffer(device: &wgpu::Device) -> wgpu::Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Environment index buffer"),
-        contents: bytemuck::cast_slice(&INDICES),
-        usage: wgpu::BufferUsages::INDEX,
-    })
-}
-
 fn create_cubemap_sampler(device: &wgpu::Device) -> wgpu::Sampler {
     device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("Environment cubemap sampler"),
@@ -889,6 +821,6 @@ impl<'a> DrawEnvironment for wgpu::RenderPass<'a> {
             environment.index_buffer.slice(..),
             wgpu::IndexFormat::Uint16,
         );
-        self.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
+        self.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
     }
 }

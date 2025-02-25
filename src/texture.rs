@@ -299,7 +299,7 @@ impl TextureManager {
                 ],
             });
 
-        self.create_cubemap_with_pipeline(
+        self.create_cube_with_pipeline(
             label,
             width,
             height,
@@ -372,20 +372,10 @@ impl TextureManager {
             ..Default::default()
         });
 
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
         Ok(TextureCube { view })
     }
 
-    pub fn create_cubemap_with_pipeline(
+    pub fn create_cube_with_pipeline(
         &mut self,
         label: Option<&str>,
         width: u32,

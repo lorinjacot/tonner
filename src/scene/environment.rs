@@ -1,19 +1,7 @@
-use glam::Vec3;
-
-use crate::texture::{Texture2dSampler, TextureCubeSampler, TextureManager, CUBE_INDICES};
+use crate::texture::{Texture2dSampler, TextureCubeSampler, TextureManager, CUBE_INDICES, CUBE_VERTEX_BUFFER_LAYOUT};
 
 const SKYBOX_SIZE: u32 = 512;
 const IRRADIANCE_MAP_SIZE: u32 = 32;
-
-const VERTEX_BUFFERS_LAYOUT: &[wgpu::VertexBufferLayout] = &[wgpu::VertexBufferLayout {
-    array_stride: size_of::<Vec3>() as u64,
-    step_mode: wgpu::VertexStepMode::Vertex,
-    attributes: &[wgpu::VertexAttribute {
-        format: wgpu::VertexFormat::Float32x3,
-        offset: 0,
-        shader_location: 0,
-    }],
-}];
 
 pub struct Environment {
     skybox_pipeline: wgpu::RenderPipeline,
@@ -223,7 +211,7 @@ fn create_skybox_pipeline(
             module,
             entry_point: Some("vs_cube_camera"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: VERTEX_BUFFERS_LAYOUT,
+            buffers: CUBE_VERTEX_BUFFER_LAYOUT,
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -249,54 +237,6 @@ fn create_skybox_pipeline(
         fragment: Some(wgpu::FragmentState {
             module,
             entry_point: Some("fs_skybox"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
-        }),
-        multiview: None,
-        cache: None,
-    })
-}
-
-fn create_irradiance_pipeline(
-    view_projection_bind_group_layout: &wgpu::BindGroupLayout,
-    cubemap_bind_group_layout: &wgpu::BindGroupLayout,
-    module: &wgpu::ShaderModule,
-    device: &wgpu::Device,
-) -> wgpu::RenderPipeline {
-    let irradiance_pipeline_layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Environment irrandiance pipeline layout"),
-            bind_group_layouts: &[view_projection_bind_group_layout, cubemap_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Environment irradiance pipeline"),
-        layout: Some(&irradiance_pipeline_layout),
-        vertex: wgpu::VertexState {
-            module,
-            entry_point: Some("vs_cube_view_projection"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: VERTEX_BUFFERS_LAYOUT,
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState {
-            count: 1,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        fragment: Some(wgpu::FragmentState {
-            module,
-            entry_point: Some("fs_irradiance"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
         }),
@@ -335,13 +275,51 @@ fn create_irradiance_map_bind_group(
     device: &wgpu::Device,
     encoder: &mut wgpu::CommandEncoder,
 ) -> wgpu::BindGroup {
-    let irradiance_pipeline = create_irradiance_pipeline(
-        textures.view_projection_bind_group_layout(),
-        &cubemap_bind_group_layout,
-        shader_module,
-        device,
-    );
-    let irradiance_map_texture = textures.create_cubemap_with_pipeline(
+    let irradiance_pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Environment irrandiance pipeline layout"),
+            bind_group_layouts: &[
+                textures.view_projection_bind_group_layout(),
+                cubemap_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+    let irradiance_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Environment irradiance pipeline"),
+        layout: Some(&irradiance_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader_module,
+            entry_point: Some("vs_cube_view_projection"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: CUBE_VERTEX_BUFFER_LAYOUT,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader_module,
+            entry_point: Some("fs_irradiance"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
+        }),
+        multiview: None,
+        cache: None,
+    });
+
+    let irradiance_map_texture = textures.create_cube_with_pipeline(
         Some("Irrandiance map texture"),
         IRRADIANCE_MAP_SIZE,
         IRRADIANCE_MAP_SIZE,

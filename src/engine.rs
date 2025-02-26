@@ -19,7 +19,7 @@ impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
             exposure: 1.0,
-            background_blur: false,
+            background_blur: true,
         }
     }
 }

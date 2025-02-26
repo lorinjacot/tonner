@@ -25,7 +25,7 @@ fn fs_equirectangular_to_cube(
     vertex: VertexOutput
 ) -> @location(0) vec4f {
     let normal = normalize(vertex.tex_coord);
-    let tex_coord = vec2f(atan2(normal.z, normal.x), asin(normal.y)) * inv_atan + 0.5;
+    let tex_coord = 0.5 - vec2f(atan2(normal.z, normal.x), asin(normal.y)) * inv_atan;
 
     let color = textureSample(equirectangular_texture, equirectangular_sampler, tex_coord).rgb;
     return vec4f(color, 1.0);

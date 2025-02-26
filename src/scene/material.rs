@@ -51,6 +51,22 @@ impl MaterialManager {
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -110,13 +126,21 @@ impl MaterialManager {
                 tex_coord: 0,
             },
         };
+        let metallic_roughness_texture = match material.metallic_roughness_texture.as_ref() {
+            Some(texture) => texture,
+            None => &TextureDescriptor {
+                view: &self.default_base_texture_view,
+                sampler: &self.default_sampler,
+                tex_coord: 0,
+            },
+        };
         let emissive_texture = match material.emissive_texture.as_ref() {
             Some(texture) => texture,
             None => &TextureDescriptor {
                 view: &self.default_base_texture_view,
                 sampler: &self.default_sampler,
-                tex_coord: 0
-            }
+                tex_coord: 0,
+            },
         };
 
         let material_uniform = MaterialUniform {
@@ -124,7 +148,7 @@ impl MaterialManager {
             base_color_tex_coord: base_color_texture.tex_coord,
             metallic_factor: material.metallic_factor,
             roughness_factor: material.roughness_factor,
-            _padding: [0.0; 1],
+            metallic_roughness_tex_coord: metallic_roughness_texture.tex_coord,
             emissive_factor: material.emissive_factor,
             emissive_tex_coord: emissive_texture.tex_coord,
         };
@@ -148,14 +172,22 @@ impl MaterialManager {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&emissive_texture.view),
+                    resource: wgpu::BindingResource::TextureView(&metallic_roughness_texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&emissive_texture.sampler),
+                    resource: wgpu::BindingResource::Sampler(&metallic_roughness_texture.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&emissive_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&emissive_texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
                     resource: material_buffer.as_entire_binding(),
                 },
             ],
@@ -198,7 +230,7 @@ struct MaterialUniform {
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
-    _padding: [f32; 1],
+    metallic_roughness_tex_coord: u32,
     emissive_factor: [f32; 3],
     emissive_tex_coord: u32,
 }
@@ -214,6 +246,7 @@ pub struct MaterialDescriptor<'a> {
     pub base_color_texture: Option<TextureDescriptor<'a>>,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
+    pub metallic_roughness_texture: Option<TextureDescriptor<'a>>,
     pub emissive_texture: Option<TextureDescriptor<'a>>,
     pub emissive_factor: [f32; 3],
 }

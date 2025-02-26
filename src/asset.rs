@@ -189,6 +189,17 @@ impl Asset {
                 queue,
             )?;
         }
+        if let Some(metallic_roughness_texture) =
+            pbr_metallic_roughness.metallic_roughness_texture()
+        {
+            self.create_texture(
+                Some("Material metallic roughness texture"),
+                wgpu::TextureFormat::Rgba8Unorm,
+                &metallic_roughness_texture.texture(),
+                device,
+                queue,
+            )?;
+        }
         if let Some(emissive_texture) = gltf_material.emissive_texture() {
             self.create_texture(
                 Some("Material emissive texture"),
@@ -207,6 +218,17 @@ impl Asset {
                 tex_coord: info.tex_coord(),
             }
         });
+        let metallic_roughness_texture =
+            pbr_metallic_roughness
+                .metallic_roughness_texture()
+                .map(|info| {
+                    let texture = &self.textures[&info.texture().index()];
+                    TextureDescriptor {
+                        view: &texture.view,
+                        sampler: &texture.sampler,
+                        tex_coord: info.tex_coord(),
+                    }
+                });
         let emissive_texture = gltf_material.emissive_texture().map(|info| {
             let texture = &self.textures[&info.texture().index()];
             TextureDescriptor {
@@ -221,6 +243,7 @@ impl Asset {
             base_color_texture,
             metallic_factor: pbr_metallic_roughness.metallic_factor(),
             roughness_factor: pbr_metallic_roughness.roughness_factor(),
+            metallic_roughness_texture,
             emissive_texture,
             emissive_factor: gltf_material.emissive_factor(),
         };

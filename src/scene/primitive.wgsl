@@ -44,6 +44,7 @@ struct Material {
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
+    metallic_roughness_tex_coord: u32,
     emissive_factor: vec3f,
     emissive_tex_coord: u32,
 }
@@ -54,9 +55,11 @@ struct Material {
 
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(2) @binding(1) var base_color_sampler: sampler;
-@group(2) @binding(2) var emissive_texture: texture_2d<f32>;
-@group(2) @binding(3) var emissive_sampler: sampler;
-@group(2) @binding(4) var<uniform> material: Material;
+@group(2) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
+@group(2) @binding(3) var metallic_roughness_sampler: sampler;
+@group(2) @binding(4) var emissive_texture: texture_2d<f32>;
+@group(2) @binding(5) var emissive_sampler: sampler;
+@group(2) @binding(6) var<uniform> material: Material;
 
 @group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
 @group(3) @binding(1) var irradiance_map_sampler: sampler;

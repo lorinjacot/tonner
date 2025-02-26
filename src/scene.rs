@@ -106,7 +106,7 @@ impl Scene {
         // )
         // .unwrap();
 
-        let materials = MaterialManager::new(device, queue);
+        let materials = MaterialManager::new(&mut textures, device.clone(), queue.clone());
 
         let meshes = MeshManager::new(
             device,
@@ -143,12 +143,8 @@ impl Scene {
         self.meshes.create(mesh, device)
     }
 
-    pub fn create_material(
-        &mut self,
-        material: &MaterialDescriptor,
-        device: &wgpu::Device,
-    ) -> MaterialId {
-        self.materials.create(material, device)
+    pub fn create_material(&mut self, material: &MaterialDescriptor) -> MaterialId {
+        self.materials.create(material)
     }
 
     pub fn create_texture2d(

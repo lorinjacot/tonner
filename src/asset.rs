@@ -15,14 +15,14 @@ use crate::{
         PrimitiveDescriptor, PrimitiveIndices, Scene, TextureDescriptor, COLORS_LEN,
         TEX_COORDS_LEN,
     },
-    texture::{Texture2dDescriptor, Texture2dSampler, Texture2dSource, TextureCreationError},
+    texture::{Texture2d, Texture2dDescriptor, Texture2dSource, TextureCreationError},
 };
 
 pub struct Asset {
     buffers: Vec<gltf::buffer::Data>,
     images: Vec<gltf::image::Data>,
     scenes_mapping: HashMap<usize, SceneMapping>,
-    texture_samplers: HashMap<usize, Texture2dSampler>,
+    texture_samplers: HashMap<usize, (Texture2d, wgpu::Sampler)>,
 }
 
 impl Asset {
@@ -151,7 +151,7 @@ impl Asset {
                     ..Default::default()
                 });
 
-                entry.insert(Texture2dSampler { texture, sampler });
+                entry.insert((texture, sampler));
 
                 Ok(())
             }
@@ -210,8 +210,8 @@ impl Asset {
             pbr_metallic_roughness.base_color_texture().map(|info| {
                 let texture_sampler = &self.texture_samplers[&info.texture().index()];
                 TextureDescriptor {
-                    view: &texture_sampler.texture.view(),
-                    sampler: &texture_sampler.sampler,
+                    texture: &texture_sampler.0,
+                    sampler: &texture_sampler.1,
                     tex_coord: info.tex_coord(),
                 }
             });
@@ -221,16 +221,16 @@ impl Asset {
                 .map(|info| {
                     let texture_sampler = &self.texture_samplers[&info.texture().index()];
                     TextureDescriptor {
-                        view: &texture_sampler.texture.view(),
-                        sampler: &texture_sampler.sampler,
+                        texture: &texture_sampler.0,
+                        sampler: &texture_sampler.1,
                         tex_coord: info.tex_coord(),
                     }
                 });
         let emissive_texture = gltf_material.emissive_texture().map(|info| {
             let texture_sampler = &self.texture_samplers[&info.texture().index()];
             TextureDescriptor {
-                view: &texture_sampler.texture.view(),
-                sampler: &texture_sampler.sampler,
+                texture: &texture_sampler.0,
+                sampler: &texture_sampler.1,
                 tex_coord: info.tex_coord(),
             }
         });
@@ -245,7 +245,7 @@ impl Asset {
             emissive_factor: gltf_material.emissive_factor(),
         };
 
-        let material = scene.create_material(&material, device);
+        let material = scene.create_material(&material);
         self.scenes_mapping
             .get_mut(&scene_id)
             .unwrap()
@@ -366,12 +366,8 @@ impl Asset {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
-                let material = self.create_material(
-                    &gltf_primitive.material(),
-                    scene_id,
-                    scene,
-                    device,
-                )?;
+                let material =
+                    self.create_material(&gltf_primitive.material(), scene_id, scene, device)?;
 
                 primitives.push(PrimitiveDescriptor {
                     vertex_count,

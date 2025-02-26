@@ -4,7 +4,14 @@ use material::MaterialManager;
 use mesh::{DrawMeshes, MeshManager};
 use node::NodeManager;
 
-use crate::{camera::Camera, engine::DisplaySettings, texture::{Texture2dSampler, TextureManager}};
+use crate::{
+    camera::Camera,
+    engine::DisplaySettings,
+    texture::{
+        Texture2d, Texture2dDescriptor, Texture2dSampler, Texture2dSource, TextureCreationError,
+        TextureManager,
+    },
+};
 
 mod environment;
 mod light;
@@ -24,12 +31,12 @@ pub struct Scene {
     meshes: MeshManager,
     materials: MaterialManager,
     lights: LightManager,
+    textures: TextureManager,
     pub camera: Camera,
     environment: Environment,
 }
 
 impl Scene {
-    #[profiling::function]
     pub fn new(camera: Camera, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let mut textures = TextureManager::new(device.clone(), queue.clone());
 
@@ -52,7 +59,7 @@ impl Scene {
         let environment_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
         let equirectangular = Texture2dSampler {
             texture: environment_texture,
-            sampler: environment_sampler
+            sampler: environment_sampler,
         };
 
         let environment = Environment::from_equirectangular(
@@ -114,6 +121,7 @@ impl Scene {
             meshes,
             materials,
             lights,
+            textures,
             camera,
             environment,
         }
@@ -141,6 +149,27 @@ impl Scene {
         device: &wgpu::Device,
     ) -> MaterialId {
         self.materials.create(material, device)
+    }
+
+    pub fn create_texture2d(
+        &mut self,
+        texture: &Texture2dDescriptor,
+    ) -> Result<Texture2d, TextureCreationError> {
+        match texture.source {
+            Texture2dSource::Pixel {
+                width,
+                height,
+                pixels,
+                format,
+            } => Ok(self.textures.create_from_pixels(
+                texture.label,
+                texture.usage,
+                width,
+                height,
+                pixels,
+                format,
+            )),
+        }
     }
 
     pub fn update_buffers(&mut self, queue: &wgpu::Queue) {

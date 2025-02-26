@@ -4,21 +4,25 @@ use std::{
 };
 
 use glam::{Mat4, Quat, Vec3};
-use image::{DynamicImage, RgbImage};
+use image::{DynamicImage, EncodableLayout, RgbImage};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
-use crate::scene::{
-    MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId, NodeCreationError,
-    NodeDescriptor, NodeId, NodeTransform, PrimitiveAttributes, PrimitiveDescriptor,
-    PrimitiveIndices, Scene, TextureDescriptor, COLORS_LEN, TEX_COORDS_LEN,
+use crate::{
+    scene::{
+        MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId,
+        NodeCreationError, NodeDescriptor, NodeId, NodeTransform, PrimitiveAttributes,
+        PrimitiveDescriptor, PrimitiveIndices, Scene, TextureDescriptor, COLORS_LEN,
+        TEX_COORDS_LEN,
+    },
+    texture::{Texture2dDescriptor, Texture2dSampler, Texture2dSource, TextureCreationError},
 };
 
 pub struct Asset {
     buffers: Vec<gltf::buffer::Data>,
     images: Vec<gltf::image::Data>,
     scenes_mapping: HashMap<usize, SceneMapping>,
-    textures: HashMap<usize, Texture>,
+    texture_samplers: HashMap<usize, Texture2dSampler>,
 }
 
 impl Asset {
@@ -30,7 +34,7 @@ impl Asset {
                 buffers,
                 images,
                 scenes_mapping: HashMap::new(),
-                textures: HashMap::new(),
+                texture_samplers: HashMap::new(),
             },
             document,
         ))
@@ -54,12 +58,12 @@ impl Asset {
     pub fn create_texture(
         &mut self,
         label: Option<&str>,
-        format: wgpu::TextureFormat,
         gltf_texture: &gltf::Texture,
+        is_srgb: bool,
+        scene: &mut Scene,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
     ) -> Result<(), CreationError> {
-        match self.textures.entry(gltf_texture.index()) {
+        match self.texture_samplers.entry(gltf_texture.index()) {
             Entry::Occupied(_) => Ok(()),
             Entry::Vacant(entry) => {
                 let image = self
@@ -67,50 +71,43 @@ impl Asset {
                     .get(gltf_texture.source().index())
                     .ok_or(CreationError::InvalidAsset)?;
 
-                let texture_descriptor = wgpu::TextureDescriptor {
-                    label,
-                    size: wgpu::Extent3d {
-                        width: image.width,
-                        height: image.height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
+                let mut create_texture = |pixels: &[u8], format: wgpu::TextureFormat| {
+                    scene.create_texture2d(&Texture2dDescriptor {
+                        label,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        source: Texture2dSource::Pixel {
+                            width: image.width,
+                            height: image.height,
+                            pixels,
+                            format: if is_srgb {
+                                format.add_srgb_suffix()
+                            } else {
+                                format
+                            },
+                        },
+                    })
                 };
 
-                let texture = match (format, image.format) {
-                    (wgpu::TextureFormat::Rgba8UnormSrgb, gltf::image::Format::R8G8B8A8) => device
-                        .create_texture_with_data(
-                            queue,
-                            &texture_descriptor,
-                            wgpu::util::TextureDataOrder::LayerMajor,
-                            &image.pixels,
-                        ),
-                    (wgpu::TextureFormat::Rgba8UnormSrgb, gltf::image::Format::R8G8B8) => {
-                        let image = DynamicImage::ImageRgb8(
+                let texture = match image.format {
+                    gltf::image::Format::R8G8B8 => {
+                        // rgb => rgba conversion needed
+                        let pixels = DynamicImage::ImageRgb8(
                             RgbImage::from_vec(image.width, image.height, image.pixels.clone())
                                 .ok_or(CreationError::InvalidAsset)?,
-                        );
-                        device.create_texture_with_data(
-                            queue,
-                            &texture_descriptor,
-                            wgpu::util::TextureDataOrder::LayerMajor,
-                            &image.into_rgba8(),
                         )
+                        .into_rgba8();
+                        create_texture(pixels.as_bytes(), wgpu::TextureFormat::Rgba8Unorm)
+                    }
+                    gltf::image::Format::R8G8B8A8 => {
+                        create_texture(&image.pixels, wgpu::TextureFormat::Rgba8Unorm)
                     }
                     _ => {
                         return Err(CreationError::Unsupported(format!(
-                            "Format pair ({:?},{:?})",
-                            format, image.format
+                            "Image format {:?}",
+                            image.format
                         )))
                     }
-                };
-
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                }?;
 
                 let gltf_sampler = gltf_texture.sampler();
                 let address_mode_u = match gltf_sampler.wrap_s() {
@@ -154,7 +151,7 @@ impl Asset {
                     ..Default::default()
                 });
 
-                entry.insert(Texture { view, sampler });
+                entry.insert(Texture2dSampler { texture, sampler });
 
                 Ok(())
             }
@@ -167,7 +164,6 @@ impl Asset {
         scene_id: usize,
         scene: &mut Scene,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
     ) -> Result<MaterialId, CreationError> {
         if let Some(material) = self
             .scenes_mapping
@@ -183,10 +179,10 @@ impl Asset {
         if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
             self.create_texture(
                 Some("Material base color texture"),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
                 &base_color_texture.texture(),
+                true,
+                scene,
                 device,
-                queue,
             )?;
         }
         if let Some(metallic_roughness_texture) =
@@ -194,46 +190,47 @@ impl Asset {
         {
             self.create_texture(
                 Some("Material metallic roughness texture"),
-                wgpu::TextureFormat::Rgba8Unorm,
                 &metallic_roughness_texture.texture(),
+                false,
+                scene,
                 device,
-                queue,
             )?;
         }
         if let Some(emissive_texture) = gltf_material.emissive_texture() {
             self.create_texture(
                 Some("Material emissive texture"),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
                 &emissive_texture.texture(),
+                true,
+                scene,
                 device,
-                queue,
             )?;
         }
 
-        let base_color_texture = pbr_metallic_roughness.base_color_texture().map(|info| {
-            let texture = &self.textures[&info.texture().index()];
-            TextureDescriptor {
-                view: &texture.view,
-                sampler: &texture.sampler,
-                tex_coord: info.tex_coord(),
-            }
-        });
+        let base_color_texture: Option<TextureDescriptor<'_>> =
+            pbr_metallic_roughness.base_color_texture().map(|info| {
+                let texture_sampler = &self.texture_samplers[&info.texture().index()];
+                TextureDescriptor {
+                    view: &texture_sampler.texture.view(),
+                    sampler: &texture_sampler.sampler,
+                    tex_coord: info.tex_coord(),
+                }
+            });
         let metallic_roughness_texture =
             pbr_metallic_roughness
                 .metallic_roughness_texture()
                 .map(|info| {
-                    let texture = &self.textures[&info.texture().index()];
+                    let texture_sampler = &self.texture_samplers[&info.texture().index()];
                     TextureDescriptor {
-                        view: &texture.view,
-                        sampler: &texture.sampler,
+                        view: &texture_sampler.texture.view(),
+                        sampler: &texture_sampler.sampler,
                         tex_coord: info.tex_coord(),
                     }
                 });
         let emissive_texture = gltf_material.emissive_texture().map(|info| {
-            let texture = &self.textures[&info.texture().index()];
+            let texture_sampler = &self.texture_samplers[&info.texture().index()];
             TextureDescriptor {
-                view: &texture.view,
-                sampler: &texture.sampler,
+                view: &texture_sampler.texture.view(),
+                sampler: &texture_sampler.sampler,
                 tex_coord: info.tex_coord(),
             }
         });
@@ -263,7 +260,6 @@ impl Asset {
         scene_id: usize,
         scene: &mut Scene,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
     ) -> Result<MeshId, CreationError> {
         if let Some(mesh) = self
             .scenes_mapping
@@ -375,7 +371,6 @@ impl Asset {
                     scene_id,
                     scene,
                     device,
-                    queue,
                 )?;
 
                 primitives.push(PrimitiveDescriptor {
@@ -427,7 +422,7 @@ impl Asset {
         };
 
         let mesh = match gltf_node.mesh() {
-            Some(gltf_mesh) => Some(self.create_mesh(&gltf_mesh, scene_id, scene, device, queue)?),
+            Some(gltf_mesh) => Some(self.create_mesh(&gltf_mesh, scene_id, scene, device)?),
             None => None,
         };
 
@@ -453,6 +448,8 @@ pub enum CreationError {
     NodeCreationError(#[from] NodeCreationError),
     #[error(transparent)]
     MeshCreationError(#[from] MeshCreationError),
+    #[error(transparent)]
+    TextureCreationError(#[from] TextureCreationError),
     #[error("Invalid asset")]
     InvalidAsset,
     #[error("unsupported: {0}")]
@@ -464,9 +461,4 @@ struct SceneMapping {
     nodes: HashMap<usize, NodeId>,
     meshes: HashMap<usize, MeshId>,
     materials: HashMap<Option<usize>, MaterialId>,
-}
-
-struct Texture {
-    view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
 }

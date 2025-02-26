@@ -74,6 +74,7 @@ impl Environment {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_faces(
         faces: &[image::DynamicImage; 6],
         camera_bind_group_layout: &wgpu::BindGroupLayout,

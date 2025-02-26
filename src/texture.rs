@@ -183,6 +183,40 @@ impl TextureManager {
         &self.cube_index_buffer
     }
 
+    pub fn create_from_pixels(
+        &self,
+        label: Option<&str>,
+        usage: wgpu::TextureUsages,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+        format: wgpu::TextureFormat,
+    ) -> Texture2d {
+        let texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label,
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::MipMajor,
+            pixels,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Texture2d { view }
+    }
+
     pub fn create_from_image(
         &self,
         label: Option<&str>,
@@ -190,33 +224,22 @@ impl TextureManager {
         image: &image::DynamicImage,
         is_srgb: bool,
     ) -> Result<Texture2d, TextureCreationError> {
-        let create_texture = |bytes: &[u8], format: wgpu::TextureFormat| {
-            let mut format = format;
-            if is_srgb {
-                format = format.add_srgb_suffix();
-            }
-            self.device.create_texture_with_data(
-                &self.queue,
-                &wgpu::TextureDescriptor {
-                    label,
-                    size: wgpu::Extent3d {
-                        width: image.width(),
-                        height: image.height(),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage,
-                    view_formats: &[],
+        let create_texture = |pixels: &[u8], format: wgpu::TextureFormat| {
+            self.create_from_pixels(
+                label,
+                usage,
+                image.width(),
+                image.height(),
+                pixels,
+                if is_srgb {
+                    format.add_srgb_suffix()
+                } else {
+                    format
                 },
-                wgpu::util::TextureDataOrder::MipMajor,
-                bytes,
             )
         };
 
-        let texture = match image.color() {
+        Ok(match image.color() {
             image::ColorType::Rgb8 => {
                 // rgb => rgba conversion needed
                 create_texture(image.to_rgba8().as_bytes(), wgpu::TextureFormat::Rgba8Unorm)
@@ -229,11 +252,7 @@ impl TextureManager {
                 wgpu::TextureFormat::Rgba32Float,
             ),
             _ => return Err(TextureCreationError::UnsupportedColorType(image.color())),
-        };
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        Ok(Texture2d { view })
+        })
     }
 
     pub fn create_cube_from_equirectangular(
@@ -471,6 +490,21 @@ impl TextureCube {
 pub struct TextureCubeSampler {
     pub texture: TextureCube,
     pub sampler: wgpu::Sampler,
+}
+
+pub struct Texture2dDescriptor<'a> {
+    pub label: Option<&'a str>,
+    pub usage: wgpu::TextureUsages,
+    pub source: Texture2dSource<'a>,
+}
+
+pub enum Texture2dSource<'a> {
+    Pixel {
+        width: u32,
+        height: u32,
+        pixels: &'a [u8],
+        format: wgpu::TextureFormat,
+    },
 }
 
 #[derive(Debug, Error)]

@@ -165,9 +165,7 @@ fn fs_main(
     // L_0: outgoing radiance
     let outgoing_l = emitted_l + reflected_l;
 
-    // return vec4f(outgoing_l, base_color.a);
-
-    return vec4f(emitted_l, 1.0);
+    return vec4f(outgoing_l, base_color.a);
 }
 
 /**

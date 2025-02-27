@@ -14,9 +14,10 @@ struct Transform {
 struct Attributes {
     @location(7) position: vec3f,
     @location(8) normal: vec3f,
-    @location(9) color_0: vec4f,
-    @location(10) tex_coord_0: vec2f,
-    @location(11) tex_coord_1: vec2f,
+    @location(9) tangent: vec4f,
+    @location(10) color_0: vec4f,
+    @location(11) tex_coord_0: vec2f,
+    @location(12) tex_coord_1: vec2f,
 }
 
 struct Camera {
@@ -25,13 +26,15 @@ struct Camera {
     world_position: vec3f,
 }
 
-struct Fragment {
+struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) world_position: vec3f,
-    @location(1) world_normal: vec3f,
-    @location(2) tex_coord_0: vec2f,
-    @location(3) tex_coord_1: vec2f,
-    @location(4) color_0: vec4f,
+    @location(1) normal: vec3f,
+    @location(2) tangent: vec3f,
+    @location(3) bitangent: vec3f,
+    @location(4) tex_coord_0: vec2f,
+    @location(5) tex_coord_1: vec2f,
+    @location(6) color_0: vec4f,
 }
 
 struct Light {
@@ -45,6 +48,8 @@ struct Material {
     metallic_factor: f32,
     roughness_factor: f32,
     metallic_roughness_tex_coord: u32,
+    normal_scale: f32,
+    normal_tex_coord: u32,
     emissive_factor: vec3f,
     emissive_tex_coord: u32,
 }
@@ -57,9 +62,11 @@ struct Material {
 @group(2) @binding(1) var base_color_sampler: sampler;
 @group(2) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
 @group(2) @binding(3) var metallic_roughness_sampler: sampler;
-@group(2) @binding(4) var emissive_texture: texture_2d<f32>;
-@group(2) @binding(5) var emissive_sampler: sampler;
-@group(2) @binding(6) var<uniform> material: Material;
+@group(2) @binding(4) var normal_texture: texture_2d<f32>;
+@group(2) @binding(5) var normal_sampler: sampler;
+@group(2) @binding(6) var emissive_texture: texture_2d<f32>;
+@group(2) @binding(7) var emissive_sampler: sampler;
+@group(2) @binding(8) var<uniform> material: Material;
 
 @group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
 @group(3) @binding(1) var irradiance_map_sampler: sampler;
@@ -68,7 +75,7 @@ struct Material {
 fn vs_main(
     transform: Transform,
     attributes: Attributes
-) -> Fragment {
+) -> VertexOutput {
     let world_position = mat4x4f(
         transform.point_col_x,
         transform.point_col_y,
@@ -76,32 +83,34 @@ fn vs_main(
         transform.point_col_w,
     ) * vec4f(attributes.position, 1.0);
 
-    let world_normal = mat3x3f(
+    let vector_transform = mat3x3f(
         transform.vector_col_x,
         transform.vector_col_y,
         transform.vector_col_z,
-    ) * attributes.normal;
+    );
 
-    var fragment: Fragment;
-    fragment.position = camera.view_projection * world_position;
-    fragment.world_position = world_position.xyz;
-    fragment.world_normal = world_normal;
-    fragment.tex_coord_0 = attributes.tex_coord_0;
-    fragment.tex_coord_1 = attributes.tex_coord_1;
-    fragment.color_0 = attributes.color_0;
-    return fragment;
+    var result: VertexOutput;
+    result.position = camera.view_projection * world_position;
+    result.world_position = world_position.xyz;
+    result.normal = vector_transform * attributes.normal;
+    result.tangent = vector_transform * attributes.tangent.xyz;
+    result.bitangent = cross(result.normal, result.tangent) * attributes.tangent.w;
+    result.tex_coord_0 = attributes.tex_coord_0;
+    result.tex_coord_1 = attributes.tex_coord_1;
+    result.color_0 = attributes.color_0;
+    return result;
 }
 
 @fragment
 fn fs_main(
-    fragment: Fragment
+    in: VertexOutput
 ) -> @location(0) vec4f {
     var tex_coords = array(
-        fragment.tex_coord_0,
-        fragment.tex_coord_1,
+        in.tex_coord_0,
+        in.tex_coord_1,
     );
 
-    let base_color = material.base_color_factor * fragment.color_0 * textureSample(
+    let base_color = material.base_color_factor * in.color_0 * textureSample(
         base_color_texture, base_color_sampler, tex_coords[material.base_color_tex_coord]
     );
 
@@ -115,8 +124,13 @@ fn fs_main(
     let c_diff = base_color.rgb * (1.0 - metallic);
     let f0 = mix(vec3f(0.04), base_color.rgb, metallic);
 
-    let normal = normalize(fragment.world_normal);
-    let view_dir = normalize(camera.world_position - fragment.world_position);
+    var normal = textureSample(
+        normal_texture, normal_sampler, tex_coords[material.normal_tex_coord]
+    ).rgb * 2.0 - 1.0;
+    normal = normalize(mat3x3f(
+        in.tangent, in.bitangent, in.normal
+    ) * normal) * vec3f(material.normal_scale, material.normal_scale, 1.0);
+    let view_dir = normalize(camera.world_position - in.world_position);
 
     // L_e: emitted radiance
     let emitted_l = material.emissive_factor * textureSample(
@@ -133,10 +147,10 @@ fn fs_main(
 
     // for each light
     {
-        let light_dir = normalize(light.world_position - fragment.world_position);
+        let light_dir = normalize(light.world_position - in.world_position);
         let halfway_dir = normalize(light_dir + view_dir);
 
-        let distance = length(light.world_position - fragment.world_position);
+        let distance = length(light.world_position - in.world_position);
         let attenuation = 1.0 / (distance * distance);
         let light_radiance = light.color * attenuation;
 
@@ -151,7 +165,9 @@ fn fs_main(
     // L_0: outgoing radiance
     let outgoing_l = emitted_l + reflected_l;
 
-    return vec4f(outgoing_l, base_color.a);
+    // return vec4f(outgoing_l, base_color.a);
+
+    return vec4f(emitted_l, 1.0);
 }
 
 /**

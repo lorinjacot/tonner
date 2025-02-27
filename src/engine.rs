@@ -247,7 +247,7 @@ impl Engine {
 
         let last_frame = Instant::now();
 
-        let (mut asset, document) = Asset::open("assets/CompareBaseColor.gltf").unwrap();
+        let (mut asset, document) = Asset::open("assets/NormalTangentMirrorTest.glb").unwrap();
 
         let scene_id = 0;
         let mut scene = Scene::new(camera, &device, &queue);

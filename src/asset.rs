@@ -11,9 +11,9 @@ use wgpu::util::DeviceExt;
 use crate::{
     scene::{
         MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId,
-        NodeCreationError, NodeDescriptor, NodeId, NodeTransform, PrimitiveAttributes,
-        PrimitiveDescriptor, PrimitiveIndices, Scene, TextureDescriptor, COLORS_LEN,
-        TEX_COORDS_LEN,
+        NodeCreationError, NodeDescriptor, NodeId, NodeTransform, NormalTextureDescriptor,
+        PrimitiveAttributes, PrimitiveDescriptor, PrimitiveIndices, Scene, TextureDescriptor,
+        COLORS_LEN, TEX_COORDS_LEN,
     },
     texture::{Texture2d, Texture2dDescriptor, Texture2dSource, TextureCreationError},
 };
@@ -196,6 +196,15 @@ impl Asset {
                 device,
             )?;
         }
+        if let Some(normal_texture) = gltf_material.normal_texture() {
+            self.create_texture(
+                Some("Material normal texture"),
+                &normal_texture.texture(),
+                false,
+                scene,
+                device,
+            )?;
+        }
         if let Some(emissive_texture) = gltf_material.emissive_texture() {
             self.create_texture(
                 Some("Material emissive texture"),
@@ -226,6 +235,15 @@ impl Asset {
                         tex_coord: info.tex_coord(),
                     }
                 });
+        let normal_texture = gltf_material.normal_texture().map(|info| {
+            let texture_sampler = &self.texture_samplers[&info.texture().index()];
+            NormalTextureDescriptor {
+                texture: &texture_sampler.0,
+                sampler: &texture_sampler.1,
+                tex_coord: info.tex_coord(),
+                scale: info.scale(),
+            }
+        });
         let emissive_texture = gltf_material.emissive_texture().map(|info| {
             let texture_sampler = &self.texture_samplers[&info.texture().index()];
             TextureDescriptor {
@@ -241,6 +259,7 @@ impl Asset {
             metallic_factor: pbr_metallic_roughness.metallic_factor(),
             roughness_factor: pbr_metallic_roughness.roughness_factor(),
             metallic_roughness_texture,
+            normal_texture,
             emissive_texture,
             emissive_factor: gltf_material.emissive_factor(),
         };
@@ -319,10 +338,6 @@ impl Asset {
                     None => None,
                 };
 
-                let mut normals = reader.read_normals().ok_or(CreationError::Unsupported(
-                    "Attributes NORMALS is required".to_string(),
-                ))?;
-
                 let mut tex_coords: Vec<Box<dyn Iterator<Item = [f32; 2]>>> =
                     Vec::with_capacity(TEX_COORDS_LEN);
                 for set in 0..TEX_COORDS_LEN as u32 {
@@ -334,6 +349,13 @@ impl Asset {
                             }),
                     );
                 }
+
+                let mut normals = reader.read_normals().ok_or(CreationError::Unsupported(
+                    "Attributes NORMAL is required".to_string(),
+                ))?;
+                let mut tangents = reader.read_tangents().ok_or(CreationError::Unsupported(
+                    "Attributes TANGENT is required".to_string(),
+                ))?;
 
                 let mut colors: Vec<Box<dyn Iterator<Item = [f32; 4]>>> =
                     Vec::with_capacity(COLORS_LEN);
@@ -349,6 +371,7 @@ impl Asset {
                     attributes.push(PrimitiveAttributes {
                         position: positions.next().ok_or(CreationError::InvalidAsset)?,
                         normal: normals.next().ok_or(CreationError::InvalidAsset)?,
+                        tangent: tangents.next().ok_or(CreationError::InvalidAsset)?,
                         tex_coords: [
                             tex_coords[0].next().ok_or(CreationError::InvalidAsset)?,
                             tex_coords[1].next().ok_or(CreationError::InvalidAsset)?,

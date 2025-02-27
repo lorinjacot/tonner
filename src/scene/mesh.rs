@@ -54,8 +54,9 @@ impl MeshManager {
             7 => Float32x3,
             8 => Float32x3,
             9 => Float32x4,
-            10 => Float32x2,
+            10 => Float32x4,
             11 => Float32x2,
+            12 => Float32x2,
         ];
         let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Primitive pipeline"),
@@ -219,6 +220,7 @@ pub struct PrimitiveIndices {
 pub struct PrimitiveAttributes {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    pub tangent: [f32; 4],
     pub colors: [[f32; 4]; COLORS_LEN],
     pub tex_coords: [[f32; 2]; TEX_COORDS_LEN],
 }

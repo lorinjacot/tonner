@@ -303,9 +303,18 @@ impl Asset {
                 let indices = match reader.read_indices() {
                     Some(indices) => match indices {
                         gltf::mesh::util::ReadIndices::U8(_) => {
-                            return Err(CreationError::Unsupported(
-                                "Only u16 and u32 index format are supported".to_string(),
-                            ))
+                            let indices: Vec<_> = indices.into_u32().collect();
+                            vertex_count = indices.len() as u32;
+                            Some(PrimitiveIndices {
+                                buffer: device.create_buffer_init(
+                                    &wgpu::util::BufferInitDescriptor {
+                                        label: Some("Index buffer"),
+                                        contents: bytemuck::cast_slice(&indices),
+                                        usage: wgpu::BufferUsages::INDEX,
+                                    },
+                                ),
+                                format: wgpu::IndexFormat::Uint32,
+                            })
                         }
                         gltf::mesh::util::ReadIndices::U16(indices) => {
                             let indices: Vec<_> = indices.collect();

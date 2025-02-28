@@ -19,10 +19,10 @@ mod material;
 mod mesh;
 mod node;
 
-pub use material::{MaterialDescriptor, MaterialId, TextureDescriptor, NormalTextureDescriptor};
+pub use material::{MaterialDescriptor, MaterialId, NormalTextureDescriptor, TextureDescriptor};
 pub use mesh::{
     MeshCreationError, MeshDescriptor, MeshId, PrimitiveAttributes, PrimitiveDescriptor,
-    PrimitiveIndices, COLORS_LEN, TEX_COORDS_LEN,
+    PrimitiveIndices,
 };
 pub use node::{NodeCreationError, NodeDescriptor, NodeId, Transform as NodeTransform};
 

@@ -1,5 +1,4 @@
 const pi: f32 = 3.14159;
-const exposure: f32 = 1.0;
 
 struct Transform {
     @location(0) point_col_x: vec4f,

@@ -11,9 +11,6 @@ use crate::storage::{Id, Storage};
 
 use super::{material::MaterialManager, node::NodeManager, MaterialId, NodeId};
 
-pub const TEX_COORDS_LEN: usize = 2;
-pub const COLORS_LEN: usize = 1;
-
 pub struct MeshManager {
     meshes: Storage<Mesh>,
     primitive_pipeline: wgpu::RenderPipeline,
@@ -221,8 +218,9 @@ pub struct PrimitiveAttributes {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub tangent: [f32; 4],
-    pub colors: [[f32; 4]; COLORS_LEN],
-    pub tex_coords: [[f32; 2]; TEX_COORDS_LEN],
+    pub color_0: [f32; 4],
+    pub tex_coord_0: [f32; 2],
+    pub tex_coord_1: [f32; 2],
 }
 
 #[repr(C)]

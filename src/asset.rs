@@ -5,6 +5,7 @@ use std::{
 
 use glam::{Mat4, Quat, Vec3};
 use image::{DynamicImage, EncodableLayout, RgbImage};
+use itertools::izip;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -13,7 +14,6 @@ use crate::{
         MaterialDescriptor, MaterialId, MeshCreationError, MeshDescriptor, MeshId,
         NodeCreationError, NodeDescriptor, NodeId, NodeTransform, NormalTextureDescriptor,
         PrimitiveAttributes, PrimitiveDescriptor, PrimitiveIndices, Scene, TextureDescriptor,
-        COLORS_LEN, TEX_COORDS_LEN,
     },
     texture::{Texture2d, Texture2dDescriptor, Texture2dSource, TextureCreationError},
 };
@@ -295,7 +295,7 @@ impl Asset {
         for gltf_primitive in gltf_primitives {
             let reader = gltf_primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
 
-            if let Some(mut positions) = reader.read_positions() {
+            if let Some(positions) = reader.read_positions() {
                 let attributes_count = positions.len();
                 let mut vertex_count = attributes_count as u32;
 
@@ -338,50 +338,49 @@ impl Asset {
                     None => None,
                 };
 
-                let mut tex_coords: Vec<Box<dyn Iterator<Item = [f32; 2]>>> =
-                    Vec::with_capacity(TEX_COORDS_LEN);
-                for set in 0..TEX_COORDS_LEN as u32 {
-                    tex_coords.push(
-                        reader
-                            .read_tex_coords(set)
-                            .map_or(Box::new(std::iter::repeat([0.0, 0.0])), |tex_coord| {
-                                Box::new(tex_coord.into_f32())
-                            }),
-                    );
-                }
-
-                let mut normals = reader.read_normals().ok_or(CreationError::Unsupported(
+                let normals = reader.read_normals().ok_or(CreationError::Unsupported(
                     "Attributes NORMAL is required".to_string(),
                 ))?;
-                let mut tangents = reader.read_tangents().ok_or(CreationError::Unsupported(
+                let tangents = reader.read_tangents().ok_or(CreationError::Unsupported(
                     "Attributes TANGENT is required".to_string(),
                 ))?;
 
-                let mut colors: Vec<Box<dyn Iterator<Item = [f32; 4]>>> =
-                    Vec::with_capacity(COLORS_LEN);
-                for set in 0..COLORS_LEN as u32 {
-                    colors.push(reader.read_colors(set).map_or(
+                let create_color = |set| -> Box<dyn Iterator<Item = [f32; 4]>> {
+                    reader.read_colors(set).map_or(
                         Box::new(std::iter::repeat([1.0, 1.0, 1.0, 1.0])),
-                        |colors| Box::new(colors.into_rgba_f32()),
-                    ));
-                }
+                        |tex_coord| Box::new(tex_coord.into_rgba_f32()),
+                    )
+                };
 
-                let mut attributes = Vec::with_capacity(attributes_count);
-                for _ in 0..attributes_count {
-                    attributes.push(PrimitiveAttributes {
-                        position: positions.next().ok_or(CreationError::InvalidAsset)?,
-                        normal: normals.next().ok_or(CreationError::InvalidAsset)?,
-                        tangent: tangents.next().ok_or(CreationError::InvalidAsset)?,
-                        tex_coords: [
-                            tex_coords[0].next().ok_or(CreationError::InvalidAsset)?,
-                            tex_coords[1].next().ok_or(CreationError::InvalidAsset)?,
-                        ],
-                        colors: [colors[0].next().ok_or(CreationError::InvalidAsset)?],
-                    });
-                }
+                let create_tex_coord = |set| -> Box<dyn Iterator<Item = [f32; 2]>> {
+                    reader
+                        .read_tex_coords(set)
+                        .map_or(Box::new(std::iter::repeat([0.0, 0.0])), |tex_coord| {
+                            Box::new(tex_coord.into_f32())
+                        })
+                };
 
-                drop(tex_coords);
-                drop(colors);
+                let attributes: Vec<_> = izip!(
+                    positions,
+                    normals,
+                    tangents,
+                    create_color(0),
+                    create_tex_coord(0),
+                    create_tex_coord(1),
+                )
+                .map(
+                    |(position, normal, tangent, color_0, tex_coord_0, tex_coord_1)| {
+                        PrimitiveAttributes {
+                            position,
+                            normal,
+                            tangent,
+                            color_0,
+                            tex_coord_0,
+                            tex_coord_1,
+                        }
+                    },
+                )
+                .collect();
 
                 let attributes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Attributes buffer"),

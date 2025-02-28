@@ -296,6 +296,7 @@ impl Asset {
             let reader = gltf_primitive.reader(|buffer| Some(&self.buffers.get(buffer.index())?));
 
             if let Some(positions) = reader.read_positions() {
+                let positions: Vec<_> = positions.collect();
                 let attributes_count = positions.len();
                 let mut vertex_count = attributes_count as u32;
 
@@ -338,35 +339,81 @@ impl Asset {
                     None => None,
                 };
 
-                let normals = reader.read_normals().ok_or(CreationError::Unsupported(
-                    "Attributes NORMAL is required".to_string(),
-                ))?;
-                let tangents = reader.read_tangents().ok_or(CreationError::Unsupported(
-                    "Attributes TANGENT is required".to_string(),
-                ))?;
-
-                let create_color = |set| -> Box<dyn Iterator<Item = [f32; 4]>> {
-                    reader.read_colors(set).map_or(
-                        Box::new(std::iter::repeat([1.0, 1.0, 1.0, 1.0])),
-                        |tex_coord| Box::new(tex_coord.into_rgba_f32()),
-                    )
+                let create_color = |set| {
+                    reader
+                        .read_colors(set)
+                        .map_or(vec![[1.0, 1.0, 1.0, 1.0]; attributes_count], |tex_coord| {
+                            tex_coord.into_rgba_f32().collect()
+                        })
                 };
+                let color_0 = create_color(0);
 
-                let create_tex_coord = |set| -> Box<dyn Iterator<Item = [f32; 2]>> {
+                let create_tex_coord = |set| {
                     reader
                         .read_tex_coords(set)
-                        .map_or(Box::new(std::iter::repeat([0.0, 0.0])), |tex_coord| {
-                            Box::new(tex_coord.into_f32())
+                        .map_or(vec![[0.0, 0.0]; attributes_count], |tex_coord| {
+                            tex_coord.into_f32().collect()
                         })
+                };
+                let tex_coord_0 = create_tex_coord(0);
+                let tex_coord_1 = create_tex_coord(1);
+
+                let normals: Vec<_> = reader
+                    .read_normals()
+                    .ok_or(CreationError::Unsupported(
+                        "Attributes NORMAL is required".to_string(),
+                    ))?
+                    .collect();
+                const DEFAULT_TANGENT: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+                let tangents = match reader.read_tangents() {
+                    Some(tangents) => tangents.collect(),
+                    None => match gltf_primitive.material().normal_texture() {
+                        None => vec![DEFAULT_TANGENT; attributes_count],
+                        Some(texture) => {
+                            let tex_coords = match texture.tex_coord() {
+                                0 => &tex_coord_0,
+                                1 => &tex_coord_1,
+                                _ => unreachable!(),
+                            };
+                            let tangents = vec![DEFAULT_TANGENT; attributes_count];
+
+                            match reader.read_indices() {
+                                Some(indices) => {
+                                    let mut mesh = IndexedMesh {
+                                        indices: &indices
+                                            .into_u32()
+                                            .map(|idx| idx as usize)
+                                            .collect::<Vec<_>>(),
+                                        positions: &positions,
+                                        normals: &normals,
+                                        tex_coords,
+                                        tangents,
+                                    };
+                                    mikktspace_sys::gen_tang_space_default(&mut mesh);
+                                    mesh.tangents
+                                }
+                                None => {
+                                    let mut mesh = UnindexedMesh {
+                                        positions: &positions,
+                                        normals: &normals,
+                                        tex_coords,
+                                        tangents,
+                                    };
+                                    mikktspace_sys::gen_tang_space_default(&mut mesh);
+                                    mesh.tangents
+                                }
+                            }
+                        }
+                    },
                 };
 
                 let attributes: Vec<_> = izip!(
                     positions,
                     normals,
                     tangents,
-                    create_color(0),
-                    create_tex_coord(0),
-                    create_tex_coord(1),
+                    color_0,
+                    tex_coord_0,
+                    tex_coord_1,
                 )
                 .map(
                     |(position, normal, tangent, color_0, tex_coord_0, tex_coord_1)| {
@@ -456,6 +503,77 @@ impl Asset {
         }
 
         Ok(node)
+    }
+}
+
+struct IndexedMesh<'a> {
+    indices: &'a [usize],
+    positions: &'a [[f32; 3]],
+    normals: &'a [[f32; 3]],
+    tex_coords: &'a [[f32; 2]],
+    tangents: Vec<[f32; 4]>,
+}
+
+impl<'a> mikktspace_sys::MikkTSpaceInterface for IndexedMesh<'a> {
+    fn get_num_faces(&self) -> usize {
+        self.indices.len() / 3
+    }
+
+    fn get_num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn get_position(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.positions[self.indices[3 * face + vert]]
+    }
+
+    fn get_normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.normals[self.indices[3 * face + vert]]
+    }
+
+    fn get_tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        self.tex_coords[self.indices[3 * face + vert]]
+    }
+
+    fn set_tspace_basic(&mut self, tangent: [f32; 3], sign: f32, face: usize, vert: usize) {
+        self.tangents[self.indices[3 * face + vert]] = [
+            tangent[0], tangent[1], tangent[2], -sign, // wgpu is left-handed
+        ];
+    }
+}
+
+struct UnindexedMesh<'a> {
+    positions: &'a [[f32; 3]],
+    normals: &'a [[f32; 3]],
+    tex_coords: &'a [[f32; 2]],
+    tangents: Vec<[f32; 4]>,
+}
+
+impl<'a> mikktspace_sys::MikkTSpaceInterface for UnindexedMesh<'a> {
+    fn get_num_faces(&self) -> usize {
+        self.positions.len() / 3
+    }
+
+    fn get_num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn get_position(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.positions[3 * face + vert]
+    }
+
+    fn get_normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.normals[3 * face + vert]
+    }
+
+    fn get_tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        self.tex_coords[3 * face + vert]
+    }
+
+    fn set_tspace_basic(&mut self, tangent: [f32; 3], sign: f32, face: usize, vert: usize) {
+        self.tangents[3 * face + vert] = [
+            tangent[0], tangent[1], tangent[2], -sign, // wgpu is left-handed
+        ];
     }
 }
 

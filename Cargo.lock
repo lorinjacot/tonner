@@ -1246,6 +1246,7 @@ dependencies = [
  "image",
  "itertools 0.14.0",
  "log",
+ "mikktspace-sys",
  "pollster",
  "profiling",
  "puffin",
@@ -1332,6 +1333,15 @@ dependencies = [
  "log",
  "objc",
  "paste",
+]
+
+[[package]]
+name = "mikktspace-sys"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fe8e422f5a41c68485cbc0bf8e698e54c64d54355033be09667ff9bf786235c"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

@@ -1,7 +1,14 @@
-use crate::texture::{Texture2dSampler, TextureCubeSampler, TextureManager, CUBE_INDICES, CUBE_VERTEX_BUFFER_LAYOUT};
+use wgpu::util::DeviceExt;
+
+use crate::texture::{
+    Texture2dSampler, TextureCube, TextureCubeSampler, TextureManager, CUBE_INDICES,
+    CUBE_VERTEX_BUFFER_LAYOUT,
+};
 
 const SKYBOX_SIZE: u32 = 512;
 const IRRADIANCE_MAP_SIZE: u32 = 32;
+const PREFILTERED_ENVIRONMENT_MAP_SIZE: u32 = 128;
+const PREFILTERED_ENVIRONMENT_MIPMAP_COUNT: u32 = 5;
 
 pub struct Environment {
     skybox_pipeline: wgpu::RenderPipeline,
@@ -9,7 +16,7 @@ pub struct Environment {
     index_buffer: wgpu::Buffer,
     cubemap_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group: wgpu::BindGroup,
-    irradiance_map_bind_group: wgpu::BindGroup,
+    ibl_bind_group: wgpu::BindGroup,
 }
 
 impl Environment {
@@ -53,10 +60,11 @@ impl Environment {
         let skybox_bind_group =
             create_skybox_bind_group(&skybox, &cubemap_bind_group_layout, device);
 
-        let irradiance_map_bind_group = create_irradiance_map_bind_group(
+        let ibl_bind_group = create_ibl(
             &skybox_bind_group,
             &cubemap_bind_group_layout,
             cubemap_sampler,
+            &skybox.texture,
             textures,
             &module,
             device,
@@ -70,7 +78,7 @@ impl Environment {
             index_buffer: textures.cube_index_buffer().clone(),
             cubemap_bind_group_layout,
             skybox_bind_group,
-            irradiance_map_bind_group,
+            ibl_bind_group,
         }
     }
 
@@ -125,10 +133,11 @@ impl Environment {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Environment command encoder"),
         });
-        let irradiance_map_bind_group = create_irradiance_map_bind_group(
+        let ibl_bind_group = create_ibl(
             &skybox_bind_group,
             &cubemap_bind_group_layout,
             cubemap_sampler,
+            &skybox.texture,
             textures,
             &module,
             device,
@@ -143,16 +152,16 @@ impl Environment {
             index_buffer: textures.cube_index_buffer().clone(),
             cubemap_bind_group_layout,
             skybox_bind_group,
-            irradiance_map_bind_group,
+            ibl_bind_group,
         })
     }
 
-    pub fn irradiance_map_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+    pub fn ibl_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.cubemap_bind_group_layout
     }
 
-    pub fn irradiance_map_bind_group(&self) -> &wgpu::BindGroup {
-        &self.irradiance_map_bind_group
+    pub fn ibl_bind_group(&self) -> &wgpu::BindGroup {
+        &self.ibl_bind_group
     }
 }
 
@@ -267,10 +276,11 @@ fn create_skybox_bind_group(
     })
 }
 
-fn create_irradiance_map_bind_group(
+fn create_ibl(
     skybox_bind_group: &wgpu::BindGroup,
     cubemap_bind_group_layout: &wgpu::BindGroupLayout,
     cubemap_sampler: wgpu::Sampler,
+    skybox: &TextureCube,
     textures: &mut TextureManager,
     shader_module: &wgpu::ShaderModule,
     device: &wgpu::Device,
@@ -330,6 +340,119 @@ fn create_irradiance_map_bind_group(
         encoder,
     );
 
+    let skybox_roughness_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Skybox + roughness bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+    let prefilter_environment_map_pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Prefilter environment map pipeline layout"),
+            bind_group_layouts: &[
+                textures.view_projection_bind_group_layout(),
+                &skybox_roughness_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+    let prefilter_environment_map_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Prefilter environment map pipeline"),
+            layout: Some(&prefilter_environment_map_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader_module,
+                entry_point: Some("vs_cube_view_projection"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: CUBE_VERTEX_BUFFER_LAYOUT,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader_module,
+                entry_point: Some("fs_prefilter_environment_map"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+    let skybox_roughness_bind_group = |mip_level| {
+        let roughness = mip_level as f32 / (PREFILTERED_ENVIRONMENT_MIPMAP_COUNT - 1) as f32;
+        let roughness = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Environment roughness buffer"),
+            contents: bytemuck::cast_slice(&[roughness]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Skybox + roughness bind group"),
+            layout: &skybox_roughness_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(skybox.view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&cubemap_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: roughness.as_entire_binding(),
+                },
+            ],
+        })
+    };
+    let prefiltered_environment_map = textures.create_cube_mip(
+        Some("prefiltered environment map"),
+        PREFILTERED_ENVIRONMENT_MAP_SIZE,
+        PREFILTERED_ENVIRONMENT_MAP_SIZE,
+        PREFILTERED_ENVIRONMENT_MIPMAP_COUNT,
+        wgpu::TextureFormat::Rgba16Float,
+        &prefilter_environment_map_pipeline,
+        skybox_roughness_bind_group,
+        encoder,
+    );
+
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Environment irradiance bind group"),
         layout: cubemap_bind_group_layout,
@@ -359,16 +482,16 @@ impl<'a> DrawEnvironment for wgpu::RenderPass<'a> {
     fn draw_environment(
         &mut self,
         environment: &Environment,
-        blur: bool,
+        _blur: bool,
         camera_bind_group: &wgpu::BindGroup,
     ) {
         self.set_pipeline(&environment.skybox_pipeline);
         self.set_bind_group(0, Some(camera_bind_group), &[]);
-        if blur {
-            self.set_bind_group(1, Some(&environment.irradiance_map_bind_group), &[]);
-        } else {
-            self.set_bind_group(1, Some(&environment.skybox_bind_group), &[]);
-        }
+        // if blur {
+        //     self.set_bind_group(1, Some(&environment.ibl_bind_group), &[]);
+        // } else {
+        self.set_bind_group(1, Some(&environment.skybox_bind_group), &[]);
+        // }
         self.set_vertex_buffer(0, environment.vertex_buffer.slice(..));
         self.set_index_buffer(
             environment.index_buffer.slice(..),

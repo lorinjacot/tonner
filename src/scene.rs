@@ -44,7 +44,7 @@ impl Scene {
 
         let lights = LightManager::new(device, camera.bind_group_layout());
 
-        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
+        let environment_image = image::ImageReader::open("assets/environments/newport_loft.hdr")
             .unwrap()
             .decode()
             .unwrap();
@@ -113,7 +113,7 @@ impl Scene {
             camera.bind_group_layout(),
             lights.bind_group_layout(),
             materials.bind_group_layout(),
-            environment.irradiance_map_bind_group_layout(),
+            environment.ibl_bind_group_layout(),
         );
 
         Self {
@@ -186,7 +186,7 @@ impl<'a> DrawScene for wgpu::RenderPass<'a> {
             &scene.materials,
             scene.camera.bind_group(),
             scene.lights.bind_group(),
-            scene.environment.irradiance_map_bind_group(),
+            scene.environment.ibl_bind_group(),
         );
 
         self.draw_environment(

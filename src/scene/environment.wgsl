@@ -22,6 +22,8 @@ struct Camera {
 @group(1) @binding(0) var environment_map_texture: texture_cube<f32>;
 @group(1) @binding(1) var environment_map_sampler: sampler;
 
+@group(1) @binding(2) var<uniform> roughness: f32;
+
 @vertex
 fn vs_cube_view_projection(
     @location(0) position: vec3f,
@@ -93,4 +95,75 @@ fn fs_skybox(
     let color = textureSample(environment_map_texture, environment_map_sampler, fragment.tex_coord).rgb;
 
     return vec4f(color, 1.0);
+}
+
+@fragment
+fn fs_prefilter_environment_map(
+    in: Fragment
+) -> @location(0) vec4f {
+    let normal = normalize(in.tex_coord);
+    let view_dir = normal;
+
+    var total_weight = 0.0;
+    var prefilter_color = vec3f(0.0);
+    
+    const sample_count: u32 = 4096u;
+    for (var i = 0u; i < sample_count; i++) {
+        let x_i = hammersley(i, sample_count);
+        let halfway_vec = importance_sample_ggx(x_i, normal, roughness);
+        let light_dir = -reflect(view_dir, halfway_vec);
+
+        let n_dot_l = max(dot(normal, light_dir), 0.0);
+        prefilter_color += textureSample(environment_map_texture, environment_map_sampler, light_dir).rgb * n_dot_l;
+        total_weight += n_dot_l;
+    }
+    prefilter_color = prefilter_color / total_weight;
+
+    return vec4f(prefilter_color, 1.0);
+}
+
+fn importance_sample_ggx(x_i: vec2f, normal: vec3f, roughness: f32) -> vec3f {
+    let a = roughness * roughness;
+
+    let phi = 2.0 * pi * x_i.x;
+    let cos_theta = sqrt((1.0 - x_i.y) / (1.0 + (a*a - 1.0) * x_i.y));
+    let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+
+    // from spherical coordinates to cartesian coordinates
+    let halfway_vec = vec3f(
+        cos(phi) * sin_theta,
+        sin(phi) * sin_theta,
+        cos_theta,
+    );
+
+    // from tangent-space vector to world-space sample vector
+    var up = vec3f(0.0, 0.0, 1.0);
+    if (abs(normal.z) >= 0.999) {
+        up = vec3f(1.0, 0.0, 0.0);
+    };
+    let tangent = normalize(cross(up, normal));
+    let bitangent = cross(normal, tangent);
+
+    let sample_vec = mat3x3f(tangent, bitangent, normal) * halfway_vec;
+    return normalize(sample_vec);
+}
+
+/*
+ * Based on Van der Corput sequence
+ */
+fn radical_inverse(i: u32) -> f32 {
+    var bits = i;
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return f32(bits) * 0x100000000; // 2.3283064365386963e-10
+}
+
+/**
+ * Generate sample i of Hammersley Sequence of n total samples.
+ */
+fn hammersley(i: u32, n: u32) -> vec2f {
+    return vec2f(f32(i)/f32(n), radical_inverse(i));
 }

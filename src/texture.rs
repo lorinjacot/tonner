@@ -1,4 +1,4 @@
-use std::f32::consts::FRAC_PI_2;
+use std::{borrow::Borrow, f32::consts::FRAC_PI_2};
 
 use glam::{vec3, Mat4, Vec3};
 use image::EncodableLayout;
@@ -451,6 +451,81 @@ impl TextureManager {
             render_pass
                 .set_index_buffer(self.cube_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
+        }
+
+        TextureCube {
+            view: texture.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::Cube),
+                ..Default::default()
+            }),
+        }
+    }
+
+    pub fn create_cube_mip<A>(
+        &mut self,
+        label: Option<&str>,
+        width: u32,
+        height: u32,
+        mip_level_count: u32,
+        format: wgpu::TextureFormat,
+        pipeline: &wgpu::RenderPipeline,
+        source_bind_group: impl Fn(u32) -> A,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> TextureCube
+    where
+        A: Borrow<wgpu::BindGroup>,
+    {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        for mip_level in 0..mip_level_count {
+            for array_layer in 0..6 {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("create cubemap pipeline"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &texture.create_view(&wgpu::TextureViewDescriptor {
+                            dimension: Some(wgpu::TextureViewDimension::D2),
+                            base_array_layer: array_layer,
+                            array_layer_count: Some(1),
+                            base_mip_level: mip_level,
+                            mip_level_count: Some(1),
+                            ..Default::default()
+                        }),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                render_pass.set_pipeline(pipeline);
+                render_pass.set_bind_group(
+                    0,
+                    &self.view_projection_bind_groups[array_layer as usize],
+                    &[],
+                );
+                render_pass.set_bind_group(1, source_bind_group(mip_level).borrow(), &[]);
+                render_pass.set_vertex_buffer(0, self.cube_vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(self.cube_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
+            }
         }
 
         TextureCube {

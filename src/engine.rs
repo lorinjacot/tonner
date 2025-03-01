@@ -257,6 +257,8 @@ impl Engine {
             .create_scene(gltf_scene, scene_id, &mut scene, &device, &queue)
             .unwrap();
 
+        device.stop_capture();
+
         Self {
             window,
             device,

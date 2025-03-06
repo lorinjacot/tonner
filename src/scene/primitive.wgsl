@@ -1,4 +1,5 @@
 const pi: f32 = 3.14159;
+const prefiltered_environment_mipmap_count: u32 = 4;
 
 struct Transform {
     @location(0) point_col_x: vec4f,
@@ -69,6 +70,10 @@ struct Material {
 
 @group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
 @group(3) @binding(1) var irradiance_map_sampler: sampler;
+@group(3) @binding(2) var prefiltered_environment_map_texture: texture_cube<f32>;
+@group(3) @binding(3) var prefiltered_environment_map_sampler: sampler;
+@group(3) @binding(4) var brdf_integration_map_texture: texture_2d<f32>;
+@group(3) @binding(5) var brdf_integration_map_sampler: sampler;
 
 @vertex
 fn vs_main(
@@ -136,13 +141,33 @@ fn fs_main(
         emissive_texture, emissive_sampler, tex_coords[material.emissive_tex_coord]
     ).rgb;
 
-    // ambient lighting (environment map)
-    let f = fresnel_roughness(f0, max(dot(normal, view_dir), 0.0), roughness);
+    // image based lighting (IBL)
+    let n_dot_v = max(dot(normal, view_dir), 0.0);
+    let f = fresnel_roughness(f0, n_dot_v, roughness);
+    
     let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
-    let ambient_l = (1.0 - f) * irradiance * base_color.rgb * occlusion;
+    let diffuse = (1.0 - f) * irradiance * base_color.rgb;
+
+    let reflection_vec = reflect(-view_dir, normal);
+    let prefiltered_color = textureSampleLevel(
+        prefiltered_environment_map_texture,
+        prefiltered_environment_map_sampler,
+        reflection_vec,
+        roughness * f32(prefiltered_environment_mipmap_count),
+    ).rgb;
+
+    let environment_brdf = textureSample(
+        brdf_integration_map_texture,
+        brdf_integration_map_sampler,
+        vec2f(n_dot_v, roughness),
+    ).rg;
+
+    let specular = prefiltered_color * (f * environment_brdf.x + environment_brdf.y);
+
+    let ambient = (diffuse + specular) * occlusion;
 
     // L_r: reflected radiance
-    var reflected_l: vec3f = ambient_l;
+    var reflected_l = ambient;
 
     // for each light
     {

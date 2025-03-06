@@ -2,7 +2,7 @@ use wgpu::util::DeviceExt;
 
 use crate::texture::{
     Texture2dSampler, TextureCube, TextureCubeSampler, TextureManager, CUBE_INDICES,
-    CUBE_VERTEX_BUFFER_LAYOUT, TRIANGLE_VERTEX_BUFFER_LAYOUT, TRIANGLE_VERTICES,
+    CUBE_VERTEX_BUFFER_LAYOUT, TRIANGLE_VERTEX_BUFFER_LAYOUT,
 };
 
 const SKYBOX_SIZE: u32 = 512;
@@ -15,7 +15,7 @@ pub struct Environment {
     skybox_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
-    cubemap_bind_group_layout: wgpu::BindGroupLayout,
+    ibl_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group: wgpu::BindGroup,
     ibl_bind_group: wgpu::BindGroup,
 }
@@ -28,9 +28,11 @@ impl Environment {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self {
+
         let module = device.create_shader_module(wgpu::include_wgsl!("environment.wgsl"));
 
         let cubemap_bind_group_layout = create_cubemap_bind_group_layout(device);
+        let ibl_bind_group_layout = create_ibl_bind_group_layout(device);
 
         let skybox_pipeline = create_skybox_pipeline(
             camera_bind_group_layout,
@@ -64,6 +66,7 @@ impl Environment {
         let ibl_bind_group = create_ibl(
             &skybox_bind_group,
             &cubemap_bind_group_layout,
+            &ibl_bind_group_layout,
             cubemap_sampler,
             &skybox.texture,
             textures,
@@ -77,7 +80,7 @@ impl Environment {
             skybox_pipeline,
             vertex_buffer: textures.cube_vertex_buffer().clone(),
             index_buffer: textures.cube_index_buffer().clone(),
-            cubemap_bind_group_layout,
+            ibl_bind_group_layout,
             skybox_bind_group,
             ibl_bind_group,
         }
@@ -94,6 +97,7 @@ impl Environment {
         let module = device.create_shader_module(wgpu::include_wgsl!("environment.wgsl"));
 
         let cubemap_bind_group_layout = create_cubemap_bind_group_layout(device);
+        let ibl_bind_group_layout = create_ibl_bind_group_layout(device);
 
         let skybox_pipeline = create_skybox_pipeline(
             camera_bind_group_layout,
@@ -137,6 +141,7 @@ impl Environment {
         let ibl_bind_group = create_ibl(
             &skybox_bind_group,
             &cubemap_bind_group_layout,
+            &ibl_bind_group_layout,
             cubemap_sampler,
             &skybox.texture,
             textures,
@@ -151,19 +156,75 @@ impl Environment {
             skybox_pipeline,
             vertex_buffer: textures.cube_vertex_buffer().clone(),
             index_buffer: textures.cube_index_buffer().clone(),
-            cubemap_bind_group_layout,
+            ibl_bind_group_layout,
             skybox_bind_group,
             ibl_bind_group,
         })
     }
 
     pub fn ibl_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.cubemap_bind_group_layout
+        &self.ibl_bind_group_layout
     }
 
     pub fn ibl_bind_group(&self) -> &wgpu::BindGroup {
         &self.ibl_bind_group
     }
+}
+
+fn create_ibl_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("IBL bind group layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::Cube,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::Cube,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
 }
 
 fn create_cubemap_sampler(device: &wgpu::Device) -> wgpu::Sampler {
@@ -280,6 +341,7 @@ fn create_skybox_bind_group(
 fn create_ibl(
     skybox_bind_group: &wgpu::BindGroup,
     cubemap_bind_group_layout: &wgpu::BindGroupLayout,
+    ibl_bind_group_layout: &wgpu::BindGroupLayout,
     cubemap_sampler: wgpu::Sampler,
     skybox: &TextureCube,
     textures: &mut TextureManager,
@@ -508,9 +570,18 @@ fn create_ibl(
         encoder,
     );
 
+    let brdf_integration_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("BRDF integration map sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Environment irradiance bind group"),
-        layout: cubemap_bind_group_layout,
+        layout: &ibl_bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -519,6 +590,22 @@ fn create_ibl(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(&cubemap_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(prefiltered_environment_map.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(&cubemap_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(brdf_integration_map.view()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(&brdf_integration_map_sampler),
             },
         ],
     })

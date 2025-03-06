@@ -12,6 +12,12 @@ struct Camera {
     world_position: vec3f,
 }
 
+struct AngleRoughness {
+    @builtin(position) position: vec4f,
+    @location(0) n_dot_v: f32,
+    @location(1) roughness: f32,
+}
+
 @group(0) @binding(0) var<uniform> view_projection: mat4x4f;
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -97,6 +103,9 @@ fn fs_skybox(
     return vec4f(color, 1.0);
 }
 
+/**
+ * https://learnopengl.com/PBR/IBL/Specular-IBL
+ */
 @fragment
 fn fs_prefilter_environment_map(
     in: Fragment
@@ -121,6 +130,81 @@ fn fs_prefilter_environment_map(
 
     return vec4f(prefilter_color, 1.0);
 }
+
+@vertex
+fn vs_brdf_integration(
+   @location(0) position: vec2f,
+   @location(1) tex_coord: vec2f,
+) -> AngleRoughness {
+    var out: AngleRoughness;
+    out.position = vec4f(position, 0.0, 1.0);
+    out.n_dot_v = tex_coord.x;
+    out.roughness = tex_coord.y;
+    return out;
+}
+
+/**
+ * https://learnopengl.com/PBR/IBL/Specular-IBL
+ */
+@fragment
+fn fs_brdf_integration(
+    in: AngleRoughness
+) -> @location(0) vec2f {
+    let view_dir = vec3f(
+        sqrt(1.0 - in.n_dot_v * in.n_dot_v),
+        0.0,
+        in.n_dot_v
+    );
+    
+    var a = 0.0;
+    var b = 0.0;
+
+    let normal = vec3f(0.0, 0.0, 1.0);
+
+    const sample_count = 1024u;
+    for (var i = 0u; i < sample_count; i++) {
+        let x_i = hammersley(i, sample_count);
+        let halfway_vec = importance_sample_ggx(x_i, normal, in.roughness);
+        let light_dir = normalize(-reflect(view_dir, halfway_vec));
+
+        let n_dot_l = max(light_dir.z, 0.0);
+        let n_dot_h = max(halfway_vec.z, 0.0);
+        let v_dot_h = max(dot(view_dir, halfway_vec), 0.0);
+
+        if (n_dot_l > 0.0) {
+            let g = geometry_smith(normal, view_dir, light_dir, in.roughness);
+            let g_vis = (g * v_dot_h) / (n_dot_h * in.n_dot_v);
+            let fc = pow(1.0 - v_dot_h, 5.0);
+
+            a += (1.0 - fc) * g_vis;
+            b += fc * g_vis;
+        }
+    }
+    a /= f32(sample_count);
+    b /= f32(sample_count);
+    return vec2f(a, b);
+}
+
+fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32
+{
+    let a = roughness;
+    let k = (a * a) / 2.0;
+
+    let nom = n_dot_v;
+    let denom = n_dot_v * (1.0 - k) + k;
+
+    return nom / denom;
+}
+
+fn geometry_smith(normal: vec3f, view_dir: vec3f, light_dir: vec3f, roughness: f32) -> f32
+{
+    let n_dot_v = max(dot(normal, view_dir), 0.0);
+    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let ggx2 = geometry_schlick_ggx(n_dot_v, roughness);
+    let ggx1 = geometry_schlick_ggx(n_dot_l, roughness);
+
+    return ggx1 * ggx2;
+}  
 
 fn importance_sample_ggx(x_i: vec2f, normal: vec3f, roughness: f32) -> vec3f {
     let a = roughness * roughness;
@@ -158,7 +242,7 @@ fn radical_inverse(i: u32) -> f32 {
     bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
     bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return f32(bits) * 0x100000000; // 2.3283064365386963e-10
+    return f32(bits) * 2.3283064365386963e-10; // / 0x100000000
 }
 
 /**

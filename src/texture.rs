@@ -1,9 +1,28 @@
 use std::{borrow::Borrow, f32::consts::FRAC_PI_2};
 
-use glam::{vec3, Mat4, Vec3};
+use bytemuck::cast_slice;
+use glam::{vec2, vec3, Mat4, Vec2, Vec3};
 use image::EncodableLayout;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
+
+#[rustfmt::skip]
+pub const TRIANGLE_VERTICES: &[Vec2] = &[
+    // positions           // texCoords
+    vec2(-1.0,  3.0), vec2(0.0, 2.0),
+    vec2(-1.0, -1.0), vec2(0.0, 0.0),
+    vec2( 3.0, -1.0), vec2(2.0, 0.0),
+];
+
+pub const TRIANGLE_VERTEX_BUFFER_LAYOUT: &[wgpu::VertexBufferLayout] =
+    &[wgpu::VertexBufferLayout {
+        array_stride: 2 * size_of::<Vec2>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![
+            0 => Float32x2,
+            1 => Float32x2,
+        ],
+    }];
 
 pub const CUBE_VERTICES: &[Vec3] = &[
     // front face
@@ -64,6 +83,7 @@ pub struct TextureManager {
     view_projection_bind_group_layout: wgpu::BindGroupLayout,
     equirectangular_bind_group_layout: wgpu::BindGroupLayout,
     equirectangular_to_cube_pipeline_layout: wgpu::PipelineLayout,
+    triangle_vertex_buffer: wgpu::Buffer,
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     view_projection_bind_groups: [wgpu::BindGroup; 6],
@@ -137,6 +157,25 @@ impl TextureManager {
                 }],
             })
         };
+
+        let triangle_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Texture manager triangle vertex buffer"),
+            contents: cast_slice(&TRIANGLE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Texture manager cube vertex buffer"),
+            contents: bytemuck::cast_slice(&CUBE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let cube_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Texture manager cube index buffer"),
+            contents: bytemuck::cast_slice(&CUBE_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         let view_projection_bind_groups = [
             create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::X, Vec3::Y)),
             create_bind_group(Mat4::look_to_rh(Vec3::ZERO, -Vec3::X, Vec3::Y)),
@@ -146,18 +185,6 @@ impl TextureManager {
             create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y)),
         ];
 
-        let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Texture manager vertex buffer"),
-            contents: bytemuck::cast_slice(&CUBE_VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let cube_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Texture manager index buffer"),
-            contents: bytemuck::cast_slice(&CUBE_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         Self {
             device,
             queue,
@@ -165,9 +192,10 @@ impl TextureManager {
             view_projection_bind_group_layout,
             equirectangular_bind_group_layout,
             equirectangular_to_cube_pipeline_layout,
-            view_projection_bind_groups,
+            triangle_vertex_buffer,
             cube_vertex_buffer,
             cube_index_buffer,
+            view_projection_bind_groups,
         }
     }
 
@@ -253,6 +281,56 @@ impl TextureManager {
             ),
             _ => return Err(TextureCreationError::UnsupportedColorType(image.color())),
         })
+    }
+
+    pub fn create_with_pipeline(
+        &self,
+        label: Option<&str>,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        usage: wgpu::TextureUsages,
+        pipeline: &wgpu::RenderPipeline,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Texture2d {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture = Texture2d { view };
+
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: label
+                .map(|label| format!("Create {label} render pass"))
+                .as_deref(),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: texture.view(),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        rpass.set_pipeline(pipeline);
+        rpass.set_vertex_buffer(0, self.triangle_vertex_buffer.slice(..));
+        rpass.draw(0..3 as u32, 0..1);
+
+        texture
     }
 
     pub fn create_cube_from_equirectangular(

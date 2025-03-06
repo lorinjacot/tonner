@@ -2,13 +2,14 @@ use wgpu::util::DeviceExt;
 
 use crate::texture::{
     Texture2dSampler, TextureCube, TextureCubeSampler, TextureManager, CUBE_INDICES,
-    CUBE_VERTEX_BUFFER_LAYOUT,
+    CUBE_VERTEX_BUFFER_LAYOUT, TRIANGLE_VERTEX_BUFFER_LAYOUT, TRIANGLE_VERTICES,
 };
 
 const SKYBOX_SIZE: u32 = 512;
 const IRRADIANCE_MAP_SIZE: u32 = 32;
 const PREFILTERED_ENVIRONMENT_MAP_SIZE: u32 = 128;
 const PREFILTERED_ENVIRONMENT_MIPMAP_COUNT: u32 = 5;
+const BRDF_INTEGRATION_MAP_SIZE: u32 = 512;
 
 pub struct Environment {
     skybox_pipeline: wgpu::RenderPipeline,
@@ -450,6 +451,60 @@ fn create_ibl(
         wgpu::TextureFormat::Rgba16Float,
         &prefilter_environment_map_pipeline,
         skybox_roughness_bind_group,
+        encoder,
+    );
+
+    let brdf_integration_map_format = wgpu::TextureFormat::Rg16Float;
+
+    let brdf_integration_pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("BRDF integration pipeline layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+    let brdf_integration_pipeline =
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("BRDF integration pipeline"),
+            layout: Some(&brdf_integration_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader_module,
+                entry_point: Some("vs_brdf_integration"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: TRIANGLE_VERTEX_BUFFER_LAYOUT,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader_module,
+                entry_point: Some("fs_brdf_integration"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(brdf_integration_map_format.into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+    let brdf_integration_map = textures.create_with_pipeline(
+        Some("BRDF integration map"),
+        BRDF_INTEGRATION_MAP_SIZE,
+        BRDF_INTEGRATION_MAP_SIZE,
+        brdf_integration_map_format,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        &brdf_integration_pipeline,
         encoder,
     );
 

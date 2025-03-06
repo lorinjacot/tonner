@@ -118,15 +118,21 @@ fn fs_main(
         base_color_texture, base_color_sampler, tex_coords[material.base_color_tex_coord]
     );
 
-    let metallic = material.metallic_factor;
-    let roughness = material.roughness_factor;
+    let metallic_roughness = textureSample(
+        metallic_roughness_texture,
+        metallic_roughness_sampler,
+        tex_coords[material.metallic_roughness_tex_coord],
+    );
+
+    let roughness = material.roughness_factor * metallic_roughness.g;
+    let metalness = material.metallic_factor * metallic_roughness.b;
     let alpha = roughness * roughness;
     let alpha_2 = alpha * alpha;
 
     let occlusion = 1.0;
 
-    let c_diff = base_color.rgb * (1.0 - metallic);
-    let f0 = mix(vec3f(0.04), base_color.rgb, metallic);
+    let c_diff = base_color.rgb * (1.0 - metalness);
+    let f0 = mix(vec3f(0.04), base_color.rgb, metalness);
 
     var normal = textureSample(
         normal_texture, normal_sampler, tex_coords[material.normal_tex_coord]

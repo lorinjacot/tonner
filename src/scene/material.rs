@@ -7,10 +7,13 @@ use crate::{
     texture::{Texture2d, TextureManager},
 };
 
+const TEX_COORD_COUNT: u32 = 2;
+
 pub struct MaterialManager {
     materials: Storage<Material>,
     bind_group_layout: wgpu::BindGroupLayout,
     default_texture: Texture2d,
+    default_normal_texture: Texture2d,
     default_sampler: wgpu::Sampler,
     device: wgpu::Device,
 }
@@ -107,6 +110,16 @@ impl MaterialManager {
             wgpu::TextureFormat::Rgba8Unorm,
         );
 
+        const DEFAULT_NORMAL: [u8; 4] = [0, 0, 255, 0];
+        let default_normal_texture = textures.create_from_pixels(
+            Some("Material default base texture"),
+            wgpu::TextureUsages::TEXTURE_BINDING,
+            1,
+            1,
+            &DEFAULT_NORMAL,
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Material default sampler"),
             ..Default::default()
@@ -116,6 +129,7 @@ impl MaterialManager {
             materials: Storage::new(),
             bind_group_layout,
             default_texture,
+            default_normal_texture,
             default_sampler,
             device,
         }
@@ -150,7 +164,12 @@ impl MaterialManager {
                     texture.tex_coord,
                     texture.scale,
                 ),
-                None => (&self.default_texture, &self.default_sampler, 0, 1.0),
+                None => (
+                    &self.default_normal_texture,
+                    &self.default_sampler,
+                    TEX_COORD_COUNT,
+                    1.0,
+                ),
             };
         let emissive_texture = match material.emissive_texture.as_ref() {
             Some(texture) => texture,

@@ -1,4 +1,5 @@
 const pi: f32 = 3.14159;
+const tex_coord_count: u32 = 2;
 const prefiltered_environment_mipmap_count: u32 = 4;
 
 struct Transform {
@@ -134,12 +135,19 @@ fn fs_main(
     let c_diff = base_color.rgb * (1.0 - metalness);
     let f0 = mix(vec3f(0.04), base_color.rgb, metalness);
 
-    var normal = textureSample(
-        normal_texture, normal_sampler, tex_coords[material.normal_tex_coord]
-    ).rgb * 2.0 - 1.0;
-    normal = normalize(mat3x3f(
-        in.tangent, in.bitangent, in.normal
-    ) * normal) * vec3f(material.normal_scale, material.normal_scale, 1.0);
+    var normal: vec3f;
+    if material.normal_tex_coord < tex_coord_count {
+        // use tangent space normal texture
+        normal = textureSample(
+            normal_texture, normal_sampler, tex_coords[material.normal_tex_coord]
+        ).rgb * 2.0 - 1.0;
+
+        let transform = mat3x3f(in.tangent, in.bitangent, in.normal);
+        normal = normalize(transform * normal) * vec3f(material.normal_scale, material.normal_scale, 1.0);
+    } else {
+        normal = normalize(in.normal);
+    }
+    
     let view_dir = normalize(camera.world_position - in.world_position);
 
     // L_e: emitted radiance
@@ -196,6 +204,7 @@ fn fs_main(
     let outgoing_l = emitted_l + reflected_l;
 
     return vec4f(outgoing_l, base_color.a);
+    // return vec4f(normal * 0.5 + 0.5, 1.0);
 }
 
 /**

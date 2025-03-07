@@ -36,6 +36,7 @@ fn fs_main(
 
     let ldr_color = vec3(1.0) - exp(-hdr_color * exposure);
     // let ldr_color = hdr_color / (hdr_color + vec3f(1.0));
+    // let ldr_color = hdr_color;
 
     return vec4f(ldr_color, 1.0);
 }

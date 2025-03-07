@@ -44,7 +44,7 @@ impl Scene {
 
         let lights = LightManager::new(device, camera.bind_group_layout());
 
-        let environment_image = image::ImageReader::open("assets/environments/newport_loft.hdr")
+        let environment_image = image::ImageReader::open("assets/environments/Cannon_Exterior.hdr")
             .unwrap()
             .decode()
             .unwrap();

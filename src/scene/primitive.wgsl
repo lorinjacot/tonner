@@ -184,27 +184,29 @@ fn fs_main(
     var reflected_l = ambient;
 
     // for each light
-    {
-        let light_dir = normalize(light.world_position - in.world_position);
-        let halfway_dir = normalize(light_dir + view_dir);
+    // {
+    //     let light_dir = normalize(light.world_position - in.world_position);
+    //     let halfway_dir = normalize(light_dir + view_dir);
 
-        let distance = length(light.world_position - in.world_position);
-        let attenuation = 1.0 / (distance * distance);
-        let light_radiance = light.color * attenuation;
+    //     let distance = length(light.world_position - in.world_position);
+    //     let attenuation = 1.0 / (distance * distance);
+    //     let light_radiance = light.color * attenuation;
 
-        let f = fresnel(f0, dot(view_dir, halfway_dir));
+    //     let f = fresnel(f0, dot(view_dir, halfway_dir));
 
-        let f_diffuse = (1.0 - f) * diffuse_brdf(c_diff);
-        let f_specular = f * specular_brdf(alpha_2, normal, halfway_dir, light_dir, view_dir);
+    //     let f_diffuse = (1.0 - f) * diffuse_brdf(c_diff);
+    //     let f_specular = f * specular_brdf(alpha_2, normal, halfway_dir, light_dir, view_dir);
         
-        reflected_l += (f_diffuse + f_specular) * light_radiance * max(dot(normal, light_dir), 0.0);
-    }
+    //     reflected_l += (f_diffuse + f_specular) * light_radiance * max(dot(normal, light_dir), 0.0);
+    // }
 
     // L_0: outgoing radiance
     let outgoing_l = emitted_l + reflected_l;
 
+
     return vec4f(outgoing_l, base_color.a);
-    // return vec4f(normal * 0.5 + 0.5, 1.0);
+    // return vec4f(pow(outgoing_l, vec3f(1.0/2.2)), base_color.a);
+    // return vec4f(pow(base_color.rgb, vec3f(2.2)), base_color.a);
 }
 
 /**

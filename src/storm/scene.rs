@@ -2,12 +2,15 @@ use glam::Mat4;
 
 use crate::storage::{Id, SecondaryStorage, Storage};
 
-use super::{camera::Camera, mesh::MeshId};
+use super::{
+    camera::Camera,
+    mesh::{Mesh, MeshId},
+};
 
 pub struct Scene {
     nodes: Storage<Node>,
     cameras: SecondaryStorage<Node, Box<dyn Camera>>,
-    meshes: SecondaryStorage<MeshId, Vec<NodeId>>,
+    meshes: SecondaryStorage<Mesh, Vec<NodeId>>,
 }
 
 impl Scene {
@@ -43,6 +46,15 @@ impl Scene {
                 parent,
                 children,
             }),
+        }
+    }
+
+    pub fn add_mesh(&mut self, mesh: MeshId, node: NodeId) {
+        assert!(self.nodes.contains(node));
+        if let Some(nodes) = self.meshes.get_mut(mesh) {
+            nodes.push(node);
+        } else {
+            self.meshes.add(vec![node], mesh);
         }
     }
 

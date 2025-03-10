@@ -1,8 +1,9 @@
-use std::{borrow::Borrow, f32::consts::FRAC_PI_2};
+use std::{borrow::Borrow, f32::consts::FRAC_PI_2, io::Read};
 
 use bytemuck::cast_slice;
 use glam::{vec2, vec3, Mat4, Vec2, Vec3};
-use image::EncodableLayout;
+use image::{DynamicImage, EncodableLayout, RgbImage};
+use itertools::Itertools;
 use wgpu::util::DeviceExt;
 
 #[rustfmt::skip]
@@ -233,6 +234,55 @@ impl TextureManager {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Texture2d { texture, view }
+    }
+
+    pub fn create_texture_2d_gltf(
+        &self,
+        texture: &gltf::Texture,
+        srgb: bool,
+        mip: TextureMip,
+        images: Vec<gltf::image::Data>,
+        usage: wgpu::TextureUsages,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Texture2d, ()> {
+        let image = images.get(texture.source().index()).ok_or(())?;
+
+        let create_texture = |bytes: &[u8], format: wgpu::TextureFormat| {
+            self.create_texture_2d_bytes(
+                texture.name(),
+                image.width,
+                image.height,
+                mip,
+                if srgb {
+                    format.add_srgb_suffix()
+                } else {
+                    format
+                },
+                usage,
+                bytes,
+                device,
+                queue,
+                encoder,
+            )
+        };
+
+        Ok(match image.format {
+            gltf::image::Format::R8G8B8 => {
+                // rgb => rgba conversion needed
+                let bytes: Vec<_> = image
+                    .pixels
+                    .chunks_exact(3)
+                    .flat_map(|p| [p[0], p[1], p[2], 255])
+                    .collect();
+                create_texture(&bytes, wgpu::TextureFormat::Rgba8Unorm)
+            }
+            gltf::image::Format::R8G8B8A8 => {
+                create_texture(&image.pixels, wgpu::TextureFormat::Rgba8Unorm)
+            }
+            _ => unimplemented!("Image format {:?} not supported", image.format),
+        })
     }
 
     pub fn create_texture_2d_image(

@@ -1,4 +1,8 @@
+mod camera;
 mod material;
-mod scene;
 mod mesh;
+mod scene;
 mod texture;
+
+pub use camera::{Controls, OrbitControls, PerspectiveCamera};
+pub use scene::{NodeId, Scene};

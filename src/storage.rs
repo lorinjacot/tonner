@@ -180,6 +180,142 @@ impl<T> Storage<T> {
     }
 }
 
+impl<T> Index<Id<T>> for Storage<T> {
+    type Output = T;
+
+    fn index(&self, index: Id<T>) -> &Self::Output {
+        self.get(index).expect("no value found for id")
+    }
+}
+
+impl<T> IndexMut<Id<T>> for Storage<T> {
+    fn index_mut(&mut self, index: Id<T>) -> &mut Self::Output {
+        self.get_mut(index).expect("no value found for id")
+    }
+}
+
+pub struct SecondaryStorage<P, S> {
+    sparse: Vec<SparseElement>,
+    dense: Vec<DenseElement<S>>,
+    primary: PhantomData<P>,
+}
+
+impl<P, S> SecondaryStorage<P, S> {
+    pub fn new() -> Self {
+        let sparse = Vec::new();
+        let dense = Vec::new();
+        let primary = PhantomData;
+        Self {
+            sparse,
+            dense,
+            primary,
+        }
+    }
+
+    pub fn add(&mut self, value: S, primary: Id<P>) {
+        let pos = self.dense.len();
+        let element = primary.element;
+        self.dense.push(DenseElement { value, element });
+        match self.sparse.get_mut(primary.element) {
+            Some(id) => {
+                id.pos = pos;
+                id.version = primary.version;
+            }
+            None => {
+                let iter = repeat_n(
+                    SparseElement {
+                        pos,
+                        version: primary.version,
+                    },
+                    element - self.sparse.len() + 1,
+                );
+                self.sparse.extend(iter);
+            }
+        }
+    }
+
+    fn remove(&mut self, id: Id<P>) -> Option<S> {
+        match self.sparse.get(id.element) {
+            Some(sparce_element) if id.version == sparce_element.version => {
+                match self.dense.get(sparce_element.pos) {
+                    Some(dense_element) if id.element == dense_element.element => {
+                        let last_pos = self.dense.len() - 1;
+                        let last_element = self.dense[last_pos].element;
+                        self.dense.swap(last_pos, sparce_element.pos);
+                        self.sparse[last_element].pos = sparce_element.pos;
+                        self.sparse[id.element].version += 1;
+                        Some(self.dense.pop().unwrap().value)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub fn contains(&self, id: Id<P>) -> bool {
+        match self.sparse.get(id.element) {
+            Some(sparse_element) if id.version == sparse_element.version => {
+                match self.dense.get(sparse_element.pos) {
+                    Some(dense_element) if dense_element.element == id.element => true,
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn get(&self, id: Id<P>) -> Option<&S> {
+        match self.sparse.get(id.element) {
+            Some(sparse_element) if id.version == sparse_element.version => {
+                match self.dense.get(sparse_element.pos) {
+                    Some(dense_element) if dense_element.element == id.element => {
+                        Some(&dense_element.value)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self, id: Id<P>) -> Option<&mut S> {
+        match self.sparse.get(id.element) {
+            Some(sparse_element) if id.version == sparse_element.version => {
+                match self.dense.get_mut(sparse_element.pos) {
+                    Some(dense_element) if dense_element.element == id.element => {
+                        Some(&mut dense_element.value)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub fn values(&self) -> Values<'_, S> {
+        Values(self.dense.iter())
+    }
+
+    pub fn values_mut(&mut self) -> ValuesMut<'_, S> {
+        ValuesMut(self.dense.iter_mut())
+    }
+}
+
+impl<P, S> Index<Id<P>> for SecondaryStorage<P, S> {
+    type Output = S;
+
+    fn index(&self, index: Id<P>) -> &Self::Output {
+        self.get(index).expect("no value found for id")
+    }
+}
+
+impl<P, S> IndexMut<Id<P>> for SecondaryStorage<P, S> {
+    fn index_mut(&mut self, index: Id<P>) -> &mut Self::Output {
+        self.get_mut(index).expect("no value found for id")
+    }
+}
+
 pub struct Values<'a, T>(std::slice::Iter<'a, DenseElement<T>>);
 
 impl<'a, T> Iterator for Values<'a, T> {
@@ -249,258 +385,6 @@ impl<'a, T> ExactSizeIterator for ValuesMut<'a, T> {
 }
 
 impl<'a, T> FusedIterator for ValuesMut<'a, T> {}
-
-impl<T> Index<Id<T>> for Storage<T> {
-    type Output = T;
-
-    fn index(&self, index: Id<T>) -> &Self::Output {
-        self.get(index).expect("no value found for id")
-    }
-}
-
-impl<T> IndexMut<Id<T>> for Storage<T> {
-    fn index_mut(&mut self, index: Id<T>) -> &mut Self::Output {
-        self.get_mut(index).expect("no value found for id")
-    }
-}
-
-struct SecondaryDenseElement<T> {
-    value: T,
-    element: usize,
-    primary_version: u16,
-}
-
-pub struct SecondaryStorage<P, S> {
-    sparse: Vec<SparseElement>,
-    dense: Vec<SecondaryDenseElement<S>>,
-    primary: PhantomData<P>,
-}
-
-impl<P, S> SecondaryStorage<P, S> {
-    pub fn new() -> Self {
-        let sparse = Vec::new();
-        let dense = Vec::new();
-        let primary = PhantomData;
-        Self {
-            sparse,
-            dense,
-            primary,
-        }
-    }
-
-    pub fn add(&mut self, value: S, primary: Id<P>) -> Id<S> {
-        let pos = self.dense.len();
-        let element = primary.element;
-        self.dense.push(SecondaryDenseElement {
-            value,
-            element,
-            primary_version: primary.version,
-        });
-        match self.sparse.get_mut(primary.element) {
-            Some(id) => {
-                id.pos = pos;
-                Id {
-                    element,
-                    version: id.version,
-                    element_type: PhantomData,
-                }
-            }
-            None => {
-                let iter = repeat_n(
-                    SparseElement { pos, version: 0 },
-                    element - self.sparse.len() + 1,
-                );
-                self.sparse.extend(iter);
-                Id {
-                    element,
-                    version: 0,
-                    element_type: PhantomData,
-                }
-            }
-        }
-    }
-
-    fn inner_remove<T>(&mut self, id: Id<T>, ignore_version: bool) -> Option<S> {
-        match self.sparse.get(id.element) {
-            Some(sparce_element) if ignore_version || id.version == sparce_element.version => {
-                match self.dense.get(sparce_element.pos) {
-                    Some(dense_element) if id.element == dense_element.element => {
-                        let last_pos = self.dense.len() - 1;
-                        let last_element = self.dense[last_pos].element;
-                        self.dense.swap(last_pos, sparce_element.pos);
-                        self.sparse[last_element].pos = sparce_element.pos;
-                        self.sparse[id.element].version += 1;
-                        Some(self.dense.pop().unwrap().value)
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    pub fn remove_primary(&mut self, id: Id<P>) -> Option<S> {
-        self.inner_remove(id, true)
-    }
-
-    pub fn remove(&mut self, id: Id<S>) -> Option<S> {
-        self.inner_remove(id, false)
-    }
-
-    pub fn inner_contains<T>(&self, id: Id<T>, ignore_version: bool) -> bool {
-        match self.sparse.get(id.element) {
-            Some(sparse_element) if ignore_version || id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
-                    Some(dense_element) if dense_element.element == id.element => true,
-                    _ => false,
-                }
-            }
-            _ => false,
-        }
-    }
-
-    pub fn contains_primary(&self, id: Id<P>) -> bool {
-        self.inner_contains(id, true)
-    }
-
-    pub fn contains(&self, id: Id<S>) -> bool {
-        self.inner_contains(id, false)
-    }
-
-    fn get(&self, id: Id<S>) -> Option<&S> {
-        match self.sparse.get(id.element) {
-            Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
-                    Some(dense_element) if dense_element.element == id.element => {
-                        Some(&dense_element.value)
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    pub fn get_mut(&mut self, id: Id<S>) -> Option<&mut S> {
-        match self.sparse.get(id.element) {
-            Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get_mut(sparse_element.pos) {
-                    Some(dense_element) if dense_element.element == id.element => {
-                        Some(&mut dense_element.value)
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    pub fn primary(&self, id: Id<S>) -> Option<Id<P>> {
-        match self.sparse.get(id.element) {
-            Some(sparse_element) => match self.dense.get(sparse_element.pos) {
-                Some(dense_element) if dense_element.element == id.element => Some(Id {
-                    element: id.element,
-                    version: dense_element.primary_version,
-                    element_type: PhantomData,
-                }),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    pub fn values(&self) -> SecondaryValues<'_, S> {
-        SecondaryValues(self.dense.iter())
-    }
-
-    pub fn values_mut(&mut self) -> SecondaryValuesMut<'_, S> {
-        SecondaryValuesMut(self.dense.iter_mut())
-    }
-}
-
-pub struct SecondaryValues<'a, S>(std::slice::Iter<'a, SecondaryDenseElement<S>>);
-
-impl<'a, S> Iterator for SecondaryValues<'a, S> {
-    type Item = &'a S;
-
-    fn next(&mut self) -> Option<&'a S> {
-        self.0.next().map(|dense_element| &dense_element.value)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    fn count(self) -> usize {
-        self.0.len()
-    }
-
-    fn fold<B, F>(self, init: B, mut f: F) -> B
-    where
-        Self: Sized,
-        F: FnMut(B, Self::Item) -> B,
-    {
-        self.0
-            .fold(init, |acc, dense_element| f(acc, &dense_element.value))
-    }
-}
-
-impl<'a, S> ExactSizeIterator for SecondaryValues<'a, S> {
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl<'a, S> FusedIterator for SecondaryValues<'a, S> {}
-
-pub struct SecondaryValuesMut<'a, S>(std::slice::IterMut<'a, SecondaryDenseElement<S>>);
-
-impl<'a, S> Iterator for SecondaryValuesMut<'a, S> {
-    type Item = &'a mut S;
-
-    fn next(&mut self) -> Option<&'a mut S> {
-        self.0.next().map(|dense_element| &mut dense_element.value)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    fn count(self) -> usize {
-        self.0.len()
-    }
-
-    fn fold<B, F>(self, init: B, mut f: F) -> B
-    where
-        Self: Sized,
-        F: FnMut(B, Self::Item) -> B,
-    {
-        self.0
-            .fold(init, |acc, dense_element| f(acc, &mut dense_element.value))
-    }
-}
-
-impl<'a, S> ExactSizeIterator for SecondaryValuesMut<'a, S> {
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl<'a, S> FusedIterator for SecondaryValuesMut<'a, S> {}
-
-impl<P, S> Index<Id<S>> for SecondaryStorage<P, S> {
-    type Output = S;
-
-    fn index(&self, index: Id<S>) -> &Self::Output {
-        self.get(index).expect("no value found for id")
-    }
-}
-
-impl<P, S> IndexMut<Id<S>> for SecondaryStorage<P, S> {
-    fn index_mut(&mut self, index: Id<S>) -> &mut Self::Output {
-        self.get_mut(index).expect("no value found for id")
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -611,14 +495,11 @@ mod tests {
         let id_1 = storage.add(TestData(String::from("data 1")));
         let id_2 = storage.add(TestData(String::from("data 2")));
 
-        let sec_id_1 = sec_storage.add(TestDataSecondary(String::from("data 1, prim 2")), id_2);
-        let sec_id_2 = sec_storage.add(TestDataSecondary(String::from("data 2, prim 1")), id_1);
+        sec_storage.add(TestDataSecondary(String::from("data 1, prim 2")), id_2);
+        sec_storage.add(TestDataSecondary(String::from("data 2, prim 1")), id_1);
 
-        assert_ne!(sec_id_1, sec_id_2);
-        assert_eq!("data 1, prim 2", sec_storage[sec_id_1].0);
-        assert_eq!("data 2, prim 1", sec_storage[sec_id_2].0);
-
-        assert_eq!(id_1, sec_storage.primary(sec_id_2).unwrap());
+        assert_eq!("data 2, prim 1", sec_storage[id_1].0);
+        assert_eq!("data 1, prim 2", sec_storage[id_2].0);
     }
 
     #[test]
@@ -629,26 +510,17 @@ mod tests {
         let mut id_1 = storage.add(TestData(String::from("data 1")));
         let mut id_2 = storage.add(TestData(String::from("data 2")));
 
-        let mut sec_id_1 = sec_storage.add(TestDataSecondary(String::from("data 1, prim 2")), id_2);
-        let mut sec_id_2 = sec_storage.add(TestDataSecondary(String::from("data 2, prim 1")), id_1);
+        sec_storage.add(TestDataSecondary(String::from("data 1, prim 2")), id_2);
+        sec_storage.add(TestDataSecondary(String::from("data 2, prim 1")), id_1);
 
-        assert!(sec_storage.contains(sec_id_1));
-        assert!(sec_storage.contains(sec_id_2));
-
-        sec_id_1.element += 1;
-        assert!(!sec_storage.contains(sec_id_1));
-
-        sec_id_2.version += 1;
-        assert!(!sec_storage.contains(sec_id_2));
-
-        assert!(sec_storage.contains_primary(id_1));
-        assert!(sec_storage.contains_primary(id_2));
+        assert!(sec_storage.contains(id_1));
+        assert!(sec_storage.contains(id_2));
 
         id_1.version += 1;
-        assert!(sec_storage.contains_primary(id_1));
+        assert!(!sec_storage.contains(id_1));
 
         id_2.element += 1;
-        assert!(!sec_storage.contains_primary(id_2));
+        assert!(!sec_storage.contains(id_2));
     }
 
     #[test]
@@ -659,17 +531,14 @@ mod tests {
         let id_1 = storage.add(TestData(String::from("data 1")));
         let id_2 = storage.add(TestData(String::from("data 2")));
 
-        let sec_id_1 = sec_storage.add(TestDataSecondary(String::from("data 1, prim 2")), id_2);
-        let sec_id_2 = sec_storage.add(TestDataSecondary(String::from("data 2, prim 1")), id_1);
+        sec_storage.add(TestDataSecondary(String::from("data 1, prim 2")), id_2);
+        sec_storage.add(TestDataSecondary(String::from("data 2, prim 1")), id_1);
 
-        sec_storage.remove(sec_id_1);
-        assert_eq!(None, sec_storage.get(sec_id_1));
-        assert_eq!("data 2, prim 1", sec_storage[sec_id_2].0);
+        sec_storage.remove(id_2);
+        assert_eq!(None, sec_storage.get(id_2));
+        assert_eq!("data 2, prim 1", sec_storage[id_1].0);
 
-        sec_storage.remove_primary(id_2);
-        assert_eq!("data 2, prim 1", sec_storage[sec_id_2].0);
-
-        sec_storage.remove_primary(id_1);
-        assert_eq!(None, sec_storage.get(sec_id_2));
+        sec_storage.remove(id_1);
+        assert_eq!(None, sec_storage.get(id_1));
     }
 }

@@ -16,9 +16,9 @@ struct Attributes {
     @location(7) position: vec3f,
     @location(8) normal: vec3f,
     @location(9) tangent: vec4f,
-    @location(10) color_0: vec4f,
-    @location(11) tex_coord_0: vec2f,
-    @location(12) tex_coord_1: vec2f,
+    @location(10) tex_coord_0: vec2f,
+    @location(11) tex_coord_1: vec2f,
+    @location(12) color_0: vec4f,
 }
 
 struct Camera {

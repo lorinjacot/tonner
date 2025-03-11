@@ -7,4 +7,5 @@ mod texture;
 
 pub use asset::AssetManager;
 pub use camera::{Controls, OrbitControls, PerspectiveCamera};
+pub use material::MaterialManager;
 pub use scene::{NodeId, Scene};

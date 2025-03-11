@@ -4,7 +4,9 @@ use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
 use winit::window::Window;
 
-use crate::storm::{AssetManager, Controls, NodeId, OrbitControls, PerspectiveCamera, Scene};
+use crate::storm::{
+    AssetManager, Controls, MaterialManager, NodeId, OrbitControls, PerspectiveCamera, Scene,
+};
 
 pub struct DisplaySettings {
     pub exposure: f32,
@@ -78,9 +80,12 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
+        let mut materials = MaterialManager::new(&device);
         let mut scene = Scene::new();
         let mut assets = AssetManager::new();
-        let asset = assets.load("assets/Box.gltf").expect("failed to load asset");
+        let asset = assets
+            .load("assets/Box.gltf")
+            .expect("failed to load asset");
 
         let camera = scene.create_node(None, Mat4::IDENTITY);
         scene.add_camera(

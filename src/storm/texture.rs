@@ -780,6 +780,12 @@ impl Texture2d {
     }
 }
 
+impl From<Texture2d> for wgpu::TextureView {
+    fn from(value: Texture2d) -> Self {
+        value.view
+    }
+}
+
 pub enum Texture2dSource<'a> {
     Bytes {
         width: u32,

@@ -7,7 +7,7 @@ use std::{
 };
 
 pub struct Id<T> {
-    element: usize,
+    element: u16,
     version: u16,
     element_type: PhantomData<T>,
 }
@@ -50,13 +50,13 @@ impl<T> Hash for Id<T> {
 
 #[derive(Debug, Clone)]
 struct SparseElement {
-    pos: usize,
+    pos: u16,
     version: u16,
 }
 
 struct DenseElement<T> {
     value: T,
-    element: usize,
+    element: u16,
 }
 
 pub struct Storage<T> {
@@ -77,12 +77,12 @@ impl<T> Storage<T> {
     }
 
     pub fn add(&mut self, value: T) -> Id<T> {
-        let pos = self.dense.len();
+        let pos = self.dense.len() as u16;
         if self.available > 0 {
-            let element = self.next.pos;
+            let element = self.next.pos as u16;
             let version = self.next.version;
             self.next.pos = pos;
-            std::mem::swap(&mut self.next, &mut self.sparse[element]);
+            std::mem::swap(&mut self.next, &mut self.sparse[element as usize]);
             self.available -= 1;
 
             self.dense.push(DenseElement { value, element });
@@ -93,7 +93,7 @@ impl<T> Storage<T> {
                 element_type: PhantomData,
             }
         } else {
-            let element = self.sparse.len();
+            let element = self.sparse.len() as u16;
             let version = 0;
             self.sparse.push(SparseElement { pos, version });
             self.dense.push(DenseElement { value, element });
@@ -106,17 +106,17 @@ impl<T> Storage<T> {
     }
 
     pub fn remove(&mut self, id: Id<T>) -> Option<T> {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
+                match self.dense.get(sparse_element.pos as usize) {
                     Some(dense_element) if id.element == dense_element.element => {
                         let last_pos = self.dense.len() - 1;
                         let last_element = self.dense[last_pos].element;
-                        self.dense.swap(last_pos, sparse_element.pos);
-                        self.sparse[last_element].pos = sparse_element.pos;
+                        self.dense.swap(last_pos, sparse_element.pos as usize);
+                        self.sparse[last_element as usize].pos = sparse_element.pos;
 
                         // add element to implicit list of deleted elements
-                        let next = &mut self.sparse[id.element];
+                        let next = &mut self.sparse[id.element as usize];
                         next.pos = id.element;
                         next.version += 1;
                         std::mem::swap(&mut self.next, next);
@@ -132,9 +132,9 @@ impl<T> Storage<T> {
     }
 
     pub fn get(&self, id: Id<T>) -> Option<&T> {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
+                match self.dense.get(sparse_element.pos as usize) {
                     Some(dense_element) if dense_element.element == id.element => {
                         Some(&dense_element.value)
                     }
@@ -146,9 +146,9 @@ impl<T> Storage<T> {
     }
 
     pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut T> {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get_mut(sparse_element.pos) {
+                match self.dense.get_mut(sparse_element.pos as usize) {
                     Some(dense_element) if dense_element.element == id.element => {
                         Some(&mut dense_element.value)
                     }
@@ -160,9 +160,9 @@ impl<T> Storage<T> {
     }
 
     pub fn contains(&self, id: Id<T>) -> bool {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
+                match self.dense.get(sparse_element.pos as usize) {
                     Some(dense_element) if id.element == dense_element.element => true,
                     _ => false,
                 }
@@ -213,10 +213,10 @@ impl<P, S> SecondaryStorage<P, S> {
     }
 
     pub fn add(&mut self, value: S, primary: Id<P>) {
-        let pos = self.dense.len();
+        let pos = self.dense.len() as u16;
         let element = primary.element;
         self.dense.push(DenseElement { value, element });
-        match self.sparse.get_mut(primary.element) {
+        match self.sparse.get_mut(primary.element as usize) {
             Some(id) => {
                 id.pos = pos;
                 id.version = primary.version;
@@ -227,7 +227,7 @@ impl<P, S> SecondaryStorage<P, S> {
                         pos,
                         version: primary.version,
                     },
-                    element - self.sparse.len() + 1,
+                    element as usize - self.sparse.len() + 1,
                 );
                 self.sparse.extend(iter);
             }
@@ -235,15 +235,15 @@ impl<P, S> SecondaryStorage<P, S> {
     }
 
     fn remove(&mut self, id: Id<P>) -> Option<S> {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparce_element) if id.version == sparce_element.version => {
-                match self.dense.get(sparce_element.pos) {
+                match self.dense.get(sparce_element.pos as usize) {
                     Some(dense_element) if id.element == dense_element.element => {
                         let last_pos = self.dense.len() - 1;
                         let last_element = self.dense[last_pos].element;
-                        self.dense.swap(last_pos, sparce_element.pos);
-                        self.sparse[last_element].pos = sparce_element.pos;
-                        self.sparse[id.element].version += 1;
+                        self.dense.swap(last_pos, sparce_element.pos as usize);
+                        self.sparse[last_element as usize].pos = sparce_element.pos;
+                        self.sparse[id.element as usize].version += 1;
                         Some(self.dense.pop().unwrap().value)
                     }
                     _ => None,
@@ -254,9 +254,9 @@ impl<P, S> SecondaryStorage<P, S> {
     }
 
     pub fn contains(&self, id: Id<P>) -> bool {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
+                match self.dense.get(sparse_element.pos as usize) {
                     Some(dense_element) if dense_element.element == id.element => true,
                     _ => false,
                 }
@@ -266,9 +266,9 @@ impl<P, S> SecondaryStorage<P, S> {
     }
 
     fn get(&self, id: Id<P>) -> Option<&S> {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get(sparse_element.pos) {
+                match self.dense.get(sparse_element.pos as usize) {
                     Some(dense_element) if dense_element.element == id.element => {
                         Some(&dense_element.value)
                     }
@@ -280,9 +280,9 @@ impl<P, S> SecondaryStorage<P, S> {
     }
 
     pub fn get_mut(&mut self, id: Id<P>) -> Option<&mut S> {
-        match self.sparse.get(id.element) {
+        match self.sparse.get(id.element as usize) {
             Some(sparse_element) if id.version == sparse_element.version => {
-                match self.dense.get_mut(sparse_element.pos) {
+                match self.dense.get_mut(sparse_element.pos as usize) {
                     Some(dense_element) if dense_element.element == id.element => {
                         Some(&mut dense_element.value)
                     }

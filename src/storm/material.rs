@@ -3,7 +3,7 @@ use wgpu::util::DeviceExt;
 
 use crate::storage::{Id, Storage};
 
-use super::texture::{TextureManager, TextureMip};
+use super::texture_old::{TextureManager, TextureMip};
 
 pub const TEX_COORD_COUNT: u32 = 2;
 

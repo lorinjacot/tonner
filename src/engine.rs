@@ -5,7 +5,8 @@ use winit::event::{DeviceEvent, WindowEvent};
 use winit::window::Window;
 
 use crate::storm::{
-    AssetManager, Controls, MaterialManager, NodeId, OrbitControls, PerspectiveCamera, Scene,
+    AssetManager, Controls, MaterialManager, MeshManager, NodeId, OrbitControls, PerspectiveCamera,
+    Scene,
 };
 
 pub struct DisplaySettings {
@@ -81,6 +82,7 @@ impl Engine {
         surface.configure(&device, &config);
 
         let mut materials = MaterialManager::new(&device);
+        let mut meshes = MeshManager::new(&device);
         let mut scene = Scene::new();
         let mut assets = AssetManager::new();
         let asset = assets

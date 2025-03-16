@@ -143,6 +143,10 @@ impl<K, V> SparseMap<K, V> {
             _ => None,
         }
     }
+
+    pub fn entry(&mut self, id: Id<K>) -> Entry<'_, K, V> {
+        todo!()
+    }
 }
 
 impl<K, V> Index<Id<K>> for SparseMap<K, V> {
@@ -156,6 +160,43 @@ impl<K, V> Index<Id<K>> for SparseMap<K, V> {
 impl<K, V> IndexMut<Id<K>> for SparseMap<K, V> {
     fn index_mut(&mut self, index: Id<K>) -> &mut Self::Output {
         self.get_mut(index).expect("no entry found for id")
+    }
+}
+
+pub enum Entry<'a, K, V: 'a> {
+    Occupied(OccupiedEntry<'a, K, V>),
+    Vacant(VacantEntry<'a, K, V>),
+}
+
+impl<'a, K, V: Default> Entry<'a, K, V> {
+    pub fn or_default(self) -> &'a mut V {
+        match self {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(V::default()),
+        }
+    }
+}
+
+pub struct OccupiedEntry<'a, K, V: 'a> {
+    id: Id<K>,
+    value: &'a mut V,
+}
+
+impl<'a, K, V: 'a> OccupiedEntry<'a, K, V> {
+    pub fn into_mut(self) -> &'a mut V {
+        self.value
+    }
+}
+
+pub struct VacantEntry<'a, K, V: 'a> {
+    id: Id<K>,
+    map: &'a mut SparseMap<K, V>,
+}
+
+impl<'a, K, V: 'a> VacantEntry<'a, K, V> {
+    pub fn insert(self, value: V) -> &'a mut V {
+        self.map.insert(self.id, value);
+        &mut self.map[self.id]
     }
 }
 
@@ -333,16 +374,16 @@ mod tests {
     fn test_map() {
         let mut set = SparseSet::new();
         let mut map = SparseMap::new();
-        
+
         let id_1_v1 = set.push(TestData(String::from("data 1 v1")));
         let id_2_v1 = set.push(TestData(String::from("data 2 v1")));
         let id_3_v1 = set.push(TestData(String::from("data 3 v1")));
-        
+
         map.insert(id_2_v1, TestData2(String::from("data2 2 v1")));
         assert!(map.get(id_1_v1).is_none());
         assert_eq!(map[id_2_v1].0, "data2 2 v1");
         assert!(map.get(id_3_v1).is_none());
-        
+
         map.insert(id_1_v1, TestData2(String::from("data2 1 v1")));
         assert_eq!(map[id_1_v1].0, "data2 1 v1");
         assert_eq!(map[id_2_v1].0, "data2 2 v1");
@@ -355,10 +396,10 @@ mod tests {
 
         set.remove(id_2_v1);
         set.remove(id_3_v1);
-        
+
         let id_2_v2 = set.push(TestData(String::from("data 2 v2")));
         let id_3_v2 = set.push(TestData(String::from("data 3 v2")));
-        
+
         assert!(map.get(id_2_v2).is_none());
         assert!(map.get(id_3_v2).is_none());
 

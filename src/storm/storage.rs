@@ -1,0 +1,385 @@
+use std::{
+    fmt::Debug,
+    iter::repeat_n,
+    marker::PhantomData,
+    mem::replace,
+    ops::{Index, IndexMut},
+    u16,
+};
+
+pub struct Id<T> {
+    sparse: u16,
+    version: u16,
+    target: PhantomData<T>,
+}
+
+impl<T> Debug for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(&format!("Id<{}>", std::any::type_name::<T>()))
+            .field("sparse", &self.sparse)
+            .field("version", &self.version)
+            .finish()
+    }
+}
+
+impl<T> Clone for Id<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sparse: self.sparse,
+            version: self.version,
+            target: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for Id<T> {}
+
+impl<T> PartialEq for Id<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.sparse == other.sparse && self.version == other.version
+    }
+}
+
+impl<T> Eq for Id<T> {}
+
+#[derive(Clone)]
+struct SparseEntry {
+    dense: u16,
+    version: u16,
+}
+struct DenseEntry<T> {
+    sparse: u16,
+    value: T,
+}
+
+pub struct SparseMap<K, V> {
+    sparse: Vec<SparseEntry>,
+    dense: Vec<DenseEntry<V>>,
+    set: PhantomData<K>,
+}
+
+impl<K, V> SparseMap<K, V> {
+    pub fn new() -> Self {
+        Self {
+            sparse: Vec::new(),
+            dense: Vec::new(),
+            set: PhantomData,
+        }
+    }
+
+    pub fn insert(&mut self, id: Id<K>, value: V) -> Option<V> {
+        match self.sparse.get_mut(id.sparse as usize) {
+            Some(sparse) if sparse.dense < u16::MAX => {
+                sparse.version = id.version;
+                let old = replace(&mut self.dense[sparse.dense as usize].value, value);
+                Some(old)
+            }
+            Some(sparse) => {
+                sparse.dense = self.dense.len() as u16;
+                sparse.version = id.version;
+                self.dense.push(DenseEntry {
+                    sparse: id.sparse,
+                    value,
+                });
+                None
+            }
+            None => {
+                let entries = repeat_n(
+                    SparseEntry {
+                        dense: u16::MAX,
+                        version: 0,
+                    },
+                    id.sparse as usize - self.sparse.len(),
+                )
+                .chain(Some(SparseEntry {
+                    dense: self.dense.len() as u16,
+                    version: id.version,
+                }));
+                self.sparse.extend(entries);
+                self.dense.push(DenseEntry {
+                    sparse: id.sparse,
+                    value,
+                });
+                None
+            }
+        }
+    }
+
+    pub fn remove(&mut self, id: Id<K>) -> Option<V> {
+        match self.sparse.get_mut(id.sparse as usize) {
+            Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
+                let dense = replace(&mut sparse.dense, u16::MAX);
+                let value = self.dense.swap_remove(dense as usize).value;
+                if let Some(entry) = self.dense.get(dense as usize) {
+                    self.sparse[entry.sparse as usize].dense = dense;
+                }
+                Some(value)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn contains(&self, id: Id<K>) -> bool {
+        match self.sparse.get(id.sparse as usize) {
+            Some(sparse) => id.version == sparse.version && sparse.dense < u16::MAX,
+            None => false,
+        }
+    }
+
+    pub fn get(&self, id: Id<K>) -> Option<&V> {
+        match self.sparse.get(id.sparse as usize) {
+            Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
+                Some(&self.dense[sparse.dense as usize].value)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self, id: Id<K>) -> Option<&mut V> {
+        match self.sparse.get(id.sparse as usize) {
+            Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
+                Some(&mut self.dense[sparse.dense as usize].value)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<K, V> Index<Id<K>> for SparseMap<K, V> {
+    type Output = V;
+
+    fn index(&self, index: Id<K>) -> &Self::Output {
+        self.get(index).expect("no entry found for id")
+    }
+}
+
+impl<K, V> IndexMut<Id<K>> for SparseMap<K, V> {
+    fn index_mut(&mut self, index: Id<K>) -> &mut Self::Output {
+        self.get_mut(index).expect("no entry found for id")
+    }
+}
+
+pub struct SparseSet<T> {
+    map: SparseMap<T, T>,
+    deleted: Vec<Id<T>>,
+}
+
+impl<T> SparseSet<T> {
+    pub fn new() -> Self {
+        Self {
+            map: SparseMap::new(),
+            deleted: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, value: T) -> Id<T> {
+        let dense = self.map.dense.len() as u16;
+        if let Some(deleted) = self.deleted.pop() {
+            let version = deleted.version + 1;
+            self.map.sparse[deleted.sparse as usize] = SparseEntry { dense, version };
+            self.map.dense.push(DenseEntry {
+                sparse: deleted.sparse,
+                value,
+            });
+            Id {
+                sparse: deleted.sparse,
+                version,
+                target: PhantomData,
+            }
+        } else {
+            assert!(dense < u16::MAX, "sparse set is full");
+            let sparse = self.map.sparse.len() as u16;
+            let version = 0;
+            self.map.sparse.push(SparseEntry { dense, version });
+            self.map.dense.push(DenseEntry { sparse, value });
+            Id {
+                sparse,
+                version,
+                target: PhantomData,
+            }
+        }
+    }
+
+    pub fn remove(&mut self, id: Id<T>) -> Option<T> {
+        match self.map.remove(id) {
+            Some(value) => {
+                self.deleted.push(id);
+                Some(value)
+            }
+            None => None,
+        }
+    }
+
+    pub fn contains(&self, id: Id<T>) -> bool {
+        self.map.contains(id)
+    }
+
+    pub fn get(&self, id: Id<T>) -> Option<&T> {
+        self.map.get(id)
+    }
+
+    pub fn get_mut(&mut self, id: Id<T>) -> Option<&mut T> {
+        self.map.get_mut(id)
+    }
+}
+
+impl<T> Index<Id<T>> for SparseSet<T> {
+    type Output = T;
+
+    fn index(&self, index: Id<T>) -> &Self::Output {
+        self.get(index).expect("no entry found for id")
+    }
+}
+
+impl<T> IndexMut<Id<T>> for SparseSet<T> {
+    fn index_mut(&mut self, index: Id<T>) -> &mut Self::Output {
+        self.get_mut(index).expect("no entry found for id")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq)]
+    struct TestData(String);
+
+    #[derive(Debug, PartialEq)]
+    struct TestData2(String);
+
+    #[test]
+    fn test_push() {
+        let mut set: SparseSet<TestData> = SparseSet::new();
+
+        let id_1 = set.push(TestData(String::from("data 1")));
+        let id_2 = set.push(TestData(String::from("data 2")));
+
+        assert_ne!(id_1, id_2);
+        assert_eq!("data 1", set[id_1].0);
+        assert_eq!("data 2", set[id_2].0);
+    }
+
+    #[test]
+    fn test_contains() {
+        let mut set = SparseSet::new();
+
+        let mut id_1 = set.push(TestData(String::from("data 1")));
+        let mut id_2 = set.push(TestData(String::from("data 2")));
+
+        assert!(set.contains(id_1));
+        assert!(set.contains(id_2));
+
+        id_1.version += 1;
+        assert!(!set.contains(id_1));
+
+        id_2.sparse += 1;
+        assert!(!set.contains(id_2));
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut set = SparseSet::new();
+
+        let id_1 = set.push(TestData(String::from("data 1")));
+        let id_2 = set.push(TestData(String::from("data 2")));
+
+        set.remove(id_1);
+        assert!(set.get(id_1).is_none());
+        assert_eq!("data 2", set[id_2].0);
+
+        assert!(set.deleted.contains(&id_1));
+
+        set.remove(id_2);
+        assert!(set.get(id_2).is_none());
+
+        assert!(set.deleted.contains(&id_2));
+    }
+
+    #[test]
+    fn test_recycling() {
+        let mut set = SparseSet::new();
+
+        let id_1_v1 = set.push(TestData(String::from("data 1 v1")));
+        let id_2_v1 = set.push(TestData(String::from("data 2 v1")));
+
+        set.remove(id_2_v1);
+        set.remove(id_1_v1);
+        assert!(set.deleted.contains(&id_1_v1));
+        assert!(set.deleted.contains(&id_2_v1));
+
+        let id_1_v2 = set.push(TestData(String::from("data 1 v2")));
+        assert_ne!(id_1_v1, id_1_v2);
+
+        assert!(!set.deleted.contains(&id_1_v1));
+        assert!(!set.deleted.contains(&id_1_v2));
+        assert!(set.deleted.contains(&id_2_v1));
+
+        let id_2_v2 = set.push(TestData(String::from("data 2 v2")));
+        assert_ne!(id_2_v1, id_2_v2);
+
+        let id_3_v1 = set.push(TestData(String::from("data 3 v1")));
+        assert!(set[id_3_v1].0 == "data 3 v1");
+
+        set.remove(id_2_v2);
+        let id_2_v3 = set.push(TestData(String::from("data 2 v3")));
+        assert!(set[id_2_v3].0 == "data 2 v3");
+        assert!(set[id_3_v1].0 == "data 3 v1");
+        assert!(set.get(id_2_v2).is_none());
+        assert_ne!(id_2_v1, id_2_v3);
+        assert_ne!(id_2_v2, id_2_v3);
+    }
+
+    #[test]
+    fn test_map() {
+        let mut set = SparseSet::new();
+        let mut map = SparseMap::new();
+        
+        let id_1_v1 = set.push(TestData(String::from("data 1 v1")));
+        let id_2_v1 = set.push(TestData(String::from("data 2 v1")));
+        let id_3_v1 = set.push(TestData(String::from("data 3 v1")));
+        
+        map.insert(id_2_v1, TestData2(String::from("data2 2 v1")));
+        assert!(map.get(id_1_v1).is_none());
+        assert_eq!(map[id_2_v1].0, "data2 2 v1");
+        assert!(map.get(id_3_v1).is_none());
+        
+        map.insert(id_1_v1, TestData2(String::from("data2 1 v1")));
+        assert_eq!(map[id_1_v1].0, "data2 1 v1");
+        assert_eq!(map[id_2_v1].0, "data2 2 v1");
+        assert!(map.get(id_3_v1).is_none());
+
+        map.remove(id_2_v1);
+        assert_eq!(map[id_1_v1].0, "data2 1 v1");
+        assert!(map.get(id_2_v1).is_none());
+        assert!(map.get(id_3_v1).is_none());
+
+        set.remove(id_2_v1);
+        set.remove(id_3_v1);
+        
+        let id_2_v2 = set.push(TestData(String::from("data 2 v2")));
+        let id_3_v2 = set.push(TestData(String::from("data 3 v2")));
+        
+        assert!(map.get(id_2_v2).is_none());
+        assert!(map.get(id_3_v2).is_none());
+
+        map.insert(id_3_v2, TestData2(String::from("data2 3 v2")));
+        assert_eq!(map[id_1_v1].0, "data2 1 v1");
+        assert!(map.get(id_2_v2).is_none());
+        assert_eq!(map[id_3_v2].0, "data2 3 v2");
+
+        set.remove(id_1_v1);
+        let id_1_v2 = set.push(TestData(String::from("data 1 v2")));
+        assert!(map.get(id_1_v2).is_none());
+
+        map.insert(id_1_v2, TestData2(String::from("data2 1 v2")));
+        assert!(map.get(id_1_v1).is_none());
+        assert_eq!(map[id_1_v2].0, "data2 1 v2");
+        assert!(map.get(id_2_v2).is_none());
+        assert_eq!(map[id_3_v2].0, "data2 3 v2");
+
+        map.insert(id_2_v2, TestData2(String::from("data2 2 v2")));
+        assert_eq!(map[id_1_v2].0, "data2 1 v2");
+        assert_eq!(map[id_2_v2].0, "data2 2 v2");
+        assert_eq!(map[id_3_v2].0, "data2 3 v2");
+    }
+}

@@ -7,6 +7,8 @@ use super::{
     Asset,
 };
 
+use TextureInner::*;
+
 pub struct TextureManager {
     textures: SparseSet<Texture>,
     images: SparseSet<Image>,
@@ -26,12 +28,20 @@ impl TextureManager {
         }
     }
 
-    pub fn load(
+    pub fn create_view_sampler(
+        &mut self,
+        view: wgpu::TextureView,
+        sampler: wgpu::Sampler,
+    ) -> Id<Texture> {
+        self.textures.push(Texture(ViewSampler(view, sampler)))
+    }
+
+    pub fn load_texture(
         &mut self,
         asset: Id<Asset>,
         texture: gltf::Texture,
         srgb: bool,
-        images: Vec<gltf::image::Data>,
+        images: &Vec<gltf::image::Data>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Texture> {
@@ -42,7 +52,7 @@ impl TextureManager {
 
         let image = self.load_image(asset, texture.source(), srgb, images, device, queue);
         let sampler = self.load_sampler(asset, texture.sampler(), device);
-        let id = self.textures.push(Texture { image, sampler });
+        let id = self.textures.push(Texture(ImageSampler(image, sampler)));
 
         let mapping = &mut self.mappings[asset].textures;
         match mapping.get_mut(texture.index()) {
@@ -53,7 +63,7 @@ impl TextureManager {
             }
         }
 
-        id
+        id.into()
     }
 
     fn load_image(
@@ -61,7 +71,7 @@ impl TextureManager {
         asset: Id<Asset>,
         image: gltf::Image,
         srgb: bool,
-        images: Vec<gltf::image::Data>,
+        images: &Vec<gltf::image::Data>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Image> {
@@ -122,11 +132,27 @@ impl TextureManager {
             }
         }
     }
+
+    pub fn view(&self, id: Id<Texture>) -> Option<&wgpu::TextureView> {
+        self.textures.get(id).map(|texture| match &texture.0 {
+            ImageSampler(image, _) => &self.images[*image].view,
+            ViewSampler(view, _) => view,
+        })
+    }
+
+    pub fn sampler(&self, id: Id<Texture>) -> Option<&wgpu::Sampler> {
+        self.textures.get(id).map(|texture| match &texture.0 {
+            ImageSampler(_, sampler) => &self.samplers[*sampler].inner,
+            ViewSampler(_, sampler) => sampler,
+        })
+    }
 }
 
-pub struct Texture {
-    image: Id<Image>,
-    sampler: Id<Sampler>,
+pub struct Texture(TextureInner);
+
+enum TextureInner {
+    ImageSampler(Id<Image>, Id<Sampler>),
+    ViewSampler(wgpu::TextureView, wgpu::Sampler),
 }
 
 struct Image {

@@ -145,7 +145,14 @@ impl<K, V> SparseMap<K, V> {
     }
 
     pub fn entry(&mut self, id: Id<K>) -> Entry<'_, K, V> {
-        todo!()
+        if self.contains(id) {
+            Entry::Occupied(OccupiedEntry {
+                id,
+                value: &mut self[id],
+            })
+        } else {
+            Entry::Vacant(VacantEntry { id, map: self })
+        }
     }
 }
 

@@ -9,14 +9,28 @@ mod texture_old;
 
 pub use asset::AssetManager;
 pub use camera::{Controls, OrbitControls, PerspectiveCamera};
-pub use material::MaterialManager;
+use material::MaterialManager;
 pub use mesh::MeshManager;
 pub use scene::{NodeId, Scene};
-use storage::SparseSet;
+use texture::TextureManager;
 
 pub struct Storm {
-    assets: SparseSet<Asset>,
-    textures: texture::TextureManager,
+    assets: storage::SparseSet<Asset>,
+    textures: TextureManager,
+    materials: MaterialManager,
+}
+
+impl Storm {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let mut textures = TextureManager::new();
+        let materials = MaterialManager::new(&mut textures, device);
+
+        Self {
+            assets: storage::SparseSet::new(),
+            textures,
+            materials,
+        }
+    }
 }
 
 struct Asset {

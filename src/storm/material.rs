@@ -1,24 +1,27 @@
+use std::iter::repeat_n;
+
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
-use crate::storage::{Id, Storage};
-
-use super::texture_old::{TextureManager, TextureMip};
+use super::{
+    storage::{Id, SparseMap, SparseSet},
+    texture::{Texture, TextureManager},
+    Asset,
+};
 
 pub const TEX_COORD_COUNT: u32 = 2;
 
 pub struct MaterialManager {
-    materials: Storage<Material>,
+    materials: SparseSet<Material>,
     bind_group_layout: wgpu::BindGroupLayout,
-    default_texture: wgpu::TextureView,
-    default_sampler: wgpu::Sampler,
+    dummy_texture: Id<Texture>,
+    default_material: Option<Id<Material>>,
+    mappings: SparseMap<Asset, Vec<Option<Id<Material>>>>,
 }
 
 impl MaterialManager {
-    pub fn new(
-        device: &wgpu::Device,
-    ) -> Self {
-        let materials = Storage::new();
+    pub fn new(textures: &mut TextureManager, device: &wgpu::Device) -> Self {
+        let materials = SparseSet::new();
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Material bind group layout"),
@@ -127,9 +130,9 @@ impl MaterialManager {
             ],
         });
 
-        let default_texture = device
+        let dummy_view = device
             .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Material default texture"),
+                label: Some("Material dummy texture"),
                 size: wgpu::Extent3d {
                     width: 1,
                     height: 1,
@@ -144,16 +147,19 @@ impl MaterialManager {
             })
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Material default sampler"),
+        let dummy_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Material dummy sampler"),
             ..Default::default()
         });
+
+        let dummy_texture = textures.create_view_sampler(dummy_view, dummy_sampler);
 
         Self {
             materials,
             bind_group_layout,
-            default_texture,
-            default_sampler,
+            dummy_texture,
+            default_material: None,
+            mappings: SparseMap::new(),
         }
     }
 
@@ -161,158 +167,218 @@ impl MaterialManager {
         &self.bind_group_layout
     }
 
-    pub fn builder<'a>(&'a mut self, name: Option<&'a str>) -> MaterialBuilder<'a> {
-        MaterialBuilder {
-            manager: self,
-            label: name,
-            uniform: MaterialUniform {
-                base_color_factor: [1.0; 4],
-                base_color_tex_coord: TEX_COORD_COUNT,
-                metallic_factor: 1.0,
-                roughness_factor: 1.0,
-                metallic_roughness_tex_coord: TEX_COORD_COUNT,
-                normal_scale: 1.0,
-                normal_tex_coord: TEX_COORD_COUNT,
-                occlusion_strength: 1.0,
-                occlusion_tex_coord: TEX_COORD_COUNT,
-                emissive_factor: [0.0; 3],
-                emissive_tex_coord: TEX_COORD_COUNT,
-            },
-            base_color_texture: None,
-            base_color_sampler: None,
-            metallic_roughness_texture: None,
-            metallic_roughness_sampler: None,
-            normal_texture: None,
-            normal_sampler: None,
-            occlusion_texture: None,
-            occlusion_sampler: None,
-            emissive_texture: None,
-            emissive_sampler: None,
+    pub fn load_material(
+        &mut self,
+        asset: Id<Asset>,
+        material: gltf::Material,
+        images: &Vec<gltf::image::Data>,
+        textures: &mut TextureManager,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Id<Material> {
+        let index = match material.index() {
+            Some(index) => index,
+            None => {
+                let id = self.create_material(asset, material, images, textures, device, queue);
+                self.default_material = Some(id);
+                return id;
+            }
+        };
+        if let Some(Some(id)) = self.mappings.entry(asset).or_default().get(index) {
+            return *id;
         }
+
+        let id = self.create_material(asset, material, images, textures, device, queue);
+
+        let mapping = &mut self.mappings[asset];
+        match mapping.get_mut(index) {
+            Some(entry) => *entry = Some(id),
+            None => {
+                let iter = repeat_n(None, index - mapping.len()).chain(Some(Some(id)));
+                mapping.extend(iter);
+            }
+        }
+
+        id
     }
-}
 
-pub type MaterialId = Id<Material>;
-pub struct Material {
-    bind_group: wgpu::BindGroup,
-}
+    fn create_material(
+        &mut self,
+        asset: Id<Asset>,
+        material: gltf::Material,
+        images: &Vec<gltf::image::Data>,
+        textures: &mut TextureManager,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Id<Material> {
+        let label = format!("Material {}", material.name().unwrap_or(""));
 
-pub struct MaterialBuilder<'a> {
-    manager: &'a mut MaterialManager,
-    label: Option<&'a str>,
-    uniform: MaterialUniform,
-    base_color_texture: Option<&'a wgpu::TextureView>,
-    base_color_sampler: Option<&'a wgpu::Sampler>,
-    metallic_roughness_texture: Option<&'a wgpu::TextureView>,
-    metallic_roughness_sampler: Option<&'a wgpu::Sampler>,
-    normal_texture: Option<&'a wgpu::TextureView>,
-    normal_sampler: Option<&'a wgpu::Sampler>,
-    occlusion_texture: Option<&'a wgpu::TextureView>,
-    occlusion_sampler: Option<&'a wgpu::Sampler>,
-    emissive_texture: Option<&'a wgpu::TextureView>,
-    emissive_sampler: Option<&'a wgpu::Sampler>,
-}
+        let base_color_texture = material
+            .pbr_metallic_roughness()
+            .base_color_texture()
+            .map(|texture| {
+                assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                (
+                    textures.load_texture(asset, texture.texture(), true, images, device, queue),
+                    texture.tex_coord(),
+                )
+            })
+            .unwrap_or((self.dummy_texture, TEX_COORD_COUNT));
 
-impl<'a> MaterialBuilder<'a> {
-    pub fn build(self, device: &wgpu::Device) -> MaterialId {
-        let material_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{} uniform", self.label.unwrap_or(""))),
-            contents: cast_slice(&[self.uniform]),
+        let metallic_roughness_texture = material
+            .pbr_metallic_roughness()
+            .metallic_roughness_texture()
+            .map(|texture| {
+                assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                (
+                    textures.load_texture(asset, texture.texture(), true, images, device, queue),
+                    texture.tex_coord(),
+                )
+            })
+            .unwrap_or((self.dummy_texture, TEX_COORD_COUNT));
+
+        let normal_texture = material
+            .normal_texture()
+            .map(|texture| {
+                assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                (
+                    textures.load_texture(asset, texture.texture(), false, images, device, queue),
+                    texture.tex_coord(),
+                    texture.scale(),
+                )
+            })
+            .unwrap_or((self.dummy_texture, TEX_COORD_COUNT, 1.0));
+
+        let occlusion_texture = material
+            .occlusion_texture()
+            .map(|texture| {
+                assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                (
+                    textures.load_texture(asset, texture.texture(), false, images, device, queue),
+                    texture.tex_coord(),
+                    texture.strength(),
+                )
+            })
+            .unwrap_or((self.dummy_texture, TEX_COORD_COUNT, 1.0));
+
+        let emissive_texture = material
+            .emissive_texture()
+            .map(|texture| {
+                assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                (
+                    textures.load_texture(asset, texture.texture(), true, images, device, queue),
+                    texture.tex_coord(),
+                )
+            })
+            .unwrap_or((self.dummy_texture, TEX_COORD_COUNT));
+
+        let uniform = MaterialUniform {
+            base_color_factor: material.pbr_metallic_roughness().base_color_factor(),
+            base_color_tex_coord: base_color_texture.1,
+            metallic_factor: material.pbr_metallic_roughness().metallic_factor(),
+            roughness_factor: material.pbr_metallic_roughness().roughness_factor(),
+            metallic_roughness_tex_coord: metallic_roughness_texture.1,
+            normal_scale: normal_texture.2,
+            normal_tex_coord: normal_texture.1,
+            occlusion_strength: occlusion_texture.2,
+            occlusion_tex_coord: occlusion_texture.1,
+            emissive_factor: material.emissive_factor(),
+            emissive_tex_coord: emissive_texture.1,
+        };
+        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label} uniform")),
+            contents: cast_slice(&[uniform]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{} bind group", self.label.unwrap_or(""))),
-            layout: &self.manager.bind_group_layout,
+            label: Some(&format!("{label} bind group")),
+            layout: &self.bind_group_layout,
             entries: &[
                 // base_color_texture
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        self.base_color_texture
-                            .unwrap_or(&self.manager.default_texture),
+                        textures.view(base_color_texture.0).unwrap(),
                     ),
                 },
                 // base_color_sampler
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(
-                        self.base_color_sampler
-                            .unwrap_or(&self.manager.default_sampler),
+                        textures.sampler(base_color_texture.0).unwrap(),
                     ),
                 },
                 // metallic_roughness_texture
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(
-                        self.metallic_roughness_texture
-                            .unwrap_or(&self.manager.default_texture),
+                        textures.view(metallic_roughness_texture.0).unwrap(),
                     ),
                 },
                 // metallic_roughness_sampler
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(
-                        self.metallic_roughness_sampler
-                            .unwrap_or(&self.manager.default_sampler),
+                        textures.sampler(metallic_roughness_texture.0).unwrap(),
                     ),
                 },
                 // normal_texture
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(
-                        self.normal_texture.unwrap_or(&self.manager.default_texture),
+                        textures.view(normal_texture.0).unwrap(),
                     ),
                 },
                 // normal_sampler
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(
-                        self.normal_sampler.unwrap_or(&self.manager.default_sampler),
+                        textures.sampler(normal_texture.0).unwrap(),
                     ),
                 },
                 // occlusion_texture
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureView(
-                        self.occlusion_texture
-                            .unwrap_or(&self.manager.default_texture),
+                        textures.view(occlusion_texture.0).unwrap(),
                     ),
                 },
                 // occlusion_sampler
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: wgpu::BindingResource::Sampler(
-                        self.occlusion_sampler
-                            .unwrap_or(&self.manager.default_sampler),
+                        textures.sampler(occlusion_texture.0).unwrap(),
                     ),
                 },
                 // emissive_texture
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: wgpu::BindingResource::TextureView(
-                        self.emissive_texture
-                            .unwrap_or(&self.manager.default_texture),
+                        textures.view(emissive_texture.0).unwrap(),
                     ),
                 },
                 // emissive_sampler
                 wgpu::BindGroupEntry {
                     binding: 9,
                     resource: wgpu::BindingResource::Sampler(
-                        self.emissive_sampler
-                            .unwrap_or(&self.manager.default_sampler),
+                        textures.sampler(emissive_texture.0).unwrap(),
                     ),
                 },
                 // material uniform
                 wgpu::BindGroupEntry {
                     binding: 10,
-                    resource: material_uniform.as_entire_binding(),
+                    resource: uniform.as_entire_binding(),
                 },
             ],
         });
 
-        self.manager.materials.add(Material { bind_group })
+        self.materials.push(Material { bind_group })
     }
+}
+
+pub struct Material {
+    bind_group: wgpu::BindGroup,
 }
 
 #[repr(C)]

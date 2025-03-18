@@ -1,4 +1,7 @@
-use std::{iter::repeat_n, ops::{Deref, Index}};
+use std::{
+    iter::repeat_n,
+    ops::{Deref, Index},
+};
 
 use wgpu::util::DeviceExt;
 
@@ -67,7 +70,7 @@ impl BufferManager {
 
         let id = self.buffers.push(Buffer {
             buffer,
-            stride: buffer_view.stride(),
+            stride: buffer_view.stride().map(|value| value as u64),
         });
 
         match asset.buffer_view_mapping.get_mut(buffer_view.index()) {
@@ -97,7 +100,13 @@ impl Index<Id<Buffer>> for BufferManager {
 
 pub struct Buffer {
     buffer: wgpu::Buffer,
-    stride: Option<usize>,
+    stride: Option<u64>,
+}
+
+impl Buffer {
+    pub fn stride(&self) -> Option<u64> {
+        self.stride
+    }
 }
 
 impl Deref for Buffer {

@@ -4,7 +4,7 @@ use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
 use winit::window::Window;
 
-use crate::storm::{Controls, MeshManager, NodeId, OrbitControls, PerspectiveCamera, Scene, Storm};
+use crate::storm::{Controls, NodeId, OrbitControls, PerspectiveCamera, Scene, Storm};
 
 pub struct DisplaySettings {
     pub exposure: f32,
@@ -78,8 +78,15 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("engine::new command encoder"),
+        });
+
         let mut storm = Storm::new(&device);
-        let mut meshes = MeshManager::new(&device);
+        let asset = storm
+            .open_asset("assets/EnvironmentTest.gltf", &device, &queue, &mut encoder)
+            .unwrap();
+
         let mut scene = Scene::new();
 
         let camera = scene.create_node(None, Mat4::IDENTITY);

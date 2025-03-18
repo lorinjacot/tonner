@@ -1,50 +1,50 @@
 const pi: f32 = 3.14159;
-const tex_coord_count: u32 = 2;
-const prefiltered_environment_mipmap_count: u32 = 4;
+const tex_coord_count: u32 = 2u;
+const prefiltered_environment_mipmap_count: u32 = 4u;
 
 struct Transform {
-    @location(0) point_col_x: vec4f,
-    @location(1) point_col_y: vec4f,
-    @location(2) point_col_z: vec4f,
-    @location(3) point_col_w: vec4f,
-    @location(4) vector_col_x: vec3f,
-    @location(5) vector_col_y: vec3f,
-    @location(6) vector_col_z: vec3f,
+    @location(0) point_col_x: vec4<f32>,
+    @location(1) point_col_y: vec4<f32>,
+    @location(2) point_col_z: vec4<f32>,
+    @location(3) point_col_w: vec4<f32>,
+    @location(4) vector_col_x: vec3<f32>,
+    @location(5) vector_col_y: vec3<f32>,
+    @location(6) vector_col_z: vec3<f32>,
 }
 
 struct Attributes {
-    @location(7) position: vec3f,
-    @location(8) normal: vec3f,
-    @location(9) tangent: vec4f,
-    @location(10) tex_coord_0: vec2f,
-    @location(11) tex_coord_1: vec2f,
-    @location(12) color_0: vec4f,
+    @location(7) position: vec3<f32>,
+    @location(8) normal: vec3<f32>,
+    @location(9) tangent: vec4<f32>,
+    @location(10) tex_coord_0: vec2<f32>,
+    @location(11) tex_coord_1: vec2<f32>,
+    @location(12) color_0: vec4<f32>,
 }
 
 struct Camera {
-    view_projection: mat4x4f,
-    normal_view_projection: mat4x4f,
-    world_position: vec3f,
+    view_projection: mat4x4<f32>,
+    normal_view_projection: mat4x4<f32>,
+    world_position: vec3<f32>,
 }
 
 struct VertexOutput {
-    @builtin(position) position: vec4f,
-    @location(0) world_position: vec3f,
-    @location(1) normal: vec3f,
-    @location(2) tangent: vec3f,
-    @location(3) bitangent: vec3f,
-    @location(4) tex_coord_0: vec2f,
-    @location(5) tex_coord_1: vec2f,
-    @location(6) color_0: vec4f,
+    @builtin(position) position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) tangent: vec3<f32>,
+    @location(3) bitangent: vec3<f32>,
+    @location(4) tex_coord_0: vec2<f32>,
+    @location(5) tex_coord_1: vec2<f32>,
+    @location(6) color_0: vec4<f32>,
 }
 
 struct Light {
-    color: vec3f,
-    world_position: vec3f,
+    color: vec3<f32>,
+    world_position: vec3<f32>,
 }
 
 struct Material {
-    base_color_factor: vec4f,
+    base_color_factor: vec4<f32>,
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
@@ -53,7 +53,7 @@ struct Material {
     normal_tex_coord: u32,
     occlusion_strength: f32,
     occlusion_tex_coord: u32,
-    emissive_factor: vec3f,
+    emissive_factor: vec3<f32>,
     emissive_tex_coord: u32,
 }
 
@@ -85,14 +85,14 @@ fn vs_main(
     transform: Transform,
     attributes: Attributes
 ) -> VertexOutput {
-    let world_position = mat4x4f(
+    let world_position = mat4x4(
         transform.point_col_x,
         transform.point_col_y,
         transform.point_col_z,
         transform.point_col_w,
     ) * vec4f(attributes.position, 1.0);
 
-    let vector_transform = mat3x3f(
+    let vector_transform = mat3x3(
         transform.vector_col_x,
         transform.vector_col_y,
         transform.vector_col_z,
@@ -113,7 +113,7 @@ fn vs_main(
 @fragment
 fn fs_main(
     in: VertexOutput
-) -> @location(0) vec4f {
+) -> @location(0) vec4<f32> {
     var tex_coords = array(
         in.tex_coord_0,
         in.tex_coord_1,
@@ -136,8 +136,8 @@ fn fs_main(
             metallic_roughness_sampler,
             tex_coords[material.metallic_roughness_tex_coord],
         );
-        var roughness *= metallic_roughness.g;
-        var metalness *= metallic_roughness.b;
+        var roughness = roughness * metallic_roughness.g;
+        var metalness = metallic_roughness * metallic_roughness.b;
     }
 
     var normal: vec3f;
@@ -149,7 +149,7 @@ fn fs_main(
             tex_coords[material.normal_tex_coord],
         ).rgb * 2.0 - 1.0;
 
-        let transform = mat3x3f(in.tangent, in.bitangent, in.normal);
+        let transform = mat3x3(in.tangent, in.bitangent, in.normal);
         normal = (
             normalize(transform * normal)
             * vec3f(material.normal_scale, material.normal_scale, 1.0)
@@ -158,7 +158,7 @@ fn fs_main(
         normal = normalize(in.normal);
     }
 
-    let occlusion = 1.0;
+    var occlusion = 1.0;
     if material.occlusion_tex_coord < tex_coord_count {
         occlusion += material.occlusion_strength * (textureSample(
             occlusion_texture,
@@ -169,7 +169,7 @@ fn fs_main(
 
     var emissive = material.emissive_factor;
     if material.emissive_tex_coord < tex_coord_count {
-        emitted_l =* textureSample(
+        emissive = emissive * textureSample(
             emissive_texture,
             emissive_sampler,
             tex_coords[material.emissive_tex_coord]
@@ -238,18 +238,18 @@ fn fs_main(
     // return vec4f(pow(base_color.rgb, vec3f(2.2)), base_color.a);
 }
 
-/**
- * Lambertian BRDF = c / pi
- */
+///**
+// * Lambertian BRDF = c / pi
+// */
 fn diffuse_brdf(color: vec3f) -> vec3f {
     return color / pi;
 }
 
-/**
- * microfacet BRDF = GD / (4 |N.L| |N.V|)
- * G = Smith joint masking-shadowing function
- * D = Trowbridge-Reitz/GGX microfacet distribution
- */
+///**
+// * microfacet BRDF = GD / (4 |N.L| |N.V|)
+// * G = Smith joint masking-shadowing function
+// * D = Trowbridge-Reitz/GGX microfacet distribution
+// */
 fn specular_brdf(alpha_2: f32, normal: vec3f, halfway_dir: vec3f, light_dir: vec3f, view_dir: vec3f) -> f32 {
     let v = visibility(alpha_2, dot(normal, light_dir), dot(halfway_dir, light_dir))
             * visibility(alpha_2, dot(normal, view_dir), dot(halfway_dir, view_dir));
@@ -258,10 +258,10 @@ fn specular_brdf(alpha_2: f32, normal: vec3f, halfway_dir: vec3f, light_dir: vec
     return v * d;
 }
 
-/**
- * (Half) visibility function
- * visibility(R) = chi(H.R) / (|N.R| + sqrt(alpha^2 + (1 - alpha^2)(N.R)^2))
- */
+///**
+// * (Half) visibility function
+// * visibility(R) = chi(H.R) / (|N.R| + sqrt(alpha^2 + (1 - alpha^2)(N.R)^2))
+// */
 fn visibility(alpha_2: f32, n_dot_r: f32, h_dot_r: f32) -> f32 {
     if h_dot_r <= 0.0 {
         return 0.0;
@@ -272,10 +272,10 @@ fn visibility(alpha_2: f32, n_dot_r: f32, h_dot_r: f32) -> f32 {
     ));
 }
 
-/**
- * Trowbridge-Reitz/GGX microfacet distribution
- * D = (alpha^2 chi(N.H)) / (pi((N.H)^2(alpha^2 - 1) + 1)^2)
- */
+///**
+// * Trowbridge-Reitz/GGX microfacet distribution
+// * D = (alpha^2 chi(N.H)) / (pi((N.H)^2(alpha^2 - 1) + 1)^2)
+// */
 fn distribution(alpha_2: f32, n_dot_h: f32) -> f32 {
     if n_dot_h <= 0.0 {
         return 0.0;
@@ -287,10 +287,10 @@ fn distribution(alpha_2: f32, n_dot_h: f32) -> f32 {
     return alpha_2 / denominator;
 }
 
-/**
- * Schlick Fresnel
- * F = f_0 + (1 - f_0)(1 - |V.H|)^5
- */
+///**
+// * Schlick Fresnel
+// * F = f_0 + (1 - f_0)(1 - |V.H|)^5
+// */
 fn fresnel(f0: vec3f, v_dot_h: f32) -> vec3f {
     return f0 + (vec3f(1.0) - f0) * pow(1.0 - abs(v_dot_h), 5.0);
 }

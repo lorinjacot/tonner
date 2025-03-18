@@ -28,11 +28,11 @@ impl TextureManager {
         }
     }
 
-    pub fn register_asset(&mut self, id: Id<Asset>, data: Vec<gltf::image::Data>) {
+    pub fn register_asset(&mut self, id: Id<Asset>, images: Vec<gltf::image::Data>) {
         self.assets.insert(
             id,
             AssetData {
-                data,
+                data: images,
                 texture_mapping: Vec::new(),
                 image_mapping: Vec::new(),
                 sampler_mapping: Vec::new(),

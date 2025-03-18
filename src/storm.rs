@@ -28,7 +28,7 @@ impl Storm {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let buffers = BufferManager::new();
-        let meshes = mesh::MeshManager::new();
+        let meshes = mesh::MeshManager::new(device);
 
         Self {
             assets: storage::SparseSet::new(),

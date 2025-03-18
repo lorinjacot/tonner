@@ -1,4 +1,4 @@
-use std::iter::repeat_n;
+use std::{iter::repeat_n, ops::{Deref, Index}};
 
 use wgpu::util::DeviceExt;
 
@@ -81,11 +81,31 @@ impl BufferManager {
 
         id
     }
+
+    pub fn get(&self, id: Id<Buffer>) -> Option<&Buffer> {
+        self.buffers.get(id)
+    }
+}
+
+impl Index<Id<Buffer>> for BufferManager {
+    type Output = Buffer;
+
+    fn index(&self, index: Id<Buffer>) -> &Self::Output {
+        &self.buffers[index]
+    }
 }
 
 pub struct Buffer {
     buffer: wgpu::Buffer,
     stride: Option<usize>,
+}
+
+impl Deref for Buffer {
+    type Target = wgpu::Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
 }
 
 struct AssetData {

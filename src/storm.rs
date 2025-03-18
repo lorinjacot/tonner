@@ -1,7 +1,7 @@
+mod buffer;
 mod camera;
 mod material;
-// mod mesh;
-mod buffer;
+mod mesh;
 mod mesh_old;
 mod scene;
 mod storage;
@@ -20,6 +20,7 @@ pub struct Storm {
     textures: TextureManager,
     materials: MaterialManager,
     buffers: BufferManager,
+    meshes: mesh::MeshManager,
 }
 
 impl Storm {
@@ -27,12 +28,14 @@ impl Storm {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let buffers = BufferManager::new();
+        let meshes = mesh::MeshManager::new();
 
         Self {
             assets: storage::SparseSet::new(),
             textures,
             materials,
             buffers,
+            meshes,
         }
     }
 }

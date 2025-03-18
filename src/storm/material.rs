@@ -1,4 +1,4 @@
-use std::iter::repeat_n;
+use std::iter::{once, repeat_n};
 
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
@@ -171,42 +171,23 @@ impl MaterialManager {
         &mut self,
         asset: Id<Asset>,
         material: gltf::Material,
-        images: &Vec<gltf::image::Data>,
         textures: &mut TextureManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Material> {
-        let index = match material.index() {
-            Some(index) => index,
-            None => {
-                let id = self.create_material(asset, material, images, textures, device, queue);
-                self.default_material = Some(id);
-                return id;
-            }
-        };
-        if let Some(Some(id)) = self.mappings.entry(asset).or_default().get(index) {
-            return *id;
+        match material.index() {
+            Some(index) => match self.mappings.entry(asset).or_default().get(index) {
+                Some(Some(id)) => *id,
+                _ => self.create_material(asset, material, textures, device, queue),
+            },
+            None => self.create_material(asset, material, textures, device, queue),
         }
-
-        let id = self.create_material(asset, material, images, textures, device, queue);
-
-        let mapping = &mut self.mappings[asset];
-        match mapping.get_mut(index) {
-            Some(entry) => *entry = Some(id),
-            None => {
-                let iter = repeat_n(None, index - mapping.len()).chain(Some(Some(id)));
-                mapping.extend(iter);
-            }
-        }
-
-        id
     }
 
     fn create_material(
         &mut self,
         asset: Id<Asset>,
         material: gltf::Material,
-        images: &Vec<gltf::image::Data>,
         textures: &mut TextureManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -219,7 +200,7 @@ impl MaterialManager {
             .map(|texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 (
-                    textures.load_texture(asset, texture.texture(), true, images, device, queue),
+                    textures.load_texture(asset, texture.texture(), true, device, queue),
                     texture.tex_coord(),
                 )
             })
@@ -231,7 +212,7 @@ impl MaterialManager {
             .map(|texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 (
-                    textures.load_texture(asset, texture.texture(), true, images, device, queue),
+                    textures.load_texture(asset, texture.texture(), true, device, queue),
                     texture.tex_coord(),
                 )
             })
@@ -242,7 +223,7 @@ impl MaterialManager {
             .map(|texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 (
-                    textures.load_texture(asset, texture.texture(), false, images, device, queue),
+                    textures.load_texture(asset, texture.texture(), false, device, queue),
                     texture.tex_coord(),
                     texture.scale(),
                 )
@@ -254,7 +235,7 @@ impl MaterialManager {
             .map(|texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 (
-                    textures.load_texture(asset, texture.texture(), false, images, device, queue),
+                    textures.load_texture(asset, texture.texture(), false, device, queue),
                     texture.tex_coord(),
                     texture.strength(),
                 )
@@ -266,7 +247,7 @@ impl MaterialManager {
             .map(|texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 (
-                    textures.load_texture(asset, texture.texture(), true, images, device, queue),
+                    textures.load_texture(asset, texture.texture(), true, device, queue),
                     texture.tex_coord(),
                 )
             })
@@ -373,7 +354,23 @@ impl MaterialManager {
             ],
         });
 
-        self.materials.push(Material { bind_group })
+        let id = self.materials.push(Material { bind_group });
+
+        match material.index() {
+            Some(index) => {
+                let mapping = &mut self.mappings[asset];
+                match mapping.get_mut(index) {
+                    Some(entry) => *entry = Some(id),
+                    None => {
+                        let iter = repeat_n(None, index - mapping.len()).chain(once(Some(id)));
+                        mapping.extend(iter);
+                    }
+                }
+            }
+            None => self.default_material = Some(id),
+        }
+
+        id
     }
 }
 

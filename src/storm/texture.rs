@@ -1,4 +1,4 @@
-use std::iter::repeat_n;
+use std::iter::{once, repeat_n};
 
 use wgpu::util::DeviceExt;
 
@@ -14,7 +14,7 @@ pub struct TextureManager {
     images: SparseSet<Image>,
     samplers: SparseSet<Sampler>,
     default_sampler: Option<Id<Sampler>>,
-    mappings: SparseMap<Asset, AssetMappings>,
+    assets: SparseMap<Asset, AssetData>,
 }
 
 impl TextureManager {
@@ -24,8 +24,20 @@ impl TextureManager {
             images: SparseSet::new(),
             samplers: SparseSet::new(),
             default_sampler: None,
-            mappings: SparseMap::new(),
+            assets: SparseMap::new(),
         }
+    }
+
+    pub fn register_asset(&mut self, id: Id<Asset>, data: Vec<gltf::image::Data>) {
+        self.assets.insert(
+            id,
+            AssetData {
+                data,
+                texture_mapping: Vec::new(),
+                image_mapping: Vec::new(),
+                sampler_mapping: Vec::new(),
+            },
+        );
     }
 
     pub fn create_view_sampler(
@@ -41,24 +53,32 @@ impl TextureManager {
         asset: Id<Asset>,
         texture: gltf::Texture,
         srgb: bool,
-        images: &Vec<gltf::image::Data>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Texture> {
-        let mapping = &mut self.mappings.entry(asset).or_default().textures;
-        if let Some(Some(id)) = mapping.get(texture.index()) {
-            return *id;
+        match self.assets[asset].texture_mapping.get(texture.index()) {
+            Some(Some(id)) => *id,
+            _ => self.create_texture(asset, texture, srgb, device, queue),
         }
+    }
 
-        let image = self.load_image(asset, texture.source(), srgb, images, device, queue);
+    fn create_texture(
+        &mut self,
+        asset: Id<Asset>,
+        texture: gltf::Texture,
+        srgb: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Id<Texture> {
+        let image = self.load_image(asset, texture.source(), srgb, device, queue);
         let sampler = self.load_sampler(asset, texture.sampler(), device);
         let id = self.textures.push(Texture(ImageSampler(image, sampler)));
 
-        let mapping = &mut self.mappings[asset].textures;
+        let mapping = &mut self.assets[asset].texture_mapping;
         match mapping.get_mut(texture.index()) {
             Some(entry) => *entry = Some(id),
             None => {
-                let iter = repeat_n(None, texture.index() - mapping.len()).chain(Some(Some(id)));
+                let iter = repeat_n(None, texture.index() - mapping.len()).chain(once(Some(id)));
                 mapping.extend(iter);
             }
         }
@@ -71,109 +91,31 @@ impl TextureManager {
         asset: Id<Asset>,
         image: gltf::Image,
         srgb: bool,
-        images: &Vec<gltf::image::Data>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Image> {
-        let mapping = &mut self.mappings.entry(asset).or_default().images;
-
-        match mapping.get_mut(image.index()) {
+        match self.assets[asset].image_mapping.get(image.index()) {
             Some(Some(id)) => *id,
-            Some(entry) => {
-                let id =
-                    self.images
-                        .create(image.name(), &images[image.index()], srgb, device, queue);
-                *entry = Some(id);
-                id
-            }
-            None => {
-                let id =
-                    self.images
-                        .create(image.name(), &images[image.index()], srgb, device, queue);
-                let iter = repeat_n(None, image.index() - mapping.len()).chain(Some(Some(id)));
-                mapping.extend(iter);
-                id
-            }
+            _ => self.create_image(asset, image, srgb, device, queue),
         }
     }
 
-    fn load_sampler(
+    fn create_image(
         &mut self,
         asset: Id<Asset>,
-        sampler: gltf::texture::Sampler,
-        device: &wgpu::Device,
-    ) -> Id<Sampler> {
-        let mapping = &mut self.mappings.entry(asset).or_default().samplers;
-
-        let index = match sampler.index() {
-            Some(index) => index,
-            None => match self.default_sampler {
-                Some(id) => return id,
-                None => {
-                    let id = self.samplers.create(sampler, device);
-                    self.default_sampler = Some(id);
-                    return id;
-                }
-            },
-        };
-
-        match mapping.get_mut(index) {
-            Some(Some(id)) => *id,
-            Some(entry) => {
-                let id = self.samplers.create(sampler, device);
-                *entry = Some(id);
-                id
-            }
-            None => {
-                let id = self.samplers.create(sampler, device);
-                let iter = repeat_n(None, index - mapping.len()).chain(Some(Some(id)));
-                mapping.extend(iter);
-                id
-            }
-        }
-    }
-
-    pub fn view(&self, id: Id<Texture>) -> Option<&wgpu::TextureView> {
-        self.textures.get(id).map(|texture| match &texture.0 {
-            ImageSampler(image, _) => &self.images[*image].view,
-            ViewSampler(view, _) => view,
-        })
-    }
-
-    pub fn sampler(&self, id: Id<Texture>) -> Option<&wgpu::Sampler> {
-        self.textures.get(id).map(|texture| match &texture.0 {
-            ImageSampler(_, sampler) => &self.samplers[*sampler].inner,
-            ViewSampler(_, sampler) => sampler,
-        })
-    }
-}
-
-pub struct Texture(TextureInner);
-
-enum TextureInner {
-    ImageSampler(Id<Image>, Id<Sampler>),
-    ViewSampler(wgpu::TextureView, wgpu::Sampler),
-}
-
-struct Image {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-}
-
-impl SparseSet<Image> {
-    fn create(
-        &mut self,
-        label: Option<&str>,
-        data: &gltf::image::Data,
+        image: gltf::Image,
         srgb: bool,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Image> {
+        let asset = &mut self.assets[asset];
+
+        let data = &asset.data[image.index()];
         let mut create = |format: wgpu::TextureFormat, bytes| {
             let texture = device.create_texture_with_data(
                 queue,
                 &wgpu::TextureDescriptor {
-                    label,
+                    label: Some(&format!("Image {}", image.name().unwrap_or(""))),
                     size: wgpu::Extent3d {
                         width: data.width,
                         height: data.height,
@@ -196,7 +138,18 @@ impl SparseSet<Image> {
 
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            self.push(Image { texture, view })
+            let id = self.images.push(Image { texture, view });
+
+            match asset.image_mapping.get_mut(image.index()) {
+                Some(entry) => *entry = Some(id),
+                None => {
+                    let iter = repeat_n(None, image.index() - asset.image_mapping.len())
+                        .chain(once(Some(id)));
+                    asset.image_mapping.extend(iter);
+                }
+            }
+
+            id
         };
 
         match data.format {
@@ -245,14 +198,28 @@ impl SparseSet<Image> {
             }
         }
     }
-}
 
-struct Sampler {
-    inner: wgpu::Sampler,
-}
+    fn load_sampler(
+        &mut self,
+        asset: Id<Asset>,
+        sampler: gltf::texture::Sampler,
+        device: &wgpu::Device,
+    ) -> Id<Sampler> {
+        match sampler.index() {
+            Some(index) => match self.assets[asset].sampler_mapping.get(index) {
+                Some(Some(id)) => *id,
+                _ => self.create_sampler(asset, sampler, device),
+            },
+            None => self.create_sampler(asset, sampler, device),
+        }
+    }
 
-impl SparseSet<Sampler> {
-    fn create(&mut self, sampler: gltf::texture::Sampler, device: &wgpu::Device) -> Id<Sampler> {
+    fn create_sampler(
+        &mut self,
+        asset: Id<Asset>,
+        sampler: gltf::texture::Sampler,
+        device: &wgpu::Device,
+    ) -> Id<Sampler> {
         use wgpu::FilterMode::*;
 
         let mag_filter = match sampler.mag_filter() {
@@ -269,31 +236,77 @@ impl SparseSet<Sampler> {
             Some(gltf::texture::MinFilter::LinearMipmapLinear) => (Linear, Linear),
             None => (wgpu::FilterMode::default(), wgpu::FilterMode::default()),
         };
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let inner = device.create_sampler(&wgpu::SamplerDescriptor {
             label: sampler.name(),
-            address_mode_u: Self::address_mode(sampler.wrap_s()),
-            address_mode_v: Self::address_mode(sampler.wrap_t()),
+            address_mode_u: address_mode(sampler.wrap_s()),
+            address_mode_v: address_mode(sampler.wrap_t()),
             mag_filter,
             min_filter,
             mipmap_filter,
             ..Default::default()
         });
 
-        self.push(Sampler { inner: sampler })
+        let id = self.samplers.push(Sampler { inner });
+
+        match sampler.index() {
+            Some(index) => {
+                let mapping = &mut self.assets[asset].sampler_mapping;
+                match mapping.get_mut(index) {
+                    Some(entry) => *entry = Some(id),
+                    None => {
+                        let iter = repeat_n(None, index - mapping.len()).chain(once(Some(id)));
+                        mapping.extend(iter);
+                    }
+                }
+            }
+            None => self.default_sampler = Some(id),
+        }
+
+        id
     }
 
-    fn address_mode(wrap: gltf::texture::WrappingMode) -> wgpu::AddressMode {
-        match wrap {
-            gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
-            gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
-            gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
-        }
+    pub fn view(&self, id: Id<Texture>) -> Option<&wgpu::TextureView> {
+        self.textures.get(id).map(|texture| match &texture.0 {
+            ImageSampler(image, _) => &self.images[*image].view,
+            ViewSampler(view, _) => view,
+        })
+    }
+
+    pub fn sampler(&self, id: Id<Texture>) -> Option<&wgpu::Sampler> {
+        self.textures.get(id).map(|texture| match &texture.0 {
+            ImageSampler(_, sampler) => &self.samplers[*sampler].inner,
+            ViewSampler(_, sampler) => sampler,
+        })
     }
 }
 
-#[derive(Default)]
-struct AssetMappings {
-    textures: Vec<Option<Id<Texture>>>,
-    images: Vec<Option<Id<Image>>>,
-    samplers: Vec<Option<Id<Sampler>>>,
+pub struct Texture(TextureInner);
+
+enum TextureInner {
+    ImageSampler(Id<Image>, Id<Sampler>),
+    ViewSampler(wgpu::TextureView, wgpu::Sampler),
+}
+
+struct Image {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+struct Sampler {
+    inner: wgpu::Sampler,
+}
+
+fn address_mode(wrap: gltf::texture::WrappingMode) -> wgpu::AddressMode {
+    match wrap {
+        gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+        gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+        gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+    }
+}
+
+struct AssetData {
+    data: Vec<gltf::image::Data>,
+    texture_mapping: Vec<Option<Id<Texture>>>,
+    image_mapping: Vec<Option<Id<Image>>>,
+    sampler_mapping: Vec<Option<Id<Sampler>>>,
 }

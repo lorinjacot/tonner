@@ -1,16 +1,17 @@
-mod asset;
 mod camera;
 mod material;
-mod mesh;
+// mod mesh;
+mod buffer;
+mod mesh_old;
 mod scene;
 mod storage;
 mod texture;
 mod texture_old;
 
-pub use asset::AssetManager;
+use buffer::BufferManager;
 pub use camera::{Controls, OrbitControls, PerspectiveCamera};
 use material::MaterialManager;
-pub use mesh::MeshManager;
+pub use mesh_old::MeshManager;
 pub use scene::{NodeId, Scene};
 use texture::TextureManager;
 
@@ -18,17 +19,20 @@ pub struct Storm {
     assets: storage::SparseSet<Asset>,
     textures: TextureManager,
     materials: MaterialManager,
+    buffers: BufferManager,
 }
 
 impl Storm {
     pub fn new(device: &wgpu::Device) -> Self {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
+        let buffers = BufferManager::new();
 
         Self {
             assets: storage::SparseSet::new(),
             textures,
             materials,
+            buffers,
         }
     }
 }

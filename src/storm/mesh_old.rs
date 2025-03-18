@@ -1,6 +1,8 @@
 use crate::storage::{Id, Storage};
 
-use super::material::MaterialId;
+use super::material::Material;
+
+type MaterialId = Id<Material>;
 
 pub struct MeshManager {
     meshes: Storage<Mesh>,

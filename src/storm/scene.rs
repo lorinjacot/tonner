@@ -4,7 +4,7 @@ use crate::storage::{Id, SecondaryStorage, Storage};
 
 use super::{
     camera::Camera,
-    mesh::{Mesh, MeshId},
+    mesh_old::{Mesh, MeshId},
 };
 
 pub struct Scene {

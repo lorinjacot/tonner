@@ -32,7 +32,7 @@ impl Storm {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let buffers = BufferManager::new();
-        let meshes = MeshManager::new(device);
+        let meshes = MeshManager::new(device, &materials);
 
         Self {
             assets,

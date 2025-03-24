@@ -1,3 +1,9 @@
+override has_base_color_texture: bool;
+override has_metallic_roughness_texture: bool;
+override has_normal_texture: bool;
+override has_occlusion_texture: bool;
+override has_emissive_texture: bool;
+
 const pi: f32 = 3.14159;
 const tex_coord_count: u32 = 2u;
 const prefiltered_environment_mipmap_count: u32 = 4u;
@@ -59,26 +65,26 @@ struct Material {
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 
-@group(1) @binding(0) var<uniform> light: Light;
+// @group(1) @binding(0) var<uniform> light: Light;
 
-@group(2) @binding(0) var base_color_texture: texture_2d<f32>;
-@group(2) @binding(1) var base_color_sampler: sampler;
-@group(2) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
-@group(2) @binding(3) var metallic_roughness_sampler: sampler;
-@group(2) @binding(4) var normal_texture: texture_2d<f32>;
-@group(2) @binding(5) var normal_sampler: sampler;
-@group(2) @binding(6) var occlusion_texture: texture_2d<f32>;
-@group(2) @binding(7) var occlusion_sampler: sampler;
-@group(2) @binding(8) var emissive_texture: texture_2d<f32>;
-@group(2) @binding(9) var emissive_sampler: sampler;
-@group(2) @binding(10) var<uniform> material: Material;
+@group(1) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(1) @binding(1) var base_color_sampler: sampler;
+@group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
+@group(1) @binding(3) var metallic_roughness_sampler: sampler;
+@group(1) @binding(4) var normal_texture: texture_2d<f32>;
+@group(1) @binding(5) var normal_sampler: sampler;
+@group(1) @binding(6) var occlusion_texture: texture_2d<f32>;
+@group(1) @binding(7) var occlusion_sampler: sampler;
+@group(1) @binding(8) var emissive_texture: texture_2d<f32>;
+@group(1) @binding(9) var emissive_sampler: sampler;
+@group(1) @binding(10) var<uniform> material: Material;
 
-@group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
-@group(3) @binding(1) var irradiance_map_sampler: sampler;
-@group(3) @binding(2) var prefiltered_environment_map_texture: texture_cube<f32>;
-@group(3) @binding(3) var prefiltered_environment_map_sampler: sampler;
-@group(3) @binding(4) var brdf_integration_map_texture: texture_2d<f32>;
-@group(3) @binding(5) var brdf_integration_map_sampler: sampler;
+// @group(3) @binding(0) var irradiance_map_texture: texture_cube<f32>;
+// @group(3) @binding(1) var irradiance_map_sampler: sampler;
+// @group(3) @binding(2) var prefiltered_environment_map_texture: texture_cube<f32>;
+// @group(3) @binding(3) var prefiltered_environment_map_sampler: sampler;
+// @group(3) @binding(4) var brdf_integration_map_texture: texture_2d<f32>;
+// @group(3) @binding(5) var brdf_integration_map_sampler: sampler;
 
 @vertex
 fn vs_main(
@@ -120,7 +126,7 @@ fn fs_main(
     );
 
     var base_color = material.base_color_factor * in.color_0;
-    if material.base_color_tex_coord < tex_coord_count {
+    if has_base_color_texture {
         base_color *= textureSample(
             base_color_texture,
             base_color_sampler,
@@ -130,7 +136,7 @@ fn fs_main(
 
     var roughness = material.roughness_factor;
     var metalness = material.metallic_factor;
-    if material.metallic_roughness_tex_coord < tex_coord_count {
+    if has_metallic_roughness_texture {
         let metallic_roughness = textureSample(
             metallic_roughness_texture,
             metallic_roughness_sampler,
@@ -141,7 +147,7 @@ fn fs_main(
     }
 
     var normal: vec3f;
-    if material.normal_tex_coord < tex_coord_count {
+    if has_normal_texture {
         // use tangent space normal texture
         normal = textureSample(
             normal_texture,
@@ -159,7 +165,7 @@ fn fs_main(
     }
 
     var occlusion = 1.0;
-    if material.occlusion_tex_coord < tex_coord_count {
+    if has_normal_texture {
         occlusion += material.occlusion_strength * (textureSample(
             occlusion_texture,
             occlusion_sampler,
@@ -168,7 +174,7 @@ fn fs_main(
     }
 
     var emissive = material.emissive_factor;
-    if material.emissive_tex_coord < tex_coord_count {
+    if has_emissive_texture {
         emissive = emissive * textureSample(
             emissive_texture,
             emissive_sampler,
@@ -185,29 +191,30 @@ fn fs_main(
     let view_dir = normalize(camera.world_position - in.world_position);
 
     // image based lighting (IBL)
-    let n_dot_v = max(dot(normal, view_dir), 0.0);
-    let f = fresnel_roughness(f0, n_dot_v, roughness);
+    // let n_dot_v = max(dot(normal, view_dir), 0.0);
+    // let f = fresnel_roughness(f0, n_dot_v, roughness);
     
-    let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
-    let diffuse = (1.0 - f) * irradiance * base_color.rgb;
+    // let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
+    // let diffuse = (1.0 - f) * irradiance * base_color.rgb;
 
-    let reflection_vec = reflect(-view_dir, normal);
-    let prefiltered_color = textureSampleLevel(
-        prefiltered_environment_map_texture,
-        prefiltered_environment_map_sampler,
-        reflection_vec,
-        roughness * f32(prefiltered_environment_mipmap_count),
-    ).rgb;
+    // let reflection_vec = reflect(-view_dir, normal);
+    // let prefiltered_color = textureSampleLevel(
+    //     prefiltered_environment_map_texture,
+    //     prefiltered_environment_map_sampler,
+    //     reflection_vec,
+    //     roughness * f32(prefiltered_environment_mipmap_count),
+    // ).rgb;
 
-    let environment_brdf = textureSample(
-        brdf_integration_map_texture,
-        brdf_integration_map_sampler,
-        vec2f(n_dot_v, roughness),
-    ).rg;
+    // let environment_brdf = textureSample(
+    //     brdf_integration_map_texture,
+    //     brdf_integration_map_sampler,
+    //     vec2f(n_dot_v, roughness),
+    // ).rg;
 
-    let specular = prefiltered_color * (f * environment_brdf.x + environment_brdf.y);
+    // let specular = prefiltered_color * (f * environment_brdf.x + environment_brdf.y);
 
-    let ambient = (diffuse + specular) * occlusion;
+    // let ambient = (diffuse + specular) * occlusion;
+    let ambient = vec3(1.0);
 
     // L_r: reflected radiance
     var reflected_l = ambient;

@@ -13,9 +13,6 @@ use super::{
     Asset,
 };
 
-const ATTRIBUTES_STRIDE: u64 = 72;
-const WORKGROUP_SIZE: u32 = 64;
-
 const POSITION_LOCATION: u32 = 7;
 const NORMAL_LOCATION: u32 = 8;
 const TANGENT_LOCATION: u32 = 9;
@@ -32,14 +29,30 @@ pub struct MeshManager {
 }
 
 impl MeshManager {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, materials: &MaterialManager) -> Self {
         let meshes = SparseSet::new();
         let assets = SparseMap::new();
 
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Primitive pipeline layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&camera_bind_group_layout, materials.bind_group_layout()],
             push_constant_ranges: &[],
         });
         let pipelines = SparseSet::new();
@@ -86,119 +99,65 @@ impl MeshManager {
         for primitive in mesh.primitives() {
             if let Some(positions) = primitive.get(&Positions) {
                 let attributes_count = positions.count() as u64;
+                let usage = wgpu::BufferUsages::VERTEX;
                 let mut attributes_buffers: SparseMap<Buffer, Vec<wgpu::VertexAttribute>> =
                     SparseMap::new();
 
-                // POSITION
-                let id = buffers.load_buffer_view(
-                    asset,
-                    positions.view().expect("sparse accessor not supported"),
-                    wgpu::BufferUsages::VERTEX,
-                    device,
-                );
-                let attribute = wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: positions.offset() as u64,
-                    shader_location: POSITION_LOCATION,
-                };
-                attributes_buffers.entry(id).or_default().push(attribute);
-
-                // NORMAL
-                let id = buffers.load_buffer_view(
-                    asset,
-                    primitive
-                        .get(&Normals)
-                        .expect("primive NORMAL required")
-                        .view()
-                        .expect("sparse accessor not supported"),
-                    wgpu::BufferUsages::VERTEX,
-                    device,
-                );
-                let attribute = wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: positions.offset() as u64,
-                    shader_location: NORMAL_LOCATION,
-                };
-                attributes_buffers.entry(id).or_default().push(attribute);
-
-                // TANGENT
-                let id = buffers.load_buffer_view(
-                    asset,
-                    primitive
-                        .get(&Normals)
-                        .expect("primive TANGENT required")
-                        .view()
-                        .expect("sparse accessor not supported"),
-                    wgpu::BufferUsages::VERTEX,
-                    device,
-                );
-                let attribute = wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: positions.offset() as u64,
-                    shader_location: TANGENT_LOCATION,
-                };
-                attributes_buffers.entry(id).or_default().push(attribute);
-
-                // TEXCOORD_0
-                let id = buffers.load_buffer_view(
-                    asset,
-                    primitive
-                        .get(&Normals)
-                        .expect("primive TEXCOORD_0 required")
-                        .view()
-                        .expect("sparse accessor not supported"),
-                    wgpu::BufferUsages::VERTEX,
-                    device,
-                );
-                let attribute = wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: positions.offset() as u64,
-                    shader_location: TEX_COORD_0_LOCATION,
-                };
-                attributes_buffers.entry(id).or_default().push(attribute);
-
-                // TEXCOORD_1
-                let id = buffers.load_buffer_view(
-                    asset,
-                    primitive
-                        .get(&Normals)
-                        .expect("primive TEXCOORD_1 required")
-                        .view()
-                        .expect("sparse accessor not supported"),
-                    wgpu::BufferUsages::VERTEX,
-                    device,
-                );
-                let attribute = wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: positions.offset() as u64,
-                    shader_location: TEX_COORD_1_LOCATION,
-                };
-                attributes_buffers.entry(id).or_default().push(attribute);
-
-                // COLOR_0
-                let id = buffers.load_buffer_view(
-                    asset,
-                    primitive
-                        .get(&Normals)
-                        .expect("primive COLOR_0 required")
-                        .view()
-                        .expect("sparse accessor not supported"),
-                    wgpu::BufferUsages::VERTEX,
-                    device,
-                );
-                let attribute = wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: positions.offset() as u64,
-                    shader_location: COLOR_0_LOCATION,
-                };
-                attributes_buffers.entry(id).or_default().push(attribute);
+                {
+                    let id = buffers.load_accessor(asset, positions, usage, device);
+                    let position = &buffers[id];
+                    attributes_buffers
+                        .entry(position.buffer())
+                        .or_default()
+                        .push(position.vertex_attribute_layout(POSITION_LOCATION));
+                }
+                primitive.get(&Normals).map(|accessor| {
+                    let id = buffers.load_accessor(asset, accessor, usage, device);
+                    let normal = &buffers[id];
+                    attributes_buffers
+                        .entry(normal.buffer())
+                        .or_default()
+                        .push(normal.vertex_attribute_layout(NORMAL_LOCATION));
+                });
+                primitive.get(&Tangents).map(|accessor| {
+                    let id = buffers.load_accessor(asset, accessor, usage, device);
+                    let tangent = &buffers[id];
+                    attributes_buffers
+                        .entry(tangent.buffer())
+                        .or_default()
+                        .push(tangent.vertex_attribute_layout(TANGENT_LOCATION));
+                });
+                primitive.get(&TexCoords(0)).map(|accessor| {
+                    let id = buffers.load_accessor(asset, accessor, usage, device);
+                    let tex_coord = &buffers[id];
+                    attributes_buffers
+                        .entry(tex_coord.buffer())
+                        .or_default()
+                        .push(tex_coord.vertex_attribute_layout(TEX_COORD_0_LOCATION));
+                });
+                primitive.get(&TexCoords(1)).map(|accessor| {
+                    let id = buffers.load_accessor(asset, accessor, usage, device);
+                    let tex_coord = &buffers[id];
+                    attributes_buffers
+                        .entry(tex_coord.buffer())
+                        .or_default()
+                        .push(tex_coord.vertex_attribute_layout(TEX_COORD_1_LOCATION));
+                });
+                primitive.get(&Colors(0)).map(|accessor| {
+                    let id = buffers.load_accessor(asset, accessor, usage, device);
+                    let color = &buffers[id];
+                    attributes_buffers
+                        .entry(color.buffer())
+                        .or_default()
+                        .push(color.vertex_attribute_layout(COLOR_0_LOCATION));
+                });
 
                 let (vertex_buffers, vertex_layouts): (Vec<_>, Vec<_>) = attributes_buffers
                     .into_iter()
                     .map(|(id, attributes)| {
                         let buffer = &buffers[id];
                         let layout = VertexBufferLayout {
-                            array_stride: buffer.stride().unwrap_or(attributes[0].format.size()),
+                            array_stride: buffer.stride(),
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes,
                         };
@@ -268,22 +227,17 @@ impl MeshManager {
                     primitive
                         .indices()
                         .map_or((None, attributes_count), |indices| {
-                            let id = buffers.load_buffer_view(
+                            let indices_count = indices.count() as u64;
+                            let id = buffers.load_accessor(
                                 asset,
-                                indices.view().expect("Sparse accessor not supported"),
+                                indices,
                                 wgpu::BufferUsages::INDEX,
                                 device,
                             );
-                            let vertex_count = indices.count() as u64;
-                            let indices = Some((
-                                buffers[id].clone(),
-                                match indices.data_type() {
-                                    gltf::accessor::DataType::U16 => wgpu::IndexFormat::Uint16,
-                                    gltf::accessor::DataType::U32 => wgpu::IndexFormat::Uint32,
-                                    _ => unimplemented!("unsupported index format"),
-                                },
-                            ));
-                            (indices, vertex_count)
+                            let accessor = &buffers[id];
+                            let indices =
+                                Some((buffers[accessor.buffer()].clone(), accessor.index_format()));
+                            (indices, indices_count)
                         });
 
                 let material =

@@ -31,8 +31,8 @@ impl Storm {
         let assets = SparseSet::new();
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
-        let buffers = BufferManager::new();
-        let meshes = MeshManager::new(&materials, device);
+        let mut buffers = BufferManager::new();
+        let meshes = MeshManager::new(&materials, &mut buffers, device);
 
         Self {
             assets,

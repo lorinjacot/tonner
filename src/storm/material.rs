@@ -410,6 +410,10 @@ pub struct Material {
 }
 
 impl Material {
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+
     pub fn flags(&self) -> MaterialFlags {
         self.flags
     }

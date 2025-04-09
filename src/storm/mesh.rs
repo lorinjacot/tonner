@@ -37,11 +37,15 @@ pub struct MeshManager {
     shader_module: wgpu::ShaderModule,
     pipelines: SparseSet<PrimitivePipeline>,
     pipeline_layout: wgpu::PipelineLayout,
-    dummy_vertex_buffer: wgpu::Buffer,
+    dummy_vertex_buffer: Id<Buffer>,
 }
 
 impl MeshManager {
-    pub fn new(materials: &MaterialManager, device: &wgpu::Device) -> Self {
+    pub fn new(
+        materials: &MaterialManager,
+        buffers: &mut BufferManager,
+        device: &wgpu::Device,
+    ) -> Self {
         let meshes = SparseSet::new();
         let assets = SparseMap::new();
 
@@ -71,11 +75,12 @@ impl MeshManager {
         let pipelines = SparseSet::new();
 
         let dummy_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Dummy primitive attribute buffer"),
+            label: Some("Dummy vertex buffer"),
             size: 16,
             usage: wgpu::BufferUsages::VERTEX,
             mapped_at_creation: false,
         });
+        let dummy_vertex_buffer = buffers.create_buffer(dummy_vertex_buffer, 0);
 
         MeshManager {
             meshes,
@@ -132,62 +137,60 @@ impl MeshManager {
                         .or_default()
                         .push(position.vertex_attribute_layout(POSITION_LOCATION));
                 }
-                primitive.get(&Normals).map(|accessor| {
-                    let id = buffers.load_accessor(asset, accessor, usage, device);
-                    let normal = &buffers[id];
-                    attributes_buffers
-                        .entry(normal.buffer())
-                        .or_default()
-                        .push(normal.vertex_attribute_layout(NORMAL_LOCATION));
-                });
-                let has_tangent = primitive
-                    .get(&Tangents)
-                    .map(|accessor| {
+                primitive.get(&Normals).map_or_else(
+                    || todo!("generate normals"),
+                    |accessor| {
                         let id = buffers.load_accessor(asset, accessor, usage, device);
-                        let tangent = &buffers[id];
+                        let normal = &buffers[id];
                         attributes_buffers
-                            .entry(tangent.buffer())
+                            .entry(normal.buffer())
                             .or_default()
-                            .push(tangent.vertex_attribute_layout(TANGENT_LOCATION));
-                        1.0
-                    })
-                    .unwrap_or(0.0);
-                let has_tex_coord_0 = primitive
-                    .get(&TexCoords(0))
-                    .map(|accessor| {
-                        let id = buffers.load_accessor(asset, accessor, usage, device);
-                        let tex_coord = &buffers[id];
-                        attributes_buffers
-                            .entry(tex_coord.buffer())
-                            .or_default()
-                            .push(tex_coord.vertex_attribute_layout(TEX_COORD_0_LOCATION));
-                        1.0
-                    })
-                    .unwrap_or(0.0);
-                let has_tex_coord_1 = primitive
-                    .get(&TexCoords(1))
-                    .map(|accessor| {
-                        let id = buffers.load_accessor(asset, accessor, usage, device);
-                        let tex_coord = &buffers[id];
-                        attributes_buffers
-                            .entry(tex_coord.buffer())
-                            .or_default()
-                            .push(tex_coord.vertex_attribute_layout(TEX_COORD_1_LOCATION));
-                        1.0
-                    })
-                    .unwrap_or(0.0);
-                let has_color_0 = primitive
-                    .get(&Colors(0))
-                    .map(|accessor| {
-                        let id = buffers.load_accessor(asset, accessor, usage, device);
-                        let color = &buffers[id];
-                        attributes_buffers
-                            .entry(color.buffer())
-                            .or_default()
-                            .push(color.vertex_attribute_layout(COLOR_0_LOCATION));
-                        1.0
-                    })
-                    .unwrap_or(0.0);
+                            .push(normal.vertex_attribute_layout(NORMAL_LOCATION));
+                    },
+                );
+
+                let mut init_attribute = |semantic, shader_location: u32, default_format| {
+                    let (has, buffer, layout) = primitive.get(&semantic).map_or_else(
+                        || {
+                            (
+                                0.0,
+                                self.dummy_vertex_buffer,
+                                wgpu::VertexAttribute {
+                                    format: default_format,
+                                    offset: 0,
+                                    shader_location,
+                                },
+                            )
+                        },
+                        |accessor| {
+                            let id = buffers.load_accessor(asset, accessor, usage, device);
+                            let tangent = &buffers[id];
+                            (
+                                1.0,
+                                tangent.buffer(),
+                                tangent.vertex_attribute_layout(shader_location),
+                            )
+                        },
+                    );
+                    attributes_buffers.entry(buffer).or_default().push(layout);
+                    has
+                };
+
+                let has_tangent =
+                    init_attribute(Tangents, TANGENT_LOCATION, wgpu::VertexFormat::Float32x4);
+
+                let has_tex_coord_0 = init_attribute(
+                    TexCoords(0),
+                    TEX_COORD_0_LOCATION,
+                    wgpu::VertexFormat::Float32x2,
+                );
+                let has_tex_coord_1 = init_attribute(
+                    TexCoords(1),
+                    TEX_COORD_1_LOCATION,
+                    wgpu::VertexFormat::Float32x2,
+                );
+                let has_color_0 =
+                    init_attribute(Colors(0), COLOR_0_LOCATION, wgpu::VertexFormat::Float32x4);
 
                 let (vertex_buffers, vertex_layouts): (Vec<_>, Vec<_>) = attributes_buffers
                     .into_iter()
@@ -204,7 +207,8 @@ impl MeshManager {
 
                 let material_id =
                     materials.load_material(asset, primitive.material(), textures, device, queue);
-                let material_flags = materials[material_id].flags();
+                let material = &materials[material_id];
+                let material_flags = material.flags();
 
                 let pipeline = self.pipelines.iter().find_map(|(id, pipeline)| {
                     if vertex_layouts == pipeline.vertex_layouts
@@ -230,50 +234,6 @@ impl MeshManager {
                                 attributes: &layout.attributes,
                             }),
                     );
-                    if has_tangent == 0.0 {
-                        buffers.push(wgpu::VertexBufferLayout {
-                            array_stride: 0,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &[wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 0,
-                                shader_location: TANGENT_LOCATION,
-                            }],
-                        });
-                    }
-                    if has_tex_coord_0 == 0.0 {
-                        buffers.push(wgpu::VertexBufferLayout {
-                            array_stride: 0,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &[wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
-                                shader_location: TEX_COORD_0_LOCATION,
-                            }],
-                        });
-                    }
-                    if has_tex_coord_1 == 0.0 {
-                        buffers.push(wgpu::VertexBufferLayout {
-                            array_stride: 0,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &[wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 0,
-                                shader_location: TEX_COORD_1_LOCATION,
-                            }],
-                        });
-                    }
-                    if has_color_0 == 0.0 {
-                        buffers.push(wgpu::VertexBufferLayout {
-                            array_stride: 0,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &[wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x4,
-                                offset: 0,
-                                shader_location: COLOR_0_LOCATION,
-                            }],
-                        });
-                    }
 
                     let mut constants = HashMap::with_capacity(5);
                     constants.insert("has_tangent".to_string(), has_tangent);
@@ -347,9 +307,9 @@ impl MeshManager {
                 primitives.push(Primitive {
                     indices,
                     vertex_buffers,
-                    pipeline,
+                    pipeline: self.pipelines[pipeline].pipeline.clone(),
                     vertex_count,
-                    material: material_id,
+                    material: material.bind_group().clone(),
                 });
             }
         }
@@ -377,8 +337,8 @@ struct Primitive {
     indices: Option<(wgpu::Buffer, wgpu::IndexFormat)>,
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_count: u64,
-    pipeline: Id<PrimitivePipeline>,
-    material: Id<Material>,
+    pipeline: wgpu::RenderPipeline,
+    material: wgpu::BindGroup,
 }
 
 struct PrimitivePipeline {

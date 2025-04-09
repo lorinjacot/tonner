@@ -36,6 +36,10 @@ impl BufferManager {
         );
     }
 
+    pub fn create_buffer(&mut self, buffer: wgpu::Buffer, stride: u64) -> Id<Buffer> {
+        self.buffers.push(Buffer { buffer, stride })
+    }
+
     pub fn load_buffer_view(
         &mut self,
         asset: Id<Asset>,

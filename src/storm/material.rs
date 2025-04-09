@@ -1,6 +1,7 @@
 use std::{
-    collections::BTreeMap,
+    collections::HashMap,
     iter::{once, repeat_n},
+    ops::Index,
 };
 
 use bitflags::bitflags;
@@ -9,7 +10,7 @@ use wgpu::util::DeviceExt;
 
 use super::{
     storage::{Id, SparseMap, SparseSet},
-    texture::TextureManager,
+    texture::{Texture, TextureManager},
     Asset,
 };
 
@@ -22,9 +23,15 @@ const OCCLUSION_TEXTURE_BINDING: u32 = 6;
 const EMISSIVE_TEXTURE_BINDING: u32 = 8;
 const UNIFORM_BINDING: u32 = 10;
 
+const BASE_COLOR_TEXTURE_OVERRIDE: &str = "has_base_color_texture";
+const METALLIC_ROUGHNESS_TEXTURE_OVERRIDE: &str = "has_metallic_roughness_texture";
+const NORMAL_TEXTURE_OVERRIDE: &str = "has_normal_texture";
+const OCCLUSION_TEXTURE_OVERRIDE: &str = "has_occlusion_texture";
+const EMISSIVE_TEXTURE_OVERRIDE: &str = "has_emissive_texture";
+
 bitflags! {
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-    struct MaterialFlags: u32 {
+    pub struct MaterialFlags: u32 {
         const BASE_COLOR_TEXTURE = 0b00000001;
         const METALLIC_ROUGHNESS_TEXTURE = 0b00000010;
         const NORMAL_TEXTURE = 0b00000100;
@@ -33,23 +40,180 @@ bitflags! {
     }
 }
 
+impl MaterialFlags {
+    pub fn insert_constants(&self, constants: &mut HashMap<String, f64>) {
+        constants.insert(
+            BASE_COLOR_TEXTURE_OVERRIDE.to_string(),
+            self.contains(MaterialFlags::BASE_COLOR_TEXTURE) as u64 as f64,
+        );
+        constants.insert(
+            METALLIC_ROUGHNESS_TEXTURE_OVERRIDE.to_string(),
+            self.contains(MaterialFlags::METALLIC_ROUGHNESS_TEXTURE) as u64 as f64,
+        );
+        constants.insert(
+            NORMAL_TEXTURE_OVERRIDE.to_string(),
+            self.contains(MaterialFlags::NORMAL_TEXTURE) as u64 as f64,
+        );
+        constants.insert(
+            OCCLUSION_TEXTURE_OVERRIDE.to_string(),
+            self.contains(MaterialFlags::OCCLUSION_TEXTURE) as u64 as f64,
+        );
+        constants.insert(
+            EMISSIVE_TEXTURE_OVERRIDE.to_string(),
+            self.contains(MaterialFlags::EMISSIVE_TEXTURE) as u64 as f64,
+        );
+    }
+}
+
 pub struct MaterialManager {
     materials: SparseSet<Material>,
-    bind_group_layouts: BTreeMap<MaterialFlags, wgpu::BindGroupLayout>,
+    bind_group_layout: wgpu::BindGroupLayout,
     default_material: Option<Id<Material>>,
     mappings: SparseMap<Asset, Vec<Option<Id<Material>>>>,
+    dummy_texture: Id<Texture>,
 }
 
 impl MaterialManager {
-    pub fn new() -> Self {
+    pub fn new(textures: &mut TextureManager, device: &wgpu::Device) -> Self {
         let materials = SparseSet::new();
-        let bind_group_layouts = BTreeMap::new();
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Material bind group layout"),
+            entries: &[
+                // base_color_texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // base_color_sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // metallic_roughness_texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // metallic_roughness_sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // normal_texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // normal_sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // occlusion_texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // occlusion_sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // emissive_texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // emissive_sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // material uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let dummy_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Material dummy texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let dummy_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Material dummy sampler"),
+            ..Default::default()
+        });
+
+        let dummy_texture = textures.create_view_sampler(dummy_view, dummy_sampler);
 
         Self {
             materials,
-            bind_group_layouts,
+            bind_group_layout,
             default_material: None,
             mappings: SparseMap::new(),
+            dummy_texture,
         }
     }
 
@@ -81,74 +245,82 @@ impl MaterialManager {
         let label = format!("Material {}", material.name().unwrap_or(""));
 
         let mut flags = MaterialFlags::empty();
-        let mut entries = Vec::new();
+        const TEXTURE_COUNT: usize = 5;
+        let mut entries = Vec::with_capacity(TEXTURE_COUNT);
 
-        let base_color_tex_coord = material
+        let (base_color_tex_coord, id) = material
             .pbr_metallic_roughness()
             .base_color_texture()
-            .map(|texture| {
-                assert!(texture.tex_coord() < TEX_COORD_COUNT);
-                flags.insert(MaterialFlags::BASE_COLOR_TEXTURE);
-                entries.push((
-                    BASE_COLOR_TEXTURE_BINDING,
-                    textures.load_texture(asset, texture.texture(), true, device, queue),
-                ));
-                texture.tex_coord()
-            })
-            .unwrap_or(0);
+            .map_or_else(
+                || (0, self.dummy_texture),
+                |texture| {
+                    assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                    flags.insert(MaterialFlags::BASE_COLOR_TEXTURE);
+                    (
+                        texture.tex_coord(),
+                        textures.load_texture(asset, texture.texture(), true, device, queue),
+                    )
+                },
+            );
+        entries.push(id);
 
-        let metallic_roughness_tex_coord = material
+        let (metallic_roughness_tex_coord, id) = material
             .pbr_metallic_roughness()
             .metallic_roughness_texture()
-            .map(|texture| {
-                assert!(texture.tex_coord() < TEX_COORD_COUNT);
-                flags.insert(MaterialFlags::METALLIC_ROUGHNESS_TEXTURE);
-                entries.push((
-                    METALLIC_ROUGHNESS_TEXTURE_BINDING,
-                    textures.load_texture(asset, texture.texture(), true, device, queue),
-                ));
-                texture.tex_coord()
-            })
-            .unwrap_or(0);
+            .map_or_else(
+                || (0, self.dummy_texture),
+                |texture| {
+                    assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                    flags.insert(MaterialFlags::METALLIC_ROUGHNESS_TEXTURE);
+                    (
+                        texture.tex_coord(),
+                        textures.load_texture(asset, texture.texture(), true, device, queue),
+                    )
+                },
+            );
+        entries.push(id);
 
-        let (normal_tex_coord, normal_texture_scale) = material
-            .normal_texture()
-            .map(|texture| {
+        let (normal_texture_scale, normal_tex_coord, id) = material.normal_texture().map_or_else(
+            || (1.0, 0, self.dummy_texture),
+            |texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 flags.insert(MaterialFlags::NORMAL_TEXTURE);
-                entries.push((
-                    NORMAL_TEXTURE_BINDING,
+                (
+                    texture.scale(),
+                    texture.tex_coord(),
                     textures.load_texture(asset, texture.texture(), false, device, queue),
-                ));
-                (texture.tex_coord(), texture.scale())
-            })
-            .unwrap_or((0, 1.0));
+                )
+            },
+        );
+        entries.push(id);
 
-        let (occlusion_tex_coord, occlusion_texture_strength) = material
-            .occlusion_texture()
-            .map(|texture| {
-                assert!(texture.tex_coord() < TEX_COORD_COUNT);
-                flags.insert(MaterialFlags::OCCLUSION_TEXTURE);
-                entries.push((
-                    OCCLUSION_TEXTURE_BINDING,
-                    textures.load_texture(asset, texture.texture(), false, device, queue),
-                ));
-                (texture.tex_coord(), texture.strength())
-            })
-            .unwrap_or((0, 1.0));
+        let (occlusion_texture_strength, occlusion_tex_coord, id) =
+            material.occlusion_texture().map_or_else(
+                || (1.0, 0, self.dummy_texture),
+                |texture| {
+                    assert!(texture.tex_coord() < TEX_COORD_COUNT);
+                    flags.insert(MaterialFlags::OCCLUSION_TEXTURE);
+                    (
+                        texture.strength(),
+                        texture.tex_coord(),
+                        textures.load_texture(asset, texture.texture(), false, device, queue),
+                    )
+                },
+            );
+        entries.push(id);
 
-        let emissive_tex_coord = material
-            .emissive_texture()
-            .map(|texture| {
+        let (emissive_tex_coord, id) = material.emissive_texture().map_or_else(
+            || (0, self.dummy_texture),
+            |texture| {
                 assert!(texture.tex_coord() < TEX_COORD_COUNT);
                 flags.insert(MaterialFlags::EMISSIVE_TEXTURE);
-                entries.push((
-                    EMISSIVE_TEXTURE_BINDING,
+                (
+                    texture.tex_coord(),
                     textures.load_texture(asset, texture.texture(), true, device, queue),
-                ));
-                texture.tex_coord()
-            })
-            .unwrap_or(0);
+                )
+            },
+        );
+        entries.push(id);
 
         let uniform = MaterialUniform {
             base_color_factor: material.pbr_metallic_roughness().base_color_factor(),
@@ -169,61 +341,21 @@ impl MaterialManager {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let layout = self.bind_group_layouts.entry(flags).or_insert_with(|| {
-            let entries: Vec<_> = flags
-                .iter()
-                .flat_map(|entry| {
-                    let binding = match entry {
-                        MaterialFlags::BASE_COLOR_TEXTURE => BASE_COLOR_TEXTURE_BINDING,
-                        MaterialFlags::METALLIC_ROUGHNESS_TEXTURE => {
-                            METALLIC_ROUGHNESS_TEXTURE_BINDING
-                        }
-                        MaterialFlags::NORMAL_TEXTURE => NORMAL_TEXTURE_BINDING,
-                        MaterialFlags::OCCLUSION_TEXTURE => OCCLUSION_TEXTURE_BINDING,
-                        MaterialFlags::EMISSIVE_TEXTURE => EMISSIVE_TEXTURE_BINDING,
-                        _ => unreachable!(),
-                    };
-                    [
-                        wgpu::BindGroupLayoutEntry {
-                            binding,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: binding + 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                    ]
-                })
-                .collect();
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some(&format!("{flags:?} material bind group layout")),
-                entries: &entries,
-            })
-        });
-
         let entries: Vec<_> = entries
             .iter()
-            .copied()
-            .flat_map(|(binding, texture)| {
+            .enumerate()
+            .flat_map(|(i, texture)| {
                 [
                     wgpu::BindGroupEntry {
-                        binding,
+                        binding: i as u32 * 2,
                         resource: wgpu::BindingResource::TextureView(
-                            textures.view(texture).unwrap(),
+                            textures.view(*texture).unwrap(),
                         ),
                     },
                     wgpu::BindGroupEntry {
-                        binding: binding + 1,
+                        binding: i as u32 * 2 + 1,
                         resource: wgpu::BindingResource::Sampler(
-                            textures.sampler(texture).unwrap(),
+                            textures.sampler(*texture).unwrap(),
                         ),
                     },
                 ]
@@ -236,7 +368,7 @@ impl MaterialManager {
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{label} bind group")),
-            layout: &layout,
+            layout: &self.bind_group_layout,
             entries: &entries,
         });
 
@@ -259,15 +391,28 @@ impl MaterialManager {
         id
     }
 
-    pub fn bind_group_layout(&self, material: Id<Material>) -> Option<&wgpu::BindGroupLayout> {
-        self.bind_group_layouts
-            .get(&self.materials.get(material)?.flags)
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
+}
+
+impl Index<Id<Material>> for MaterialManager {
+    type Output = Material;
+
+    fn index(&self, index: Id<Material>) -> &Self::Output {
+        &self.materials[index]
     }
 }
 
 pub struct Material {
     bind_group: wgpu::BindGroup,
     flags: MaterialFlags,
+}
+
+impl Material {
+    pub fn flags(&self) -> MaterialFlags {
+        self.flags
+    }
 }
 
 #[repr(C)]

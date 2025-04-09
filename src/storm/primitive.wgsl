@@ -1,3 +1,8 @@
+override has_tangent: bool;
+override has_tex_coord_0: bool;
+override has_tex_coord_1: bool;
+override has_color_0: bool;
+
 override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 override has_normal_texture: bool;
@@ -108,11 +113,19 @@ fn vs_main(
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
     result.normal = vector_transform * attributes.normal;
-    result.tangent = vector_transform * attributes.tangent.xyz;
-    result.bitangent = cross(result.normal, result.tangent) * attributes.tangent.w;
-    result.tex_coord_0 = attributes.tex_coord_0;
-    result.tex_coord_1 = attributes.tex_coord_1;
-    result.color_0 = attributes.color_0;
+    if has_tangent {
+        result.tangent = vector_transform * attributes.tangent.xyz;
+        result.bitangent = cross(result.normal, result.tangent) * attributes.tangent.w;
+    }
+    if has_tex_coord_0 {
+        result.tex_coord_0 = attributes.tex_coord_0;
+    }
+    if has_tex_coord_1 {
+        result.tex_coord_1 = attributes.tex_coord_1;
+    }
+    if has_color_0 {
+        result.color_0 = attributes.color_0;
+    }
     return result;
 }
 

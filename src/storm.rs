@@ -29,10 +29,10 @@ pub struct Storm {
 impl Storm {
     pub fn new(device: &wgpu::Device) -> Self {
         let assets = SparseSet::new();
-        let textures = TextureManager::new();
-        let materials = MaterialManager::new();
+        let mut textures = TextureManager::new();
+        let materials = MaterialManager::new(&mut textures, device);
         let buffers = BufferManager::new();
-        let meshes = MeshManager::new(device, &materials);
+        let meshes = MeshManager::new(&materials, device);
 
         Self {
             assets,

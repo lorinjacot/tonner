@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.94"
+bitflags = "2.9.0"
 bytemuck = { version = "1.20.0", features = ["derive"] }
 egui = "0.31.0"
 egui-wgpu = "0.31.0"

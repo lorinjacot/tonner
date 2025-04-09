@@ -24,7 +24,6 @@ pub struct MeshManager {
     meshes: SparseSet<Mesh>,
     assets: SparseMap<Asset, Vec<Option<Id<Mesh>>>>,
     shader_module: wgpu::ShaderModule,
-    pipeline_layout: wgpu::PipelineLayout,
     pipelines: SparseSet<PrimitivePipeline>,
 }
 
@@ -50,18 +49,12 @@ impl MeshManager {
                 }],
             });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Primitive pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, materials.bind_group_layout()],
-            push_constant_ranges: &[],
-        });
         let pipelines = SparseSet::new();
 
         MeshManager {
             meshes,
             assets,
             shader_module,
-            pipeline_layout,
             pipelines,
         }
     }
@@ -183,7 +176,7 @@ impl MeshManager {
                         let pipeline =
                             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                                 label: Some("Primitive render pipeline"),
-                                layout: Some(&self.pipeline_layout),
+                                layout: None,
                                 vertex: wgpu::VertexState {
                                     module: &self.shader_module,
                                     entry_point: Some("vs_main"),

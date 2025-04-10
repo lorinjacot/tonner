@@ -25,6 +25,7 @@ pub struct Engine {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    storm: Storm,
     last_frame: Instant,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -78,9 +79,9 @@ impl Engine {
             label: Some("engine::new command encoder"),
         });
 
-        let mut storm = Storm::new(&device);
-        let asset = storm
-            .open_asset("assets/EnvironmentTest.gltf", &device, &queue, &mut encoder)
+        let mut storm = Storm::new(swapchain_format, &device);
+        let _asset = storm
+            .load_asset("assets/EnvironmentTest.gltf", &device, &queue, &mut encoder)
             .unwrap();
 
         let egui_ctx = egui::Context::default();
@@ -260,6 +261,7 @@ impl Engine {
             queue,
             surface,
             config,
+            storm,
             last_frame,
             egui_state,
             egui_renderer,
@@ -493,7 +495,7 @@ impl Engine {
                 occlusion_query_set: None,
             });
 
-            // self.scene.render(self.camera, &mut render_pass);
+            self.storm.render(&self.device, &mut render_pass);
 
             self.egui_renderer.render(
                 &mut render_pass.forget_lifetime(),

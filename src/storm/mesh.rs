@@ -37,6 +37,7 @@ pub struct MeshManager {
     shader_module: wgpu::ShaderModule,
     pipelines: SparseSet<PrimitivePipeline>,
     pipeline_layout: wgpu::PipelineLayout,
+    render_format: wgpu::TextureFormat,
     dummy_vertex_buffer: Id<Buffer>,
 }
 
@@ -44,6 +45,7 @@ impl MeshManager {
     pub fn new(
         materials: &MaterialManager,
         buffers: &mut BufferManager,
+        render_format: wgpu::TextureFormat,
         device: &wgpu::Device,
     ) -> Self {
         let meshes = SparseSet::new();
@@ -88,6 +90,7 @@ impl MeshManager {
             shader_module,
             pipelines,
             pipeline_layout,
+            render_format,
             dummy_vertex_buffer,
         }
     }
@@ -274,7 +277,7 @@ impl MeshManager {
                             module: &self.shader_module,
                             entry_point: Some("fs_main"),
                             compilation_options,
-                            targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
+                            targets: &[Some(self.render_format.into())],
                         }),
                         multiview: None,
                         cache: None,

@@ -13,7 +13,7 @@ use std::path::Path;
 use buffer::BufferManager;
 use material::MaterialManager;
 use mesh::MeshManager;
-use scene::SceneManager;
+use scene::{Scene, SceneManager};
 use storage::{Id, SparseSet};
 use texture::TextureManager;
 
@@ -24,15 +24,16 @@ pub struct Storm {
     buffers: BufferManager,
     meshes: MeshManager,
     scenes: SceneManager,
+    active_scene: Option<Id<Scene>>,
 }
 
 impl Storm {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(render_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
         let assets = SparseSet::new();
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
-        let meshes = MeshManager::new(&materials, &mut buffers, device);
+        let meshes = MeshManager::new(&materials, &mut buffers, render_format, device);
         let scenes = SceneManager::new();
 
         Self {
@@ -42,10 +43,11 @@ impl Storm {
             buffers,
             meshes,
             scenes,
+            active_scene: None,
         }
     }
 
-    pub fn open_asset(
+    pub fn load_asset(
         &mut self,
         path: impl AsRef<Path>,
         device: &wgpu::Device,
@@ -58,32 +60,69 @@ impl Storm {
         self.buffers.register_asset(id, buffers);
         self.textures.register_asset(id, images);
 
-        // for mesh in self.assets[id].document.meshes() {
-        //     self.meshes.load_mesh(
-        //         id,
-        //         mesh,
-        //         &mut self.buffers,
-        //         &mut self.textures,
-        //         &mut self.materials,
-        //         device,
-        //         queue,
-        //     );
-        // }
+        let document = &self.assets[id].document;
+        for scene in document.scenes() {
+            self.scenes.load_scene(
+                id,
+                scene,
+                &mut self.buffers,
+                &mut self.textures,
+                &mut self.materials,
+                &mut self.meshes,
+                device,
+                queue,
+            );
+        }
 
-        let scene = self.assets[id].document.scenes().next().unwrap();
-
-        let _id = self.scenes.create_scene(
-            id,
-            scene,
-            &mut self.buffers,
-            &mut self.textures,
-            &mut self.materials,
-            &mut self.meshes,
-            device,
-            queue,
-        );
+        self.active_scene = document.default_scene().map(|scene| {
+            self.scenes.load_scene(
+                id,
+                scene,
+                &mut self.buffers,
+                &mut self.textures,
+                &mut self.materials,
+                &mut self.meshes,
+                device,
+                queue,
+            )
+        });
 
         Ok(id)
+    }
+
+    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
+        let camera = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Camera uniform buffer"),
+            size: 144,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let camera = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Camera uniform bind group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera.as_entire_binding(),
+            }],
+        });
+        if let Some(scene) = self.active_scene {
+            self.scenes[scene].render(&camera, device, render_pass);
+        }
     }
 }
 

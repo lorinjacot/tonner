@@ -1,6 +1,11 @@
-use std::ops::Range;
+use std::{
+    iter::{once, repeat_n},
+    ops::{Index, Range},
+};
 
-use glam::Mat4;
+use bytemuck::{cast_slice, Pod, Zeroable};
+use glam::{Mat3, Mat4};
+use wgpu::util::DeviceExt;
 
 use super::{
     buffer::BufferManager,
@@ -13,16 +18,37 @@ use super::{
 
 pub struct SceneManager {
     scenes: SparseSet<Scene>,
+    assets: SparseMap<Asset, Vec<Option<Id<Scene>>>>,
 }
 
 impl SceneManager {
     pub fn new() -> Self {
         let scenes = SparseSet::new();
+        let assets = SparseMap::new();
 
-        SceneManager { scenes }
+        SceneManager { scenes, assets }
     }
 
-    pub fn create_scene(
+    pub fn load_scene(
+        &mut self,
+        asset: Id<Asset>,
+        scene: gltf::Scene,
+        buffers: &mut BufferManager,
+        textures: &mut TextureManager,
+        materials: &mut MaterialManager,
+        meshes: &mut MeshManager,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Id<Scene> {
+        match self.assets.entry(asset).or_default().get(scene.index()) {
+            Some(Some(id)) => *id,
+            _ => self.create_scene(
+                asset, scene, buffers, textures, materials, meshes, device, queue,
+            ),
+        }
+    }
+
+    fn create_scene(
         &mut self,
         asset: Id<Asset>,
         gltf_scene: gltf::Scene,
@@ -54,7 +80,18 @@ impl SceneManager {
             );
         }
 
-        self.scenes.push(scene)
+        let id = self.scenes.push(scene);
+
+        let mapping = &mut self.assets[asset];
+        match mapping.get_mut(gltf_scene.index()) {
+            Some(entry) => *entry = Some(id),
+            None => {
+                let iter = repeat_n(None, gltf_scene.index() - mapping.len()).chain(once(Some(id)));
+                mapping.extend(iter);
+            }
+        }
+
+        id
     }
 }
 
@@ -166,32 +203,74 @@ pub struct Scene {
     >,
 }
 
-// impl Scene {
-//     pub fn render(&self, render_pass: &mut wgpu::RenderPass) {
-//         for (pipeline, nodes_primitives) in &self.primitives {
-//             render_pass.set_pipeline(pipeline);
-//             for (_, primitive, nodes) in nodes_primitives {
-//                 render_pass.set_bind_group(1, &primitive.material, &[]);
-//                 for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
-//                     render_pass.set_vertex_buffer(slot as u32, vertex_buffer.slice(..));
-//                 }
+impl Scene {
+    pub fn render(
+        &self,
+        camera: &wgpu::BindGroup,
+        device: &wgpu::Device,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
+        for (pipeline, by_mesh) in self.primitives.values() {
+            render_pass.set_pipeline(pipeline);
+            render_pass.set_bind_group(0, camera, &[]);
+            for (primitives, nodes) in by_mesh.values() {
+                let node_count = nodes.len() as u32;
+                let transforms: Vec<_> = nodes
+                    .iter()
+                    .map(|node| {
+                        let transform = self.nodes[*node].global_transform;
+                        Transform {
+                            point: transform.to_cols_array(),
+                            vector: Mat3::from_mat4(transform.inverse().transpose())
+                                .to_cols_array(),
+                        }
+                    })
+                    .collect();
+                let transforms = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Node transforms vertex buffer"),
+                    contents: cast_slice(&transforms),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                render_pass.set_vertex_buffer(0, transforms.slice(..));
 
-//                 let node_count = nodes.len() as u32;
-//                 match &primitive.indices {
-//                     Some(indices) => {
-//                         render_pass.set_index_buffer(indices.0.slice(indices.1.clone()), indices.2);
-//                         render_pass.draw_indexed(0..primitive.vertex_count, 0, 0..node_count);
-//                     }
-//                     None => render_pass.draw(0..primitive.vertex_count, 0..node_count),
-//                 }
-//             }
-//         }
-//     }
-// }
+                for primitive in primitives {
+                    render_pass.set_bind_group(1, &primitive.material, &[]);
+                    for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
+                        render_pass.set_vertex_buffer(slot as u32 + 1, vertex_buffer.slice(..));
+                    }
+
+                    match &primitive.indices {
+                        Some(indices) => {
+                            render_pass
+                                .set_index_buffer(indices.0.slice(indices.1.clone()), indices.2);
+                            render_pass.draw_indexed(0..primitive.vertex_count, 0, 0..node_count);
+                        }
+                        None => render_pass.draw(0..primitive.vertex_count, 0..node_count),
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Index<Id<Scene>> for SceneManager {
+    type Output = Scene;
+
+    fn index(&self, index: Id<Scene>) -> &Self::Output {
+        &self.scenes[index]
+    }
+}
 
 pub struct Node {
     local_transform: Mat4,
     global_transform: Mat4,
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct Transform {
+    point: [f32; 16],
+    vector: [f32; 9],
 }

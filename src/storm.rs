@@ -11,10 +11,9 @@ mod texture_old;
 use std::path::Path;
 
 use buffer::BufferManager;
-pub use camera::{Controls, OrbitControls, PerspectiveCamera};
 use material::MaterialManager;
 use mesh::MeshManager;
-pub use scene::{NodeId, Scene};
+use scene::SceneManager;
 use storage::{Id, SparseSet};
 use texture::TextureManager;
 
@@ -24,6 +23,7 @@ pub struct Storm {
     materials: MaterialManager,
     buffers: BufferManager,
     meshes: MeshManager,
+    scenes: SceneManager,
 }
 
 impl Storm {
@@ -33,6 +33,7 @@ impl Storm {
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
         let meshes = MeshManager::new(&materials, &mut buffers, device);
+        let scenes = SceneManager::new();
 
         Self {
             assets,
@@ -40,6 +41,7 @@ impl Storm {
             materials,
             buffers,
             meshes,
+            scenes,
         }
     }
 
@@ -56,17 +58,30 @@ impl Storm {
         self.buffers.register_asset(id, buffers);
         self.textures.register_asset(id, images);
 
-        for mesh in self.assets[id].document.meshes() {
-            self.meshes.load_mesh(
-                id,
-                mesh,
-                &mut self.buffers,
-                &mut self.textures,
-                &mut self.materials,
-                device,
-                queue,
-            );
-        }
+        // for mesh in self.assets[id].document.meshes() {
+        //     self.meshes.load_mesh(
+        //         id,
+        //         mesh,
+        //         &mut self.buffers,
+        //         &mut self.textures,
+        //         &mut self.materials,
+        //         device,
+        //         queue,
+        //     );
+        // }
+
+        let scene = self.assets[id].document.scenes().next().unwrap();
+
+        let _id = self.scenes.create_scene(
+            id,
+            scene,
+            &mut self.buffers,
+            &mut self.textures,
+            &mut self.materials,
+            &mut self.meshes,
+            device,
+            queue,
+        );
 
         Ok(id)
     }

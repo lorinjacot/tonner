@@ -237,6 +237,15 @@ pub enum Entry<'a, K, V: 'a> {
     Vacant(VacantEntry<'a, K, V>),
 }
 
+impl<'a, K, V> Entry<'a, K, V> {
+    pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'a mut V {
+        match self {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(default()),
+        }
+    }
+}
+
 impl<'a, K, V: Default> Entry<'a, K, V> {
     pub fn or_default(self) -> &'a mut V {
         match self {

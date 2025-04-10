@@ -1,6 +1,6 @@
 use std::{
     iter::{once, repeat_n},
-    ops::{Deref, Index},
+    ops::{Deref, Index, Range},
 };
 
 use wgpu::util::DeviceExt;
@@ -131,9 +131,12 @@ impl BufferManager {
             device,
         );
 
+        let start = accessor.offset() as u64;
+        let end = start + accessor.count() as u64 * accessor.size() as u64;
         let id = self.accessors.push(Accessor {
             buffer,
-            offset: accessor.offset() as u64,
+            start,
+            end,
             data_type: accessor.data_type(),
             normalized: accessor.normalized(),
             dimensions: accessor.dimensions(),
@@ -189,7 +192,8 @@ impl Deref for Buffer {
 
 pub struct Accessor {
     buffer: Id<Buffer>,
-    offset: u64,
+    start: u64,
+    end: u64,
     data_type: gltf::accessor::DataType,
     normalized: bool,
     dimensions: gltf::accessor::Dimensions,
@@ -249,7 +253,7 @@ impl Accessor {
 
         wgpu::VertexAttribute {
             format,
-            offset: self.offset,
+            offset: self.start,
             shader_location,
         }
     }
@@ -260,6 +264,10 @@ impl Accessor {
             gltf::accessor::DataType::U32 => wgpu::IndexFormat::Uint32,
             _ => panic!("unsupported index format"),
         }
+    }
+
+    pub fn bounds(&self) -> Range<u64> {
+        self.start..self.end
     }
 }
 

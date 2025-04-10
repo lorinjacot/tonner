@@ -1,10 +1,9 @@
-use glam::Mat4;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
 use winit::window::Window;
 
-use crate::storm::{Controls, NodeId, OrbitControls, PerspectiveCamera, Scene, Storm};
+use crate::storm::Storm;
 
 pub struct DisplaySettings {
     pub exposure: f32,
@@ -27,9 +26,6 @@ pub struct Engine {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     last_frame: Instant,
-    scene: Scene,
-    camera: NodeId,
-    controls: OrbitControls,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
 }
@@ -86,20 +82,6 @@ impl Engine {
         let asset = storm
             .open_asset("assets/EnvironmentTest.gltf", &device, &queue, &mut encoder)
             .unwrap();
-
-        let mut scene = Scene::new();
-
-        let camera = scene.create_node(None, Mat4::IDENTITY);
-        scene.add_camera(
-            PerspectiveCamera::new(
-                f32::to_radians(45.0),
-                size.width as f32 / size.height as f32,
-                0.1,
-                100.0,
-            ),
-            camera,
-        );
-        let controls = OrbitControls::new();
 
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
@@ -279,9 +261,6 @@ impl Engine {
             surface,
             config,
             last_frame,
-            scene,
-            camera,
-            controls,
             egui_state,
             egui_renderer,
         }
@@ -310,17 +289,17 @@ impl Engine {
                 self.resize(new_size);
                 true
             }
-            WindowEvent::KeyboardInput { event, .. } => self.controls.keyboard_input(event),
-            WindowEvent::MouseInput { state, button, .. } => {
-                self.controls.mouse_input(state, button)
-            }
+            // WindowEvent::KeyboardInput { event, .. } => self.controls.keyboard_input(event),
+            // WindowEvent::MouseInput { state, button, .. } => {
+            //     self.controls.mouse_input(state, button)
+            // }
             _ => false,
         }
     }
 
     pub fn device_event(&mut self, event: &DeviceEvent) -> bool {
         match event {
-            DeviceEvent::MouseMotion { delta } => self.controls.mouse_motion(delta),
+            // DeviceEvent::MouseMotion { delta } => self.controls.mouse_motion(delta),
             _ => false,
         }
     }
@@ -398,11 +377,11 @@ impl Engine {
         // handle inputs
         let new_input = self.egui_state.take_egui_input(&self.window);
 
-        let camera = self.scene.camera_mut(self.camera).unwrap();
-        self.controls.update(delta_time, camera.0, camera.1);
+        // let camera = self.scene.camera_mut(self.camera).unwrap();
+        // self.controls.update(delta_time, camera.0, camera.1);
 
         // updates engine components
-        self.scene.update();
+        // self.scene.update();
 
         let full_output = self.egui_state.egui_ctx().run(new_input, |ctx| {
             // egui::SidePanel::left("display_panel").show(ctx, |ui| {
@@ -514,7 +493,7 @@ impl Engine {
                 occlusion_query_set: None,
             });
 
-            self.scene.render(self.camera, &mut render_pass);
+            // self.scene.render(self.camera, &mut render_pass);
 
             self.egui_renderer.render(
                 &mut render_pass.forget_lifetime(),

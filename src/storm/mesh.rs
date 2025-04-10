@@ -1,13 +1,13 @@
 use std::{
     collections::HashMap,
     iter::{once, repeat_n},
-    ops::Deref,
+    ops::{Deref, Index},
 };
 
 use crate::storm::buffer::Buffer;
 
 use super::{
-    buffer::BufferManager,
+    buffer::{Accessor, BufferManager},
     material::{Material, MaterialFlags, MaterialManager},
     storage::{Id, SparseMap, SparseSet},
     texture::TextureManager,
@@ -120,11 +120,11 @@ impl MeshManager {
     ) -> Id<Mesh> {
         use gltf::mesh::Semantic::*;
 
-        let mut primitives = Vec::with_capacity(mesh.primitives().len());
+        let mut primitives: SparseMap<PrimitivePipeline, Vec<Primitive>> = SparseMap::new();
 
         for primitive in mesh.primitives() {
             if let Some(positions) = primitive.get(&Positions) {
-                let attributes_count = positions.count() as u64;
+                let attributes_count = positions.count() as u32;
                 let usage = wgpu::BufferUsages::VERTEX;
                 let mut attributes_buffers: SparseMap<Buffer, Vec<wgpu::VertexAttribute>> =
                     SparseMap::new();
@@ -201,14 +201,13 @@ impl MeshManager {
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes,
                         };
-                        (buffer.deref().clone(), layout)
+                        (id, layout)
                     })
                     .unzip();
 
-                let material_id =
+                let material =
                     materials.load_material(asset, primitive.material(), textures, device, queue);
-                let material = &materials[material_id];
-                let material_flags = material.flags();
+                let material_flags = materials[material].flags();
 
                 let pipeline = self.pipelines.iter().find_map(|(id, pipeline)| {
                     if vertex_layouts == pipeline.vertex_layouts
@@ -291,7 +290,7 @@ impl MeshManager {
                     primitive
                         .indices()
                         .map_or((None, attributes_count), |indices| {
-                            let indices_count = indices.count() as u64;
+                            let indices_count = indices.count() as u32;
                             let id = buffers.load_accessor(
                                 asset,
                                 indices,
@@ -299,17 +298,15 @@ impl MeshManager {
                                 device,
                             );
                             let accessor = &buffers[id];
-                            let indices =
-                                Some((buffers[accessor.buffer()].clone(), accessor.index_format()));
+                            let indices = Some((id, accessor.index_format()));
                             (indices, indices_count)
                         });
 
-                primitives.push(Primitive {
+                primitives.entry(pipeline).or_default().push(Primitive {
                     indices,
                     vertex_buffers,
-                    pipeline: self.pipelines[pipeline].pipeline.clone(),
                     vertex_count,
-                    material: material.bind_group().clone(),
+                    material,
                 });
             }
         }
@@ -329,19 +326,34 @@ impl MeshManager {
     }
 }
 
+impl Index<Id<Mesh>> for MeshManager {
+    type Output = Mesh;
+
+    fn index(&self, index: Id<Mesh>) -> &Self::Output {
+        &self.meshes[index]
+    }
+}
+
+impl Index<Id<PrimitivePipeline>> for MeshManager {
+    type Output = wgpu::RenderPipeline;
+
+    fn index(&self, index: Id<PrimitivePipeline>) -> &Self::Output {
+        &self.pipelines[index].pipeline
+    }
+}
+
 pub struct Mesh {
-    primitives: Vec<Primitive>,
+    pub primitives: SparseMap<PrimitivePipeline, Vec<Primitive>>,
 }
 
-struct Primitive {
-    indices: Option<(wgpu::Buffer, wgpu::IndexFormat)>,
-    vertex_buffers: Vec<wgpu::Buffer>,
-    vertex_count: u64,
-    pipeline: wgpu::RenderPipeline,
-    material: wgpu::BindGroup,
+pub struct Primitive {
+    pub indices: Option<(Id<Accessor>, wgpu::IndexFormat)>,
+    pub vertex_buffers: Vec<Id<Buffer>>,
+    pub vertex_count: u32,
+    pub material: Id<Material>,
 }
 
-struct PrimitivePipeline {
+pub struct PrimitivePipeline {
     pipeline: wgpu::RenderPipeline,
     vertex_layouts: Vec<VertexBufferLayout>,
     material_flags: MaterialFlags,

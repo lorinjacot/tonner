@@ -81,7 +81,7 @@ impl Engine {
 
         let mut storm = Storm::new(swapchain_format, &device);
         let _asset = storm
-            .load_asset("assets/EnvironmentTest.gltf", &device, &queue, &mut encoder)
+            .load_asset("assets/Cameras.gltf", &device, &queue, &mut encoder)
             .unwrap();
 
         let egui_ctx = egui::Context::default();

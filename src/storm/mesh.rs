@@ -1,13 +1,20 @@
 use std::{
+    cmp::Ordering::*,
     collections::HashMap,
-    iter::{once, repeat_n},
-    ops::{Deref, Index},
+    iter::{once, repeat_n, repeat_with, zip},
+    ops::Index,
 };
+
+use bitflags::bitflags;
+use bytemuck::{cast_slice, Pod, Zeroable};
+use glam::Vec3;
+use wgpu::util::DeviceExt;
 
 use crate::storm::buffer::Buffer;
 
 use super::{
     buffer::{Accessor, BufferManager},
+    camera::CameraManager,
     material::{Material, MaterialFlags, MaterialManager},
     storage::{Id, SparseMap, SparseSet},
     texture::TextureManager,
@@ -45,6 +52,7 @@ impl MeshManager {
     pub fn new(
         materials: &MaterialManager,
         buffers: &mut BufferManager,
+        cameras: &CameraManager,
         render_format: wgpu::TextureFormat,
         device: &wgpu::Device,
     ) -> Self {
@@ -53,24 +61,9 @@ impl MeshManager {
 
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Camera bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
-
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Primitive pipeline layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, materials.bind_group_layout()],
+            bind_group_layouts: &[cameras.bind_group_layout(), materials.bind_group_layout()],
             push_constant_ranges: &[],
         });
 
@@ -132,81 +125,230 @@ impl MeshManager {
                 let mut attributes_buffers: SparseMap<Buffer, Vec<wgpu::VertexAttribute>> =
                     SparseMap::new();
 
-                {
-                    let id = buffers.load_accessor(asset, positions, usage, device);
-                    let position = &buffers[id];
-                    attributes_buffers
-                        .entry(position.buffer())
-                        .or_default()
-                        .push(position.vertex_attribute_layout(POSITION_LOCATION));
-                }
-                primitive.get(&Normals).map_or_else(
-                    || todo!("generate normals"),
-                    |accessor| {
-                        let id = buffers.load_accessor(asset, accessor, usage, device);
-                        let normal = &buffers[id];
-                        attributes_buffers
-                            .entry(normal.buffer())
-                            .or_default()
-                            .push(normal.vertex_attribute_layout(NORMAL_LOCATION));
-                    },
-                );
+                let (vertex_buffers, vertex_layouts, primitive_flats, indices, vertex_count): (
+                    Vec<_>,
+                    Vec<_>,
+                    PrimitiveFlags,
+                    Option<(Id<Accessor>, wgpu::IndexFormat)>,
+                    u32,
+                ) = match primitive.get(&Normals) {
+                    Some(normals) => {
+                        {
+                            let id = buffers.load_accessor(asset, positions, usage, device);
+                            let position = &buffers[id];
+                            attributes_buffers
+                                .entry(position.buffer())
+                                .or_default()
+                                .push(position.vertex_attribute_layout(POSITION_LOCATION));
+                        }
 
-                let mut init_attribute = |semantic, shader_location: u32, default_format| {
-                    let (has, buffer, layout) = primitive.get(&semantic).map_or_else(
-                        || {
-                            (
-                                0.0,
-                                self.dummy_vertex_buffer,
-                                wgpu::VertexAttribute {
-                                    format: default_format,
-                                    offset: 0,
-                                    shader_location,
-                                },
-                            )
-                        },
-                        |accessor| {
-                            let id = buffers.load_accessor(asset, accessor, usage, device);
-                            let tangent = &buffers[id];
-                            (
-                                1.0,
-                                tangent.buffer(),
-                                tangent.vertex_attribute_layout(shader_location),
-                            )
-                        },
-                    );
-                    attributes_buffers.entry(buffer).or_default().push(layout);
-                    has
-                };
+                        {
+                            let id = buffers.load_accessor(asset, normals, usage, device);
+                            let normal = &buffers[id];
+                            attributes_buffers
+                                .entry(normal.buffer())
+                                .or_default()
+                                .push(normal.vertex_attribute_layout(NORMAL_LOCATION));
+                        }
 
-                let has_tangent =
-                    init_attribute(Tangents, TANGENT_LOCATION, wgpu::VertexFormat::Float32x4);
+                        let mut flags = PrimitiveFlags::empty();
+                        let mut init_attribute =
+                            |semantic: gltf::Semantic,
+                             flag: PrimitiveFlags,
+                             shader_location: u32,
+                             default_format: wgpu::VertexFormat| {
+                                let (buffer, layout) = primitive.get(&semantic).map_or_else(
+                                    || {
+                                        (
+                                            self.dummy_vertex_buffer,
+                                            wgpu::VertexAttribute {
+                                                format: default_format,
+                                                offset: 0,
+                                                shader_location,
+                                            },
+                                        )
+                                    },
+                                    |accessor| {
+                                        let id =
+                                            buffers.load_accessor(asset, accessor, usage, device);
+                                        let tangent = &buffers[id];
+                                        flags.insert(flag);
+                                        (
+                                            tangent.buffer(),
+                                            tangent.vertex_attribute_layout(shader_location),
+                                        )
+                                    },
+                                );
+                                attributes_buffers.entry(buffer).or_default().push(layout)
+                            };
 
-                let has_tex_coord_0 = init_attribute(
-                    TexCoords(0),
-                    TEX_COORD_0_LOCATION,
-                    wgpu::VertexFormat::Float32x2,
-                );
-                let has_tex_coord_1 = init_attribute(
-                    TexCoords(1),
-                    TEX_COORD_1_LOCATION,
-                    wgpu::VertexFormat::Float32x2,
-                );
-                let has_color_0 =
-                    init_attribute(Colors(0), COLOR_0_LOCATION, wgpu::VertexFormat::Float32x4);
+                        init_attribute(
+                            Tangents,
+                            PrimitiveFlags::TANGENT,
+                            TANGENT_LOCATION,
+                            wgpu::VertexFormat::Float32x4,
+                        );
+                        init_attribute(
+                            TexCoords(0),
+                            PrimitiveFlags::TEX_COORD_0,
+                            TEX_COORD_0_LOCATION,
+                            wgpu::VertexFormat::Float32x2,
+                        );
+                        init_attribute(
+                            TexCoords(1),
+                            PrimitiveFlags::TEX_COORD_1,
+                            TEX_COORD_1_LOCATION,
+                            wgpu::VertexFormat::Float32x2,
+                        );
+                        init_attribute(
+                            Colors(0),
+                            PrimitiveFlags::COLOR_0,
+                            COLOR_0_LOCATION,
+                            wgpu::VertexFormat::Float32x4,
+                        );
 
-                let (vertex_buffers, vertex_layouts): (Vec<_>, Vec<_>) = attributes_buffers
-                    .into_iter()
-                    .map(|(id, attributes)| {
-                        let buffer = &buffers[id];
-                        let layout = VertexBufferLayout {
-                            array_stride: buffer.stride(),
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes,
+                        let (vertex_buffers, vertex_layouts) = attributes_buffers
+                            .into_iter()
+                            .map(|(id, attributes)| {
+                                let buffer = &buffers[id];
+                                let layout = VertexBufferLayout {
+                                    array_stride: buffer.stride(),
+                                    step_mode: wgpu::VertexStepMode::Vertex,
+                                    attributes,
+                                };
+                                (id, layout)
+                            })
+                            .unzip();
+
+                        let (indices, vertex_count) =
+                            primitive
+                                .indices()
+                                .map_or((None, attributes_count), |indices| {
+                                    let indices_count = indices.count() as u32;
+                                    let id = buffers.load_accessor(
+                                        asset,
+                                        indices,
+                                        wgpu::BufferUsages::INDEX,
+                                        device,
+                                    );
+                                    let accessor = &buffers[id];
+                                    let indices = Some((id, accessor.index_format()));
+                                    (indices, indices_count)
+                                });
+
+                        (vertex_buffers, vertex_layouts, flags, indices, vertex_count)
+                    }
+                    None => {
+                        let reader = primitive.reader(|buffer| {
+                            Some(&buffers.buffer_data(asset)?.get(buffer.index())?.0)
+                        });
+
+                        let positions: Vec<_> = match reader.read_indices() {
+                            Some(indices) => {
+                                let positions: Vec<_> = reader.read_positions().unwrap().collect();
+                                indices
+                                    .into_u32()
+                                    .map(|index| positions[index as usize])
+                                    .collect()
+                            }
+                            None => reader.read_positions().unwrap().collect(),
                         };
-                        (id, layout)
-                    })
-                    .unzip();
+
+                        let normals = generate_normals(&positions);
+
+                        let flags = PrimitiveFlags::empty();
+                        if reader.read_tangents().is_some()
+                            || reader.read_tex_coords(0).is_some()
+                            || reader.read_colors(0).is_some()
+                        {
+                            todo!("include other vertex data");
+                        }
+
+                        let vertices = zip(positions, normals).map(|(position, normal)| {
+                            VertexData([
+                                position[0],
+                                position[1],
+                                position[2],
+                                normal[0],
+                                normal[1],
+                                normal[2],
+                            ])
+                        });
+
+                        let (indices, vertices) = merge_vertices(vertices);
+
+                        let vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(&format!(
+                                    "{} vertex buffer",
+                                    mesh.name().unwrap_or("")
+                                )),
+                                contents: cast_slice(&vertices),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+
+                        use wgpu::VertexFormat::*;
+
+                        let stride = size_of::<VertexData<6>>() as u64;
+                        let vertex_buffers = vec![
+                            buffers.create_buffer(vertex_buffer, stride),
+                            self.dummy_vertex_buffer,
+                        ];
+                        let vertex_layouts = vec![
+                            VertexBufferLayout {
+                                array_stride: stride,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: wgpu::vertex_attr_array![POSITION_LOCATION => Float32x3, NORMAL_LOCATION => Float32x3].into(),
+                            },
+                            VertexBufferLayout {
+                                array_stride: 0,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: [
+                                    (Float32x3, TANGENT_LOCATION),
+                                    (Float32x2, TEX_COORD_0_LOCATION),
+                                    (Float32x2, TEX_COORD_1_LOCATION),
+                                    (Float32x4, COLOR_0_LOCATION),
+                                ].into_iter().map(|(format, shader_location)| {
+                                    wgpu::VertexAttribute {
+                                        format,
+                                        offset: 0,
+                                        shader_location,
+                                    }
+                                }).collect(),
+                            }
+                        ];
+
+                        let vertex_count = indices.len();
+                        const INDEX_STRIDE: u64 = size_of::<u32>() as u64;
+                        let indices_buffer = buffers.create_buffer(
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(&format!("{} index buffer", mesh.name().unwrap_or(""))),
+                                contents: cast_slice(&indices),
+                                usage: wgpu::BufferUsages::INDEX,
+                            }),
+                            INDEX_STRIDE,
+                        );
+                        let indices = (
+                            buffers.create_accessor(
+                                indices_buffer,
+                                0,
+                                vertex_count as u64 * INDEX_STRIDE,
+                                gltf::accessor::DataType::U32,
+                                false,
+                                gltf::accessor::Dimensions::Scalar,
+                            ),
+                            wgpu::IndexFormat::Uint32,
+                        );
+
+                        (
+                            vertex_buffers,
+                            vertex_layouts,
+                            flags,
+                            Some(indices),
+                            vertex_count as u32,
+                        )
+                    }
+                };
 
                 let material =
                     materials.load_material(asset, primitive.material(), textures, device, queue);
@@ -238,10 +380,7 @@ impl MeshManager {
                     );
 
                     let mut constants = HashMap::with_capacity(5);
-                    constants.insert("has_tangent".to_string(), has_tangent);
-                    constants.insert("has_tex_coord_0".to_string(), has_tex_coord_0);
-                    constants.insert("has_tex_coord_1".to_string(), has_tex_coord_1);
-                    constants.insert("has_color_0".to_string(), has_color_0);
+                    primitive_flats.insert_constants(&mut constants);
                     material_flags.insert_constants(&mut constants);
 
                     let compilation_options = wgpu::PipelineCompilationOptions {
@@ -289,22 +428,6 @@ impl MeshManager {
                     })
                 });
 
-                let (indices, vertex_count) =
-                    primitive
-                        .indices()
-                        .map_or((None, attributes_count), |indices| {
-                            let indices_count = indices.count() as u32;
-                            let id = buffers.load_accessor(
-                                asset,
-                                indices,
-                                wgpu::BufferUsages::INDEX,
-                                device,
-                            );
-                            let accessor = &buffers[id];
-                            let indices = Some((id, accessor.index_format()));
-                            (indices, indices_count)
-                        });
-
                 primitives.entry(pipeline).or_default().push(Primitive {
                     indices,
                     vertex_buffers,
@@ -327,6 +450,123 @@ impl MeshManager {
 
         id
     }
+}
+
+fn generate_normals(positions: &[[f32; 3]]) -> Vec<[f32; 3]> {
+    positions
+        .chunks_exact(3)
+        .into_iter()
+        .flat_map(|positions| {
+            let a = Vec3::from_array(positions[0]);
+            let b = Vec3::from_array(positions[1]);
+            let c = Vec3::from_array(positions[2]);
+
+            [Vec3::cross(b - a, c - b).to_array(); 3]
+        })
+        .collect()
+}
+
+bitflags! {
+    struct PrimitiveFlags: u32 {
+        const TANGENT = 0b00000001;
+        const TEX_COORD_0 = 0b00000010;
+        const TEX_COORD_1 = 0b00000100;
+        const COLOR_0 = 0b00001000;
+    }
+}
+
+impl PrimitiveFlags {
+    fn insert_constants(&self, constants: &mut HashMap<String, f64>) {
+        constants.insert(
+            "has_tangent".to_string(),
+            self.contains(Self::TANGENT) as u64 as f64,
+        );
+        constants.insert(
+            "has_tex_coord_0".to_string(),
+            self.contains(Self::TEX_COORD_0) as u64 as f64,
+        );
+        constants.insert(
+            "has_tex_coord_1".to_string(),
+            self.contains(Self::TEX_COORD_1) as u64 as f64,
+        );
+        constants.insert(
+            "has_color_0".to_string(),
+            self.contains(Self::COLOR_0) as u64 as f64,
+        );
+    }
+}
+
+#[derive(Clone, Copy, Zeroable)]
+#[repr(C)]
+struct VertexData<const D: usize>([f32; D]);
+
+unsafe impl<const D: usize> Pod for VertexData<D> {}
+
+const TOLERANCE: f32 = 1e-8;
+
+impl<const D: usize> PartialEq for VertexData<D> {
+    fn eq(&self, other: &Self) -> bool {
+        zip(self.0, other.0).all(|(a, b)| (a - b).abs() <= TOLERANCE)
+    }
+}
+
+impl<const D: usize> Eq for VertexData<D> {}
+
+impl<const D: usize> PartialOrd for VertexData<D> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        for (a, b) in zip(self.0, other.0) {
+            if a < b - TOLERANCE {
+                return Some(Less);
+            }
+            if a > b + TOLERANCE {
+                return Some(Greater);
+            }
+        }
+        Some(Equal)
+    }
+}
+
+impl<const D: usize> Ord for VertexData<D> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        for (a, b) in zip(self.0, other.0) {
+            if a < b - TOLERANCE {
+                return Less;
+            }
+            if a > b + TOLERANCE {
+                return Greater;
+            }
+        }
+        Equal
+    }
+}
+
+fn merge_vertices<V>(vertices: V) -> (Vec<u32>, Vec<V::Item>)
+where
+    V: IntoIterator,
+    V::Item: Ord,
+{
+    let mut vertices: Vec<_> = vertices.into_iter().enumerate().collect();
+    vertices.sort_by(|a, b| (a.1.cmp(&b.1)));
+
+    let mut unique_vertices = Vec::with_capacity(vertices.len());
+    let mut indices = vec![0; vertices.len()];
+    for (pos, data) in vertices {
+        match unique_vertices.last() {
+            Some(last) => match data.cmp(last) {
+                Greater => {
+                    indices[pos] = unique_vertices.len() as u32;
+                    unique_vertices.push(data);
+                }
+                Equal => indices[pos] = unique_vertices.len() as u32 - 1,
+                Less => unreachable!(),
+            },
+            None => {
+                indices[pos] = 0;
+                unique_vertices.push(data);
+            }
+        }
+    }
+    (indices, unique_vertices)
 }
 
 impl Index<Id<Mesh>> for MeshManager {

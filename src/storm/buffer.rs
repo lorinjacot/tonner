@@ -40,6 +40,25 @@ impl BufferManager {
         self.buffers.push(Buffer { buffer, stride })
     }
 
+    pub fn create_accessor(
+        &mut self,
+        buffer: Id<Buffer>,
+        start: u64,
+        end: u64,
+        data_type: gltf::accessor::DataType,
+        normalized: bool,
+        dimensions: gltf_json::accessor::Type,
+    ) -> Id<Accessor> {
+        self.accessors.push(Accessor {
+            buffer,
+            start,
+            end,
+            data_type,
+            normalized,
+            dimensions,
+        })
+    }
+
     pub fn load_buffer_view(
         &mut self,
         asset: Id<Asset>,
@@ -112,11 +131,11 @@ impl BufferManager {
             .get(accessor.index())
         {
             Some(Some(id)) => *id,
-            _ => self.create_accessor(asset, accessor, usage, device),
+            _ => self.create_gltf_accessor(asset, accessor, usage, device),
         }
     }
 
-    fn create_accessor(
+    fn create_gltf_accessor(
         &mut self,
         asset: Id<Asset>,
         accessor: gltf::Accessor,
@@ -152,6 +171,10 @@ impl BufferManager {
         }
 
         id
+    }
+
+    pub fn buffer_data(&self, asset: Id<Asset>) -> Option<&Vec<gltf::buffer::Data>> {
+        self.assets.get(asset).map(|asset| &asset.data)
     }
 }
 

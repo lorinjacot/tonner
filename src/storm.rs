@@ -11,6 +11,7 @@ mod texture_old;
 use std::path::Path;
 
 use buffer::BufferManager;
+use camera::CameraManager;
 use material::MaterialManager;
 use mesh::MeshManager;
 use scene::{Scene, SceneManager};
@@ -22,6 +23,7 @@ pub struct Storm {
     textures: TextureManager,
     materials: MaterialManager,
     buffers: BufferManager,
+    cameras: CameraManager,
     meshes: MeshManager,
     scenes: SceneManager,
     active_scene: Option<Id<Scene>>,
@@ -33,7 +35,8 @@ impl Storm {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
-        let meshes = MeshManager::new(&materials, &mut buffers, render_format, device);
+        let cameras = CameraManager::new(device);
+        let meshes = MeshManager::new(&materials, &mut buffers, &cameras, render_format, device);
         let scenes = SceneManager::new();
 
         Self {
@@ -41,6 +44,7 @@ impl Storm {
             textures,
             materials,
             buffers,
+            cameras,
             meshes,
             scenes,
             active_scene: None,
@@ -98,23 +102,9 @@ impl Storm {
             mapped_at_creation: false,
         });
 
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Camera bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
         let camera = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Camera uniform bind group"),
-            layout: &camera_bind_group_layout,
+            layout: self.cameras.bind_group_layout(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera.as_entire_binding(),

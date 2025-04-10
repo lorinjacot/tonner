@@ -1,6 +1,49 @@
 use std::time::Duration;
 
-use super::scene::Node;
+use super::{
+    scene::Node,
+    storage::{SparseMap, SparseSet},
+    Asset,
+};
+
+pub struct CameraManager {
+    cameras: SparseSet<Box<dyn Camera>>,
+    assets: SparseMap<Asset, Vec<Option<Box<dyn Camera>>>>,
+    bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl CameraManager {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let cameras = SparseSet::new();
+        let assets = SparseMap::new();
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Camera bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        Self {
+            cameras,
+            assets,
+            bind_group_layout,
+        }
+    }
+
+    
+
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
+}
 
 pub trait Camera {}
 
@@ -43,7 +86,5 @@ impl OrbitControls {
 }
 
 impl Controls for OrbitControls {
-    fn update(&mut self, delta_time: Duration, camera: &mut dyn Camera, node: &mut Node) {
-        
-    }
+    fn update(&mut self, delta_time: Duration, camera: &mut dyn Camera, node: &mut Node) {}
 }

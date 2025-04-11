@@ -34,7 +34,6 @@ struct Attributes {
 
 struct Camera {
     view_projection: mat4x4<f32>,
-    normal_view_projection: mat4x4<f32>,
     world_position: vec3<f32>,
 }
 

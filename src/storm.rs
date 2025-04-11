@@ -30,13 +30,17 @@ pub struct Storm {
 }
 
 impl Storm {
-    pub fn new(aspect_ration: f32, render_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
+    pub fn new(
+        aspect_ration: f32,
+        render_format: wgpu::TextureFormat,
+        device: &wgpu::Device,
+    ) -> Self {
         let assets = SparseSet::new();
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
         let cameras = CameraManager::new(aspect_ration, device);
-        let meshes = MeshManager::new(&materials, &mut buffers, &cameras, render_format, device);
+        let meshes = MeshManager::new(&materials, &mut buffers, render_format, device);
         let scenes = SceneManager::new();
 
         Self {
@@ -96,24 +100,17 @@ impl Storm {
         Ok(id)
     }
 
-    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
-        let camera = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Camera uniform buffer"),
-            size: 144,
-            usage: wgpu::BufferUsages::UNIFORM,
-            mapped_at_creation: false,
-        });
-
-        let camera = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Camera uniform bind group"),
-            layout: self.cameras.bind_group_layout(),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera.as_entire_binding(),
-            }],
-        });
+    pub fn update(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue) {
         if let Some(scene) = self.active_scene {
-            self.scenes[scene].render(&camera, device, render_pass);
+            if let Some(scene) = self.scenes.get_mut(scene) {
+                scene.update(&mut self.cameras, queue);
+            }
+        }
+    }
+
+    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
+        if let Some(scene) = self.active_scene {
+            self.scenes[scene].render(device, render_pass);
         }
     }
 }

@@ -3,6 +3,7 @@ use std::{
     ops::{Index, Range},
 };
 
+use bitflags::serde;
 use bytemuck::{cast_slice, Pod, Zeroable};
 use glam::{Mat3, Mat4};
 use wgpu::util::DeviceExt;
@@ -28,6 +29,10 @@ impl SceneManager {
         let assets = SparseMap::new();
 
         SceneManager { scenes, assets }
+    }
+
+    pub fn get_mut(&mut self, scene: Id<Scene>) -> Option<&mut Scene> {
+        self.scenes.get_mut(scene)
     }
 
     pub fn load_scene(
@@ -66,6 +71,7 @@ impl SceneManager {
             nodes: SparseSet::new(),
             primitives: SparseMap::new(),
             cameras: SparseMap::new(),
+            active_camera: None,
         };
 
         for node in gltf_scene.nodes() {
@@ -167,8 +173,25 @@ fn create_node(
     }
 
     if let Some(camera) = node.camera() {
-        let camera_id = cameras.create_camera(camera);
-        scene.cameras.insert(camera_id, node_id);
+        let name = camera.name().unwrap_or("");
+        let camera_id = cameras.create_camera(camera, device);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{name} camera buffer")),
+            size: size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{name} camera bind group")),
+            layout: meshes.camera_bind_group_layout(),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        scene
+            .cameras
+            .insert(camera_id, (buffer, bind_group, node_id));
     }
 
     let children: Vec<_> = node
@@ -197,6 +220,13 @@ fn create_node(
     node_id
 }
 
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct CameraUniform {
+    view_projection: [f32; 16],
+    world_position: [f32; 3],
+}
+
 struct Primitive {
     indices: Option<(wgpu::Buffer, Range<u64>, wgpu::IndexFormat)>,
     vertex_buffers: Vec<wgpu::Buffer>,
@@ -213,16 +243,37 @@ pub struct Scene {
             SparseMap<Mesh, (Vec<Primitive>, Vec<Id<Node>>)>,
         ),
     >,
-    cameras: SparseMap<Camera, Id<Node>>,
+    cameras: SparseMap<Camera, (wgpu::Buffer, wgpu::BindGroup, Id<Node>)>,
+    pub active_camera: Option<Id<Camera>>,
 }
 
 impl Scene {
-    pub fn render(
-        &self,
-        camera: &wgpu::BindGroup,
-        device: &wgpu::Device,
-        render_pass: &mut wgpu::RenderPass,
-    ) {
+    pub fn cameras(&self) -> impl Iterator<Item = Id<Camera>> + use<'_> {
+        self.cameras.iter().map(|(camera, _)| camera)
+    }
+
+    pub fn update(&mut self, cameras: &mut CameraManager, queue: &wgpu::Queue) {
+        if let Some(camera_id) = self.active_camera {
+            let projection = cameras[camera_id].projection_matrix();
+            if let Some((buffer, _, node)) = self.cameras.get(camera_id) {
+                if let Some(node) = self.nodes.get(*node) {
+                    let view = node.global_transform;
+                    queue.write_buffer(buffer, 0, cast_slice(&[projection * view]));
+                }
+            }
+        }
+    }
+
+    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
+        let camera = match self
+            .active_camera
+            .map(|camera| self.cameras.get(camera))
+            .flatten()
+        {
+            Some((_, bind_group, _)) => bind_group,
+            None => return,
+        };
+
         for (pipeline, by_mesh) in self.primitives.values() {
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, camera, &[]);

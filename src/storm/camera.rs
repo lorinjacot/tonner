@@ -1,9 +1,9 @@
+use std::ops::Index;
+
+use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 
-use super::{
-    storage::{Id, SparseSet},
-    Asset,
-};
+use super::storage::{Id, SparseSet};
 
 pub struct CameraManager {
     cameras: SparseSet<Camera>,
@@ -36,28 +36,80 @@ impl CameraManager {
         }
     }
 
-    pub fn create_camera(&mut self, camera: gltf::Camera) -> Id<Camera> {
-        let projection = match camera.projection() {
-            gltf::camera::Projection::Orthographic(projection) => {
-                let f = projection.zfar();
-                let n = projection.znear();
+    pub fn create_camera(&mut self, camera: gltf::Camera, device: &wgpu::Device) -> Id<Camera> {
+        let projection = Projection::from(camera.projection());
+        let matrix = projection.matrix(self.viewport_aspect_ratio);
 
-                Mat4::from_cols_array_2d(&[
-                    [1.0 / projection.xmag(), 0.0, 0.0, 0.0],
-                    [0.0, 1.0 / projection.ymag(), 0.0, 0.0],
-                    [0.0, 0.0, 2.0 / (n - f), 0.0],
-                    [0.0, 0.0, (f + n) / (n - f), 0.0],
-                ])
-            }
-            gltf::camera::Projection::Perspective(projection) => {
-                let a = projection
-                    .aspect_ratio()
-                    .unwrap_or(self.viewport_aspect_ratio);
-                let tan_y = (0.5 * projection.yfov()).tan();
-                let n = projection.znear();
-                let (zz, zw) = match projection.zfar() {
-                    Some(f) => ((f + n) / (n - f), (2.0 * f * n) / (n - f)),
-                    None => (-1.0, -2.0 * n),
+        self.cameras.push(Camera { projection, matrix })
+    }
+
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
+}
+
+impl Index<Id<Camera>> for CameraManager {
+    type Output = Camera;
+
+    fn index(&self, index: Id<Camera>) -> &Self::Output {
+        &self.cameras[index]
+    }
+}
+
+pub struct Camera {
+    projection: Projection,
+    matrix: Mat4,
+}
+
+impl Camera {
+    pub fn projection_matrix(&self) -> Mat4 {
+        self.matrix
+    }
+}
+
+enum Projection {
+    Orthographic {
+        xmag: f32,
+        ymag: f32,
+        zfar: f32,
+        znear: f32,
+    },
+    Perspective {
+        aspect_ration: Option<f32>,
+        yfov: f32,
+        zfar: Option<f32>,
+        znear: f32,
+    },
+}
+
+impl Projection {
+    fn matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
+        match self {
+            Projection::Orthographic {
+                xmag,
+                ymag,
+                zfar,
+                znear,
+            } => Mat4::from_cols_array_2d(&[
+                [1.0 / xmag, 0.0, 0.0, 0.0],
+                [0.0, 1.0 / ymag, 0.0, 0.0],
+                [0.0, 0.0, 2.0 / (znear - zfar), 0.0],
+                [0.0, 0.0, (zfar + znear) / (znear - zfar), 0.0],
+            ]),
+            Projection::Perspective {
+                aspect_ration,
+                yfov,
+                zfar,
+                znear,
+            } => {
+                let a = aspect_ration.unwrap_or(viewport_aspect_ratio);
+                let tan_y = (0.5 * yfov).tan();
+                let (zz, zw) = match zfar {
+                    Some(zfar) => (
+                        (zfar + znear) / (znear - zfar),
+                        (2.0 * zfar * znear) / (znear - zfar),
+                    ),
+                    None => (-1.0, -2.0 * znear),
                 };
                 Mat4::from_cols_array_2d(&[
                     [1.0 / (a * tan_y), 0.0, 0.0, 0.0],
@@ -66,21 +118,28 @@ impl CameraManager {
                     [0.0, 0.0, zw, 0.0],
                 ])
             }
-        };
-
-        self.cameras.push(Camera { projection })
-    }
-
-    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.bind_group_layout
+        }
     }
 }
 
-pub struct Camera {
-    projection: Mat4,
+impl<'a> From<gltf::camera::Projection<'a>> for Projection {
+    fn from(value: gltf::camera::Projection) -> Self {
+        match value {
+            gltf::camera::Projection::Orthographic(ortho) => Self::Orthographic {
+                xmag: ortho.xmag(),
+                ymag: ortho.ymag(),
+                zfar: ortho.zfar(),
+                znear: ortho.znear(),
+            },
+            gltf::camera::Projection::Perspective(pers) => Self::Perspective {
+                aspect_ration: pers.aspect_ratio(),
+                yfov: pers.yfov(),
+                zfar: pers.zfar(),
+                znear: pers.znear(),
+            },
+        }
+    }
 }
-
-// pub trait Camera {}
 
 // pub struct PerspectiveCamera {}
 

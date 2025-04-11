@@ -433,7 +433,7 @@ impl Engine {
             &screen_descriptor,
         );
 
-        // render
+        self.storm.update(&self.device, &self.queue);
 
         // {
         //     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -79,7 +79,8 @@ impl Engine {
             label: Some("engine::new command encoder"),
         });
 
-        let mut storm = Storm::new(swapchain_format, &device);
+        let aspect_ration = size.width as f32 / size.height as f32;
+        let mut storm = Storm::new(aspect_ration, swapchain_format, &device);
         let _asset = storm
             .load_asset("assets/Cameras.gltf", &device, &queue, &mut encoder)
             .unwrap();

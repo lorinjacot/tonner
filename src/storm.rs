@@ -30,12 +30,12 @@ pub struct Storm {
 }
 
 impl Storm {
-    pub fn new(render_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
+    pub fn new(aspect_ration: f32, render_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
         let assets = SparseSet::new();
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
-        let cameras = CameraManager::new(device);
+        let cameras = CameraManager::new(aspect_ration, device);
         let meshes = MeshManager::new(&materials, &mut buffers, &cameras, render_format, device);
         let scenes = SceneManager::new();
 
@@ -73,6 +73,7 @@ impl Storm {
                 &mut self.textures,
                 &mut self.materials,
                 &mut self.meshes,
+                &mut self.cameras,
                 device,
                 queue,
             );
@@ -86,6 +87,7 @@ impl Storm {
                 &mut self.textures,
                 &mut self.materials,
                 &mut self.meshes,
+                &mut self.cameras,
                 device,
                 queue,
             )

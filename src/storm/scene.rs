@@ -9,6 +9,7 @@ use wgpu::util::DeviceExt;
 
 use super::{
     buffer::BufferManager,
+    camera::{Camera, CameraManager},
     material::MaterialManager,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
     storage::{Id, SparseMap, SparseSet},
@@ -37,13 +38,14 @@ impl SceneManager {
         textures: &mut TextureManager,
         materials: &mut MaterialManager,
         meshes: &mut MeshManager,
+        cameras: &mut CameraManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Scene> {
         match self.assets.entry(asset).or_default().get(scene.index()) {
             Some(Some(id)) => *id,
             _ => self.create_scene(
-                asset, scene, buffers, textures, materials, meshes, device, queue,
+                asset, scene, buffers, textures, materials, meshes, cameras, device, queue,
             ),
         }
     }
@@ -56,12 +58,14 @@ impl SceneManager {
         textures: &mut TextureManager,
         materials: &mut MaterialManager,
         meshes: &mut MeshManager,
+        cameras: &mut CameraManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Scene> {
         let mut scene = Scene {
             nodes: SparseSet::new(),
             primitives: SparseMap::new(),
+            cameras: SparseMap::new(),
         };
 
         for node in gltf_scene.nodes() {
@@ -75,6 +79,7 @@ impl SceneManager {
                 textures,
                 materials,
                 meshes,
+                cameras,
                 device,
                 queue,
             );
@@ -105,6 +110,7 @@ fn create_node(
     textures: &mut TextureManager,
     materials: &mut MaterialManager,
     meshes: &mut MeshManager,
+    cameras: &mut CameraManager,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Id<Node> {
@@ -160,6 +166,11 @@ fn create_node(
         }
     }
 
+    if let Some(camera) = node.camera() {
+        let camera_id = cameras.create_camera(camera);
+        scene.cameras.insert(camera_id, node_id);
+    }
+
     let children: Vec<_> = node
         .children()
         .map(|child| {
@@ -173,6 +184,7 @@ fn create_node(
                 textures,
                 materials,
                 meshes,
+                cameras,
                 device,
                 queue,
             )
@@ -201,6 +213,7 @@ pub struct Scene {
             SparseMap<Mesh, (Vec<Primitive>, Vec<Id<Node>>)>,
         ),
     >,
+    cameras: SparseMap<Camera, Id<Node>>,
 }
 
 impl Scene {

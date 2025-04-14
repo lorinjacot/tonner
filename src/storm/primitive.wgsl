@@ -93,7 +93,8 @@ struct Material {
 @vertex
 fn vs_main(
     transform: Transform,
-    attributes: Attributes
+    attributes: Attributes,
+    @builtin(vertex_index) vertex_index: u32,
 ) -> VertexOutput {
     let world_position = mat4x4(
         transform.point_col_x,
@@ -109,7 +110,10 @@ fn vs_main(
     );
 
     var result: VertexOutput;
-    result.position = camera.view_projection * world_position;
+    // result.position = camera.view_projection * world_position;
+    let x = f32(i32(vertex_index) - 1);
+    let y = f32(i32(vertex_index & 1u) * 2 - 1);
+    result.position = vec4<f32>(x, y, 0.0, 1.0);
     result.world_position = world_position.xyz;
     result.normal = vector_transform * attributes.normal;
     if has_tangent {
@@ -251,8 +255,8 @@ fn fs_main(
     // L_0: outgoing radiance
     let outgoing_l = emissive + reflected_l;
 
-
-    return vec4f(outgoing_l, base_color.a);
+    return vec4f(1.0, 0.0, 0.0, 1.0);
+    // return vec4f(outgoing_l, base_color.a);
     // return vec4f(pow(outgoing_l, vec3f(1.0/2.2)), base_color.a);
     // return vec4f(pow(base_color.rgb, vec3f(2.2)), base_color.a);
 }

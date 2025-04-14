@@ -3,7 +3,6 @@ use std::{
     ops::{Index, Range},
 };
 
-use bitflags::serde;
 use bytemuck::{cast_slice, Pod, Zeroable};
 use glam::{Mat3, Mat4};
 use wgpu::util::DeviceExt;
@@ -31,8 +30,16 @@ impl SceneManager {
         SceneManager { scenes, assets }
     }
 
+    pub fn get(&self, scene: Id<Scene>) -> Option<&Scene> {
+        self.scenes.get(scene)
+    }
+
     pub fn get_mut(&mut self, scene: Id<Scene>) -> Option<&mut Scene> {
         self.scenes.get_mut(scene)
+    }
+
+    pub fn len(&self) -> usize {
+        self.scenes.len()
     }
 
     pub fn load_scene(
@@ -67,8 +74,13 @@ impl SceneManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Scene> {
+        let label = gltf_scene
+            .name()
+            .map_or_else(|| gltf_scene.index().to_string(), str::to_string);
         let mut scene = Scene {
-            nodes: SparseSet::new(),
+            label,
+            nodes: SparseSet::with_capacity(gltf_scene.nodes().count()),
+            root_nodes: Vec::with_capacity(gltf_scene.nodes().count()),
             primitives: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
@@ -104,6 +116,18 @@ impl SceneManager {
 
         id
     }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, (Id<Scene>, Scene)> {
+        self.scenes.iter()
+    }
+}
+
+impl Index<Id<Scene>> for SceneManager {
+    type Output = Scene;
+
+    fn index(&self, index: Id<Scene>) -> &Self::Output {
+        &self.scenes[index]
+    }
 }
 
 fn create_node(
@@ -120,24 +144,32 @@ fn create_node(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Id<Node> {
+    let label = node
+        .name()
+        .map_or_else(|| node.index().to_string(), str::to_string);
     let local_transform = Mat4::from_cols_array_2d(&node.transform().matrix());
     let global_transform = parent_transform * local_transform;
 
     let node_id = scene.nodes.push(Node {
+        label,
         local_transform,
         global_transform,
         children: Vec::new(),
         parent,
     });
 
+    if parent.is_none() {
+        scene.root_nodes.push(node_id);
+    }
+
     if let Some(mesh) = node.mesh() {
         let mesh_id = meshes.load_mesh(asset, mesh, buffers, textures, materials, device, queue);
         let mesh = &meshes[mesh_id];
-        for (pipeline, primitives) in mesh.primitives.iter() {
+        for (pipeline, primitives) in &mesh.primitives {
             scene
                 .primitives
-                .entry(pipeline)
-                .or_insert_with(|| (meshes[pipeline].clone(), SparseMap::new()))
+                .entry(*pipeline)
+                .or_insert_with(|| (meshes[*pipeline].clone(), SparseMap::new()))
                 .1
                 .entry(mesh_id)
                 .or_insert_with(|| {
@@ -173,16 +205,16 @@ fn create_node(
     }
 
     if let Some(camera) = node.camera() {
-        let name = camera.name().unwrap_or("");
+        let label = camera.name().unwrap_or("");
         let camera_id = cameras.create_camera(camera, device);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("{name} camera buffer")),
+            label: Some(&format!("{label} camera buffer")),
             size: size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM,
             mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{name} camera bind group")),
+            label: Some(&format!("{label} camera bind group")),
             layout: meshes.camera_bind_group_layout(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -235,7 +267,9 @@ struct Primitive {
 }
 
 pub struct Scene {
+    pub label: String,
     nodes: SparseSet<Node>,
+    root_nodes: Vec<Id<Node>>,
     primitives: SparseMap<
         PrimitivePipeline,
         (
@@ -248,8 +282,12 @@ pub struct Scene {
 }
 
 impl Scene {
+    pub fn root_nodes(&self) -> &Vec<Id<Node>> {
+        &self.root_nodes
+    }
+
     pub fn cameras(&self) -> impl Iterator<Item = Id<Camera>> + use<'_> {
-        self.cameras.iter().map(|(camera, _)| camera)
+        self.cameras.iter().map(|(camera, _)| *camera)
     }
 
     pub fn update(&mut self, cameras: &mut CameraManager, queue: &wgpu::Queue) {
@@ -317,19 +355,26 @@ impl Scene {
     }
 }
 
-impl Index<Id<Scene>> for SceneManager {
-    type Output = Scene;
+impl Index<Id<Node>> for Scene {
+    type Output = Node;
 
-    fn index(&self, index: Id<Scene>) -> &Self::Output {
-        &self.scenes[index]
+    fn index(&self, index: Id<Node>) -> &Self::Output {
+        &self.nodes[index]
     }
 }
 
 pub struct Node {
+    pub label: String,
     local_transform: Mat4,
     global_transform: Mat4,
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
+}
+
+impl Node {
+    pub fn children(&self) -> &Vec<Id<Node>> {
+        &self.children
+    }
 }
 
 #[derive(Clone, Copy, Pod, Zeroable)]

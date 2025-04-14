@@ -1,12 +1,11 @@
-use environment::{DrawEnvironment, Environment};
-use light::{DrawLights, LightManager};
+use environment::Environment;
+use light::LightManager;
 use material::MaterialManager;
-use mesh::{DrawMeshes, MeshManager};
+use mesh::MeshManager;
 use node::NodeManager;
 
 use crate::{
     camera::Camera,
-    engine::DisplaySettings,
     texture::{
         Texture2d, Texture2dDescriptor, Texture2dSampler, Texture2dSource, TextureCreationError,
         TextureManager,
@@ -170,29 +169,5 @@ impl Scene {
 
     pub fn update_buffers(&mut self, queue: &wgpu::Queue) {
         self.meshes.update_transforms(&self.nodes, queue);
-    }
-}
-
-pub trait DrawScene {
-    fn draw_scene(&mut self, scene: &Scene, display_setting: &DisplaySettings);
-}
-
-impl<'a> DrawScene for wgpu::RenderPass<'a> {
-    fn draw_scene(&mut self, scene: &Scene, display_setting: &DisplaySettings) {
-        self.draw_lights(&scene.lights, scene.camera.bind_group());
-
-        self.draw_meshes(
-            &scene.meshes,
-            &scene.materials,
-            scene.camera.bind_group(),
-            scene.lights.bind_group(),
-            scene.environment.ibl_bind_group(),
-        );
-
-        self.draw_environment(
-            &scene.environment,
-            display_setting.background_blur,
-            scene.camera.bind_group(),
-        );
     }
 }

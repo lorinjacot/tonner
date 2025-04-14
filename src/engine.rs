@@ -1,23 +1,12 @@
+mod explorer;
+
+use rfd::FileDialog;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
 use winit::window::Window;
 
 use crate::storm::Storm;
-
-pub struct DisplaySettings {
-    pub exposure: f32,
-    pub background_blur: bool,
-}
-
-impl Default for DisplaySettings {
-    fn default() -> Self {
-        Self {
-            exposure: 1.0,
-            background_blur: true,
-        }
-    }
-}
 
 pub struct Engine {
     window: Arc<Window>,
@@ -75,15 +64,8 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("engine::new command encoder"),
-        });
-
         let aspect_ration = size.width as f32 / size.height as f32;
-        let mut storm = Storm::new(aspect_ration, swapchain_format, &device);
-        let _asset = storm
-            .load_asset("assets/Cameras.gltf", &device, &queue, &mut encoder)
-            .unwrap();
+        let storm = Storm::new(aspect_ration, swapchain_format, &device);
 
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
@@ -370,7 +352,7 @@ impl Engine {
     }
 
     fn draw(&mut self) {
-        let delta_time = self.last_frame.elapsed();
+        let _delta_time = self.last_frame.elapsed();
         self.last_frame = Instant::now();
 
         let mut encoder = self
@@ -387,27 +369,31 @@ impl Engine {
         // self.scene.update();
 
         let full_output = self.egui_state.egui_ctx().run(new_input, |ctx| {
-            // egui::SidePanel::left("display_panel").show(ctx, |ui| {
-            //     ui.heading(egui::RichText::new("Display").size(32.0));
-            //     ui.heading("Lighting");
-            //     ui.label("Exposure");
-            //     if ui
-            //         .add(
-            //             egui::Slider::new(&mut self.display_settings.exposure, 0.0..=64.0)
-            //                 .logarithmic(true),
-            //         )
-            //         .changed()
-            //     {
-            //         self.queue.write_buffer(
-            //             &self.exposure_buffer,
-            //             0,
-            //             bytemuck::cast_slice(&[self.display_settings.exposure]),
-            //         );
-            //     };
+            egui::TopBottomPanel::top("Menu bar").show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Open").clicked() {
+                            let file = FileDialog::new()
+                                .add_filter("glTF", &["gltf", "glb"])
+                                .pick_file();
 
-            //     ui.heading("Background");
-            //     ui.checkbox(&mut self.display_settings.background_blur, "Blur");
-            // });
+                            if let Some(path) = file {
+                                let mut encoder = self.device.create_command_encoder(
+                                    &wgpu::CommandEncoderDescriptor {
+                                        label: Some("file::open command encoder"),
+                                    },
+                                );
+                                let result = self.storm.load_asset(path, &self.device, &self.queue, &mut encoder);
+                                if let Err(err) = result {
+                                    dbg!(err);
+                                }                            
+                            }
+                        }
+                    });
+                });
+            });
+            egui::SidePanel::left("Explorer")
+                .show(ctx, |ui| explorer::add_contents(ui, &mut self.storm));
         });
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);

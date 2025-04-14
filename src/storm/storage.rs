@@ -47,14 +47,10 @@ struct SparseEntry {
     dense: u16,
     version: u16,
 }
-struct DenseEntry<K, V> {
-    id: Id<K>,
-    value: V,
-}
 
 pub struct SparseMap<K, V> {
     sparse: Vec<SparseEntry>,
-    dense: Vec<DenseEntry<K, V>>,
+    dense: Vec<(Id<K>, V)>,
 }
 
 impl<K, V> SparseMap<K, V> {
@@ -65,17 +61,24 @@ impl<K, V> SparseMap<K, V> {
         }
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            sparse: Vec::with_capacity(capacity),
+            dense: Vec::with_capacity(capacity),
+        }
+    }
+
     pub fn insert(&mut self, id: Id<K>, value: V) -> Option<V> {
         match self.sparse.get_mut(id.sparse as usize) {
             Some(sparse) if sparse.dense < u16::MAX => {
                 sparse.version = id.version;
-                let old = replace(&mut self.dense[sparse.dense as usize].value, value);
+                let old = replace(&mut self.dense[sparse.dense as usize].1, value);
                 Some(old)
             }
             Some(sparse) => {
                 sparse.dense = self.dense.len() as u16;
                 sparse.version = id.version;
-                self.dense.push(DenseEntry { id, value });
+                self.dense.push((id, value));
                 None
             }
             None => {
@@ -91,7 +94,7 @@ impl<K, V> SparseMap<K, V> {
                     version: id.version,
                 }));
                 self.sparse.extend(entries);
-                self.dense.push(DenseEntry { id, value });
+                self.dense.push((id, value));
                 None
             }
         }
@@ -101,9 +104,9 @@ impl<K, V> SparseMap<K, V> {
         match self.sparse.get_mut(id.sparse as usize) {
             Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
                 let dense = replace(&mut sparse.dense, u16::MAX);
-                let value = self.dense.swap_remove(dense as usize).value;
+                let value = self.dense.swap_remove(dense as usize).1;
                 if let Some(entry) = self.dense.get(dense as usize) {
-                    self.sparse[entry.id.sparse as usize].dense = dense;
+                    self.sparse[entry.0.sparse as usize].dense = dense;
                 }
                 Some(value)
             }
@@ -121,7 +124,7 @@ impl<K, V> SparseMap<K, V> {
     pub fn get(&self, id: Id<K>) -> Option<&V> {
         match self.sparse.get(id.sparse as usize) {
             Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
-                Some(&self.dense[sparse.dense as usize].value)
+                Some(&self.dense[sparse.dense as usize].1)
             }
             _ => None,
         }
@@ -130,7 +133,7 @@ impl<K, V> SparseMap<K, V> {
     pub fn get_mut(&mut self, id: Id<K>) -> Option<&mut V> {
         match self.sparse.get(id.sparse as usize) {
             Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
-                Some(&mut self.dense[sparse.dense as usize].value)
+                Some(&mut self.dense[sparse.dense as usize].1)
             }
             _ => None,
         }
@@ -151,17 +154,18 @@ impl<K, V> SparseMap<K, V> {
         self.dense.len()
     }
 
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (Id<K>, &V)> + ExactSizeIterator + FusedIterator + DoubleEndedIterator
-    {
-        self.dense.iter().map(|entry| (entry.id, &entry.value))
+    pub fn iter(&self) -> std::slice::Iter<'_, (Id<K>, V)> {
+        self.dense.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (Id<K>, V)> {
+        self.dense.iter_mut()
     }
 
     pub fn values(
         &self,
     ) -> impl Iterator<Item = &V> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
-        self.dense.iter().map(|entry| &entry.value)
+        self.dense.iter().map(|entry| &entry.1)
     }
 }
 
@@ -180,57 +184,31 @@ impl<K, V> IndexMut<Id<K>> for SparseMap<K, V> {
 }
 
 impl<K, V> IntoIterator for SparseMap<K, V> {
-    type IntoIter = IntoIter<K, V>;
     type Item = (Id<K>, V);
+    type IntoIter = std::vec::IntoIter<(Id<K>, V)>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter(self.dense.into_iter())
+        self.dense.into_iter()
     }
 }
 
-pub struct IntoIter<K, V>(std::vec::IntoIter<DenseEntry<K, V>>);
+impl<'a, K, V> IntoIterator for &'a SparseMap<K, V> {
+    type Item = &'a (Id<K>, V);
+    type IntoIter = std::slice::Iter<'a, (Id<K>, V)>;
 
-impl<K, V> Iterator for IntoIter<K, V> {
-    type Item = (Id<K>, V);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|entry| (entry.id, entry.value))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    fn count(self) -> usize
-    where
-        Self: Sized,
-    {
-        self.0.count()
-    }
-
-    fn fold<B, F>(self, init: B, mut f: F) -> B
-    where
-        Self: Sized,
-        F: FnMut(B, Self::Item) -> B,
-    {
-        self.0
-            .fold(init, |init, entry| f(init, (entry.id, entry.value)))
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
-impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.0.next_back().map(|entry| (entry.id, entry.value))
+impl<'a, K, V> IntoIterator for &'a mut SparseMap<K, V> {
+    type Item = &'a mut (Id<K>, V);
+    type IntoIter = std::slice::IterMut<'a, (Id<K>, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
-
-impl<K, V> ExactSizeIterator for IntoIter<K, V> {
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl<K, V> FusedIterator for IntoIter<K, V> {}
 
 pub enum Entry<'a, K, V: 'a> {
     Occupied(OccupiedEntry<'a, K, V>),
@@ -291,6 +269,13 @@ impl<T> SparseSet<T> {
         }
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            map: SparseMap::with_capacity(capacity),
+            deleted: Vec::new(),
+        }
+    }
+
     pub fn push(&mut self, value: T) -> Id<T> {
         let dense = self.map.dense.len() as u16;
         if let Some(deleted) = self.deleted.pop() {
@@ -303,7 +288,7 @@ impl<T> SparseSet<T> {
                 dense,
                 version: id.version,
             };
-            self.map.dense.push(DenseEntry { id, value });
+            self.map.dense.push((id, value));
             id
         } else {
             assert!(dense < u16::MAX, "sparse set is full");
@@ -316,7 +301,7 @@ impl<T> SparseSet<T> {
                 dense,
                 version: id.version,
             });
-            self.map.dense.push(DenseEntry { id, value });
+            self.map.dense.push((id, value));
             id
         }
     }
@@ -335,6 +320,10 @@ impl<T> SparseSet<T> {
         self.map.contains(id)
     }
 
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
     pub fn get(&self, id: Id<T>) -> Option<&T> {
         self.map.get(id)
     }
@@ -343,17 +332,45 @@ impl<T> SparseSet<T> {
         self.map.get_mut(id)
     }
 
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (Id<T>, &T)> + DoubleEndedIterator + ExactSizeIterator + FusedIterator
-    {
+    pub fn iter(&self) -> std::slice::Iter<'_, (Id<T>, T)> {
         self.map.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (Id<T>, T)> {
+        self.map.iter_mut()
     }
 
     pub fn values(
         &self,
     ) -> impl Iterator<Item = &T> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
         self.map.values()
+    }
+}
+
+impl<V> IntoIterator for SparseSet<V> {
+    type Item = (Id<V>, V);
+    type IntoIter = std::vec::IntoIter<(Id<V>, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.map.into_iter()
+    }
+}
+
+impl<'a, V> IntoIterator for &'a SparseSet<V> {
+    type Item = &'a (Id<V>, V);
+    type IntoIter = std::slice::Iter<'a, (Id<V>, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, V> IntoIterator for &'a mut SparseSet<V> {
+    type Item = &'a mut (Id<V>, V);
+    type IntoIter = std::slice::IterMut<'a, (Id<V>, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
@@ -368,15 +385,6 @@ impl<T> Index<Id<T>> for SparseSet<T> {
 impl<T> IndexMut<Id<T>> for SparseSet<T> {
     fn index_mut(&mut self, index: Id<T>) -> &mut Self::Output {
         self.get_mut(index).expect("no entry found for id")
-    }
-}
-
-impl<T> IntoIterator for SparseSet<T> {
-    type IntoIter = IntoIter<T, T>;
-    type Item = (Id<T>, T);
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.map.into_iter()
     }
 }
 

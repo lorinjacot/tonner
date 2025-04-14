@@ -373,7 +373,7 @@ impl MeshManager {
                     if vertex_layouts == pipeline.vertex_layouts
                         && material_flags == pipeline.material_flags
                     {
-                        Some(id)
+                        Some(*id)
                     } else {
                         None
                     }

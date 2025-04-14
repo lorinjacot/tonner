@@ -14,9 +14,12 @@ use buffer::BufferManager;
 use camera::CameraManager;
 use material::MaterialManager;
 use mesh::MeshManager;
-use scene::{Scene, SceneManager};
-use storage::{Id, SparseSet};
+use scene::SceneManager;
+use storage::SparseSet;
 use texture::TextureManager;
+
+pub use scene::{Node, Scene};
+pub use storage::Id;
 
 pub struct Storm {
     assets: SparseSet<Asset>,
@@ -25,8 +28,8 @@ pub struct Storm {
     buffers: BufferManager,
     cameras: CameraManager,
     meshes: MeshManager,
-    scenes: SceneManager,
-    active_scene: Option<Id<Scene>>,
+    pub scenes: SceneManager,
+    pub active_scene: Option<Id<Scene>>,
 }
 
 impl Storm {
@@ -112,6 +115,10 @@ impl Storm {
         if let Some(scene) = self.active_scene {
             self.scenes[scene].render(device, render_pass);
         }
+    }
+
+    pub fn active_scene(&self) -> Option<&Scene> {
+        self.scenes.get(self.active_scene?)
     }
 }
 

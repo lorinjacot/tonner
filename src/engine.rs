@@ -65,7 +65,7 @@ impl Engine {
         surface.configure(&device, &config);
 
         let aspect_ration = size.width as f32 / size.height as f32;
-        let storm = Storm::new(aspect_ration, swapchain_format, &device);
+        let storm = Storm::new(swapchain_format, &device);
 
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
@@ -383,10 +383,16 @@ impl Engine {
                                         label: Some("file::open command encoder"),
                                     },
                                 );
-                                let result = self.storm.load_asset(path, &self.device, &self.queue, &mut encoder);
+                                let result = self.storm.load_asset(
+                                    path,
+                                    self.config.width as f32 / self.config.height as f32,
+                                    &self.device,
+                                    &self.queue,
+                                    &mut encoder,
+                                );
                                 if let Err(err) = result {
                                     dbg!(err);
-                                }                            
+                                }
                             }
                         }
                     });

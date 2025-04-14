@@ -16,12 +16,27 @@ pub fn add_contents(ui: &mut Ui, storm: &mut Storm) {
                 })
         });
     }
-    if let Some(scene) = storm.active_scene() {
+    if let Some(scene) = storm.active_scene {
+        let scene = &mut storm.scenes[scene];
         ui.separator();
         ui.label("Nodes");
         for node in scene.root_nodes() {
             add_node(ui, *node, scene);
         }
+
+        ui.separator();
+        ui.label("Camera");
+        egui::ComboBox::from_id_salt("Camera")
+            .selected_text(
+                scene
+                    .active_camera
+                    .map_or("", |camera| &scene.camera(camera).unwrap().label),
+            )
+            .show_ui(ui, |ui| {
+                for (id, camera) in scene.cameras.iter() {
+                    ui.selectable_value(&mut scene.active_camera, Some(*id), &camera.label);
+                }
+            });
     }
 }
 

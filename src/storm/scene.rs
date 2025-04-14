@@ -1,15 +1,14 @@
 use std::{
     iter::{once, repeat_n},
-    ops::{Index, Range},
+    ops::{Index, IndexMut, Range},
 };
 
 use bytemuck::{cast_slice, Pod, Zeroable};
-use glam::{Mat3, Mat4};
+use glam::{Mat3, Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
 use super::{
     buffer::BufferManager,
-    camera::{Camera, CameraManager},
     material::MaterialManager,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
     storage::{Id, SparseMap, SparseSet},
@@ -46,18 +45,26 @@ impl SceneManager {
         &mut self,
         asset: Id<Asset>,
         scene: gltf::Scene,
+        viewport_aspect_ratio: f32,
         buffers: &mut BufferManager,
         textures: &mut TextureManager,
         materials: &mut MaterialManager,
         meshes: &mut MeshManager,
-        cameras: &mut CameraManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Scene> {
         match self.assets.entry(asset).or_default().get(scene.index()) {
             Some(Some(id)) => *id,
             _ => self.create_scene(
-                asset, scene, buffers, textures, materials, meshes, cameras, device, queue,
+                asset,
+                scene,
+                viewport_aspect_ratio,
+                buffers,
+                textures,
+                materials,
+                meshes,
+                device,
+                queue,
             ),
         }
     }
@@ -66,11 +73,11 @@ impl SceneManager {
         &mut self,
         asset: Id<Asset>,
         gltf_scene: gltf::Scene,
+        viewport_aspect_ratio: f32,
         buffers: &mut BufferManager,
         textures: &mut TextureManager,
         materials: &mut MaterialManager,
         meshes: &mut MeshManager,
-        cameras: &mut CameraManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Scene> {
@@ -84,6 +91,7 @@ impl SceneManager {
             primitives: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
+            viewport_aspect_ratio,
         };
 
         for node in gltf_scene.nodes() {
@@ -97,7 +105,6 @@ impl SceneManager {
                 textures,
                 materials,
                 meshes,
-                cameras,
                 device,
                 queue,
             );
@@ -130,6 +137,12 @@ impl Index<Id<Scene>> for SceneManager {
     }
 }
 
+impl IndexMut<Id<Scene>> for SceneManager {
+    fn index_mut(&mut self, index: Id<Scene>) -> &mut Self::Output {
+        &mut self.scenes[index]
+    }
+}
+
 fn create_node(
     asset: Id<Asset>,
     node: gltf::Node,
@@ -140,7 +153,6 @@ fn create_node(
     textures: &mut TextureManager,
     materials: &mut MaterialManager,
     meshes: &mut MeshManager,
-    cameras: &mut CameraManager,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Id<Node> {
@@ -205,12 +217,16 @@ fn create_node(
     }
 
     if let Some(camera) = node.camera() {
-        let label = camera.name().unwrap_or("");
-        let camera_id = cameras.create_camera(camera, device);
+        let label = camera
+            .name()
+            .map_or_else(|| camera.index().to_string(), str::to_string);
+        let projection = Projection::from(camera.projection());
+        let matrix = projection.matrix(scene.viewport_aspect_ratio);
+
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label} camera buffer")),
             size: size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -221,9 +237,14 @@ fn create_node(
                 resource: buffer.as_entire_binding(),
             }],
         });
-        scene
-            .cameras
-            .insert(camera_id, (buffer, bind_group, node_id));
+        let camera = Camera {
+            label,
+            projection,
+            matrix,
+            buffer,
+            bind_group,
+        };
+        scene.cameras.insert(node_id, camera);
     }
 
     let children: Vec<_> = node
@@ -239,7 +260,6 @@ fn create_node(
                 textures,
                 materials,
                 meshes,
-                cameras,
                 device,
                 queue,
             )
@@ -257,6 +277,7 @@ fn create_node(
 struct CameraUniform {
     view_projection: [f32; 16],
     world_position: [f32; 3],
+    _padding: [f32; 1],
 }
 
 struct Primitive {
@@ -277,8 +298,9 @@ pub struct Scene {
             SparseMap<Mesh, (Vec<Primitive>, Vec<Id<Node>>)>,
         ),
     >,
-    cameras: SparseMap<Camera, (wgpu::Buffer, wgpu::BindGroup, Id<Node>)>,
-    pub active_camera: Option<Id<Camera>>,
+    pub cameras: SparseMap<Node, Camera>,
+    pub active_camera: Option<Id<Node>>,
+    viewport_aspect_ratio: f32,
 }
 
 impl Scene {
@@ -286,18 +308,23 @@ impl Scene {
         &self.root_nodes
     }
 
-    pub fn cameras(&self) -> impl Iterator<Item = Id<Camera>> + use<'_> {
-        self.cameras.iter().map(|(camera, _)| *camera)
+    pub fn camera(&self, id: Id<Node>) -> Option<&Camera> {
+        self.cameras.get(id)
     }
 
-    pub fn update(&mut self, cameras: &mut CameraManager, queue: &wgpu::Queue) {
+    pub fn update(&mut self, queue: &wgpu::Queue) {
         if let Some(camera_id) = self.active_camera {
-            let projection = cameras[camera_id].projection_matrix();
-            if let Some((buffer, _, node)) = self.cameras.get(camera_id) {
-                if let Some(node) = self.nodes.get(*node) {
-                    let view = node.global_transform;
-                    queue.write_buffer(buffer, 0, cast_slice(&[projection * view]));
-                }
+            if let (Some(node), Some(camera)) =
+                (self.nodes.get(camera_id), self.cameras.get(camera_id))
+            {
+                let view = node.global_transform;
+                let projection = camera.matrix;
+                let data = CameraUniform {
+                    view_projection: (projection * view).to_cols_array(),
+                    world_position: view.project_point3(Vec3::ZERO).to_array(),
+                    _padding: [0.0; 1],
+                };
+                queue.write_buffer(&camera.buffer, 0, cast_slice(&[data]));
             }
         }
     }
@@ -308,7 +335,7 @@ impl Scene {
             .map(|camera| self.cameras.get(camera))
             .flatten()
         {
-            Some((_, bind_group, _)) => bind_group,
+            Some(camera) => &camera.bind_group,
             None => return,
         };
 
@@ -382,4 +409,86 @@ impl Node {
 struct Transform {
     point: [f32; 16],
     vector: [f32; 9],
+}
+
+pub struct Camera {
+    pub label: String,
+    projection: Projection,
+    matrix: Mat4,
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+enum Projection {
+    Orthographic {
+        xmag: f32,
+        ymag: f32,
+        zfar: f32,
+        znear: f32,
+    },
+    Perspective {
+        aspect_ration: Option<f32>,
+        yfov: f32,
+        zfar: Option<f32>,
+        znear: f32,
+    },
+}
+
+impl Projection {
+    fn matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
+        match self {
+            Projection::Orthographic {
+                xmag,
+                ymag,
+                zfar,
+                znear,
+            } => Mat4::from_cols_array_2d(&[
+                [1.0 / xmag, 0.0, 0.0, 0.0],
+                [0.0, 1.0 / ymag, 0.0, 0.0],
+                [0.0, 0.0, 2.0 / (znear - zfar), 0.0],
+                [0.0, 0.0, (zfar + znear) / (znear - zfar), 0.0],
+            ]),
+            Projection::Perspective {
+                aspect_ration,
+                yfov,
+                zfar,
+                znear,
+            } => {
+                let a = aspect_ration.unwrap_or(viewport_aspect_ratio);
+                let tan_y = (0.5 * yfov).tan();
+                let (zz, zw) = match zfar {
+                    Some(zfar) => (
+                        (zfar + znear) / (znear - zfar),
+                        (2.0 * zfar * znear) / (znear - zfar),
+                    ),
+                    None => (-1.0, -2.0 * znear),
+                };
+                Mat4::from_cols_array_2d(&[
+                    [1.0 / (a * tan_y), 0.0, 0.0, 0.0],
+                    [0.0, 1.0 / a, 0.0, 0.0],
+                    [0.0, 0.0, zz, -1.0],
+                    [0.0, 0.0, zw, 0.0],
+                ])
+            }
+        }
+    }
+}
+
+impl<'a> From<gltf::camera::Projection<'a>> for Projection {
+    fn from(value: gltf::camera::Projection) -> Self {
+        match value {
+            gltf::camera::Projection::Orthographic(ortho) => Self::Orthographic {
+                xmag: ortho.xmag(),
+                ymag: ortho.ymag(),
+                zfar: ortho.zfar(),
+                znear: ortho.znear(),
+            },
+            gltf::camera::Projection::Perspective(pers) => Self::Perspective {
+                aspect_ration: pers.aspect_ratio(),
+                yfov: pers.yfov(),
+                zfar: pers.zfar(),
+                znear: pers.znear(),
+            },
+        }
+    }
 }

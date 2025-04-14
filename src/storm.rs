@@ -1,5 +1,4 @@
 mod buffer;
-mod camera;
 mod material;
 mod mesh;
 mod mesh_old;
@@ -11,7 +10,6 @@ mod texture_old;
 use std::path::Path;
 
 use buffer::BufferManager;
-use camera::CameraManager;
 use material::MaterialManager;
 use mesh::MeshManager;
 use scene::SceneManager;
@@ -26,7 +24,6 @@ pub struct Storm {
     textures: TextureManager,
     materials: MaterialManager,
     buffers: BufferManager,
-    cameras: CameraManager,
     meshes: MeshManager,
     pub scenes: SceneManager,
     pub active_scene: Option<Id<Scene>>,
@@ -34,7 +31,6 @@ pub struct Storm {
 
 impl Storm {
     pub fn new(
-        aspect_ration: f32,
         render_format: wgpu::TextureFormat,
         device: &wgpu::Device,
     ) -> Self {
@@ -42,7 +38,6 @@ impl Storm {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
-        let cameras = CameraManager::new(aspect_ration, device);
         let meshes = MeshManager::new(&materials, &mut buffers, render_format, device);
         let scenes = SceneManager::new();
 
@@ -51,7 +46,6 @@ impl Storm {
             textures,
             materials,
             buffers,
-            cameras,
             meshes,
             scenes,
             active_scene: None,
@@ -61,6 +55,7 @@ impl Storm {
     pub fn load_asset(
         &mut self,
         path: impl AsRef<Path>,
+        viewport_aspect_ratio: f32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _encoder: &mut wgpu::CommandEncoder,
@@ -76,11 +71,11 @@ impl Storm {
             self.scenes.load_scene(
                 id,
                 scene,
+                viewport_aspect_ratio,
                 &mut self.buffers,
                 &mut self.textures,
                 &mut self.materials,
                 &mut self.meshes,
-                &mut self.cameras,
                 device,
                 queue,
             );
@@ -90,11 +85,11 @@ impl Storm {
             self.scenes.load_scene(
                 id,
                 scene,
+                viewport_aspect_ratio,
                 &mut self.buffers,
                 &mut self.textures,
                 &mut self.materials,
                 &mut self.meshes,
-                &mut self.cameras,
                 device,
                 queue,
             )
@@ -106,7 +101,7 @@ impl Storm {
     pub fn update(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue) {
         if let Some(scene) = self.active_scene {
             if let Some(scene) = self.scenes.get_mut(scene) {
-                scene.update(&mut self.cameras, queue);
+                scene.update(queue);
             }
         }
     }

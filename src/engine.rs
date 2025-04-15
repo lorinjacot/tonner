@@ -2,10 +2,11 @@ mod explorer;
 
 use explorer::Explorer;
 use rfd::FileDialog;
-use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::Window;
 
 use crate::storm::Storm;
@@ -24,7 +25,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub async fn new(window: Window) -> Self {
+    pub async fn new(window: Window, load_asset: Option<PathBuf>) -> Self {
         let window = Arc::new(window);
 
         let mut size = window.inner_size();
@@ -67,7 +68,22 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
-        let storm = Storm::new(swapchain_format, &device);
+        let mut storm = Storm::new(swapchain_format, &device);
+        if let Some(path) = load_asset {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine::new command encoder"),
+            });
+
+            if let Err(err) = storm.load_asset(
+                path,
+                config.height as f32 / config.width as f32,
+                &device,
+                &queue,
+                &mut encoder,
+            ) {
+                eprintln!("Failed to load asset: {err}");
+            }
+        }
         let explorer = Explorer::new();
 
         let egui_ctx = egui::Context::default();
@@ -278,14 +294,12 @@ impl Engine {
                 self.resize(new_size);
                 true
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                match event.text_with_all_modifiers() {
-                    Some("\u{f}") => {
-                        load_dialog(&mut self.storm, &self.config, &self.device, &self.queue);
-                        true
-                    }
-                    _ => false
+            WindowEvent::KeyboardInput { event, .. } => match event.text_with_all_modifiers() {
+                Some("\u{f}") => {
+                    load_dialog(&mut self.storm, &self.config, &self.device, &self.queue);
+                    true
                 }
+                _ => false,
             },
             // WindowEvent::MouseInput { state, button, .. } => {
             //     self.controls.mouse_input(state, button)
@@ -390,8 +404,7 @@ impl Engine {
                     });
                 });
             });
-            egui::SidePanel::left("Explorer")
-                .show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
+            egui::SidePanel::left("Explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
         });
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);

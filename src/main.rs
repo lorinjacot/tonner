@@ -1,4 +1,14 @@
+use std::path::PathBuf;
+
+use clap::Parser;
 use lightning::run;
+
+#[derive(clap::Parser)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Optional asset to load on launch
+    asset: Option<PathBuf>,
+}
 
 fn main() {
     env_logger::init();
@@ -8,5 +18,7 @@ fn main() {
 
     profiling::puffin::set_scopes_on(true);
 
-    run();
+    let args = Args::parse();
+
+    run(args.asset);
 }

@@ -390,6 +390,12 @@ impl Index<Id<Node>> for Scene {
     }
 }
 
+impl IndexMut<Id<Node>> for Scene {
+    fn index_mut(&mut self, index: Id<Node>) -> &mut Self::Output {
+        &mut self.nodes[index]
+    }
+}
+
 pub struct Node {
     pub label: String,
     local_transform: Mat4,
@@ -401,6 +407,14 @@ pub struct Node {
 impl Node {
     pub fn children(&self) -> &Vec<Id<Node>> {
         &self.children
+    }
+
+    pub fn local_transform(&self) -> Mat4 {
+        self.local_transform
+    }
+
+    pub fn global_transform(&self) -> Mat4 {
+        self.global_transform
     }
 }
 

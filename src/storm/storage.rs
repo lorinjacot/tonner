@@ -1,5 +1,5 @@
 use std::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     iter::{repeat_n, FusedIterator},
     marker::PhantomData,
     mem::replace,
@@ -19,6 +19,12 @@ impl<T> Debug for Id<T> {
             .field("sparse", &self.sparse)
             .field("version", &self.version)
             .finish()
+    }
+}
+
+impl<T> Display for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.sparse, self.version)
     }
 }
 

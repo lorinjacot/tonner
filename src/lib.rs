@@ -12,8 +12,8 @@ mod camera;
 mod engine;
 mod scene;
 mod storage;
-mod texture;
 mod storm;
+mod texture;
 
 #[derive(Default)]
 struct App {
@@ -39,16 +39,7 @@ impl ApplicationHandler for App {
                 return;
             }
             match event {
-                WindowEvent::CloseRequested
-                | WindowEvent::KeyboardInput {
-                    event:
-                        KeyEvent {
-                            physical_key: PhysicalKey::Code(KeyCode::Escape),
-                            state: ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => {
+                WindowEvent::CloseRequested => {
                     event_loop.exit();
                 }
                 _ => (),

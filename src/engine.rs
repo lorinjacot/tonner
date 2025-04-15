@@ -1,6 +1,8 @@
 mod explorer;
 
+use explorer::Explorer;
 use rfd::FileDialog;
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
@@ -15,6 +17,7 @@ pub struct Engine {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     storm: Storm,
+    explorer: Explorer,
     last_frame: Instant,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -64,8 +67,8 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &config);
 
-        let aspect_ration = size.width as f32 / size.height as f32;
         let storm = Storm::new(swapchain_format, &device);
+        let explorer = Explorer::new();
 
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
@@ -245,6 +248,7 @@ impl Engine {
             surface,
             config,
             storm,
+            explorer,
             last_frame,
             egui_state,
             egui_renderer,
@@ -274,7 +278,15 @@ impl Engine {
                 self.resize(new_size);
                 true
             }
-            // WindowEvent::KeyboardInput { event, .. } => self.controls.keyboard_input(event),
+            WindowEvent::KeyboardInput { event, .. } => {
+                match event.text_with_all_modifiers() {
+                    Some("\u{f}") => {
+                        load_dialog(&mut self.storm, &self.config, &self.device, &self.queue);
+                        true
+                    }
+                    _ => false
+                }
+            },
             // WindowEvent::MouseInput { state, button, .. } => {
             //     self.controls.mouse_input(state, button)
             // }
@@ -373,33 +385,13 @@ impl Engine {
                 egui::menu::bar(ui, |ui| {
                     ui.menu_button("File", |ui| {
                         if ui.button("Open").clicked() {
-                            let file = FileDialog::new()
-                                .add_filter("glTF", &["gltf", "glb"])
-                                .pick_file();
-
-                            if let Some(path) = file {
-                                let mut encoder = self.device.create_command_encoder(
-                                    &wgpu::CommandEncoderDescriptor {
-                                        label: Some("file::open command encoder"),
-                                    },
-                                );
-                                let result = self.storm.load_asset(
-                                    path,
-                                    self.config.width as f32 / self.config.height as f32,
-                                    &self.device,
-                                    &self.queue,
-                                    &mut encoder,
-                                );
-                                if let Err(err) = result {
-                                    dbg!(err);
-                                }
-                            }
-                        }
+                            load_dialog(&mut self.storm, &self.config, &self.device, &self.queue);
+                        };
                     });
                 });
             });
             egui::SidePanel::left("Explorer")
-                .show(ctx, |ui| explorer::add_contents(ui, &mut self.storm));
+                .show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
         });
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
@@ -499,5 +491,32 @@ impl Engine {
 
         self.queue.submit([encoder.finish()]);
         frame.present();
+    }
+}
+
+fn load_dialog(
+    storm: &mut Storm,
+    config: &wgpu::SurfaceConfiguration,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) {
+    let file = FileDialog::new()
+        .add_filter("glTF", &["gltf", "glb"])
+        .pick_file();
+
+    if let Some(path) = file {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("file::open command encoder"),
+        });
+        let result = storm.load_asset(
+            path,
+            config.width as f32 / config.height as f32,
+            device,
+            queue,
+            &mut encoder,
+        );
+        if let Err(err) = result {
+            dbg!(err);
+        }
     }
 }

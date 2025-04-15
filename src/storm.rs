@@ -30,10 +30,7 @@ pub struct Storm {
 }
 
 impl Storm {
-    pub fn new(
-        render_format: wgpu::TextureFormat,
-        device: &wgpu::Device,
-    ) -> Self {
+    pub fn new(render_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
         let assets = SparseSet::new();
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
@@ -98,17 +95,15 @@ impl Storm {
         Ok(id)
     }
 
-    pub fn update(&mut self, _device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn update(&self, queue: &wgpu::Queue) {
         if let Some(scene) = self.active_scene {
-            if let Some(scene) = self.scenes.get_mut(scene) {
-                scene.update(queue);
-            }
+            self.scenes[scene].update(queue);
         }
     }
 
-    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
+    pub fn render(&self, render_pass: &mut wgpu::RenderPass) {
         if let Some(scene) = self.active_scene {
-            self.scenes[scene].render(device, render_pass);
+            self.scenes[scene].render(render_pass);
         }
     }
 

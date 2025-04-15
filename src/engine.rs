@@ -1,5 +1,6 @@
 mod explorer;
 
+use egui_wgpu::CallbackTrait;
 use explorer::Explorer;
 use rfd::FileDialog;
 use std::path::PathBuf;
@@ -11,17 +12,43 @@ use winit::window::Window;
 
 use crate::storm::Storm;
 
+struct StormCallback {}
+
+impl CallbackTrait for StormCallback {
+    fn prepare(
+        &self,
+        _device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let storm: &Storm = callback_resources.get().unwrap();
+        storm.update(queue);
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        let storm: &Storm = callback_resources.get().unwrap();
+        storm.render(render_pass);
+    }
+}
+
 pub struct Engine {
     window: Arc<Window>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    storm: Storm,
     explorer: Explorer,
     last_frame: Instant,
-    egui_state: egui_winit::State,
-    egui_renderer: egui_wgpu::Renderer,
+    state: egui_winit::State,
+    renderer: egui_wgpu::Renderer,
 }
 
 impl Engine {
@@ -88,8 +115,9 @@ impl Engine {
 
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
-        let egui_state = egui_winit::State::new(egui_ctx, viewport_id, &window, None, None, None);
-        let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
+        let state = egui_winit::State::new(egui_ctx, viewport_id, &window, None, None, None);
+        let mut renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
+        renderer.callback_resources.insert(storm);
 
         // let display_settings = DisplaySettings::default();
 
@@ -263,11 +291,10 @@ impl Engine {
             queue,
             surface,
             config,
-            storm,
             explorer,
             last_frame,
-            egui_state,
-            egui_renderer,
+            state,
+            renderer,
         }
     }
 
@@ -276,11 +303,7 @@ impl Engine {
     }
 
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
-        if self
-            .egui_state
-            .on_window_event(&self.window, event)
-            .consumed
-        {
+        if self.state.on_window_event(&self.window, event).consumed {
             return true;
         }
         match event {
@@ -296,7 +319,12 @@ impl Engine {
             }
             WindowEvent::KeyboardInput { event, .. } => match event.text_with_all_modifiers() {
                 Some("\u{f}") => {
-                    load_dialog(&mut self.storm, &self.config, &self.device, &self.queue);
+                    load_dialog(
+                        self.renderer.callback_resources.get_mut().unwrap(),
+                        &self.config,
+                        &self.device,
+                        &self.queue,
+                    );
                     true
                 }
                 _ => false,
@@ -386,7 +414,7 @@ impl Engine {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         // handle inputs
-        let new_input = self.egui_state.take_egui_input(&self.window);
+        let new_input = self.state.take_egui_input(&self.window);
 
         // let camera = self.scene.camera_mut(self.camera).unwrap();
         // self.controls.update(delta_time, camera.0, camera.1);
@@ -394,23 +422,30 @@ impl Engine {
         // updates engine components
         // self.scene.update();
 
-        let full_output = self.egui_state.egui_ctx().run(new_input, |ctx| {
+        let storm: &mut Storm = self.renderer.callback_resources.get_mut().unwrap();
+        let full_output = self.state.egui_ctx().run(new_input, |ctx| {
             egui::TopBottomPanel::top("Menu bar").show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
                     ui.menu_button("File", |ui| {
                         if ui.button("Open").clicked() {
-                            load_dialog(&mut self.storm, &self.config, &self.device, &self.queue);
+                            load_dialog(storm, &self.config, &self.device, &self.queue);
                         };
                     });
                 });
             });
-            egui::SidePanel::left("Explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
+            egui::SidePanel::left("Explorer").show(ctx, |ui| self.explorer.ui(ui, storm));
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                    ui.clip_rect(),
+                    StormCallback {},
+                ));
+            });
         });
-        self.egui_state
+        self.state
             .handle_platform_output(&self.window, full_output.platform_output);
 
         let clipped_primitives = self
-            .egui_state
+            .state
             .egui_ctx()
             .tessellate(full_output.shapes, full_output.pixels_per_point);
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
@@ -419,18 +454,17 @@ impl Engine {
         };
 
         for (id, image_delta) in full_output.textures_delta.set {
-            self.egui_renderer
+            self.renderer
                 .update_texture(&self.device, &self.queue, id, &image_delta);
         }
-        self.egui_renderer.update_buffers(
+        
+        self.renderer.update_buffers(
             &self.device,
             &self.queue,
             &mut encoder,
             &clipped_primitives,
             &screen_descriptor,
         );
-
-        self.storm.update(&self.device, &self.queue);
 
         // {
         //     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -473,7 +507,7 @@ impl Engine {
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
 
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -493,9 +527,7 @@ impl Engine {
                 occlusion_query_set: None,
             });
 
-            self.storm.render(&self.device, &mut render_pass);
-
-            self.egui_renderer.render(
+            self.renderer.render(
                 &mut render_pass.forget_lifetime(),
                 &clipped_primitives,
                 &screen_descriptor,

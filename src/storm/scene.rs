@@ -5,13 +5,12 @@ use std::{
 
 use bytemuck::{cast_slice, Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3};
-use wgpu::util::DeviceExt;
 
 use super::{
     buffer::BufferManager,
     material::MaterialManager,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
-    storage::{Id, SparseMap, SparseSet},
+    storage::{Entry, Id, SparseMap, SparseSet},
     texture::TextureManager,
     Asset,
 };
@@ -178,41 +177,39 @@ fn create_node(
         let mesh_id = meshes.load_mesh(asset, mesh, buffers, textures, materials, device, queue);
         let mesh = &meshes[mesh_id];
         for (pipeline, primitives) in &mesh.primitives {
-            scene
+            match scene
                 .primitives
                 .entry(*pipeline)
                 .or_insert_with(|| (meshes[*pipeline].clone(), SparseMap::new()))
                 .1
                 .entry(mesh_id)
-                .or_insert_with(|| {
-                    let primitives = primitives
-                        .iter()
-                        .map(|primitive| {
-                            let indices = primitive.indices.map(|(accessor, index_format)| {
-                                let accessor = &buffers[accessor];
-                                (
-                                    buffers[accessor.buffer()].clone(),
-                                    accessor.bounds(),
-                                    index_format,
-                                )
-                            });
-                            let vertex_buffers = primitive
-                                .vertex_buffers
-                                .iter()
-                                .map(|buffer| buffers[*buffer].clone())
-                                .collect();
-                            Primitive {
-                                indices,
-                                vertex_buffers,
-                                vertex_count: primitive.vertex_count,
-                                material: materials[primitive.material].bind_group().clone(),
-                            }
-                        })
-                        .collect();
-                    (primitives, Vec::with_capacity(1))
-                })
-                .1
-                .push(node_id);
+            {
+                Entry::Occupied(entry) => {
+                    let (_, nodes, buffer) = entry.into_mut();
+                    nodes.push(node_id);
+                    *buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Node transforms buffer"),
+                        size: buffer.size() + size_of::<Transform>() as u64,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert((
+                        primitives
+                            .iter()
+                            .map(|primitive| Primitive::new(primitive, buffers, materials))
+                            .collect(),
+                        vec![node_id],
+                        device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("Node transforms buffer"),
+                            size: size_of::<Transform>() as u64,
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    ));
+                }
+            }
         }
     }
 
@@ -272,21 +269,6 @@ fn create_node(
     node_id
 }
 
-#[derive(Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct CameraUniform {
-    view_projection: [f32; 16],
-    world_position: [f32; 3],
-    _padding: [f32; 1],
-}
-
-struct Primitive {
-    indices: Option<(wgpu::Buffer, Range<u64>, wgpu::IndexFormat)>,
-    vertex_buffers: Vec<wgpu::Buffer>,
-    vertex_count: u32,
-    material: wgpu::BindGroup,
-}
-
 pub struct Scene {
     pub label: String,
     nodes: SparseSet<Node>,
@@ -295,7 +277,7 @@ pub struct Scene {
         PrimitivePipeline,
         (
             wgpu::RenderPipeline,
-            SparseMap<Mesh, (Vec<Primitive>, Vec<Id<Node>>)>,
+            SparseMap<Mesh, (Vec<Primitive>, Vec<Id<Node>>, wgpu::Buffer)>,
         ),
     >,
     pub cameras: SparseMap<Node, Camera>,
@@ -312,24 +294,47 @@ impl Scene {
         self.cameras.get(id)
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue) {
-        if let Some(camera_id) = self.active_camera {
-            if let (Some(node), Some(camera)) =
-                (self.nodes.get(camera_id), self.cameras.get(camera_id))
-            {
-                let view = node.global_transform;
-                let projection = camera.matrix;
-                let data = CameraUniform {
-                    view_projection: (projection * view).to_cols_array(),
-                    world_position: view.project_point3(Vec3::ZERO).to_array(),
-                    _padding: [0.0; 1],
-                };
-                queue.write_buffer(&camera.buffer, 0, cast_slice(&[data]));
+    pub fn update(&self, queue: &wgpu::Queue) {
+        for (_, mesh_map) in self.primitives.values() {
+            for (_, nodes, buffer) in mesh_map.values() {
+                let transforms: Vec<_> = nodes
+                    .iter()
+                    .map(|node| {
+                        let transform = self.nodes[*node].global_transform;
+                        Transform {
+                            point: transform.to_cols_array(),
+                            vector: Mat3::from_mat4(transform.inverse())
+                                .transpose()
+                                .to_cols_array(),
+                        }
+                    })
+                    .collect();
+                queue.write_buffer(buffer, 0, cast_slice(&transforms));
             }
+        }
+
+        if let Some(id) = self.active_camera {
+            let node = &self.nodes[id];
+            let camera = &self.cameras[id];
+
+            let position = node.global_transform.transform_point3(Vec3::ZERO);
+            let view = Mat4::look_to_rh(
+                position,
+                node.global_transform.transform_vector3(Vec3::Z),
+                node.global_transform.transform_vector3(Vec3::Y),
+            );
+
+            let data = CameraUniform {
+                view_projection: (camera.matrix * view).to_cols_array(),
+                world_position: position.to_array(),
+                _padding: [0.0; 1],
+            };
+
+            queue.write_buffer(&camera.buffer, 0, cast_slice(&[data]));
         }
     }
 
-    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
+    pub fn render(&self, render_pass: &mut wgpu::RenderPass) {
         let camera = match self
             .active_camera
             .map(|camera| self.cameras.get(camera))
@@ -342,24 +347,8 @@ impl Scene {
         for (pipeline, by_mesh) in self.primitives.values() {
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, camera, &[]);
-            for (primitives, nodes) in by_mesh.values() {
+            for (primitives, nodes, transforms) in by_mesh.values() {
                 let node_count = nodes.len() as u32;
-                let transforms: Vec<_> = nodes
-                    .iter()
-                    .map(|node| {
-                        let transform = self.nodes[*node].global_transform;
-                        Transform {
-                            point: transform.to_cols_array(),
-                            vector: Mat3::from_mat4(transform.inverse().transpose())
-                                .to_cols_array(),
-                        }
-                    })
-                    .collect();
-                let transforms = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Node transforms vertex buffer"),
-                    contents: cast_slice(&transforms),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
                 render_pass.set_vertex_buffer(0, transforms.slice(..));
 
                 for primitive in primitives {
@@ -423,6 +412,49 @@ impl Node {
 struct Transform {
     point: [f32; 16],
     vector: [f32; 9],
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct CameraUniform {
+    view_projection: [f32; 16],
+    world_position: [f32; 3],
+    _padding: [f32; 1],
+}
+
+struct Primitive {
+    indices: Option<(wgpu::Buffer, Range<u64>, wgpu::IndexFormat)>,
+    vertex_buffers: Vec<wgpu::Buffer>,
+    vertex_count: u32,
+    material: wgpu::BindGroup,
+}
+
+impl Primitive {
+    fn new(
+        primitive: &super::mesh::Primitive,
+        buffers: &BufferManager,
+        materials: &MaterialManager,
+    ) -> Self {
+        let indices = primitive.indices.map(|(accessor, index_format)| {
+            let accessor = &buffers[accessor];
+            (
+                buffers[accessor.buffer()].clone(),
+                accessor.bounds(),
+                index_format,
+            )
+        });
+        let vertex_buffers = primitive
+            .vertex_buffers
+            .iter()
+            .map(|buffer| buffers[*buffer].clone())
+            .collect();
+        Primitive {
+            indices,
+            vertex_buffers,
+            vertex_count: primitive.vertex_count,
+            material: materials[primitive.material].bind_group().clone(),
+        }
+    }
 }
 
 pub struct Camera {

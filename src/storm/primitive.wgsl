@@ -110,10 +110,10 @@ fn vs_main(
     );
 
     var result: VertexOutput;
-    result.position = camera.view_projection * world_position;
-    // let x = f32(i32(vertex_index) - 1);
-    // let y = f32(i32(vertex_index & 1u) * 2 - 1);
-    // result.position = vec4<f32>(x, y, 0.0, 1.0);
+    // result.position = camera.view_projection * world_position;
+    let x = f32(i32(vertex_index) - 1);
+    let y = f32(i32(vertex_index & 1u) * 2 - 1);
+    result.position = vec4<f32>(x, y, 0.0, 1.0);
     result.world_position = world_position.xyz;
     result.normal = vector_transform * attributes.normal;
     if has_tangent {

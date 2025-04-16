@@ -144,14 +144,14 @@ fn create_node(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Id<Node> {
-    let label = node
+    let name = node
         .name()
         .map_or_else(|| node.index().to_string(), str::to_string);
     let local_transform = Mat4::from_cols_array_2d(&node.transform().matrix());
     let global_transform = parent_transform * local_transform;
 
     let node_id = scene.nodes.push(Node {
-        label,
+        name,
         local_transform,
         global_transform,
         children: Vec::new(),
@@ -203,19 +203,19 @@ fn create_node(
     }
 
     if let Some(camera) = node.camera() {
-        let label = camera
+        let name = camera
             .name()
             .map_or_else(|| camera.index().to_string(), str::to_string);
         let projection = Projection::from(camera.projection());
 
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("{label} camera buffer")),
+            label: Some(&format!("{name} camera buffer")),
             size: size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{label} camera bind group")),
+            label: Some(&format!("{name} camera bind group")),
             layout: meshes.camera_bind_group_layout(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -223,7 +223,7 @@ fn create_node(
             }],
         });
         let camera = Camera {
-            label,
+            name,
             projection,
             buffer,
             bind_group,
@@ -380,7 +380,7 @@ impl IndexMut<Id<Node>> for Scene {
 }
 
 pub struct Node {
-    pub label: String,
+    pub name: String,
     local_transform: Mat4,
     global_transform: Mat4,
     parent: Option<Id<Node>>,
@@ -452,7 +452,7 @@ impl Primitive {
 }
 
 pub struct Camera {
-    pub label: String,
+    pub name: String,
     projection: Projection,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,

@@ -45,11 +45,11 @@ impl Explorer {
                 .selected_text(
                     scene
                         .active_camera
-                        .map_or("", |camera| &scene.camera(camera).unwrap().label),
+                        .map_or("", |camera| &scene.camera(camera).unwrap().name),
                 )
                 .show_ui(ui, |ui| {
                     for (id, camera) in scene.cameras.iter() {
-                        ui.selectable_value(&mut scene.active_camera, Some(*id), &camera.label);
+                        ui.selectable_value(&mut scene.active_camera, Some(*id), &camera.name);
                     }
                 });
 
@@ -66,7 +66,7 @@ impl Explorer {
 
     fn node_ui(&mut self, ui: &mut Ui, id: Id<Node>, scene: &Scene) {
         let node = &scene[id];
-        ui.collapsing(&node.label, |ui| {
+        ui.collapsing(&node.name, |ui| {
             for node in node.children() {
                 self.node_ui(ui, *node, scene);
             }
@@ -81,7 +81,7 @@ impl Explorer {
 
     fn node_modal_ui(&self, ui: &mut Ui, id: Id<Node>, scene: &mut Scene) {
         let node = &mut scene[id];
-        ui.heading(format!("{}'s properties", node.label));
+        ui.heading(format!("{}'s properties", node.name));
 
         ui.horizontal(|ui| {
             ui.label("Id");
@@ -89,7 +89,7 @@ impl Explorer {
         });
         ui.horizontal(|ui| {
             ui.label("Label");
-            ui.text_edit_singleline(&mut node.label)
+            ui.text_edit_singleline(&mut node.name)
         });
 
         ui.collapsing("Local transform", |ui| {

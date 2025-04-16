@@ -1,11 +1,12 @@
+mod controls;
 mod explorer;
 
+use controls::{Controls, OrbitControls};
 use egui_wgpu::CallbackTrait;
 use explorer::Explorer;
 use rfd::FileDialog;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 use winit::event::{DeviceEvent, WindowEvent};
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::Window;
@@ -48,10 +49,10 @@ pub struct Engine {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    controls: Vec<Box<dyn Controls>>,
     explorer: Explorer,
-    last_frame: Instant,
-    state: egui_winit::State,
-    renderer: egui_wgpu::Renderer,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
 }
 
 impl Engine {
@@ -114,13 +115,16 @@ impl Engine {
                 eprintln!("Failed to load asset: {err}");
             }
         }
+
+        let controls: Vec<Box<dyn Controls>> = vec![Box::new(OrbitControls::new())];
+
         let explorer = Explorer::new();
 
         let egui_ctx = egui::Context::default();
         let viewport_id = egui_ctx.viewport_id();
-        let state = egui_winit::State::new(egui_ctx, viewport_id, &window, None, None, None);
-        let mut renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
-        renderer.callback_resources.insert(storm);
+        let egui_state = egui_winit::State::new(egui_ctx, viewport_id, &window, None, None, None);
+        let mut egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, false);
+        egui_renderer.callback_resources.insert(storm);
 
         // let display_settings = DisplaySettings::default();
 
@@ -286,7 +290,6 @@ impl Engine {
         //     .unwrap();
 
         device.stop_capture();
-        let last_frame = Instant::now();
 
         Self {
             window,
@@ -294,10 +297,10 @@ impl Engine {
             queue,
             surface,
             config,
+            controls,
             explorer,
-            last_frame,
-            state,
-            renderer,
+            egui_state,
+            egui_renderer,
         }
     }
 
@@ -306,7 +309,11 @@ impl Engine {
     }
 
     pub fn window_event(&mut self, event: &WindowEvent) -> bool {
-        if self.state.on_window_event(&self.window, event).consumed {
+        if self
+            .egui_state
+            .on_window_event(&self.window, event)
+            .consumed
+        {
             return true;
         }
         match event {
@@ -323,7 +330,7 @@ impl Engine {
             WindowEvent::KeyboardInput { event, .. } => match event.text_with_all_modifiers() {
                 Some("\u{f}") => {
                     load_dialog(
-                        self.renderer.callback_resources.get_mut().unwrap(),
+                        self.egui_renderer.callback_resources.get_mut().unwrap(),
                         &self.config,
                         &self.device,
                         &self.queue,
@@ -341,7 +348,10 @@ impl Engine {
 
     pub fn device_event(&mut self, event: &DeviceEvent) -> bool {
         match event {
-            // DeviceEvent::MouseMotion { delta } => self.controls.mouse_motion(delta),
+            DeviceEvent::MouseMotion { delta } => {
+                self.egui_state.on_mouse_motion(*delta);
+                true
+            }
             _ => false,
         }
     }
@@ -409,24 +419,10 @@ impl Engine {
     }
 
     fn draw(&mut self) {
-        let _delta_time = self.last_frame.elapsed();
-        self.last_frame = Instant::now();
+        let new_input = self.egui_state.take_egui_input(&self.window);
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        // handle inputs
-        let new_input = self.state.take_egui_input(&self.window);
-
-        // let camera = self.scene.camera_mut(self.camera).unwrap();
-        // self.controls.update(delta_time, camera.0, camera.1);
-
-        // updates engine components
-        // self.scene.update();
-
-        let storm: &mut Storm = self.renderer.callback_resources.get_mut().unwrap();
-        let full_output = self.state.egui_ctx().run(new_input, |ctx| {
+        let storm: &mut Storm = self.egui_renderer.callback_resources.get_mut().unwrap();
+        let full_output = self.egui_state.egui_ctx().run(new_input, |ctx| {
             egui::TopBottomPanel::top("Menu bar").show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
                     ui.menu_button("File", |ui| {
@@ -439,31 +435,50 @@ impl Engine {
             egui::SidePanel::left("Explorer").show(ctx, |ui| self.explorer.ui(ui, storm));
             if let Some(scene) = storm.active_scene() {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let viewport = match scene.aspect_ratio() {
-                        Some(aspect_ratio) => {
-                            let width = ui.clip_rect().width();
-                            let height = ui.clip_rect().height();
-                            let mut rec = ui.clip_rect();
-                            rec.set_width(width.min(height * aspect_ratio));
-                            rec.set_height(height.min(width / aspect_ratio));
-                            rec.set_center(ui.clip_rect().center());
-                            rec
-                        }
-                        None => ui.clip_rect(),
-                    };
+                    ui.horizontal_centered(|ui| {
+                        ui.vertical_centered(|ui| {
+                            let sense = egui::Sense::click_and_drag();
+                            let (viewport, response) = match scene.aspect_ratio() {
+                                Some(aspect_ratio) => {
+                                    let width = ui.available_width();
+                                    let height = ui.available_height();
+                                    ui.allocate_exact_size(
+                                        egui::Vec2 {
+                                            x: width.min(height * aspect_ratio),
+                                            y: height.min(width / aspect_ratio),
+                                        },
+                                        sense,
+                                    )
+                                }
+                                None => ui.allocate_exact_size(ui.available_size(), sense),
+                            };
+                            if response.clicked() {
+                                response.request_focus();
+                            } else if response.clicked_elsewhere() {
+                                response.surrender_focus();
+                            }
+                            if response.has_focus() {
+                                ui.input_mut(|inputs| {
+                                    for control in self.controls.iter_mut() {
+                                        control.handle_inputs(inputs);
+                                    }
+                                });
+                            }
 
-                    ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                        viewport,
-                        StormCallback {},
-                    ));
+                            ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                                viewport,
+                                StormCallback {},
+                            ));
+                        });
+                    });
                 });
             }
         });
-        self.state
+        self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
 
         let clipped_primitives = self
-            .state
+            .egui_state
             .egui_ctx()
             .tessellate(full_output.shapes, full_output.pixels_per_point);
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
@@ -471,12 +486,18 @@ impl Engine {
             pixels_per_point: full_output.pixels_per_point,
         };
 
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine::draw command encoder"),
+            });
+
         for (id, image_delta) in full_output.textures_delta.set {
-            self.renderer
+            self.egui_renderer
                 .update_texture(&self.device, &self.queue, id, &image_delta);
         }
 
-        self.renderer.update_buffers(
+        self.egui_renderer.update_buffers(
             &self.device,
             &self.queue,
             &mut encoder,
@@ -520,37 +541,35 @@ impl Engine {
             .get_current_texture()
             .expect("Failed to acquire next swap chain texture");
 
-        {
-            let view = frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
-            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.1,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.1,
+                        g: 0.1,
+                        b: 0.1,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-            self.renderer.render(
-                &mut render_pass.forget_lifetime(),
-                &clipped_primitives,
-                &screen_descriptor,
-            );
-        }
+        self.egui_renderer.render(
+            &mut render_pass.forget_lifetime(),
+            &clipped_primitives,
+            &screen_descriptor,
+        );
 
         self.queue.submit([encoder.finish()]);
         frame.present();

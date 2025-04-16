@@ -44,7 +44,6 @@ impl SceneManager {
         &mut self,
         asset: Id<Asset>,
         scene: gltf::Scene,
-        viewport_aspect_ratio: f32,
         buffers: &mut BufferManager,
         textures: &mut TextureManager,
         materials: &mut MaterialManager,
@@ -55,15 +54,7 @@ impl SceneManager {
         match self.assets.entry(asset).or_default().get(scene.index()) {
             Some(Some(id)) => *id,
             _ => self.create_scene(
-                asset,
-                scene,
-                viewport_aspect_ratio,
-                buffers,
-                textures,
-                materials,
-                meshes,
-                device,
-                queue,
+                asset, scene, buffers, textures, materials, meshes, device, queue,
             ),
         }
     }
@@ -72,7 +63,6 @@ impl SceneManager {
         &mut self,
         asset: Id<Asset>,
         gltf_scene: gltf::Scene,
-        viewport_aspect_ratio: f32,
         buffers: &mut BufferManager,
         textures: &mut TextureManager,
         materials: &mut MaterialManager,
@@ -90,7 +80,6 @@ impl SceneManager {
             primitives: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
-            viewport_aspect_ratio,
         };
 
         for node in gltf_scene.nodes() {
@@ -218,7 +207,6 @@ fn create_node(
             .name()
             .map_or_else(|| camera.index().to_string(), str::to_string);
         let projection = Projection::from(camera.projection());
-        let matrix = projection.matrix(scene.viewport_aspect_ratio);
 
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label} camera buffer")),
@@ -237,7 +225,6 @@ fn create_node(
         let camera = Camera {
             label,
             projection,
-            matrix,
             buffer,
             bind_group,
         };
@@ -282,7 +269,6 @@ pub struct Scene {
     >,
     pub cameras: SparseMap<Node, Camera>,
     pub active_camera: Option<Id<Node>>,
-    viewport_aspect_ratio: f32,
 }
 
 impl Scene {
@@ -294,7 +280,14 @@ impl Scene {
         self.cameras.get(id)
     }
 
-    pub fn update(&self, queue: &wgpu::Queue) {
+    pub fn aspect_ratio(&self) -> Option<f32> {
+        match self.cameras[self.active_camera?].projection {
+            Projection::Perspective { aspect_ratio, .. } => aspect_ratio,
+            Projection::Orthographic { x_mag, y_mag, .. } => Some(x_mag / y_mag),
+        }
+    }
+
+    pub fn update(&self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
         for (_, mesh_map) in self.primitives.values() {
             for (_, nodes, buffer) in mesh_map.values() {
                 let transforms: Vec<_> = nodes
@@ -320,27 +313,16 @@ impl Scene {
             let position = node.global_transform.transform_point3(Vec3::ZERO);
             let view = Mat4::look_to_rh(
                 position,
-                node.global_transform.transform_vector3(Vec3::Z),
+                node.global_transform.transform_vector3(-Vec3::Z),
                 node.global_transform.transform_vector3(Vec3::Y),
             );
-            // dbg!(&view);
-            let projection = Mat4::perspective_lh(f32::to_radians(90.0), 1.0, 0.1, 10.0);
-            // dbg!(&projection);
+            let projection = camera.projection_matrix(viewport_aspect_ratio);
 
             let data = CameraUniform {
                 view_projection: (projection * view).to_cols_array(),
                 world_position: position.to_array(),
                 _padding: [0.0; 1],
             };
-
-            // let view = Mat4::look_at_rh(5.0 * Vec3::Z, Vec3::ZERO, Vec3::Y);
-            // let projection = Mat4::perspective_lh(f32::to_radians(90.0), 1.0, 0.1, 10.0);
-            // let data = CameraUniform {
-            //     view_projection: (projection * view).to_cols_array(),
-            //     world_position: position.to_array(),
-            //     _padding: [0.0; 1],
-            // };
-            // println!("{}", projection * view);
 
             queue.write_buffer(&camera.buffer, 0, cast_slice(&[data]));
         }
@@ -472,80 +454,73 @@ impl Primitive {
 pub struct Camera {
     pub label: String,
     projection: Projection,
-    matrix: Mat4,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
-enum Projection {
-    Orthographic {
-        xmag: f32,
-        ymag: f32,
-        zfar: f32,
-        znear: f32,
-    },
-    Perspective {
-        aspect_ration: Option<f32>,
-        yfov: f32,
-        zfar: Option<f32>,
-        znear: f32,
-    },
-}
-
-impl Projection {
-    fn matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
-        match self {
+impl Camera {
+    fn projection_matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
+        match self.projection {
             Projection::Orthographic {
-                xmag,
-                ymag,
-                zfar,
-                znear,
-            } => Mat4::from_cols_array_2d(&[
-                [1.0 / xmag, 0.0, 0.0, 0.0],
-                [0.0, 1.0 / ymag, 0.0, 0.0],
-                [0.0, 0.0, 2.0 / (znear - zfar), 0.0],
-                [0.0, 0.0, (zfar + znear) / (znear - zfar), 0.0],
-            ]),
+                x_mag,
+                y_mag,
+                z_far,
+                z_near,
+            } => Mat4::orthographic_rh(-x_mag, x_mag, -y_mag, y_mag, z_near, z_far),
             Projection::Perspective {
-                aspect_ration,
-                yfov,
-                zfar,
-                znear,
-            } => {
-                let a = aspect_ration.unwrap_or(viewport_aspect_ratio);
-                let tan_y = (0.5 * yfov).tan();
-                let (zz, zw) = match zfar {
-                    Some(zfar) => (
-                        (zfar + znear) / (znear - zfar),
-                        (2.0 * zfar * znear) / (znear - zfar),
-                    ),
-                    None => (-1.0, -2.0 * znear),
-                };
-                Mat4::from_cols_array_2d(&[
-                    [1.0 / (a * tan_y), 0.0, 0.0, 0.0],
-                    [0.0, 1.0 / a, 0.0, 0.0],
-                    [0.0, 0.0, zz, -1.0],
-                    [0.0, 0.0, zw, 0.0],
-                ])
-            }
+                aspect_ratio,
+                y_fov,
+                z_far: Some(z_far),
+                z_near,
+            } => Mat4::perspective_rh(
+                y_fov,
+                aspect_ratio.unwrap_or(viewport_aspect_ratio),
+                z_near,
+                z_far,
+            ),
+            Projection::Perspective {
+                aspect_ratio,
+                y_fov,
+                z_far: None,
+                z_near,
+            } => Mat4::perspective_infinite_rh(
+                y_fov,
+                aspect_ratio.unwrap_or(viewport_aspect_ratio),
+                z_near,
+            ),
         }
     }
+}
+
+enum Projection {
+    Orthographic {
+        x_mag: f32,
+        y_mag: f32,
+        z_far: f32,
+        z_near: f32,
+    },
+    Perspective {
+        aspect_ratio: Option<f32>,
+        y_fov: f32,
+        z_far: Option<f32>,
+        z_near: f32,
+    },
 }
 
 impl<'a> From<gltf::camera::Projection<'a>> for Projection {
     fn from(value: gltf::camera::Projection) -> Self {
         match value {
             gltf::camera::Projection::Orthographic(ortho) => Self::Orthographic {
-                xmag: ortho.xmag(),
-                ymag: ortho.ymag(),
-                zfar: ortho.zfar(),
-                znear: ortho.znear(),
+                x_mag: ortho.xmag(),
+                y_mag: ortho.ymag(),
+                z_far: ortho.zfar(),
+                z_near: ortho.znear(),
             },
             gltf::camera::Projection::Perspective(pers) => Self::Perspective {
-                aspect_ration: pers.aspect_ratio(),
-                yfov: pers.yfov(),
-                zfar: pers.zfar(),
-                znear: pers.znear(),
+                aspect_ratio: pers.aspect_ratio(),
+                y_fov: pers.yfov(),
+                z_far: pers.zfar(),
+                z_near: pers.znear(),
             },
         }
     }

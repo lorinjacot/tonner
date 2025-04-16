@@ -261,7 +261,6 @@ impl MeshManager {
                         let positions: Vec<_> = match reader.read_indices() {
                             Some(indices) => {
                                 let positions: Vec<_> = reader.read_positions().unwrap().collect();
-                                dbg!(&positions);
                                 indices
                                     .into_u32()
                                     .map(|index| positions[index as usize])

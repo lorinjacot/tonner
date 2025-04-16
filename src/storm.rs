@@ -68,7 +68,6 @@ impl Storm {
             self.scenes.load_scene(
                 id,
                 scene,
-                viewport_aspect_ratio,
                 &mut self.buffers,
                 &mut self.textures,
                 &mut self.materials,
@@ -82,7 +81,6 @@ impl Storm {
             self.scenes.load_scene(
                 id,
                 scene,
-                viewport_aspect_ratio,
                 &mut self.buffers,
                 &mut self.textures,
                 &mut self.materials,
@@ -95,9 +93,9 @@ impl Storm {
         Ok(id)
     }
 
-    pub fn update(&self, queue: &wgpu::Queue) {
+    pub fn update(&self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
         if let Some(scene) = self.active_scene {
-            self.scenes[scene].update(queue);
+            self.scenes[scene].update(viewport_aspect_ratio, queue);
         }
     }
 

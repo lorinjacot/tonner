@@ -19,12 +19,15 @@ impl CallbackTrait for StormCallback {
         &self,
         _device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let storm: &Storm = callback_resources.get().unwrap();
-        storm.update(queue);
+        storm.update(
+            screen_descriptor.size_in_pixels[0] as f32 / screen_descriptor.size_in_pixels[1] as f32,
+            queue,
+        );
         Vec::new()
     }
 
@@ -434,12 +437,27 @@ impl Engine {
                 });
             });
             egui::SidePanel::left("Explorer").show(ctx, |ui| self.explorer.ui(ui, storm));
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.painter().add(egui_wgpu::Callback::new_paint_callback(
-                    ui.clip_rect(),
-                    StormCallback {},
-                ));
-            });
+            if let Some(scene) = storm.active_scene() {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let viewport = match scene.aspect_ratio() {
+                        Some(aspect_ratio) => {
+                            let width = ui.clip_rect().width();
+                            let height = ui.clip_rect().height();
+                            let mut rec = ui.clip_rect();
+                            rec.set_width(width.min(height * aspect_ratio));
+                            rec.set_height(height.min(width / aspect_ratio));
+                            rec.set_center(ui.clip_rect().center());
+                            rec
+                        }
+                        None => ui.clip_rect(),
+                    };
+
+                    ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+                        viewport,
+                        StormCallback {},
+                    ));
+                });
+            }
         });
         self.state
             .handle_platform_output(&self.window, full_output.platform_output);
@@ -457,7 +475,7 @@ impl Engine {
             self.renderer
                 .update_texture(&self.device, &self.queue, id, &image_delta);
         }
-        
+
         self.renderer.update_buffers(
             &self.device,
             &self.queue,

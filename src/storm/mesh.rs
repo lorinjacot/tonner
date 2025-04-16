@@ -627,16 +627,3 @@ struct VertexBufferLayout {
     step_mode: wgpu::VertexStepMode,
     attributes: Vec<wgpu::VertexAttribute>,
 }
-
-fn component_type(data_type: gltf::accessor::DataType) -> u32 {
-    use gltf::accessor::DataType::*;
-
-    match data_type {
-        I8 => 5120,
-        U8 => 5121,
-        I16 => 5122,
-        U16 => 5123,
-        U32 => 5125,
-        F32 => 5126,
-    }
-}

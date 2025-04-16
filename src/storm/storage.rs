@@ -148,7 +148,7 @@ impl<K, V> SparseMap<K, V> {
     pub fn entry(&mut self, id: Id<K>) -> Entry<'_, K, V> {
         if self.contains(id) {
             Entry::Occupied(OccupiedEntry {
-                id,
+                key: PhantomData,
                 value: &mut self[id],
             })
         } else {
@@ -240,7 +240,7 @@ impl<'a, K, V: Default> Entry<'a, K, V> {
 }
 
 pub struct OccupiedEntry<'a, K, V: 'a> {
-    id: Id<K>,
+    key: PhantomData<K>,
     value: &'a mut V,
 }
 

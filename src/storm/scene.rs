@@ -32,10 +32,6 @@ impl SceneManager {
         self.scenes.get(scene)
     }
 
-    pub fn get_mut(&mut self, scene: Id<Scene>) -> Option<&mut Scene> {
-        self.scenes.get_mut(scene)
-    }
-
     pub fn len(&self) -> usize {
         self.scenes.len()
     }

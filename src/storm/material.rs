@@ -16,11 +16,6 @@ use super::{
 
 pub const TEX_COORD_COUNT: u32 = 2;
 
-const BASE_COLOR_TEXTURE_BINDING: u32 = 0;
-const METALLIC_ROUGHNESS_TEXTURE_BINDING: u32 = 2;
-const NORMAL_TEXTURE_BINDING: u32 = 4;
-const OCCLUSION_TEXTURE_BINDING: u32 = 6;
-const EMISSIVE_TEXTURE_BINDING: u32 = 8;
 const UNIFORM_BINDING: u32 = 10;
 
 const BASE_COLOR_TEXTURE_OVERRIDE: &str = "has_base_color_texture";

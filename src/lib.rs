@@ -4,17 +4,18 @@ use std::sync::Arc;
 use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
+use storm::Storm;
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
-mod asset;
-mod camera;
-mod engine;
-mod scene;
-mod storage;
+// mod asset;
+// mod camera;
+// mod scene;
+// mod storage;
 mod storm;
-mod texture;
+// mod texture;
+// mod explorer;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -34,6 +35,8 @@ pub fn run(load_asset: Option<PathBuf>) {
     event_loop.run_app(&mut app).unwrap();
 }
 
+const RENDER_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
 struct App {
     wgpu_instance: wgpu::Instance,
     engine: Option<Engine>,
@@ -44,6 +47,7 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if self.engine.is_none() {
             self.engine = Some(pollster::block_on(Engine::new(
+                self.load_asset.take(),
                 event_loop,
                 &self.wgpu_instance,
             )));
@@ -106,12 +110,17 @@ struct Engine {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
+    storm: Storm,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
+    render_texture: wgpu::Texture,
+    render_texture_view: wgpu::TextureView,
+    render_texture_id: egui::TextureId,
 }
 
 impl Engine {
     async fn new(
+        load_asset: Option<PathBuf>,
         event_loop: &winit::event_loop::ActiveEventLoop,
         wgpu_instance: &wgpu::Instance,
     ) -> Self {
@@ -161,10 +170,16 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        dbg!(
-            device.limits().max_texture_dimension_2d,
-            adapter.limits().max_texture_dimension_2d
-        );
+        let mut storm = Storm::new(RENDER_TEXTURE_FORMAT, &device);
+        if let Some(path) = load_asset {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Engine::new command encoder"),
+            });
+            if let Err(err) = storm.load_asset(path, &device, &queue, &mut encoder) {
+                panic!("{err}");
+            }
+        }
+
         let egui_state = egui_winit::State::new(
             egui_ctx,
             egui::ViewportId::ROOT,
@@ -175,7 +190,10 @@ impl Engine {
             // None,
         );
 
-        let egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, true);
+        let mut egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, true);
+
+        let (render_texture, render_texture_view, render_texture_id) =
+            create_render_texture(size.width, size.height, &mut egui_renderer, &device);
 
         Self {
             device,
@@ -183,8 +201,12 @@ impl Engine {
             window,
             surface,
             surface_config,
+            storm,
             egui_state,
             egui_renderer,
+            render_texture,
+            render_texture_view,
+            render_texture_id,
         }
     }
 
@@ -192,12 +214,43 @@ impl Engine {
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
-            egui::CentralPanel::default().show(&ctx, |ui| {
-                ui.label("Hello world!");
-                if ui.button("Click me").clicked() {
-                    // take some action here
-                }
-            });
+            if let Some(scene) = self.storm.active_scene() {
+                egui::CentralPanel::default().show(&ctx, |ui| {
+                    let size = match scene.aspect_ratio() {
+                        Some(aspect_ratio) => {
+                            let width = ui.available_width();
+                            let height = ui.available_height();
+                            egui::vec2(
+                                width.min(height * aspect_ratio),
+                                height.min(width / aspect_ratio),
+                            )
+                        }
+                        None => ui.available_size(),
+                    };
+                    let width = (size.x * ui.pixels_per_point()) as u32;
+                    let height = (size.y * ui.pixels_per_point()) as u32;
+                    if width != self.render_texture.width()
+                        || height != self.render_texture.height()
+                    {
+                        (
+                            self.render_texture,
+                            self.render_texture_view,
+                            self.render_texture_id,
+                        ) = create_render_texture(
+                            width,
+                            height,
+                            &mut self.egui_renderer,
+                            &self.device,
+                        );
+                    }
+
+                    ui.horizontal_centered(|ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.image((self.render_texture_id, size));
+                        });
+                    });
+                });
+            }
         });
 
         self.egui_state
@@ -212,6 +265,11 @@ impl Engine {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Engine::draw command encoder"),
                 });
+
+        self.storm.update(
+            self.render_texture.width() as f32 / self.render_texture.height() as f32,
+            &self.queue,
+        );
 
         let screen_descriptor = ScreenDescriptor {
             size_in_pixels: [self.surface_config.width, self.surface_config.height],
@@ -230,6 +288,26 @@ impl Engine {
         }
         for id in full_output.textures_delta.free {
             self.egui_renderer.free_texture(&id);
+        }
+
+        {
+            let mut storm_render_pass =
+                command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("storm render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.render_texture_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+            self.storm.render(&mut storm_render_pass);
         }
 
         let frame = self
@@ -267,4 +345,39 @@ impl Engine {
         self.queue.submit([command_encoder.finish()]);
         frame.present();
     }
+}
+
+fn create_render_texture(
+    width: u32,
+    height: u32,
+    egui_renderer: &mut egui_wgpu::Renderer,
+    device: &wgpu::Device,
+) -> (wgpu::Texture, wgpu::TextureView, egui::TextureId) {
+    let render_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Render texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: RENDER_TEXTURE_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    let render_texture_view = render_texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("Render texture view"),
+        ..Default::default()
+    });
+
+    let render_texture_id = egui_renderer.register_native_texture(
+        device,
+        &render_texture_view,
+        wgpu::FilterMode::Nearest,
+    );
+
+    (render_texture, render_texture_view, render_texture_id)
 }

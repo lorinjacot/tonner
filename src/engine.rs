@@ -107,7 +107,6 @@ impl Engine {
 
             if let Err(err) = storm.load_asset(
                 path,
-                config.height as f32 / config.width as f32,
                 &device,
                 &queue,
                 &mut encoder,
@@ -592,7 +591,6 @@ fn load_dialog(
         });
         let result = storm.load_asset(
             path,
-            config.width as f32 / config.height as f32,
             device,
             queue,
             &mut encoder,

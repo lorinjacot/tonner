@@ -1,11 +1,11 @@
 mod buffer;
 mod material;
 mod mesh;
-mod mesh_old;
+// mod mesh_old;
 mod scene;
 mod storage;
 mod texture;
-mod texture_old;
+// mod texture_old;
 
 use std::path::Path;
 
@@ -52,7 +52,6 @@ impl Storm {
     pub fn load_asset(
         &mut self,
         path: impl AsRef<Path>,
-        viewport_aspect_ratio: f32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _encoder: &mut wgpu::CommandEncoder,

@@ -229,6 +229,7 @@ fn create_node(
             bind_group,
         };
         scene.cameras.insert(node_id, camera);
+        scene.active_camera.get_or_insert(node_id);
     }
 
     let children: Vec<_> = node

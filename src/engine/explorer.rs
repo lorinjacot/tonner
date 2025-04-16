@@ -110,6 +110,10 @@ impl Explorer {
             ui.code(scale.to_string());
             ui.end_row();
 
+            ui.label("Rotation quaternion");
+            ui.code(rotation.to_string());
+            ui.end_row();
+
             let (axis, angle) = rotation.to_axis_angle();
             ui.label("Rotation axis");
             ui.code(axis.to_string());

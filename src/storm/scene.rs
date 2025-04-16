@@ -323,12 +323,24 @@ impl Scene {
                 node.global_transform.transform_vector3(Vec3::Z),
                 node.global_transform.transform_vector3(Vec3::Y),
             );
+            // dbg!(&view);
+            let projection = Mat4::perspective_lh(f32::to_radians(90.0), 1.0, 0.1, 10.0);
+            // dbg!(&projection);
 
             let data = CameraUniform {
-                view_projection: (camera.matrix * view).to_cols_array(),
+                view_projection: (projection * view).to_cols_array(),
                 world_position: position.to_array(),
                 _padding: [0.0; 1],
             };
+
+            // let view = Mat4::look_at_rh(5.0 * Vec3::Z, Vec3::ZERO, Vec3::Y);
+            // let projection = Mat4::perspective_lh(f32::to_radians(90.0), 1.0, 0.1, 10.0);
+            // let data = CameraUniform {
+            //     view_projection: (projection * view).to_cols_array(),
+            //     world_position: position.to_array(),
+            //     _padding: [0.0; 1],
+            // };
+            // println!("{}", projection * view);
 
             queue.write_buffer(&camera.buffer, 0, cast_slice(&[data]));
         }

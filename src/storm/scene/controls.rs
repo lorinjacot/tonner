@@ -148,10 +148,12 @@ impl ControlsTrait for OrbitControls {
             self.delta_theta -= delta.x;
             self.delta_phi -= delta.y;
         } else if self.enable_pan && inputs.pointer.secondary_down() {
+            let delta = self.pan_speed * inputs.pointer.delta() / viewport_size.y;
+            let camera = &nodes[self.camera];
+            let matrix = camera.local_matrix();
             match cameras[self.camera].projection {
                 Projection::Perspective { y_fov, .. } => {
                     // perspective
-                    let camera = &nodes[self.camera];
                     let position = camera.local_position();
                     let target = nodes[self.target].local_position();
                     let offset = position - target;
@@ -161,14 +163,12 @@ impl ControlsTrait for OrbitControls {
                     target_distance *= (y_fov / 2.0).tan();
 
                     // we use only viewport_size.y here so aspect ratio does not distort speed
-                    let factor = 2.0 * target_distance / viewport_size.y;
-                    let delta = self.pan_speed * inputs.pointer.delta();
-                    let matrix = camera.local_matrix();
-                    self.pan_left(factor * delta.x, matrix);
-                    self.pan_up(factor * delta.y, matrix);
+                    self.pan_left(2.0 * delta.x * target_distance, matrix);
+                    self.pan_up(2.0 * delta.y * target_distance, matrix);
                 }
-                Projection::Orthographic { .. } => {
-                    todo!()
+                Projection::Orthographic { x_mag, y_mag, .. } => {
+                    self.pan_left(delta.x * 2.0 * x_mag, matrix);
+                    self.pan_up(delta.y * 2.0 * y_mag, matrix);
                 }
             }
         }

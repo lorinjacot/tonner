@@ -132,6 +132,12 @@ impl SceneManager {
                 z_far: Some(100.0),
                 z_near: 0.01,
             },
+            // Projection::Orthographic {
+            //     x_mag: 0.5,
+            //     y_mag: 0.5,
+            //     z_far: 0.01,
+            //     z_near: 10.0,
+            // },
             camera,
             device,
         );

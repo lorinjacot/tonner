@@ -118,6 +118,7 @@ impl SceneManager {
         }
 
         let target = scene.node_builder().name("Orbit camera target").build();
+        let cursor = scene.node_builder().name("Orbit camera cursor").build();
         let camera = scene
             .node_builder()
             .name("Orbit camera node")
@@ -137,7 +138,7 @@ impl SceneManager {
         scene.active_camera = Some(camera);
         scene
             .controls
-            .push(OrbitControls::new(target, camera).into());
+            .push(OrbitControls::new(target, cursor, camera, &scene.nodes).into());
 
         let id = self.scenes.push(scene);
 

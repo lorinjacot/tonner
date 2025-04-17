@@ -1,4 +1,7 @@
-use std::{f32::consts::PI, ops::RangeInclusive};
+use std::{
+    f32::{consts::PI, INFINITY},
+    ops::RangeInclusive,
+};
 
 use glam::{Mat4, Vec3};
 
@@ -26,29 +29,63 @@ pub(super) trait ControlsTrait {
 /// Adapted from three.js OrbitControls
 pub struct OrbitControls {
     target: Id<Node>,
+    cursor: Id<Node>,
     camera: Id<Node>,
+    pub polar_angle: RangeInclusive<f32>,
+    pub azimuth_angle: Option<RangeInclusive<f32>>,
+    pub target_radius: RangeInclusive<f32>,
+    pub rotation_speed: f32,
+    pub damping_factor: Option<f32>,
+    pub screen_space_panning: bool,
     delta_theta: f32,
     delta_phi: f32,
     pan_offset: Vec3,
-    polar_angle: RangeInclusive<f32>,
-    azimuth_angle: Option<RangeInclusive<f32>>,
-    rotation_speed: f32,
-    damping_factor: Option<f32>,
 }
 
 impl OrbitControls {
-    pub fn new(target: Id<Node>, camera: Id<Node>) -> Self {
+    pub fn new(
+        target: Id<Node>,
+        cursor: Id<Node>,
+        camera: Id<Node>,
+        nodes: &SparseSet<Node>,
+    ) -> Self {
+        assert_eq!(
+            nodes[target].parent, nodes[cursor].parent,
+            "The target, cursor and camera must share the same parent"
+        );
+        assert_eq!(
+            nodes[target].parent, nodes[camera].parent,
+            "The target, cursor and camera must share the same parent"
+        );
         OrbitControls {
             target,
             camera,
-            delta_theta: 0.0,
-            delta_phi: 0.0,
+            cursor,
+            screen_space_panning: true,
             polar_angle: 0.0..=PI,
-            pan_offset: Vec3::ZERO,
             azimuth_angle: None,
+            target_radius: 0.0..=INFINITY,
             rotation_speed: 1.0,
             damping_factor: Some(0.05),
+            delta_theta: 0.0,
+            delta_phi: 0.0,
+            pan_offset: Vec3::ZERO,
         }
+    }
+}
+
+impl OrbitControls {
+    fn pan_left(&mut self, distance: f32, camera_local_matrix: Mat4) {
+        self.pan_offset -= distance * camera_local_matrix.x_axis.truncate();
+    }
+
+    fn pan_up(&mut self, distance: f32, camera_local_matrix: Mat4) {
+        self.pan_offset += distance
+            * if self.screen_space_panning {
+                camera_local_matrix.y_axis.truncate()
+            } else {
+                Vec3::Y.cross(camera_local_matrix.x_axis.truncate())
+            }
     }
 }
 
@@ -66,9 +103,23 @@ impl ControlsTrait for OrbitControls {
             self.delta_phi -= delta.y;
         } else if inputs.pointer.secondary_down() {
             match cameras[self.camera].projection {
-                Projection::Perspective { .. } => {
-                    // let position = nodes[self.camera].local_position();
-                    todo!()
+                Projection::Perspective { y_fov, .. } => {
+                    // perspective
+                    let camera = &nodes[self.camera];
+                    let position = camera.local_position();
+                    let target = nodes[self.target].local_position();
+                    let offset = position - target;
+                    let mut target_distance = offset.length();
+
+                    // half of the fov is center to top of screen
+                    target_distance *= (y_fov / 2.0).tan();
+
+                    // we use only viewport_size.y here so aspect ratio does not distort speed
+                    let factor = 2.0 * target_distance / viewport_size.y;
+                    let delta = inputs.pointer.delta();
+                    let matrix = camera.local_matrix();
+                    self.pan_left(factor * delta.x, matrix);
+                    self.pan_up(factor * delta.y, matrix);
                 }
                 Projection::Orthographic { .. } => {
                     todo!()
@@ -135,12 +186,19 @@ impl ControlsTrait for OrbitControls {
             .clamp(*self.polar_angle.start(), *self.polar_angle.end())
             .clamp(0.000001, PI - 0.000001); // make safe
 
+        // Limit the target distance from the cursor to create a sphere around the center of interest
+        let cursor = nodes[self.cursor].local_position();
+        target -= cursor;
+        target = target.clamp_length(*self.target_radius.start(), *self.target_radius.end());
+        target += cursor;
+
         offset.z = radius * phi.sin() * theta.cos();
         offset.x = radius * phi.sin() * theta.sin();
         offset.y = radius * phi.cos();
 
         let camera = target + offset;
 
+        nodes.set_local_position(self.target, target);
         nodes.set_world_matrix(
             self.camera,
             Mat4::look_at_rh(camera, target, Vec3::Y).inverse(),

@@ -93,11 +93,11 @@ impl Explorer {
         });
 
         ui.collapsing("Local transform", |ui| {
-            self.transform_ui(ui, node.local_transform())
+            self.transform_ui(ui, node.local_matrix())
         });
 
         ui.collapsing("Global transform", |ui| {
-            self.transform_ui(ui, node.global_transform())
+            self.transform_ui(ui, node.local_matrix())
         });
     }
 

@@ -7,7 +7,7 @@ use std::{
 
 use bytemuck::{cast_slice, Pod, Zeroable};
 use controls::{Controls, OrbitControls};
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 
 use super::{
     buffer::BufferManager,
@@ -111,9 +111,8 @@ impl SceneManager {
             camera_bind_group_layout: self.camera_bind_group_layout.clone(),
         };
 
-        let mut first = None;
         for node in gltf_scene.nodes() {
-            let id = create_node(
+            create_node(
                 asset,
                 node,
                 None,
@@ -126,16 +125,21 @@ impl SceneManager {
                 device,
                 queue,
             );
-            first.get_or_insert(id);
         }
 
-        let target = first.unwrap_or_else(|| {
-            scene.create_node(Some("Orbit camera target"), None, Mat4::IDENTITY)
-        });
+        let target = scene.create_node(
+            Some("Orbit camera target"),
+            None,
+            Vec3::ZERO,
+            Quat::IDENTITY,
+            Vec3::ONE,
+        );
         let camera = scene.create_node(
             Some("Orbit camera node"),
             None,
-            Mat4::from_translation(1.5 * Vec3::Z),
+            1.5 * Vec3::Z,
+            Quat::IDENTITY,
+            Vec3::ONE,
         );
         scene.create_camera(
             Some("Orbit camera"),
@@ -200,13 +204,19 @@ fn create_node(
     queue: &wgpu::Queue,
 ) -> Id<Node> {
     let name = Name::from_name_or_else(|| scene.nodes.next_id(), gltf_node.name());
-    let local_transform = Mat4::from_cols_array_2d(&gltf_node.transform().matrix());
-    let global_transform = parent_transform * local_transform;
+    let decomposed = gltf_node.transform().decomposed();
+    let translation = Vec3::from_array(decomposed.0);
+    let rotation = Quat::from_array(decomposed.1);
+    let scale = Vec3::from_array(decomposed.2);
+    let local_matrix = Mat4::from_cols_array_2d(&gltf_node.transform().matrix());
+    let model = parent_transform * local_matrix;
 
     let node_id = scene.nodes.push(Node {
         name: name.clone(),
-        local_transform,
-        global_transform,
+        scale,
+        rotation,
+        translation,
+        model,
         children: Vec::new(),
         parent,
     });
@@ -267,7 +277,7 @@ fn create_node(
                 asset,
                 child,
                 Some(node_id),
-                global_transform,
+                model,
                 scene,
                 buffers,
                 textures,
@@ -322,20 +332,29 @@ impl Scene {
         &mut self,
         name: Option<&str>,
         parent: Option<Id<Node>>,
-        local_transform: Mat4,
+        translation: Vec3,
+        rotation: Quat,
+        scale: Vec3,
     ) -> Id<Node> {
-        let global_transform = match parent {
-            Some(parent_id) => self.nodes[parent_id].global_transform * local_transform,
-            None => local_transform,
+        let local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        let model = match parent {
+            Some(parent_id) => self.nodes[parent_id].model * local_matrix,
+            None => local_matrix,
         };
         let name = Name::from_name_or_else(|| self.nodes.next_id(), name);
-        self.nodes.push(Node {
+        let id = self.nodes.push(Node {
             name,
-            local_transform,
-            global_transform,
+            translation,
+            rotation,
+            scale,
+            model,
             parent,
             children: Vec::new(),
-        })
+        });
+        if parent.is_none() {
+            self.root_nodes.push(id);
+        }
+        id
     }
 
     pub fn create_camera(
@@ -373,7 +392,9 @@ impl Scene {
 
     pub fn take_input(&mut self, inputs: &mut egui::InputState, viewport_size: egui::Vec2) {
         for controls in self.controls.values_mut() {
-            controls.0.take_input(inputs, viewport_size);
+            controls
+                .0
+                .take_input(inputs, viewport_size, &self.nodes, &self.cameras);
         }
     }
 
@@ -387,12 +408,10 @@ impl Scene {
                 let transforms: Vec<_> = nodes
                     .iter()
                     .map(|node| {
-                        let transform = self.nodes[*node].global_transform;
+                        let model = self.nodes[*node].model;
                         Transform {
-                            point: transform.to_cols_array(),
-                            vector: Mat3::from_mat4(transform.inverse())
-                                .transpose()
-                                .to_cols_array(),
+                            point: model.to_cols_array(),
+                            vector: Mat3::from_mat4(model.inverse()).transpose().to_cols_array(),
                         }
                     })
                     .collect();
@@ -404,11 +423,11 @@ impl Scene {
             let node = &self.nodes[id];
             let camera = &self.cameras[id];
 
-            let position = node.global_transform.transform_point3(Vec3::ZERO);
+            let position = node.model.transform_point3(Vec3::ZERO);
             let view = Mat4::look_to_rh(
                 position,
-                node.global_transform.transform_vector3(-Vec3::Z),
-                node.global_transform.transform_vector3(Vec3::Y),
+                node.model.transform_vector3(-Vec3::Z),
+                node.model.transform_vector3(Vec3::Y),
             );
             let projection = camera.projection_matrix(viewport_aspect_ratio);
 
@@ -475,8 +494,10 @@ impl IndexMut<Id<Node>> for Scene {
 
 pub struct Node {
     pub name: Name,
-    local_transform: Mat4,
-    global_transform: Mat4,
+    scale: Vec3,
+    rotation: Quat,
+    translation: Vec3,
+    model: Mat4,
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
 }
@@ -486,48 +507,56 @@ impl Node {
         &self.children
     }
 
-    pub fn local_transform(&self) -> Mat4 {
-        self.local_transform
+    pub fn local_matrix(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
 
-    pub fn global_transform(&self) -> Mat4 {
-        self.global_transform
+    pub fn world_matrix(&self) -> Mat4 {
+        self.model
+    }
+
+    pub fn local_position(&self) -> Vec3 {
+        self.translation
     }
 }
 
 impl SparseSet<Node> {
-    fn update_global_transform(&mut self, node: Id<Node>, parent_transform: Mat4) {
+    fn update_global_matrix(&mut self, node: Id<Node>, parent: Mat4) {
         let node = &mut self[node];
-        let global_transform = parent_transform * node.local_transform;
-        node.global_transform = global_transform;
+        let model = parent * node.local_matrix();
+        node.model = model;
         for child in node.children.to_vec() {
-            self.update_global_transform(child, global_transform);
+            self.update_global_matrix(child, model);
         }
     }
 
-    // fn set_local_transform(&mut self, node: Id<Node>, transform: Mat4) {
-    //     let global_transform = match self[node].parent {
-    //         Some(parent) => self[parent].global_transform * transform,
-    //         None => transform,
-    //     };
-    //     let node = &mut self[node];
-    //     node.local_transform = transform;
-    //     node.global_transform = global_transform;
-    //     for child in node.children.to_vec() {
-    //         self.update_global_transform(child, global_transform);
-    //     }
-    // }
-
-    fn set_global_transform(&mut self, node: Id<Node>, transform: Mat4) {
-        let local_transform = match self[node].parent {
-            Some(parent) => self[parent].global_transform.inverse() * transform,
-            None => transform,
+    fn set_local_position(&mut self, node: Id<Node>, position: Vec3) {
+        let parent = match self[node].parent {
+            Some(parent) => self[parent].model,
+            None => Mat4::IDENTITY,
         };
         let node = &mut self[node];
-        node.local_transform = local_transform;
-        node.global_transform = transform;
+        node.translation = position;
+        let model = parent * node.local_matrix();
+        node.model = model;
         for child in node.children.to_vec() {
-            self.update_global_transform(child, transform);
+            self.update_global_matrix(child, model);
+        }
+    }
+
+    fn set_world_matrix(&mut self, node: Id<Node>, matrix: Mat4) {
+        let local_matrix = match self[node].parent {
+            Some(parent) => self[parent].model.inverse() * matrix,
+            None => matrix
+        };
+        let (scale, rotation, translation) = local_matrix.to_scale_rotation_translation();
+        let node = &mut self[node];
+        node.scale = scale;
+        node.rotation = rotation;
+        node.translation = translation;
+        node.model = matrix;
+        for child in node.children.to_vec() {
+            self.update_global_matrix(child, matrix);
         }
     }
 }

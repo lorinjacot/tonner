@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, ops::RangeInclusive};
 
 use glam::{Mat4, Vec3};
 
@@ -22,6 +22,7 @@ pub struct OrbitControls {
     camera: Id<Node>,
     delta_theta: f32,
     delta_phi: f32,
+    polar_angle: RangeInclusive<f32>,
     rotation_speed: f32,
     damping_factor: Option<f32>,
 }
@@ -33,6 +34,7 @@ impl OrbitControls {
             camera,
             delta_theta: 0.0,
             delta_phi: 0.0,
+            polar_angle: 0.0..=PI,
             rotation_speed: 1.0,
             damping_factor: Some(0.05),
         }
@@ -74,6 +76,11 @@ impl ControlsTrait for OrbitControls {
             self.delta_theta = 0.0;
             self.delta_phi = 0.0;
         }
+
+        phi = phi
+            .min(*self.polar_angle.end())
+            .max(*self.polar_angle.start())
+            .clamp(0.000001, PI - 0.000001);
 
         offset.z = radius * phi.sin() * theta.cos();
         offset.x = radius * phi.sin() * theta.sin();

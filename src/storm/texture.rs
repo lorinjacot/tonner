@@ -138,7 +138,7 @@ impl TextureManager {
 
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            let id = self.images.push(Image { texture, view });
+            let id = self.images.push(Image { view });
 
             match asset.image_mapping.get_mut(image.index()) {
                 Some(entry) => *entry = Some(id),
@@ -288,7 +288,6 @@ enum TextureInner {
 }
 
 struct Image {
-    texture: wgpu::Texture,
     view: wgpu::TextureView,
 }
 

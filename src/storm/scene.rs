@@ -111,10 +111,30 @@ impl SceneManager {
             camera_bind_group_layout: self.camera_bind_group_layout.clone(),
         };
 
-        let target = scene.create_node(Some("Orbit camera focus point"), None, Mat4::IDENTITY);
+        let mut first = None;
+        for node in gltf_scene.nodes() {
+            let id = create_node(
+                asset,
+                node,
+                None,
+                Mat4::IDENTITY,
+                &mut scene,
+                buffers,
+                textures,
+                materials,
+                meshes,
+                device,
+                queue,
+            );
+            first.get_or_insert(id);
+        }
+
+        let target = first.unwrap_or_else(|| {
+            scene.create_node(Some("Orbit camera target"), None, Mat4::IDENTITY)
+        });
         let camera = scene.create_node(
             Some("Orbit camera node"),
-            Some(target),
+            None,
             Mat4::from_translation(1.5 * Vec3::Z),
         );
         scene.create_camera(
@@ -132,22 +152,6 @@ impl SceneManager {
         scene
             .controls
             .push(OrbitControls::new(target, camera).into());
-
-        for node in gltf_scene.nodes() {
-            create_node(
-                asset,
-                node,
-                None,
-                Mat4::IDENTITY,
-                &mut scene,
-                buffers,
-                textures,
-                materials,
-                meshes,
-                device,
-                queue,
-            );
-        }
 
         let id = self.scenes.push(scene);
 
@@ -367,13 +371,17 @@ impl Scene {
         );
     }
 
-    pub fn handle_inputs(&mut self, inputs: &egui::InputState, viewport_size: egui::Vec2) {
+    pub fn take_input(&mut self, inputs: &mut egui::InputState, viewport_size: egui::Vec2) {
         for controls in self.controls.values_mut() {
-            controls.handle_inputs(inputs, viewport_size, &mut self.nodes, &mut self.cameras);
+            controls.0.take_input(inputs, viewport_size);
         }
     }
 
     pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
+        for controls in self.controls.values_mut() {
+            controls.0.update(&mut self.nodes, &mut self.cameras);
+        }
+
         for (_, mesh_map) in self.primitives.values() {
             for (_, nodes, buffer) in mesh_map.values() {
                 let transforms: Vec<_> = nodes

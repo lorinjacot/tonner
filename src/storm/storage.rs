@@ -176,7 +176,8 @@ impl<K, V> SparseMap<K, V> {
 
     pub fn values_mut(
         &mut self,
-    ) -> impl Iterator<Item = &mut V> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
+    ) -> impl Iterator<Item = &mut V> + ExactSizeIterator + FusedIterator + DoubleEndedIterator
+    {
         self.dense.iter_mut().map(|entry| &mut entry.1)
     }
 }
@@ -375,7 +376,8 @@ impl<T> SparseSet<T> {
 
     pub fn values_mut(
         &mut self,
-    ) -> impl Iterator<Item = &mut T> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
+    ) -> impl Iterator<Item = &mut T> + ExactSizeIterator + FusedIterator + DoubleEndedIterator
+    {
         self.map.values_mut()
     }
 }

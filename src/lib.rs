@@ -264,7 +264,7 @@ impl Engine {
                                     if inputs.consume_shortcut(&self.shortcuts.escape_scene_focus) {
                                         response.surrender_focus();
                                     } else {
-                                        scene.handle_inputs(inputs, size);
+                                        scene.take_input(inputs, size);
                                     }
                                 });
                             }

@@ -1,9 +1,12 @@
+mod controls;
+
 use std::{
     iter::{once, repeat_n},
     ops::{Index, IndexMut, Range},
 };
 
 use bytemuck::{cast_slice, Pod, Zeroable};
+use controls::{Controls, OrbitControls};
 use glam::{Mat3, Mat4, Vec3};
 
 use super::{
@@ -12,24 +15,52 @@ use super::{
     mesh::{Mesh, MeshManager, PrimitivePipeline},
     storage::{Entry, Id, SparseMap, SparseSet},
     texture::TextureManager,
-    Asset,
+    Asset, Name,
 };
 
 pub struct SceneManager {
     scenes: SparseSet<Scene>,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
     assets: SparseMap<Asset, Vec<Option<Id<Scene>>>>,
 }
 
 impl SceneManager {
-    pub fn new() -> Self {
+    pub fn new(device: &wgpu::Device) -> Self {
         let scenes = SparseSet::new();
         let assets = SparseMap::new();
 
-        SceneManager { scenes, assets }
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        SceneManager {
+            scenes,
+            camera_bind_group_layout,
+            assets,
+        }
+    }
+
+    pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.camera_bind_group_layout
     }
 
     pub fn get(&self, scene: Id<Scene>) -> Option<&Scene> {
         self.scenes.get(scene)
+    }
+
+    pub fn get_mut(&mut self, scene: Id<Scene>) -> Option<&mut Scene> {
+        self.scenes.get_mut(scene)
     }
 
     pub fn len(&self) -> usize {
@@ -71,12 +102,36 @@ impl SceneManager {
             .map_or_else(|| gltf_scene.index().to_string(), str::to_string);
         let mut scene = Scene {
             label,
-            nodes: SparseSet::with_capacity(gltf_scene.nodes().count()),
-            root_nodes: Vec::with_capacity(gltf_scene.nodes().count()),
+            nodes: SparseSet::with_capacity(gltf_scene.nodes().count() + 2),
+            root_nodes: Vec::with_capacity(gltf_scene.nodes().count() + 2),
             primitives: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
+            controls: SparseSet::with_capacity(1),
+            camera_bind_group_layout: self.camera_bind_group_layout.clone(),
         };
+
+        let target = scene.create_node(Some("Orbit camera focus point"), None, Mat4::IDENTITY);
+        let camera = scene.create_node(
+            Some("Orbit camera node"),
+            Some(target),
+            Mat4::from_translation(1.5 * Vec3::Z),
+        );
+        scene.create_camera(
+            Some("Orbit camera"),
+            Projection::Perspective {
+                aspect_ratio: None,
+                y_fov: f32::to_radians(90.0),
+                z_far: Some(100.0),
+                z_near: 0.01,
+            },
+            camera,
+            device,
+        );
+        scene.active_camera = Some(camera);
+        scene
+            .controls
+            .push(OrbitControls::new(target, camera).into());
 
         for node in gltf_scene.nodes() {
             create_node(
@@ -129,7 +184,7 @@ impl IndexMut<Id<Scene>> for SceneManager {
 
 fn create_node(
     asset: Id<Asset>,
-    node: gltf::Node,
+    gltf_node: gltf::Node,
     parent: Option<Id<Node>>,
     parent_transform: Mat4,
     scene: &mut Scene,
@@ -140,14 +195,12 @@ fn create_node(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Id<Node> {
-    let name = node
-        .name()
-        .map_or_else(|| node.index().to_string(), str::to_string);
-    let local_transform = Mat4::from_cols_array_2d(&node.transform().matrix());
+    let name = Name::from_name_or_else(|| scene.nodes.next_id(), gltf_node.name());
+    let local_transform = Mat4::from_cols_array_2d(&gltf_node.transform().matrix());
     let global_transform = parent_transform * local_transform;
 
     let node_id = scene.nodes.push(Node {
-        name,
+        name: name.clone(),
         local_transform,
         global_transform,
         children: Vec::new(),
@@ -158,7 +211,7 @@ fn create_node(
         scene.root_nodes.push(node_id);
     }
 
-    if let Some(mesh) = node.mesh() {
+    if let Some(mesh) = gltf_node.mesh() {
         let mesh_id = meshes.load_mesh(asset, mesh, buffers, textures, materials, device, queue);
         let mesh = &meshes[mesh_id];
         for (pipeline, primitives) in &mesh.primitives {
@@ -198,37 +251,12 @@ fn create_node(
         }
     }
 
-    if let Some(camera) = node.camera() {
-        let name = camera
-            .name()
-            .map_or_else(|| camera.index().to_string(), str::to_string);
+    if let Some(camera) = gltf_node.camera() {
         let projection = Projection::from(camera.projection());
-
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("{name} camera buffer")),
-            size: size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{name} camera bind group")),
-            layout: meshes.camera_bind_group_layout(),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
-        let camera = Camera {
-            name,
-            projection,
-            buffer,
-            bind_group,
-        };
-        scene.cameras.insert(node_id, camera);
-        scene.active_camera.get_or_insert(node_id);
+        scene.create_camera(camera.name(), projection, node_id, device);
     }
 
-    let children: Vec<_> = node
+    let children: Vec<_> = gltf_node
         .children()
         .map(|child| {
             create_node(
@@ -266,6 +294,8 @@ pub struct Scene {
     >,
     pub cameras: SparseMap<Node, Camera>,
     pub active_camera: Option<Id<Node>>,
+    controls: SparseSet<Controls>,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl Scene {
@@ -284,7 +314,66 @@ impl Scene {
         }
     }
 
-    pub fn update(&self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
+    pub fn create_node(
+        &mut self,
+        name: Option<&str>,
+        parent: Option<Id<Node>>,
+        local_transform: Mat4,
+    ) -> Id<Node> {
+        let global_transform = match parent {
+            Some(parent_id) => self.nodes[parent_id].global_transform * local_transform,
+            None => local_transform,
+        };
+        let name = Name::from_name_or_else(|| self.nodes.next_id(), name);
+        self.nodes.push(Node {
+            name,
+            local_transform,
+            global_transform,
+            parent,
+            children: Vec::new(),
+        })
+    }
+
+    pub fn create_camera(
+        &mut self,
+        name: Option<&str>,
+        projection: Projection,
+        node: Id<Node>,
+        device: &wgpu::Device,
+    ) {
+        let name = Name::from_name_or_else(|| &self.nodes[node].name, name);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{name} camera buffer")),
+            size: size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{name} camera bind group")),
+            layout: &self.camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        self.cameras.insert(
+            node,
+            Camera {
+                name,
+                projection,
+                buffer,
+                bind_group,
+            },
+        );
+    }
+
+    pub fn handle_inputs(&mut self, inputs: &egui::InputState, viewport_size: egui::Vec2) {
+        for controls in self.controls.values_mut() {
+            controls.handle_inputs(inputs, viewport_size, &mut self.nodes, &mut self.cameras);
+        }
+    }
+
+    pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
         for (_, mesh_map) in self.primitives.values() {
             for (_, nodes, buffer) in mesh_map.values() {
                 let transforms: Vec<_> = nodes
@@ -377,7 +466,7 @@ impl IndexMut<Id<Node>> for Scene {
 }
 
 pub struct Node {
-    pub name: String,
+    pub name: Name,
     local_transform: Mat4,
     global_transform: Mat4,
     parent: Option<Id<Node>>,
@@ -395,6 +484,43 @@ impl Node {
 
     pub fn global_transform(&self) -> Mat4 {
         self.global_transform
+    }
+}
+
+impl SparseSet<Node> {
+    fn update_global_transform(&mut self, node: Id<Node>, parent_transform: Mat4) {
+        let node = &mut self[node];
+        let global_transform = parent_transform * node.local_transform;
+        node.global_transform = global_transform;
+        for child in node.children.to_vec() {
+            self.update_global_transform(child, global_transform);
+        }
+    }
+
+    // fn set_local_transform(&mut self, node: Id<Node>, transform: Mat4) {
+    //     let global_transform = match self[node].parent {
+    //         Some(parent) => self[parent].global_transform * transform,
+    //         None => transform,
+    //     };
+    //     let node = &mut self[node];
+    //     node.local_transform = transform;
+    //     node.global_transform = global_transform;
+    //     for child in node.children.to_vec() {
+    //         self.update_global_transform(child, global_transform);
+    //     }
+    // }
+
+    fn set_global_transform(&mut self, node: Id<Node>, transform: Mat4) {
+        let local_transform = match self[node].parent {
+            Some(parent) => self[parent].global_transform.inverse() * transform,
+            None => transform,
+        };
+        let node = &mut self[node];
+        node.local_transform = local_transform;
+        node.global_transform = transform;
+        for child in node.children.to_vec() {
+            self.update_global_transform(child, transform);
+        }
     }
 }
 
@@ -449,7 +575,7 @@ impl Primitive {
 }
 
 pub struct Camera {
-    pub name: String,
+    pub name: Name,
     projection: Projection,
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -489,7 +615,7 @@ impl Camera {
     }
 }
 
-enum Projection {
+pub enum Projection {
     Orthographic {
         x_mag: f32,
         y_mag: f32,

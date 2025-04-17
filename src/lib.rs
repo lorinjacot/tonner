@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use egui::ViewportBuilder;
+use egui::{Key, KeyboardShortcut, Modifiers, ViewportBuilder};
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
 use explorer::Explorer;
@@ -10,13 +10,8 @@ use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
-// mod asset;
-// mod camera;
-// mod scene;
-// mod storage;
-mod storm;
-// mod texture;
 mod explorer;
+mod storm;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -112,6 +107,7 @@ struct Engine {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     storm: Storm,
+    shortcuts: ShortCuts,
     explorer: Explorer,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -130,7 +126,7 @@ impl Engine {
         let window = create_window(
             &egui_ctx,
             event_loop,
-            &ViewportBuilder::default().with_maximized(true),
+            &ViewportBuilder::default().with_maximized(false),
         )
         .unwrap();
         let window = Arc::new(window);
@@ -182,6 +178,10 @@ impl Engine {
             }
         }
 
+        let shortcuts = ShortCuts {
+            escape_scene_focus: KeyboardShortcut::new(Modifiers::NONE, Key::Escape),
+        };
+
         let explorer = Explorer::new();
 
         let egui_state = egui_winit::State::new(
@@ -206,6 +206,7 @@ impl Engine {
             surface,
             surface_config,
             storm,
+            shortcuts,
             explorer,
             egui_state,
             egui_renderer,
@@ -220,7 +221,7 @@ impl Engine {
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
-            if let Some(scene) = self.storm.active_scene() {
+            if let Some(scene) = self.storm.active_scene_mut() {
                 egui::CentralPanel::default().show(&ctx, |ui| {
                     let size = match scene.aspect_ratio() {
                         Some(aspect_ratio) => {
@@ -253,6 +254,20 @@ impl Engine {
                     ui.horizontal_centered(|ui| {
                         ui.vertical_centered(|ui| {
                             ui.image((self.render_texture_id, size));
+                            let response = ui.interact(
+                                ui.clip_rect(),
+                                egui::Id::new("render region"),
+                                egui::Sense::all(),
+                            );
+                            if response.hovered() {  
+                                ui.input_mut(|inputs| {
+                                    if inputs.consume_shortcut(&self.shortcuts.escape_scene_focus) {
+                                        response.surrender_focus();
+                                    } else {
+                                        scene.handle_inputs(inputs, size);
+                                    }
+                                });
+                            }
                         });
                     });
                 });
@@ -386,4 +401,8 @@ fn create_render_texture(
     );
 
     (render_texture, render_texture_view, render_texture_id)
+}
+
+struct ShortCuts {
+    escape_scene_focus: KeyboardShortcut,
 }

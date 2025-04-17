@@ -173,6 +173,12 @@ impl<K, V> SparseMap<K, V> {
     ) -> impl Iterator<Item = &V> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
         self.dense.iter().map(|entry| &entry.1)
     }
+
+    pub fn values_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut V> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
+        self.dense.iter_mut().map(|entry| &mut entry.1)
+    }
 }
 
 impl<K, V> Index<Id<K>> for SparseMap<K, V> {
@@ -282,6 +288,21 @@ impl<T> SparseSet<T> {
         }
     }
 
+    pub fn next_id(&self) -> Id<T> {
+        match self.deleted.last() {
+            Some(deleted) => Id {
+                sparse: deleted.sparse,
+                version: deleted.version + 1,
+                target: PhantomData,
+            },
+            None => Id {
+                sparse: self.map.len() as u16,
+                version: 0,
+                target: PhantomData,
+            },
+        }
+    }
+
     pub fn push(&mut self, value: T) -> Id<T> {
         let dense = self.map.dense.len() as u16;
         if let Some(deleted) = self.deleted.pop() {
@@ -350,6 +371,12 @@ impl<T> SparseSet<T> {
         &self,
     ) -> impl Iterator<Item = &T> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
         self.map.values()
+    }
+
+    pub fn values_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut T> + ExactSizeIterator + FusedIterator + DoubleEndedIterator {
+        self.map.values_mut()
     }
 }
 

@@ -42,7 +42,6 @@ pub struct MeshManager {
     assets: SparseMap<Asset, Vec<Option<Id<Mesh>>>>,
     shader_module: wgpu::ShaderModule,
     pipelines: SparseSet<PrimitivePipeline>,
-    camera_bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     render_format: wgpu::TextureFormat,
     dummy_vertex_buffer: Id<Buffer>,
@@ -50,6 +49,7 @@ pub struct MeshManager {
 
 impl MeshManager {
     pub fn new(
+        camera_bind_group_layout: &wgpu::BindGroupLayout,
         materials: &MaterialManager,
         buffers: &mut BufferManager,
         render_format: wgpu::TextureFormat,
@@ -59,21 +59,6 @@ impl MeshManager {
         let assets = SparseMap::new();
 
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
-
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Camera bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Primitive pipeline layout"),
@@ -96,7 +81,6 @@ impl MeshManager {
             assets,
             shader_module,
             pipelines,
-            camera_bind_group_layout,
             pipeline_layout,
             render_format,
             dummy_vertex_buffer,
@@ -464,10 +448,6 @@ impl MeshManager {
         }
 
         id
-    }
-
-    pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.camera_bind_group_layout
     }
 }
 

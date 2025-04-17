@@ -1,13 +1,11 @@
 mod buffer;
 mod material;
 mod mesh;
-// mod mesh_old;
 mod scene;
 mod storage;
 mod texture;
-// mod texture_old;
 
-use std::path::Path;
+use std::{fmt::Display, path::Path};
 
 use buffer::BufferManager;
 use material::MaterialManager;
@@ -35,8 +33,14 @@ impl Storm {
         let mut textures = TextureManager::new();
         let materials = MaterialManager::new(&mut textures, device);
         let mut buffers = BufferManager::new();
-        let meshes = MeshManager::new(&materials, &mut buffers, render_format, device);
-        let scenes = SceneManager::new();
+        let scenes = SceneManager::new(device);
+        let meshes = MeshManager::new(
+            scenes.camera_bind_group_layout(),
+            &materials,
+            &mut buffers,
+            render_format,
+            device,
+        );
 
         Self {
             assets,
@@ -58,13 +62,14 @@ impl Storm {
     ) -> Result<Id<Asset>, gltf::Error> {
         let (document, buffers, images) = gltf::import(path)?;
 
-        let id = self.assets.push(Asset { document });
+        let scenes = Vec::with_capacity(document.scenes().len());
+        let id = self.assets.push(Asset { document, scenes });
         self.buffers.register_asset(id, buffers);
         self.textures.register_asset(id, images);
 
-        let document = &self.assets[id].document;
-        for scene in document.scenes() {
-            self.scenes.load_scene(
+        let asset = &mut self.assets[id];
+        for scene in asset.document.scenes() {
+            asset.scenes.push(self.scenes.load_scene(
                 id,
                 scene,
                 &mut self.buffers,
@@ -73,26 +78,18 @@ impl Storm {
                 &mut self.meshes,
                 device,
                 queue,
-            );
+            ));
         }
 
-        self.active_scene = document.default_scene().map(|scene| {
-            self.scenes.load_scene(
-                id,
-                scene,
-                &mut self.buffers,
-                &mut self.textures,
-                &mut self.materials,
-                &mut self.meshes,
-                device,
-                queue,
-            )
-        });
+        self.active_scene = asset
+            .document
+            .default_scene()
+            .map(|scene| asset.scenes[scene.index()]);
 
         Ok(id)
     }
 
-    pub fn update(&self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
+    pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
         if let Some(scene) = self.active_scene {
             self.scenes[scene].update(viewport_aspect_ratio, queue);
         }
@@ -107,8 +104,32 @@ impl Storm {
     pub fn active_scene(&self) -> Option<&Scene> {
         self.scenes.get(self.active_scene?)
     }
+
+    pub fn active_scene_mut(&mut self) -> Option<&mut Scene> {
+        self.scenes.get_mut(self.active_scene?)
+    }
 }
 
 pub struct Asset {
     document: gltf::Document,
+    scenes: Vec<Id<Scene>>,
+}
+
+#[derive(Clone)]
+pub struct Name(pub String);
+
+impl Name {
+    fn from_name_or_else<F, T>(default: F, name: Option<&str>) -> Self
+    where
+        F: FnOnce() -> T,
+        T: ToString,
+    {
+        Self(name.map_or_else(|| default().to_string(), |name| name.to_string()))
+    }
+}
+
+impl Display for Name {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }

@@ -45,11 +45,11 @@ impl Explorer {
                 .selected_text(
                     scene
                         .active_camera
-                        .map_or("", |camera| &scene.camera(camera).unwrap().name),
+                        .map_or("", |camera| &scene.camera(camera).unwrap().name.0),
                 )
                 .show_ui(ui, |ui| {
                     for (id, camera) in scene.cameras.iter() {
-                        ui.selectable_value(&mut scene.active_camera, Some(*id), &camera.name);
+                        ui.selectable_value(&mut scene.active_camera, Some(*id), &camera.name.0);
                     }
                 });
 
@@ -66,7 +66,7 @@ impl Explorer {
 
     fn node_ui(&mut self, ui: &mut Ui, id: Id<Node>, scene: &Scene) {
         let node = &scene[id];
-        ui.collapsing(&node.name, |ui| {
+        ui.collapsing(&node.name.0, |ui| {
             for node in node.children() {
                 self.node_ui(ui, *node, scene);
             }
@@ -89,7 +89,7 @@ impl Explorer {
         });
         ui.horizontal(|ui| {
             ui.label("Label");
-            ui.text_edit_singleline(&mut node.name)
+            ui.text_edit_singleline(&mut node.name.0)
         });
 
         ui.collapsing("Local transform", |ui| {

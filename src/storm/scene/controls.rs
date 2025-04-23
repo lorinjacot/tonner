@@ -3,9 +3,10 @@ use std::{
     ops::RangeInclusive,
 };
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 
 use crate::storm::{
+    math::{Plane, Ray},
     storage::{SparseMap, SparseSet},
     Id,
 };
@@ -23,7 +24,12 @@ pub trait ControlsTrait {
         cameras: &SparseMap<Node, Camera>,
     );
 
-    fn update(&mut self, nodes: &mut SparseSet<Node>, cameras: &mut SparseMap<Node, Camera>);
+    fn update(
+        &mut self,
+        viewport_aspect_ratio: f32,
+        nodes: &mut SparseSet<Node>,
+        cameras: &mut SparseMap<Node, Camera>,
+    );
 }
 
 /// Adapted from three.js OrbitControls
@@ -60,10 +66,13 @@ pub struct OrbitControls {
     /// with `end - start < 2.0*PI`. Default is `None`.
     pub azimuth_angle: Option<RangeInclusive<f32>>,
 
+    /// How near/far you can dolly out ( `Projection::Perspective` only ). Default is `0.0..=INFINITY`.
+    pub distance: RangeInclusive<f32>,
+
     /// How far you can orbit vertically. Max range is `0.0..PI`, and is the default.
     pub polar_angle: RangeInclusive<f32>,
 
-    /// How far you can zoom out Default is `0.0..=INFINITY`.
+    /// How far you can zoom out ( `Projection::Orthographic` only ). Default is `0.0..=INFINITY`.
     pub zoom: RangeInclusive<f32>,
 
     /// How close/far you can get the target to/from the cursor. Default is `0.0..=INFINITY`
@@ -80,9 +89,19 @@ pub struct OrbitControls {
     /// Default is `true`.
     pub screen_space_panning: bool,
 
+    ///  Speed of zooming / dollying. Default is `1`.
+    pub zoom_speed: f32,
+
+    /// Setting this property to true allows to zoom to the cursor's position. Default is `false`.
+    pub zoom_to_cursor: bool,
+
     delta_theta: f32,
     delta_phi: f32,
     pan_offset: Vec3,
+    perform_cursor_zoom: bool,
+    scale: f32,
+    zoom_direction: Vec3,
+    mouse: Vec2,
 }
 
 impl OrbitControls {
@@ -109,15 +128,22 @@ impl OrbitControls {
             enable_rotate: true,
             enable_zoom: true,
             azimuth_angle: None,
+            distance: 0.0..=INFINITY,
             polar_angle: 0.0..=PI,
             zoom: 0.0..=INFINITY,
             target_radius: 0.0..=INFINITY,
             pan_speed: 1.0,
             rotate_speed: 1.0,
             screen_space_panning: true,
+            zoom_speed: 1.0,
+            zoom_to_cursor: false,
             delta_theta: 0.0,
             delta_phi: 0.0,
             pan_offset: Vec3::ZERO,
+            perform_cursor_zoom: false,
+            scale: 1.0,
+            zoom_direction: Vec3::Z,
+            mouse: Vec2::ZERO,
         }
     }
 
@@ -132,6 +158,11 @@ impl OrbitControls {
             } else {
                 Vec3::Y.cross(camera_local_matrix.x_axis.truncate())
             }
+    }
+
+    fn zoom_scale(&self, delta: f32) -> f32 {
+        let normalized_delta = (delta * 0.01).abs();
+        f32::powf(0.95, self.zoom_speed * normalized_delta)
     }
 }
 
@@ -171,22 +202,34 @@ impl ControlsTrait for OrbitControls {
                     self.pan_up(delta.y * 2.0 * y_mag, matrix);
                 }
             }
+        } else if self.enable_zoom {
+            let delta = inputs.smooth_scroll_delta.y;
+            if delta > 0.0 {
+                self.scale *= self.zoom_scale(delta);
+            } else if delta < 0.0 {
+                self.scale /= self.zoom_scale(delta);
+            }
         }
     }
 
-    fn update(&mut self, nodes: &mut SparseSet<Node>, _cameras: &mut SparseMap<Node, Camera>) {
-        let camera = nodes[self.camera].local_position();
-        let mut target = nodes[self.target].local_position();
-        let mut offset = camera - target;
+    fn update(
+        &mut self,
+        viewport_aspect_ratio: f32,
+        nodes: &mut SparseSet<Node>,
+        cameras: &mut SparseMap<Node, Camera>,
+    ) {
+        let mut camera = nodes[self.camera].local_transform();
+        let mut target = nodes[self.target].local_transform();
+        let mut offset = camera.position() - target.position();
 
-        let radius = offset.length();
+        let mut radius = offset.length();
         let mut theta = offset.x.atan2(offset.z);
         let mut phi = (offset.y / radius).acos();
 
         if let Some(damping_factor) = self.damping_factor {
             theta += self.delta_theta * damping_factor;
             phi += self.delta_phi * damping_factor;
-            target += self.pan_offset * damping_factor;
+            target.set_position(target.position() + self.pan_offset * damping_factor);
 
             self.delta_theta *= 1.0 - damping_factor;
             self.delta_phi *= 1.0 - damping_factor;
@@ -194,7 +237,7 @@ impl ControlsTrait for OrbitControls {
         } else {
             theta += self.delta_theta;
             phi += self.delta_phi;
-            target += self.pan_offset;
+            target.set_position(target.position() + self.pan_offset);
 
             self.delta_theta = 0.0;
             self.delta_phi = 0.0;
@@ -233,22 +276,110 @@ impl ControlsTrait for OrbitControls {
             .clamp(0.000001, PI - 0.000001); // make safe
 
         // Limit the target distance from the cursor to create a sphere around the center of interest
-        let cursor = nodes[self.cursor].local_position();
-        target -= cursor;
-        target = target.clamp_length(*self.target_radius.start(), *self.target_radius.end());
-        target += cursor;
+        let cursor = nodes[self.cursor].local_transform();
+        let mut distance = target.position() - cursor.position();
+        distance = distance.clamp_length(*self.target_radius.start(), *self.target_radius.end());
+        target.set_position(distance + cursor.position());
+
+        let camera_instance = &mut cameras[self.camera];
+        let camera_projection = camera_instance.projection_matrix(viewport_aspect_ratio);
+        let orthographic_camera_zoom =
+            if let Projection::Orthographic { ref mut zoom, .. } = camera_instance.projection {
+                Some(zoom)
+            } else {
+                None
+            };
+        // adjust the camera position based on zoom only if we're not zooming to the cursor or if it's an ortho camera
+        // we adjust zoom later in these cases
+        if self.zoom_to_cursor && self.perform_cursor_zoom || orthographic_camera_zoom.is_some() {
+            radius = radius.clamp(*self.distance.start(), *self.distance.end());
+        } else {
+            radius = (radius * self.scale).clamp(*self.distance.start(), *self.distance.end());
+        }
 
         offset.z = radius * phi.sin() * theta.cos();
         offset.x = radius * phi.sin() * theta.sin();
         offset.y = radius * phi.cos();
 
-        let camera = target + offset;
+        camera.set_position(target.position() + offset);
+        camera.look_at(target.position());
 
-        nodes.set_local_position(self.target, target);
-        nodes.set_world_matrix(
-            self.camera,
-            Mat4::look_at_rh(camera, target, Vec3::Y).inverse(),
-        );
+        if self.zoom_to_cursor && self.perform_cursor_zoom {
+            let new_radius = if let Some(zoom) = orthographic_camera_zoom {
+                nodes.set_local_transform(self.camera, camera);
+                let camera_world_matrix = nodes[self.camera].world_matrix();
+
+                // adjust the ortho camera position based on zoom changes
+                let mouse_before = self.mouse.extend(0.0);
+                let mouse_before = (camera_world_matrix * camera_projection.inverse())
+                    .project_point3(mouse_before);
+
+                *zoom = (*zoom / self.scale).clamp(*self.zoom.start(), *self.zoom.end());
+
+                let mouse_after = (camera_world_matrix
+                    * cameras[self.camera]
+                        .projection_matrix(viewport_aspect_ratio)
+                        .inverse())
+                .project_point3(mouse_before);
+
+                camera.set_position(camera.position() - mouse_after + mouse_before);
+
+                offset.length()
+            } else {
+                // move the camera down the pointer ray
+                // this method avoids floating point error
+                let previous_radius = offset.length();
+                let new_radius =
+                    (previous_radius * self.scale).clamp(*self.distance.start(), *self.distance.end());
+
+                let radius_delta = previous_radius - new_radius;
+                camera.set_position(camera.position() + self.zoom_direction * radius_delta);
+
+                new_radius
+            };
+
+            // handle the placement of the target
+            if self.screen_space_panning {
+                // position the orbit target in front of the new camera position
+                target.set_position(
+                    target
+                        .matrix()
+                        .transform_vector3(target.position())
+                        .normalize()
+                        * new_radius
+                        + nodes[self.camera].local_position(),
+                );
+            } else {
+                // get the ray and translation plane to compute target
+                let ray = Ray {
+                    origin: nodes[self.camera].local_position(),
+                    direction: nodes[self.camera]
+                        .local_matrix()
+                        .transform_vector3(-Vec3::Z)
+                        .normalize(),
+                };
+
+                // if the camera is 20 degrees above the horizon then don't adjust the focus target to avoid
+                // extremely large values
+                let tilt_limit = f32::to_radians(70.0).cos();
+                if Vec3::Y.dot(ray.direction).abs() < tilt_limit {
+                    camera.look_at(target.position());
+                } else {
+                    let plane = Plane::from_normal_and_coplanar_point(Vec3::Y, target.position());
+                    if let Some(target_pos) = ray.intersect_plane(plane) {
+                        target.set_position(target_pos);
+                    };
+                }
+            }
+        } else if let Some(zoom) = orthographic_camera_zoom {
+            *zoom = (*zoom / self.scale).clamp(*self.zoom.start(), *self.zoom.end());
+        }
+
+        self.scale = 1.0;
+        self.perform_cursor_zoom = false;
+
+        nodes.set_local_transform(self.camera, camera);
+        nodes.set_local_transform(self.target, target);
     }
 }
 

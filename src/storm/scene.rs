@@ -12,6 +12,7 @@ use glam::{Mat3, Mat4, Quat, Vec3};
 use super::{
     buffer::BufferManager,
     material::MaterialManager,
+    math,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
     storage::{Entry, Id, SparseMap, SparseSet},
     texture::TextureManager,
@@ -317,10 +318,7 @@ impl Scene {
             scene: self,
             name: None,
             parent: None,
-            scale: Vec3::ONE,
-            rotation: Quat::IDENTITY,
-            translation: Vec3::ZERO,
-            local_matrix: Mat4::IDENTITY,
+            transform: math::Transform::IDENTITY,
         }
     }
 
@@ -367,7 +365,9 @@ impl Scene {
 
     pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
         for controls in self.controls.values_mut() {
-            controls.0.update(&mut self.nodes, &mut self.cameras);
+            controls
+                .0
+                .update(viewport_aspect_ratio, &mut self.nodes, &mut self.cameras);
         }
 
         for (_, mesh_map) in self.primitives.values() {
@@ -463,10 +463,7 @@ impl IndexMut<Id<Node>> for Scene {
 
 pub struct Node {
     pub name: Name,
-    scale: Vec3,
-    rotation: Quat,
-    translation: Vec3,
-    local_matrix: Mat4,
+    local_transform: math::Transform,
     world_matrix: Mat4,
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
@@ -478,7 +475,7 @@ impl Node {
     }
 
     pub fn local_matrix(&self) -> Mat4 {
-        self.local_matrix
+        self.local_transform.matrix()
     }
 
     pub fn world_matrix(&self) -> Mat4 {
@@ -486,7 +483,11 @@ impl Node {
     }
 
     pub fn local_position(&self) -> Vec3 {
-        self.translation
+        self.local_transform.position()
+    }
+
+    pub fn local_transform(&self) -> math::Transform {
+        self.local_transform
     }
 }
 
@@ -500,31 +501,14 @@ impl SparseSet<Node> {
         }
     }
 
-    fn set_local_position(&mut self, node: Id<Node>, position: Vec3) {
+    fn set_local_transform(&mut self, node: Id<Node>, transform: math::Transform) {
         let parent = match self[node].parent {
             Some(parent) => self[parent].world_matrix,
             None => Mat4::IDENTITY,
         };
         let node = &mut self[node];
-        node.translation = position;
-        node.local_matrix =
-            Mat4::from_scale_rotation_translation(node.scale, node.rotation, node.translation);
+        node.local_transform = transform;
         let world_matrix = parent * node.local_matrix();
-        node.world_matrix = world_matrix;
-        for child in node.children.to_vec() {
-            self.update_global_matrix(child, world_matrix);
-        }
-    }
-
-    fn set_world_matrix(&mut self, node: Id<Node>, world_matrix: Mat4) {
-        let local_matrix = match self[node].parent {
-            Some(parent) => self[parent].world_matrix.inverse() * world_matrix,
-            None => world_matrix,
-        };
-        let node = &mut self[node];
-        (node.scale, node.rotation, node.translation) =
-            local_matrix.to_scale_rotation_translation();
-        node.local_matrix = local_matrix;
         node.world_matrix = world_matrix;
         for child in node.children.to_vec() {
             self.update_global_matrix(child, world_matrix);
@@ -536,10 +520,7 @@ pub struct NodeBuilder<'a> {
     scene: &'a mut Scene,
     name: Option<&'a str>,
     parent: Option<Id<Node>>,
-    scale: Vec3,
-    rotation: Quat,
-    translation: Vec3,
-    local_matrix: Mat4,
+    transform: math::Transform,
 }
 
 impl<'a> NodeBuilder<'a> {
@@ -549,45 +530,34 @@ impl<'a> NodeBuilder<'a> {
     }
 
     pub fn scale(&mut self, scale: impl Into<Vec3>) -> &mut Self {
-        self.scale = scale.into();
-        self.local_matrix =
-            Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation);
+        self.transform.set_scale(scale);
         self
     }
 
     pub fn rotation(&mut self, rotation: impl Into<Quat>) -> &mut Self {
-        self.rotation = rotation.into();
-        self.local_matrix =
-            Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation);
+        self.transform.set_rotation(rotation);
         self
     }
 
     pub fn translation(&mut self, translation: impl Into<Vec3>) -> &mut Self {
-        self.translation = translation.into();
-        self.local_matrix =
-            Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation);
+        self.transform.set_position(translation);
         self
     }
 
     pub fn local_matrix(&mut self, local_matrix: impl Into<Mat4>) -> &mut Self {
-        self.local_matrix = local_matrix.into();
-        (self.scale, self.rotation, self.translation) =
-            self.local_matrix.to_scale_rotation_translation();
+        self.transform.set_matrix(local_matrix);
         self
     }
 
     pub fn build(&mut self) -> Id<Node> {
         let world_matrix = match self.parent {
-            Some(parent_id) => self.scene.nodes[parent_id].world_matrix * self.local_matrix,
-            None => self.local_matrix,
+            Some(parent_id) => self.scene.nodes[parent_id].world_matrix * self.transform.matrix(),
+            None => self.transform.matrix(),
         };
         let name = Name::from_name_or_else(|| self.scene.nodes.next_id(), self.name);
         let id = self.scene.nodes.push(Node {
             name,
-            translation: self.translation,
-            rotation: self.rotation,
-            scale: self.scale,
-            local_matrix: self.local_matrix,
+            local_transform: self.transform,
             world_matrix,
             parent: self.parent,
             children: Vec::new(),
@@ -665,7 +635,15 @@ impl Camera {
                 y_mag,
                 z_far,
                 z_near,
-            } => Mat4::orthographic_rh(-x_mag, x_mag, -y_mag, y_mag, z_near, z_far),
+                zoom,
+            } => Mat4::orthographic_rh(
+                -x_mag / zoom,
+                x_mag / zoom,
+                -y_mag / zoom,
+                y_mag / zoom,
+                z_near,
+                z_far,
+            ),
             Projection::Perspective {
                 aspect_ratio,
                 y_fov,
@@ -697,6 +675,7 @@ pub enum Projection {
         y_mag: f32,
         z_far: f32,
         z_near: f32,
+        zoom: f32,
     },
     Perspective {
         aspect_ratio: Option<f32>,
@@ -714,6 +693,7 @@ impl<'a> From<gltf::camera::Projection<'a>> for Projection {
                 y_mag: ortho.ymag(),
                 z_far: ortho.zfar(),
                 z_near: ortho.znear(),
+                zoom: 1.0,
             },
             gltf::camera::Projection::Perspective(pers) => Self::Perspective {
                 aspect_ratio: pers.aspect_ratio(),

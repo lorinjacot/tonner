@@ -4,6 +4,7 @@ mod mesh;
 mod scene;
 mod storage;
 mod texture;
+mod math;
 
 use std::{fmt::Display, path::Path};
 

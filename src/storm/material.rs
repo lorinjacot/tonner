@@ -179,29 +179,29 @@ impl MaterialManager {
             ],
         });
 
-        let dummy_view = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Material dummy texture"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let dummy_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Material dummy texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let dummy_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let dummy_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Material dummy sampler"),
             ..Default::default()
         });
 
-        let dummy_texture = textures.create_view_sampler(dummy_view, dummy_sampler);
+        let dummy_texture =
+            textures.create_texture_view_sampler(dummy_texture, dummy_view, dummy_sampler);
 
         Self {
             materials,

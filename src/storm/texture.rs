@@ -1,34 +1,199 @@
 use std::{
-    io::Read,
+    f32::consts::FRAC_PI_2,
     iter::{once, repeat_n},
 };
 
-use image::{DynamicImage, GenericImageView, RgbaImage};
+use glam::{vec3, Mat4, Vec3};
+use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
 use super::{
     storage::{Id, SparseMap, SparseSet},
-    Asset, Iter, Name,
+    Asset, Iter, Name, Storm,
 };
 
 use TextureInner::*;
+
+pub const CUBE_VERTICES: &[Vec3] = &[
+    // front face
+    vec3(-1.0, 1.0, 1.0),
+    vec3(-1.0, -1.0, 1.0),
+    vec3(1.0, 1.0, 1.0),
+    vec3(1.0, -1.0, 1.0),
+    // right face
+    vec3(1.0, 1.0, -1.0),
+    vec3(1.0, 1.0, 1.0),
+    vec3(1.0, -1.0, -1.0),
+    vec3(1.0, -1.0, 1.0),
+    // back face
+    vec3(1.0, 1.0, -1.0),
+    vec3(1.0, -1.0, -1.0),
+    vec3(-1.0, 1.0, -1.0),
+    vec3(-1.0, -1.0, -1.0),
+    // left face
+    vec3(-1.0, 1.0, 1.0),
+    vec3(-1.0, 1.0, -1.0),
+    vec3(-1.0, -1.0, 1.0),
+    vec3(-1.0, -1.0, -1.0),
+    // bottom face
+    vec3(1.0, -1.0, 1.0),
+    vec3(-1.0, -1.0, 1.0),
+    vec3(1.0, -1.0, -1.0),
+    vec3(-1.0, -1.0, -1.0),
+    // top face
+    vec3(-1.0, 1.0, 1.0),
+    vec3(1.0, 1.0, 1.0),
+    vec3(-1.0, 1.0, -1.0),
+    vec3(1.0, 1.0, -1.0),
+];
+
+pub const CUBE_INDICES: &[u16] = &[
+    0, 1, 2, 2, 1, 3, // front
+    4, 5, 6, 6, 5, 7, // right
+    8, 9, 10, 10, 9, 11, // back
+    12, 13, 14, 14, 13, 15, // left
+    16, 17, 18, 18, 17, 19, // bottom
+    20, 21, 22, 22, 21, 23, // top
+];
+
+pub const CUBE_VERTEX_BUFFER_LAYOUT: &[wgpu::VertexBufferLayout] = &[wgpu::VertexBufferLayout {
+    array_stride: size_of::<Vec3>() as u64,
+    step_mode: wgpu::VertexStepMode::Vertex,
+    attributes: &[wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    }],
+}];
 
 pub struct TextureManager {
     textures: SparseSet<Texture>,
     images: SparseSet<Image>,
     samplers: SparseSet<Sampler>,
+    cubemaps: SparseSet<Cubemap>,
     environment_maps: SparseSet<EnvironmentMap>,
     default_sampler: Option<Id<Sampler>>,
+    cubemap_sampler: wgpu::Sampler,
+    shader_module: wgpu::ShaderModule,
+    equirectangular_bind_group_layout: wgpu::BindGroupLayout,
+    equirectangular_to_cube_pipeline_layout: wgpu::PipelineLayout,
+    cube_vertex_buffer: wgpu::Buffer,
+    cube_index_buffer: wgpu::Buffer,
+    view_projection_bind_groups: [wgpu::BindGroup; 6],
     assets: SparseMap<Asset, AssetData>,
 }
 
 impl TextureManager {
-    pub fn new() -> Self {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let shader_module = device.create_shader_module(wgpu::include_wgsl!("texture.wgsl"));
+
+        let view_projection_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture manager view projection bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let equirectangular_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture manager equirectangular bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let equirectangular_to_cube_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Textures manager equirectangular to cube pipeline layout"),
+                bind_group_layouts: &[
+                    &view_projection_bind_group_layout,
+                    &equirectangular_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Texture manager cube vertex buffer"),
+            contents: bytemuck::cast_slice(&CUBE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let cube_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Texture manager cube index buffer"),
+            contents: bytemuck::cast_slice(&CUBE_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let projection = Mat4::perspective_rh(FRAC_PI_2, 1.0, 0.1, 10.0);
+        let create_bind_group = |view| {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Texture manager view projection buffer"),
+                contents: bytemuck::cast_slice(&[projection * view]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Texture manager view projection bind group"),
+                layout: &view_projection_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            })
+        };
+
+        let view_projection_bind_groups = [
+            create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::X, Vec3::Y)),
+            create_bind_group(Mat4::look_to_rh(Vec3::ZERO, -Vec3::X, Vec3::Y)),
+            create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::Y, Vec3::Z)),
+            create_bind_group(Mat4::look_to_rh(Vec3::ZERO, -Vec3::Y, -Vec3::Z)),
+            create_bind_group(Mat4::look_to_rh(Vec3::ZERO, -Vec3::Z, Vec3::Y)), // the z-axis of wgpu is our -z
+            create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y)),
+        ];
+
+        let cubemap_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Cubemap sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
         Self {
             textures: SparseSet::new(),
             images: SparseSet::new(),
             samplers: SparseSet::new(),
+            cubemaps: SparseSet::new(),
             environment_maps: SparseSet::new(),
+            shader_module,
+            equirectangular_bind_group_layout,
+            equirectangular_to_cube_pipeline_layout,
+            cube_vertex_buffer,
+            cube_index_buffer,
+            view_projection_bind_groups,
+            cubemap_sampler,
             default_sampler: None,
             assets: SparseMap::new(),
         }
@@ -46,12 +211,14 @@ impl TextureManager {
         );
     }
 
-    pub fn create_view_sampler(
+    pub fn create_texture_view_sampler(
         &mut self,
+        texture: wgpu::Texture,
         view: wgpu::TextureView,
         sampler: wgpu::Sampler,
     ) -> Id<Texture> {
-        self.textures.push(Texture(ViewSampler(view, sampler)))
+        self.textures
+            .push(Texture(TextureViewSampler(texture, view, sampler)))
     }
 
     pub fn create_dynamic_image(
@@ -115,7 +282,7 @@ impl TextureManager {
             label: Some(&format!("{} sampler", name.0)),
             ..Default::default()
         });
-        self.create_view_sampler(view, sampler)
+        self.create_texture_view_sampler(texture, view, sampler)
     }
 
     pub fn load_texture(
@@ -208,7 +375,7 @@ impl TextureManager {
 
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            let id = self.images.push(Image { view });
+            let id = self.images.push(Image { texture, view });
 
             match asset.image_mapping.get_mut(image.index()) {
                 Some(entry) => *entry = Some(id),
@@ -350,17 +517,24 @@ impl TextureManager {
         self.environment_maps.iter()
     }
 
+    pub fn texture(&self, id: Id<Texture>) -> Option<&wgpu::Texture> {
+        self.textures.get(id).map(|texture| match &texture.0 {
+            ImageSampler(image, _) => &self.images[*image].texture,
+            TextureViewSampler(texture, _, _) => texture,
+        })
+    }
+
     pub fn view(&self, id: Id<Texture>) -> Option<&wgpu::TextureView> {
         self.textures.get(id).map(|texture| match &texture.0 {
             ImageSampler(image, _) => &self.images[*image].view,
-            ViewSampler(view, _) => view,
+            TextureViewSampler(_, view, _) => view,
         })
     }
 
     pub fn sampler(&self, id: Id<Texture>) -> Option<&wgpu::Sampler> {
         self.textures.get(id).map(|texture| match &texture.0 {
             ImageSampler(_, sampler) => &self.samplers[*sampler].inner,
-            ViewSampler(_, sampler) => sampler,
+            TextureViewSampler(_, _, sampler) => sampler,
         })
     }
 }
@@ -369,15 +543,168 @@ pub struct Texture(TextureInner);
 
 enum TextureInner {
     ImageSampler(Id<Image>, Id<Sampler>),
-    ViewSampler(wgpu::TextureView, wgpu::Sampler),
+    TextureViewSampler(wgpu::Texture, wgpu::TextureView, wgpu::Sampler),
 }
 
 struct Image {
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
 }
 
 struct Sampler {
     inner: wgpu::Sampler,
+}
+
+pub struct Cubemap {
+    view: wgpu::TextureView,
+}
+
+impl Cubemap {
+    pub fn from_equirectangular_map(
+        name: Option<&str>,
+        equirectangular_map: Id<Texture>,
+        storm: &mut Storm,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Id<Self> {
+        let texture = storm.textures.texture(equirectangular_map).unwrap();
+        let view = storm.textures.view(equirectangular_map).unwrap();
+        let sampler = storm.textures.sampler(equirectangular_map).unwrap();
+
+        let name = Name::from_name_or_else(|| storm.textures.cubemaps.next_id(), name);
+        let pipeline = storm
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{name} creation pipeline")),
+                layout: Some(&storm.textures.equirectangular_to_cube_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &storm.textures.shader_module,
+                    entry_point: Some("vs_cube"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: CUBE_VERTEX_BUFFER_LAYOUT,
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &storm.textures.shader_module,
+                    entry_point: Some("fs_equirectangular_to_cube"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(texture.format().into())],
+                }),
+                multiview: None,
+                cache: None,
+            });
+
+        let equirectangular_bind_group =
+            storm.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("equirectangular bind group"),
+                layout: &storm.textures.equirectangular_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            });
+
+        Self::from_pipeline(
+            Some(&name.0),
+            texture.width(),
+            texture.height(),
+            texture.format(),
+            &pipeline,
+            &equirectangular_bind_group,
+            storm,
+            encoder,
+        )
+    }
+
+    fn from_pipeline(
+        name: Option<&str>,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        pipeline: &wgpu::RenderPipeline,
+        source_bind_group: &wgpu::BindGroup,
+        storm: &mut Storm,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Id<Self> {
+        let name = Name::from_name_or_else(|| storm.textures.cubemaps.next_id(), name);
+
+        let texture = storm.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("{name} texture")),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        for base_array_layer in 0..6 {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("create cubemap pipeline"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &texture.create_view(&wgpu::TextureViewDescriptor {
+                        dimension: Some(wgpu::TextureViewDimension::D2),
+                        base_array_layer,
+                        array_layer_count: Some(1),
+                        ..Default::default()
+                    }),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            render_pass.set_pipeline(pipeline);
+            render_pass.set_bind_group(
+                0,
+                &storm.textures.view_projection_bind_groups[base_array_layer as usize],
+                &[],
+            );
+            render_pass.set_bind_group(1, source_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, storm.textures.cube_vertex_buffer.slice(..));
+            render_pass.set_index_buffer(
+                storm.textures.cube_index_buffer.slice(..),
+                wgpu::IndexFormat::Uint16,
+            );
+            render_pass.draw_indexed(0..CUBE_INDICES.len() as u32, 0, 0..1);
+        }
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(&format!("{name} texture view")),
+            ..Default::default()
+        });
+
+        storm.textures.cubemaps.push(Cubemap { view })
+    }
 }
 
 pub struct EnvironmentMap {

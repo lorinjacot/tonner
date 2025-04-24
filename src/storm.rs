@@ -13,12 +13,14 @@ use material::MaterialManager;
 use mesh::MeshManager;
 use scene::SceneManager;
 use storage::SparseSet;
-use texture::{EnvironmentMap, TextureManager};
+use texture::{Cubemap, EnvironmentMap, TextureManager};
 
 pub use scene::{Node, Scene};
 pub use storage::{Id, Iter};
 
 pub struct Storm {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     assets: SparseSet<Asset>,
     textures: TextureManager,
     materials: MaterialManager,
@@ -29,21 +31,27 @@ pub struct Storm {
 }
 
 impl Storm {
-    pub fn new(render_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
+    pub fn new(
+        render_format: wgpu::TextureFormat,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Self {
         let assets = SparseSet::new();
-        let mut textures = TextureManager::new();
-        let materials = MaterialManager::new(&mut textures, device);
+        let mut textures = TextureManager::new(&device);
+        let materials = MaterialManager::new(&mut textures, &device);
         let mut buffers = BufferManager::new();
-        let scenes = SceneManager::new(device);
+        let scenes = SceneManager::new(&device);
         let meshes = MeshManager::new(
             scenes.camera_bind_group_layout(),
             &materials,
             &mut buffers,
             render_format,
-            device,
+            &device,
         );
 
         Self {
+            device,
+            queue,
             assets,
             textures,
             materials,

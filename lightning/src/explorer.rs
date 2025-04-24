@@ -1,7 +1,7 @@
 use egui::Ui;
 use glam::Mat4;
 
-use crate::storm::{Id, Node, Scene, Storm};
+use storm::{Id, Node, Scene, Storm};
 
 pub struct Explorer {
     node_modal: Option<Id<Node>>,

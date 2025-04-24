@@ -9,9 +9,9 @@ use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
 use super::{
+    Asset,
     storage::{Id, SparseMap, SparseSet},
     texture::{Texture, TextureManager},
-    Asset,
 };
 
 pub const TEX_COORD_COUNT: u32 = 2;

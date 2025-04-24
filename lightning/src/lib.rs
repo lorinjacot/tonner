@@ -1,4 +1,3 @@
-use std::fs::read_dir;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,7 +11,6 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
 mod explorer;
-mod storm;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -179,7 +177,7 @@ impl Engine {
             }
         }
 
-        let newport_loft = include_bytes!("../assets/environments/newport_loft.hdr");
+        let newport_loft = include_bytes!("../../assets/environments/newport_loft.hdr");
         let newport_loft =
             image::load_from_memory_with_format(newport_loft, image::ImageFormat::Hdr).unwrap();
         storm.create_environment_map(Some("Newport Loft"), newport_loft, false, &device, &queue);

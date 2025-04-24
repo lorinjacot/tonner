@@ -118,7 +118,7 @@ impl Storm {
             device,
             queue,
         );
-        self.textures.create_environment_map(equirectangular_map)
+        self.textures.create_environment_map(name, equirectangular_map)
     }
 
     pub fn environment_map(&self, id: Id<EnvironmentMap>) -> Option<&EnvironmentMap> {

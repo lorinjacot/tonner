@@ -3,13 +3,13 @@ use std::{
     iter::{once, repeat_n},
 };
 
-use glam::{vec3, Mat4, Vec3};
+use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
 use super::{
-    storage::{Id, SparseMap, SparseSet},
     Asset, Iter, Name, Storm,
+    storage::{Id, SparseMap, SparseSet},
 };
 
 use TextureInner::*;
@@ -504,9 +504,11 @@ impl TextureManager {
 
     pub fn create_environment_map(
         &mut self,
-        equirectangular_map: Id<Texture>,
+        name: Option<&str>,
+        _equirectangular_map: Id<Texture>,
     ) -> Id<EnvironmentMap> {
-        todo!()
+        let name = Name::from_name_or_else(|| self.environment_maps.next_id(), name);
+        self.environment_maps.push(EnvironmentMap { name })
     }
 
     pub fn environment_map(&self, id: Id<EnvironmentMap>) -> Option<&EnvironmentMap> {

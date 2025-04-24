@@ -6,18 +6,18 @@ use std::{
 };
 
 use bitflags::bitflags;
-use bytemuck::{cast_slice, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::storm::buffer::Buffer;
+use crate::buffer::Buffer;
 
 use super::{
+    Asset,
     buffer::{Accessor, BufferManager},
     material::{Material, MaterialFlags, MaterialManager},
     storage::{Id, SparseMap, SparseSet},
     texture::TextureManager,
-    Asset,
 };
 
 const POSITION_LOCATION: u32 = 7;
@@ -378,7 +378,7 @@ impl MeshManager {
                             }),
                     );
 
-                    let mut constants = HashMap::with_capacity(5);
+                    let mut constants = HashMap::with_capacity(9);
                     primitive_flats.insert_constants(&mut constants);
                     material_flags.insert_constants(&mut constants);
 

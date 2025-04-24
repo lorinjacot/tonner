@@ -1,14 +1,14 @@
 use std::{
-    f32::{consts::PI, INFINITY},
+    f32::{INFINITY, consts::PI},
     ops::RangeInclusive,
 };
 
 use glam::{Mat4, Vec2, Vec3};
 
-use crate::storm::{
+use crate::{
+    Id,
     math::{Plane, Ray},
     storage::{SparseMap, SparseSet},
-    Id,
 };
 
 use super::{Camera, Node, Projection};
@@ -329,8 +329,8 @@ impl ControlsTrait for OrbitControls {
                 // move the camera down the pointer ray
                 // this method avoids floating point error
                 let previous_radius = offset.length();
-                let new_radius =
-                    (previous_radius * self.scale).clamp(*self.distance.start(), *self.distance.end());
+                let new_radius = (previous_radius * self.scale)
+                    .clamp(*self.distance.start(), *self.distance.end());
 
                 let radius_delta = previous_radius - new_radius;
                 camera.set_position(camera.position() + self.zoom_direction * radius_delta);

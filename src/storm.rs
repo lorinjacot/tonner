@@ -13,7 +13,7 @@ use material::MaterialManager;
 use mesh::MeshManager;
 use scene::SceneManager;
 use storage::SparseSet;
-use texture::TextureManager;
+use texture::{EnvironmentMap, TextureManager};
 
 pub use scene::{Node, Scene};
 pub use storage::{Id, Iter};
@@ -92,6 +92,33 @@ impl Storm {
 
     pub fn scenes(&self) -> Iter<'_, Scene, Scene> {
         self.scenes.iter()
+    }
+
+    pub fn create_environment_map(
+        &mut self,
+        name: Option<&str>,
+        equirectangular_map: image::DynamicImage,
+        srgb: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Id<EnvironmentMap> {
+        let equirectangular_map = self.textures.create_dynamic_image(
+            name,
+            &equirectangular_map,
+            srgb,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+            device,
+            queue,
+        );
+        self.textures.create_environment_map(equirectangular_map)
+    }
+
+    pub fn environment_map(&self, id: Id<EnvironmentMap>) -> Option<&EnvironmentMap> {
+        self.textures.environment_map(id)
+    }
+
+    pub fn environment_maps(&self) -> Iter<'_, EnvironmentMap, EnvironmentMap> {
+        self.textures.environment_maps()
     }
 
     pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {

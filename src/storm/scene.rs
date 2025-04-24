@@ -15,7 +15,7 @@ use super::{
     math,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
     storage::{Entry, Id, Iter, SparseMap, SparseSet},
-    texture::TextureManager,
+    texture::{EnvironmentMap, TextureManager},
     Asset, Name,
 };
 
@@ -64,10 +64,6 @@ impl SceneManager {
         self.scenes.get_mut(scene)
     }
 
-    pub fn len(&self) -> usize {
-        self.scenes.len()
-    }
-
     pub fn load_scene(
         &mut self,
         asset: Id<Asset>,
@@ -108,6 +104,7 @@ impl SceneManager {
             primitives: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
+            environment_map: None,
             controls: SparseSet::with_capacity(1),
             camera_bind_group_layout: self.camera_bind_group_layout.clone(),
         };
@@ -293,6 +290,7 @@ pub struct Scene {
     >,
     pub cameras: SparseMap<Node, Camera>,
     pub active_camera: Option<Id<Node>>,
+    pub environment_map: Option<Id<EnvironmentMap>>,
     controls: SparseSet<Controls>,
     camera_bind_group_layout: wgpu::BindGroupLayout,
 }

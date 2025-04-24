@@ -1,3 +1,4 @@
+use std::fs::read_dir;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -178,6 +179,11 @@ impl Engine {
             }
         }
 
+        let newport_loft = include_bytes!("../assets/environments/newport_loft.hdr");
+        let newport_loft =
+            image::load_from_memory_with_format(newport_loft, image::ImageFormat::Hdr).unwrap();
+        storm.create_environment_map(Some("Newport Loft"), newport_loft, false, &device, &queue);
+
         let shortcuts = ShortCuts {
             escape_scene_focus: KeyboardShortcut::new(Modifiers::NONE, Key::Escape),
         };
@@ -259,7 +265,7 @@ impl Engine {
                                 egui::Id::new("render region"),
                                 egui::Sense::all(),
                             );
-                            if response.hovered() {  
+                            if response.hovered() {
                                 ui.input_mut(|inputs| {
                                     if inputs.consume_shortcut(&self.shortcuts.escape_scene_focus) {
                                         response.surrender_focus();

@@ -33,7 +33,8 @@ impl Explorer {
                     })
             });
         }
-        if let Some(scene) = storm.active_scene_mut() {
+
+        if let Some(scene) = storm.active_scene() {
             ui.separator();
             ui.label("Nodes");
             for node in scene.root_nodes() {
@@ -42,6 +43,7 @@ impl Explorer {
 
             ui.separator();
             ui.label("Camera");
+            let mut active_camera = scene.active_camera;
             egui::ComboBox::from_id_salt("Camera")
                 .selected_text(
                     scene
@@ -50,9 +52,32 @@ impl Explorer {
                 )
                 .show_ui(ui, |ui| {
                     for (id, camera) in scene.cameras.iter() {
-                        ui.selectable_value(&mut scene.active_camera, Some(id), &camera.name.0);
+                        ui.selectable_value(&mut active_camera, Some(id), &camera.name.0);
                     }
                 });
+
+            ui.separator();
+            ui.label("Environment");
+            let mut active_environment_map = scene.environment_map;
+            egui::ComboBox::from_id_salt("Environment map")
+                .selected_text(
+                    active_environment_map
+                        .map_or("", |id| &storm.environment_map(id).unwrap().name.0),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut active_environment_map, None, "");
+                    for (id, environment_map) in storm.environment_maps() {
+                        ui.selectable_value(
+                            &mut active_environment_map,
+                            Some(id),
+                            &environment_map.name.0,
+                        );
+                    }
+                });
+
+            let scene = storm.active_scene_mut().unwrap();
+            scene.active_camera = active_camera;
+            scene.environment_map = active_environment_map;
 
             if let Some(node) = self.node_modal {
                 let modal = egui::Modal::new(egui::Id::new(format!("{node} properties")))
@@ -62,9 +87,6 @@ impl Explorer {
                     self.node_modal = None;
                 }
             }
-
-            ui.separator();
-            ui.label("Environment");
         }
     }
 

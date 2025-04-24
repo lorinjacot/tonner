@@ -1,10 +1,14 @@
-use std::iter::{once, repeat_n};
+use std::{
+    io::Read,
+    iter::{once, repeat_n},
+};
 
+use image::{DynamicImage, GenericImageView, RgbaImage};
 use wgpu::util::DeviceExt;
 
 use super::{
     storage::{Id, SparseMap, SparseSet},
-    Asset,
+    Asset, Iter, Name,
 };
 
 use TextureInner::*;
@@ -13,6 +17,7 @@ pub struct TextureManager {
     textures: SparseSet<Texture>,
     images: SparseSet<Image>,
     samplers: SparseSet<Sampler>,
+    environment_maps: SparseSet<EnvironmentMap>,
     default_sampler: Option<Id<Sampler>>,
     assets: SparseMap<Asset, AssetData>,
 }
@@ -23,6 +28,7 @@ impl TextureManager {
             textures: SparseSet::new(),
             images: SparseSet::new(),
             samplers: SparseSet::new(),
+            environment_maps: SparseSet::new(),
             default_sampler: None,
             assets: SparseMap::new(),
         }
@@ -46,6 +52,70 @@ impl TextureManager {
         sampler: wgpu::Sampler,
     ) -> Id<Texture> {
         self.textures.push(Texture(ViewSampler(view, sampler)))
+    }
+
+    pub fn create_dynamic_image(
+        &mut self,
+        name: Option<&str>,
+        dynamic_image: &DynamicImage,
+        srgb: bool,
+        usage: wgpu::TextureUsages,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Id<Texture> {
+        use DynamicImage::*;
+        let (dynamic_image, format) = match dynamic_image {
+            ImageRgb8(_) => (
+                &ImageRgba8(dynamic_image.to_rgba8()),
+                wgpu::TextureFormat::Rgba8Unorm,
+            ),
+            ImageRgba8(_) => (dynamic_image, wgpu::TextureFormat::Rgba8Unorm),
+            ImageRgb16(_) => (
+                &ImageRgba16(dynamic_image.to_rgba16()),
+                wgpu::TextureFormat::Rgba16Unorm,
+            ),
+            ImageRgba16(_) => (dynamic_image, wgpu::TextureFormat::Rgba16Unorm),
+            ImageRgb32F(_) => (
+                &ImageRgba32F(dynamic_image.to_rgba32f()),
+                wgpu::TextureFormat::Rgba32Float,
+            ),
+            ImageRgba32F(_) => (dynamic_image, wgpu::TextureFormat::Rgba32Float),
+            _ => unimplemented!(),
+        };
+
+        let name = Name::from_name_or_else(|| self.textures.next_id(), name);
+        let texture = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some(&format!("{} texture", name.0)),
+                size: wgpu::Extent3d {
+                    width: dynamic_image.width(),
+                    height: dynamic_image.height(),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: if srgb {
+                    format.add_srgb_suffix()
+                } else {
+                    format
+                },
+                usage,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            dynamic_image.as_bytes(),
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(&format!("{} view", name.0)),
+            ..Default::default()
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some(&format!("{} sampler", name.0)),
+            ..Default::default()
+        });
+        self.create_view_sampler(view, sampler)
     }
 
     pub fn load_texture(
@@ -265,6 +335,21 @@ impl TextureManager {
         id
     }
 
+    pub fn create_environment_map(
+        &mut self,
+        equirectangular_map: Id<Texture>,
+    ) -> Id<EnvironmentMap> {
+        todo!()
+    }
+
+    pub fn environment_map(&self, id: Id<EnvironmentMap>) -> Option<&EnvironmentMap> {
+        self.environment_maps.get(id)
+    }
+
+    pub fn environment_maps(&self) -> Iter<'_, EnvironmentMap, EnvironmentMap> {
+        self.environment_maps.iter()
+    }
+
     pub fn view(&self, id: Id<Texture>) -> Option<&wgpu::TextureView> {
         self.textures.get(id).map(|texture| match &texture.0 {
             ImageSampler(image, _) => &self.images[*image].view,
@@ -293,6 +378,10 @@ struct Image {
 
 struct Sampler {
     inner: wgpu::Sampler,
+}
+
+pub struct EnvironmentMap {
+    pub name: Name,
 }
 
 fn address_mode(wrap: gltf::texture::WrappingMode) -> wgpu::AddressMode {

@@ -14,25 +14,26 @@ impl Explorer {
 
     pub fn ui(&mut self, ui: &mut Ui, storm: &mut Storm) {
         ui.heading("Explorer");
-        if storm.scenes.len() > 0 {
+        if storm.scenes().len() > 0 {
             ui.horizontal(|ui| {
                 ui.label("Scene");
                 egui::ComboBox::from_id_salt("Scene")
                     .selected_text(storm.active_scene().map_or("", |scene| &scene.label))
                     .show_ui(ui, |ui| {
-                        for (id, scene) in storm.scenes.iter() {
+                        let mut active_scene = storm.active_scene;
+                        for (id, scene) in storm.scenes() {
                             if ui
-                                .selectable_value(&mut storm.active_scene, Some(*id), &scene.label)
+                                .selectable_value(&mut active_scene, Some(id), &scene.label)
                                 .clicked()
                             {
                                 self.node_modal = None;
                             };
                         }
+                        storm.active_scene = active_scene;
                     })
             });
         }
-        if let Some(scene) = storm.active_scene {
-            let scene = &mut storm.scenes[scene];
+        if let Some(scene) = storm.active_scene_mut() {
             ui.separator();
             ui.label("Nodes");
             for node in scene.root_nodes() {
@@ -49,7 +50,7 @@ impl Explorer {
                 )
                 .show_ui(ui, |ui| {
                     for (id, camera) in scene.cameras.iter() {
-                        ui.selectable_value(&mut scene.active_camera, Some(*id), &camera.name.0);
+                        ui.selectable_value(&mut scene.active_camera, Some(id), &camera.name.0);
                     }
                 });
 
@@ -61,6 +62,9 @@ impl Explorer {
                     self.node_modal = None;
                 }
             }
+
+            ui.separator();
+            ui.label("Environment");
         }
     }
 

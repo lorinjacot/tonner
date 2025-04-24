@@ -160,12 +160,12 @@ impl<K, V> SparseMap<K, V> {
         self.dense.len()
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, (Id<K>, V)> {
-        self.dense.iter()
+    pub fn iter(&self) -> Iter<'_, K, V> {
+        Iter(self.dense.iter())
     }
 
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (Id<K>, V)> {
-        self.dense.iter_mut()
+    pub fn iter_mut(&mut self) -> IterMut<'_, K, V> {
+        IterMut(self.dense.iter_mut())
     }
 
     pub fn values(
@@ -196,6 +196,94 @@ impl<K, V> IndexMut<Id<K>> for SparseMap<K, V> {
     }
 }
 
+pub struct Iter<'a, K, V>(std::slice::Iter<'a, (Id<K>, V)>);
+
+impl<'a, K, V> Iterator for Iter<'a, K, V> {
+    type Item = (Id<K>, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(id, value)| (*id, value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.0.count()
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.0
+            .fold(init, |accum, (id, value)| f(accum, (*id, value)))
+    }
+}
+
+impl<'a, K, V> DoubleEndedIterator for Iter<'a, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back().map(|(id, value)| (*id, value))
+    }
+}
+
+impl<'a, K, V> ExactSizeIterator for Iter<'a, K, V> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a, K, V> FusedIterator for Iter<'a, K, V> {}
+
+pub struct IterMut<'a, K, V>(std::slice::IterMut<'a, (Id<K>, V)>);
+
+impl<'a, K, V> Iterator for IterMut<'a, K, V> {
+    type Item = (Id<K>, &'a mut V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(id, value)| (*id, value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.0.count()
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.0
+            .fold(init, |accum, (id, value)| f(accum, (*id, value)))
+    }
+}
+
+impl<'a, K, V> DoubleEndedIterator for IterMut<'a, K, V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back().map(|(id, value)| (*id, value))
+    }
+}
+
+impl<'a, K, V> ExactSizeIterator for IterMut<'a, K, V> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a, K, V> FusedIterator for IterMut<'a, K, V> {}
+
 impl<K, V> IntoIterator for SparseMap<K, V> {
     type Item = (Id<K>, V);
     type IntoIter = std::vec::IntoIter<(Id<K>, V)>;
@@ -206,8 +294,8 @@ impl<K, V> IntoIterator for SparseMap<K, V> {
 }
 
 impl<'a, K, V> IntoIterator for &'a SparseMap<K, V> {
-    type Item = &'a (Id<K>, V);
-    type IntoIter = std::slice::Iter<'a, (Id<K>, V)>;
+    type Item = (Id<K>, &'a V);
+    type IntoIter = Iter<'a, K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -215,8 +303,8 @@ impl<'a, K, V> IntoIterator for &'a SparseMap<K, V> {
 }
 
 impl<'a, K, V> IntoIterator for &'a mut SparseMap<K, V> {
-    type Item = &'a mut (Id<K>, V);
-    type IntoIter = std::slice::IterMut<'a, (Id<K>, V)>;
+    type Item = (Id<K>, &'a mut V);
+    type IntoIter = IterMut<'a, K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
@@ -360,11 +448,11 @@ impl<T> SparseSet<T> {
         self.map.get_mut(id)
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, (Id<T>, T)> {
+    pub fn iter(&self) -> Iter<'_, T, T> {
         self.map.iter()
     }
 
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (Id<T>, T)> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T, T> {
         self.map.iter_mut()
     }
 
@@ -382,27 +470,27 @@ impl<T> SparseSet<T> {
     }
 }
 
-impl<V> IntoIterator for SparseSet<V> {
-    type Item = (Id<V>, V);
-    type IntoIter = std::vec::IntoIter<(Id<V>, V)>;
+impl<T> IntoIterator for SparseSet<T> {
+    type Item = (Id<T>, T);
+    type IntoIter = std::vec::IntoIter<(Id<T>, T)>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.map.into_iter()
     }
 }
 
-impl<'a, V> IntoIterator for &'a SparseSet<V> {
-    type Item = &'a (Id<V>, V);
-    type IntoIter = std::slice::Iter<'a, (Id<V>, V)>;
+impl<'a, T> IntoIterator for &'a SparseSet<T> {
+    type Item = (Id<T>, &'a T);
+    type IntoIter = Iter<'a, T, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, V> IntoIterator for &'a mut SparseSet<V> {
-    type Item = &'a mut (Id<V>, V);
-    type IntoIter = std::slice::IterMut<'a, (Id<V>, V)>;
+impl<'a, T> IntoIterator for &'a mut SparseSet<T> {
+    type Item = (Id<T>, &'a mut T);
+    type IntoIter = IterMut<'a, T, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()

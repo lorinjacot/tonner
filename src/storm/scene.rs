@@ -14,7 +14,7 @@ use super::{
     material::MaterialManager,
     math,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
-    storage::{Entry, Id, SparseMap, SparseSet},
+    storage::{Entry, Id, Iter, SparseMap, SparseSet},
     texture::TextureManager,
     Asset, Name,
 };
@@ -161,7 +161,7 @@ impl SceneManager {
         id
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, (Id<Scene>, Scene)> {
+    pub fn iter(&self) -> Iter<'_, Scene, Scene> {
         self.scenes.iter()
     }
 }
@@ -217,8 +217,8 @@ fn create_node(
         for (pipeline, primitives) in &mesh.primitives {
             match scene
                 .primitives
-                .entry(*pipeline)
-                .or_insert_with(|| (meshes[*pipeline].clone(), SparseMap::new()))
+                .entry(pipeline)
+                .or_insert_with(|| (meshes[pipeline].clone(), SparseMap::new()))
                 .1
                 .entry(mesh_id)
             {

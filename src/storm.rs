@@ -1,10 +1,10 @@
 mod buffer;
 mod material;
+mod math;
 mod mesh;
 mod scene;
 mod storage;
 mod texture;
-mod math;
 
 use std::{fmt::Display, path::Path};
 
@@ -16,7 +16,7 @@ use storage::SparseSet;
 use texture::TextureManager;
 
 pub use scene::{Node, Scene};
-pub use storage::Id;
+pub use storage::{Id, Iter};
 
 pub struct Storm {
     assets: SparseSet<Asset>,
@@ -24,7 +24,7 @@ pub struct Storm {
     materials: MaterialManager,
     buffers: BufferManager,
     meshes: MeshManager,
-    pub scenes: SceneManager,
+    scenes: SceneManager,
     pub active_scene: Option<Id<Scene>>,
 }
 
@@ -88,6 +88,10 @@ impl Storm {
             .map(|scene| asset.scenes[scene.index()]);
 
         Ok(id)
+    }
+
+    pub fn scenes(&self) -> Iter<'_, Scene, Scene> {
+        self.scenes.iter()
     }
 
     pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {

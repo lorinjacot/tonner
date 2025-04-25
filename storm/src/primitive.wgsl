@@ -3,11 +3,12 @@ struct VertexOutput {
 };
 
 struct Attributes {
-    @location(7) position: vec3<f32>,
+    @location(1) position: vec3<f32>,
 }
 
 @vertex
 fn vs_main(
+    @location(0) index: u32,
     attributes: Attributes,
 ) -> VertexOutput {
     var result: VertexOutput;

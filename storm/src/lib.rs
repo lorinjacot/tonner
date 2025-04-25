@@ -11,34 +11,42 @@ mod scene;
 mod storage;
 
 pub struct Storm {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     render_texture_format: wgpu::TextureFormat,
     assets: SparseSet<Asset>,
     scenes: SparseSet<Scene>,
     scene: Option<Id<Scene>>,
     primitive_shader_module: wgpu::ShaderModule,
+    scene_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl Storm {
-    pub fn new(
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        render_texture_format: wgpu::TextureFormat,
-    ) -> Self {
+    pub fn new(render_texture_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
         let assets = SparseSet::new();
         let scenes = SparseSet::new();
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
+        let scene_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Scene bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
 
         Self {
-            device,
-            queue,
             render_texture_format,
             assets,
             scenes,
             scene: None,
             primitive_shader_module,
+            scene_bind_group_layout,
         }
     }
 
@@ -57,8 +65,4 @@ impl Storm {
     pub fn scenes(&self) -> std::slice::Iter<'_, Scene> {
         self.scenes.iter()
     }
-
-    pub fn update(&mut self, _aspect_ration: f32) {}
-
-    pub fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
 }

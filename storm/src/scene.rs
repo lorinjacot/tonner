@@ -1,5 +1,9 @@
 use std::ops::{Index, IndexMut};
 
+use bytemuck::{Pod, Zeroable, cast_slice};
+use glam::Mat4;
+use wgpu::util::DeviceExt;
+
 use crate::{
     math::Transform,
     storage::{DenseEntry, Id, SparseSet},
@@ -9,7 +13,10 @@ pub struct Scene {
     id: Id<Self>,
     pub name: String,
     nodes: SparseSet<Node>,
+    nodes_buffer: Option<wgpu::Buffer>,
     root_nodes: Vec<Id<Node>>,
+    bind_group_layout: wgpu::BindGroupLayout,
+    bind_group: Option<wgpu::BindGroup>,
 }
 
 impl Scene {
@@ -20,6 +27,47 @@ impl Scene {
     pub fn root_nodes(&self) -> &[Id<Node>] {
         &self.root_nodes
     }
+
+    pub fn update(&mut self, _aspect_ration: f32, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let nodes_buffer = {
+            let data: Vec<_> = self
+                .nodes
+                .iter()
+                .map(|node| NodeUniform {
+                    model: node.global_transform,
+                })
+                .collect();
+
+            match &self.nodes_buffer {
+                Some(buffer) => {
+                    queue.write_buffer(buffer, 0, cast_slice(&data));
+                    buffer
+                }
+                None => {
+                    self.bind_group = None;
+                    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("{}'s nodes buffer", self.name)),
+                        contents: cast_slice(&data),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    });
+                    self.nodes_buffer.insert(buffer)
+                }
+            }
+        };
+
+        if self.bind_group.is_none() {
+            self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("{} scene bind group", self.name)),
+                layout: &self.bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: nodes_buffer.as_entire_binding(),
+                }],
+            }))
+        }
+    }
+
+    pub fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
 }
 
 impl Index<Id<Node>> for Scene {
@@ -38,6 +86,7 @@ impl IndexMut<Id<Node>> for Scene {
 
 pub struct SceneDescriptor {
     pub(super) name: Option<String>,
+    pub(super) bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl DenseEntry for Scene {
@@ -52,7 +101,10 @@ impl DenseEntry for Scene {
             id,
             name,
             nodes,
+            nodes_buffer: None,
             root_nodes,
+            bind_group_layout: desc.bind_group_layout,
+            bind_group: None,
         }
     }
 
@@ -67,6 +119,7 @@ pub struct Node {
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
     local_transform: Transform,
+    global_transform: Mat4,
 }
 
 impl Node {
@@ -93,6 +146,7 @@ impl<'a> NodeBuilder<'a> {
                 name: None,
                 children: Vec::new(),
                 local_transform: Transform::IDENTITY,
+                global_transform: Mat4::IDENTITY,
             },
         }
     }
@@ -107,12 +161,18 @@ impl<'a> NodeBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> &'a mut Node {
+    pub fn build(mut self) -> &'a mut Node {
         let id = self.scene.nodes.next_id();
         match self.desc.parent {
-            Some(parent) => self.scene.nodes[parent].children.push(id),
+            Some(parent) => {
+                let parent = &mut self.scene.nodes[parent];
+                parent.children.push(id);
+                self.desc.global_transform =
+                    parent.global_transform * self.desc.local_transform.matrix();
+            }
             None => self.scene.root_nodes.push(id),
         }
+        self.scene.nodes_buffer = None;
         self.scene.nodes.push(self.desc)
     }
 }
@@ -122,6 +182,7 @@ pub struct NodeDescriptor {
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
     local_transform: Transform,
+    global_transform: Mat4,
 }
 
 impl DenseEntry for Node {
@@ -136,10 +197,17 @@ impl DenseEntry for Node {
             parent: desc.parent,
             children: desc.children,
             local_transform: desc.local_transform,
+            global_transform: desc.global_transform,
         }
     }
 
     fn id(&self) -> Id<Self::Key> {
         self.id
     }
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct NodeUniform {
+    model: Mat4,
 }

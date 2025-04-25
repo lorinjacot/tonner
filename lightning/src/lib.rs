@@ -166,9 +166,9 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut storm = Storm::new(device.clone(), queue.clone(), RENDER_TEXTURE_FORMAT);
+        let mut storm = Storm::new(RENDER_TEXTURE_FORMAT, &device);
         if let Some(path) = load_asset {
-            if let Err(err) = storm.load_gltf(path) {
+            if let Err(err) = storm.open_gltf(path, &device) {
                 panic!("{err}");
             }
         }
@@ -276,8 +276,13 @@ impl Engine {
                     label: Some("Engine::draw command encoder"),
                 });
 
-        self.storm
-            .update(self.render_texture.width() as f32 / self.render_texture.height() as f32);
+        if let Some(scene) = self.storm.scene_mut() {
+            scene.update(
+                self.render_texture.width() as f32 / self.render_texture.height() as f32,
+                &self.device,
+                &self.queue,
+            );
+        }
 
         let screen_descriptor = ScreenDescriptor {
             size_in_pixels: [self.surface_config.width, self.surface_config.height],
@@ -298,7 +303,7 @@ impl Engine {
             self.egui_renderer.free_texture(&id);
         }
 
-        {
+        if let Some(scene) = self.storm.scene() {
             let mut storm_render_pass =
                 command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("storm render pass"),
@@ -315,7 +320,7 @@ impl Engine {
                     occlusion_query_set: None,
                 });
 
-            self.storm.render(&mut storm_render_pass);
+            scene.render(&mut storm_render_pass);
         }
 
         let frame = self

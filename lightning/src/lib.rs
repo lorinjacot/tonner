@@ -1,16 +1,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use egui::{Key, KeyboardShortcut, Modifiers, ViewportBuilder};
+use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
-use explorer::Explorer;
 use storm::Storm;
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
-
-mod explorer;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -106,8 +103,6 @@ struct Engine {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     storm: Storm,
-    shortcuts: ShortCuts,
-    explorer: Explorer,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
     render_texture: wgpu::Texture,
@@ -167,23 +162,12 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut storm = Storm::new(device.clone(), queue.clone());
+        let mut storm = Storm::new(device.clone(), queue.clone(), RENDER_TEXTURE_FORMAT);
         if let Some(path) = load_asset {
-            if let Err(err) = storm.import_gltf(path) {
+            if let Err(err) = storm.load_gltf(path) {
                 panic!("{err}");
             }
         }
-
-        let newport_loft = include_bytes!("../../assets/environments/newport_loft.hdr");
-        let newport_loft =
-            image::load_from_memory_with_format(newport_loft, image::ImageFormat::Hdr).unwrap();
-        storm.create_environment_map(Some("Newport Loft"), newport_loft, false, &device, &queue);
-
-        let shortcuts = ShortCuts {
-            escape_scene_focus: KeyboardShortcut::new(Modifiers::NONE, Key::Escape),
-        };
-
-        let explorer = Explorer::new();
 
         let egui_state = egui_winit::State::new(
             egui_ctx,
@@ -192,7 +176,6 @@ impl Engine {
             Some(window.scale_factor() as f32),
             window.theme(),
             Some(device.limits().max_texture_dimension_2d as usize),
-            // None,
         );
 
         let mut egui_renderer = egui_wgpu::Renderer::new(&device, swapchain_format, None, 1, true);
@@ -207,8 +190,6 @@ impl Engine {
             surface,
             surface_config,
             storm,
-            shortcuts,
-            explorer,
             egui_state,
             egui_renderer,
             render_texture,
@@ -220,59 +201,58 @@ impl Engine {
     fn draw(&mut self) {
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
-        let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
-            egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
-            if let Some(scene) = self.storm.active_scene_mut() {
-                egui::CentralPanel::default().show(&ctx, |ui| {
-                    let size = match scene.aspect_ratio() {
-                        Some(aspect_ratio) => {
-                            let width = ui.available_width();
-                            let height = ui.available_height();
-                            egui::vec2(
-                                width.min(height * aspect_ratio),
-                                height.min(width / aspect_ratio),
-                            )
-                        }
-                        None => ui.available_size(),
-                    };
-                    let width = (size.x * ui.pixels_per_point()) as u32;
-                    let height = (size.y * ui.pixels_per_point()) as u32;
-                    if width != self.render_texture.width()
-                        || height != self.render_texture.height()
-                    {
-                        (
-                            self.render_texture,
-                            self.render_texture_view,
-                            self.render_texture_id,
-                        ) = create_render_texture(
-                            width,
-                            height,
-                            &mut self.egui_renderer,
-                            &self.device,
-                        );
-                    }
+        let full_output = self.egui_state.egui_ctx().run(raw_input, |_ctx| {
+            // if let Some(scene) = self.storm.active_scene_mut() {
+            //     egui::CentralPanel::default().show(&ctx, |ui| {
+            //         let size = match scene.aspect_ratio() {
+            //             Some(aspect_ratio) => {
+            //                 let width = ui.available_width();
+            //                 let height = ui.available_height();
+            //                 egui::vec2(
+            //                     width.min(height * aspect_ratio),
+            //                     height.min(width / aspect_ratio),
+            //                 )
+            //             }
+            //             None => ui.available_size(),
+            //         };
+            //         let width = (size.x * ui.pixels_per_point()) as u32;
+            //         let height = (size.y * ui.pixels_per_point()) as u32;
+            //         if width != self.render_texture.width()
+            //             || height != self.render_texture.height()
+            //         {
+            //             (
+            //                 self.render_texture,
+            //                 self.render_texture_view,
+            //                 self.render_texture_id,
+            //             ) = create_render_texture(
+            //                 width,
+            //                 height,
+            //                 &mut self.egui_renderer,
+            //                 &self.device,
+            //             );
+            //         }
 
-                    ui.horizontal_centered(|ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.image((self.render_texture_id, size));
-                            let response = ui.interact(
-                                ui.clip_rect(),
-                                egui::Id::new("render region"),
-                                egui::Sense::all(),
-                            );
-                            if response.hovered() {
-                                ui.input_mut(|inputs| {
-                                    if inputs.consume_shortcut(&self.shortcuts.escape_scene_focus) {
-                                        response.surrender_focus();
-                                    } else {
-                                        scene.take_input(inputs, size);
-                                    }
-                                });
-                            }
-                        });
-                    });
-                });
-            }
+            //         ui.horizontal_centered(|ui| {
+            //             ui.vertical_centered(|ui| {
+            //                 ui.image((self.render_texture_id, size));
+            //                 let response = ui.interact(
+            //                     ui.clip_rect(),
+            //                     egui::Id::new("render region"),
+            //                     egui::Sense::all(),
+            //                 );
+            //                 if response.hovered() {
+            //                     ui.input_mut(|inputs| {
+            //                         if inputs.consume_shortcut(&self.shortcuts.escape_scene_focus) {
+            //                             response.surrender_focus();
+            //                         } else {
+            //                             scene.take_input(inputs, size);
+            //                         }
+            //                     });
+            //                 }
+            //             });
+            //         });
+            //     });
+            // }
         });
 
         self.egui_state
@@ -288,10 +268,8 @@ impl Engine {
                     label: Some("Engine::draw command encoder"),
                 });
 
-        self.storm.update(
-            self.render_texture.width() as f32 / self.render_texture.height() as f32,
-            &self.queue,
-        );
+        self.storm
+            .update(self.render_texture.width() as f32 / self.render_texture.height() as f32);
 
         let screen_descriptor = ScreenDescriptor {
             size_in_pixels: [self.surface_config.width, self.surface_config.height],
@@ -402,8 +380,4 @@ fn create_render_texture(
     );
 
     (render_texture, render_texture_view, render_texture_id)
-}
-
-struct ShortCuts {
-    escape_scene_focus: KeyboardShortcut,
 }

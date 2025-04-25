@@ -1,15 +1,15 @@
 use crate::storage::{DenseEntry, Id};
 
-pub struct Scene {
-    id: Id<Self>
+pub struct Asset {
+    id: Id<Self>,
 }
 
-impl DenseEntry for Scene {
+impl DenseEntry for Asset {
     type Key = Self;
     type Value = ();
 
     fn new(id: Id<Self::Key>, value: Self::Value) -> Self {
-        Scene { id }
+        Self { id }
     }
 
     fn id(&self) -> Id<Self::Key> {

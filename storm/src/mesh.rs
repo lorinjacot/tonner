@@ -1,15 +1,11 @@
-use std::{
-    ops::Range,
-    sync::{Arc, RwLock},
-};
+use std::ops::Range;
 
 use crate::{DenseEntry, Id, storage::SetEntry};
 
-#[derive(Clone)]
 pub struct Mesh {
     id: Id<Mesh>,
-    name: Arc<RwLock<String>>,
-    primitives: Arc<Vec<Primitive>>,
+    name: String,
+    pub(super) primitives: Vec<Primitive>,
 }
 
 pub struct MeshDescriptor {
@@ -31,8 +27,8 @@ impl SetEntry for Mesh {
     fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
         Self {
             id,
-            name: Arc::new(RwLock::new(desc.name.unwrap_or_else(|| id.to_string()))),
-            primitives: Arc::new(desc.primitives),
+            name: desc.name.unwrap_or_else(|| id.to_string()),
+            primitives: desc.primitives,
         }
     }
 }
@@ -42,6 +38,7 @@ pub struct Primitive {
     pub(super) pipeline: wgpu::RenderPipeline,
     pub(super) index_buffer: Option<IndexBuffer>,
     pub(super) vertex_buffers: Vec<wgpu::Buffer>,
+    pub(super) vertex_count: u32,
 }
 
 #[derive(Debug, Clone)]

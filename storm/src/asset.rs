@@ -4,9 +4,9 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Id, Storm,
-    mesh::{IndexBuffer, MeshDescriptor, Primitive},
+    mesh::{IndexBuffer, Mesh, MeshDescriptor, Primitive},
     scene::{Node, Scene, SceneDescriptor},
-    storage::{DenseEntry, SetEntry},
+    storage::{DenseEntry, SetEntry, SparseSet},
 };
 
 impl Storm {
@@ -30,27 +30,27 @@ impl Storm {
                 );
                 let mut primitives = Vec::with_capacity(gltf_mesh.primitives().len());
                 for primitive in gltf_mesh.primitives() {
-                    if primitive.get(&gltf::Semantic::Positions).is_none() {
-                        continue;
-                    }
+                    let mut vertex_count = match primitive.get(&gltf::Semantic::Positions) {
+                        Some(positions) => positions.count() as u32,
+                        None => continue,
+                    };
 
-                    let index_buffer =
-                        primitive
-                            .indices()
-                            .map(|indices| match &accessors[indices.index()] {
-                                Some(Accessor::IndexBuffer(index_buffer)) => index_buffer.clone(),
-                                None => {
-                                    let index_buffer = IndexBuffer::from_gltf(
-                                        &indices, &buffers, &mut views, device,
-                                    );
-                                    accessors[indices.index()] =
-                                        Some(Accessor::IndexBuffer(index_buffer.clone()));
-                                    index_buffer
-                                }
-                                _ => panic!(
-                                    "primitive indices accessors cannot be used for other purposes"
-                                ),
-                            });
+                    let index_buffer = primitive.indices().map(|indices| {
+                        vertex_count = indices.count() as u32;
+                        match &accessors[indices.index()] {
+                            Some(Accessor::IndexBuffer(index_buffer)) => index_buffer.clone(),
+                            None => {
+                                let index_buffer =
+                                    IndexBuffer::from_gltf(&indices, &buffers, &mut views, device);
+                                accessors[indices.index()] =
+                                    Some(Accessor::IndexBuffer(index_buffer.clone()));
+                                index_buffer
+                            }
+                            _ => panic!(
+                                "primitive indices accessors cannot be used for other purposes"
+                            ),
+                        }
+                    });
 
                     let mut vertex_buffers: BTreeMap<usize, VertexBufferLayout> = BTreeMap::new();
                     for (semantic, accessor) in primitive.attributes() {
@@ -151,6 +151,7 @@ impl Storm {
                         pipeline,
                         index_buffer,
                         vertex_buffers,
+                        vertex_count,
                     });
                 }
                 self.meshes
@@ -170,7 +171,7 @@ impl Storm {
                     bind_group_layout: self.scene_bind_group_layout.clone(),
                 });
                 for gltf_node in gltf_scene.nodes() {
-                    Node::from_gltf(&gltf_node, None, scene);
+                    Node::from_gltf(&gltf_node, None, scene, &mut self.meshes, &meshes, device);
                 }
                 scene.id()
             })
@@ -186,12 +187,24 @@ impl Node {
         node: &gltf::Node,
         parent: Option<Id<Node>>,
         scene: &'a mut Scene,
-    ) -> &'a mut Self {
-        scene
+        meshes: &mut SparseSet<Mesh>,
+        meshes_mapping: &[Id<Mesh>],
+        device: &wgpu::Device,
+    ) -> Id<Node> {
+        let mesh = node
+            .mesh()
+            .map(|gltf_mesh| &meshes[meshes_mapping[gltf_mesh.index()]]);
+        let id = scene
             .node_builder()
             .name(node.name().map(|name| name.to_string()))
             .parent(parent)
-            .build()
+            .mesh(mesh)
+            .build(device)
+            .id();
+        for child in node.children() {
+            Node::from_gltf(&child, Some(id), scene, meshes, meshes_mapping, device);
+        }
+        id
     }
 }
 

@@ -86,11 +86,17 @@ impl<T: DenseEntry> SparseMap<T> {
 
     pub fn insert(&mut self, entry: T) -> &mut T {
         match self.sparse.get_mut(entry.id().sparse as usize) {
-            Some(sparse) => {
+            Some(sparse) if sparse.dense < u16::MAX => {
                 sparse.version = entry.id().version;
                 let dense_entry = &mut self.dense[sparse.dense as usize];
                 *dense_entry = entry;
                 dense_entry
+            }
+            Some(sparse) => {
+                sparse.dense = self.dense.len() as u16;
+                sparse.version = entry.id().version;
+                self.dense.push(entry);
+                self.dense.last_mut().unwrap()
             }
             None => {
                 let iter = repeat_n(
@@ -125,38 +131,35 @@ impl<T: DenseEntry> SparseMap<T> {
         }
     }
 
-    pub fn contains(&self, id: Id<T::Key>) -> bool {
+    pub fn dense_index(&self, id: Id<T::Key>) -> Option<u16> {
         match self.sparse.get(id.sparse as usize) {
-            Some(sparse) => id.version == sparse.version && sparse.dense < u16::MAX,
-            None => false,
+            Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
+                Some(sparse.dense)
+            }
+            _ => None,
         }
+    }
+
+    pub fn contains(&self, id: Id<T::Key>) -> bool {
+        self.dense_index(id).is_some()
     }
 
     pub fn get(&self, id: Id<T::Key>) -> Option<&T> {
-        match self.sparse.get(id.sparse as usize) {
-            Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
-                Some(&self.dense[sparse.dense as usize])
-            }
-            _ => None,
-        }
+        self.dense_index(id)
+            .map(|index| &self.dense[index as usize])
     }
 
     pub fn get_mut(&mut self, id: Id<T::Key>) -> Option<&mut T> {
-        match self.sparse.get(id.sparse as usize) {
-            Some(sparse) if id.version == sparse.version && sparse.dense < u16::MAX => {
-                Some(&mut self.dense[sparse.dense as usize])
-            }
-            _ => None,
-        }
+        self.dense_index(id)
+            .map(|index| &mut self.dense[index as usize])
     }
 
     pub fn entry(&mut self, id: Id<T::Key>) -> Entry<'_, T> {
-        if self.contains(id) {
-            Entry::Occupied(OccupiedEntry {
-                value: &mut self[id],
-            })
-        } else {
-            Entry::Vacant(VacantEntry { map: self })
+        match self.dense_index(id) {
+            Some(index) => Entry::Occupied(OccupiedEntry {
+                value: &mut self.dense[index as usize],
+            }),
+            None => Entry::Vacant(VacantEntry { map: self }),
         }
     }
 
@@ -357,6 +360,10 @@ impl<T: SetEntry> SparseSet<T> {
 
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
         self.map.iter_mut()
+    }
+
+    pub fn dense_index(&self, id: Id<T::Key>) -> Option<u16> {
+        self.map.dense_index(id)
     }
 }
 

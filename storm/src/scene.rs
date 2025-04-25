@@ -1,13 +1,13 @@
 use std::ops::{Index, IndexMut};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
-use glam::Mat4;
+use glam::{Mat4, usize};
 use wgpu::util::DeviceExt;
 
 use crate::{
     math::Transform,
-    mesh::Mesh,
-    storage::{DenseEntry, Id, SetEntry, SparseSet},
+    mesh::{Mesh, Primitive},
+    storage::{DenseEntry, Id, SetEntry, SparseMap, SparseSet},
 };
 
 pub struct Scene {
@@ -16,6 +16,7 @@ pub struct Scene {
     nodes: SparseSet<Node>,
     nodes_buffer: Option<wgpu::Buffer>,
     root_nodes: Vec<Id<Node>>,
+    meshes: SparseMap<MeshInstances>,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: Option<wgpu::BindGroup>,
 }
@@ -55,6 +56,25 @@ impl Scene {
                 }
             }
         };
+
+        for mesh_instances in self.meshes.iter_mut() {
+            const INDEX_SIZE: usize = size_of::<u32>();
+            let data: Vec<_> = mesh_instances
+                .nodes
+                .iter()
+                .map(|id| self.nodes.dense_index(*id).unwrap() as u32)
+                .collect();
+            let buffer = &mut mesh_instances.vertex_buffer;
+            if buffer.size() >= (mesh_instances.nodes.len() * INDEX_SIZE) as wgpu::BufferAddress {
+                queue.write_buffer(&buffer, 0, cast_slice(&data));
+            } else {
+                *buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Mesh instances vertex buffer"),
+                    contents: cast_slice(&data),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                });
+            }
+        }
 
         if self.bind_group.is_none() {
             self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -105,12 +125,15 @@ impl SetEntry for Scene {
         let name = desc.name.unwrap_or_else(|| id.to_string());
         let nodes = SparseSet::new();
         let root_nodes = Vec::new();
+        let meshes = SparseMap::new();
+
         Scene {
             id,
             name,
             nodes,
             nodes_buffer: None,
             root_nodes,
+            meshes,
             bind_group_layout: desc.bind_group_layout,
             bind_group: None,
         }
@@ -136,14 +159,14 @@ impl Node {
     }
 }
 
-pub struct NodeBuilder<'a> {
-    scene: &'a mut Scene,
+pub struct NodeBuilder<'a, 's> {
+    scene: &'s mut Scene,
     desc: NodeDescriptor,
-    mesh: Option<Mesh>,
+    mesh: Option<&'a Mesh>,
 }
 
-impl<'a> NodeBuilder<'a> {
-    pub fn new(scene: &'a mut Scene) -> Self {
+impl<'a, 's> NodeBuilder<'a, 's> {
+    pub fn new(scene: &'s mut Scene) -> Self {
         Self {
             scene,
             desc: NodeDescriptor {
@@ -167,12 +190,12 @@ impl<'a> NodeBuilder<'a> {
         self
     }
 
-    pub fn mesh(mut self, mesh: Option<Mesh>) -> Self {
+    pub fn mesh(mut self, mesh: Option<&'a Mesh>) -> Self {
         self.mesh = mesh;
         self
     }
 
-    pub fn build(mut self) -> &'a mut Node {
+    pub fn build(mut self, device: &wgpu::Device) -> &'s mut Node {
         let id = self.scene.nodes.next_id();
         match self.desc.parent {
             Some(parent) => {
@@ -182,6 +205,27 @@ impl<'a> NodeBuilder<'a> {
                     parent.global_transform * self.desc.local_transform.matrix();
             }
             None => self.scene.root_nodes.push(id),
+        }
+        if let Some(mesh) = self.mesh {
+            self.scene
+                .meshes
+                .entry(mesh.id())
+                .or_insert_with(|| {
+                    let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Mesh instance vertex buffer"),
+                        size: size_of::<u32>() as u64,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    MeshInstances {
+                        mesh: mesh.id(),
+                        primitives: mesh.primitives.clone(),
+                        nodes: Vec::with_capacity(1),
+                        vertex_buffer,
+                    }
+                })
+                .nodes
+                .push(id);
         }
         self.scene.nodes_buffer = None;
         self.scene.nodes.push(self.desc)
@@ -226,15 +270,17 @@ struct NodeUniform {
     model: Mat4,
 }
 
-struct MeshNodes {
-    mesh: Mesh,
+struct MeshInstances {
+    mesh: Id<Mesh>,
+    primitives: Vec<Primitive>,
     nodes: Vec<Id<Node>>,
+    vertex_buffer: wgpu::Buffer,
 }
 
-impl DenseEntry for MeshNodes {
+impl DenseEntry for MeshInstances {
     type Key = Mesh;
 
     fn id(&self) -> Id<Self::Key> {
-        self.mesh.id()
+        self.mesh
     }
 }

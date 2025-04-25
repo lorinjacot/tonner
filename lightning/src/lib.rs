@@ -210,57 +210,49 @@ impl Engine {
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
-            // if let Some(scene) = self.storm.active_scene_mut() {
-            //     egui::CentralPanel::default().show(&ctx, |ui| {
-            //         let size = match scene.aspect_ratio() {
-            //             Some(aspect_ratio) => {
-            //                 let width = ui.available_width();
-            //                 let height = ui.available_height();
-            //                 egui::vec2(
-            //                     width.min(height * aspect_ratio),
-            //                     height.min(width / aspect_ratio),
-            //                 )
-            //             }
-            //             None => ui.available_size(),
-            //         };
-            //         let width = (size.x * ui.pixels_per_point()) as u32;
-            //         let height = (size.y * ui.pixels_per_point()) as u32;
-            //         if width != self.render_texture.width()
-            //             || height != self.render_texture.height()
-            //         {
-            //             (
-            //                 self.render_texture,
-            //                 self.render_texture_view,
-            //                 self.render_texture_id,
-            //             ) = create_render_texture(
-            //                 width,
-            //                 height,
-            //                 &mut self.egui_renderer,
-            //                 &self.device,
-            //             );
-            //         }
+            if let Some(_scene) = self.storm.scene_mut() {
+                egui::CentralPanel::default().show(&ctx, |ui| {
+                    // let size = match scene.aspect_ratio() {
+                    //     Some(aspect_ratio) => {
+                    //         let width = ui.available_width();
+                    //         let height = ui.available_height();
+                    //         egui::vec2(
+                    //             width.min(height * aspect_ratio),
+                    //             height.min(width / aspect_ratio),
+                    //         )
+                    //     }
+                    //     None => ui.available_size(),
+                    // };
+                    let size = ui.available_size();
+                    let width = (size.x * ui.pixels_per_point()) as u32;
+                    let height = (size.y * ui.pixels_per_point()) as u32;
+                    if width != self.render_texture.width()
+                        || height != self.render_texture.height()
+                    {
+                        (
+                            self.render_texture,
+                            self.render_texture_view,
+                            self.render_texture_id,
+                        ) = create_render_texture(
+                            width,
+                            height,
+                            &mut self.egui_renderer,
+                            &self.device,
+                        );
+                    }
 
-            //         ui.horizontal_centered(|ui| {
-            //             ui.vertical_centered(|ui| {
-            //                 ui.image((self.render_texture_id, size));
-            //                 let response = ui.interact(
-            //                     ui.clip_rect(),
-            //                     egui::Id::new("render region"),
-            //                     egui::Sense::all(),
-            //                 );
-            //                 if response.hovered() {
-            //                     ui.input_mut(|inputs| {
-            //                         if inputs.consume_shortcut(&self.shortcuts.escape_scene_focus) {
-            //                             response.surrender_focus();
-            //                         } else {
-            //                             scene.take_input(inputs, size);
-            //                         }
-            //                     });
-            //                 }
-            //             });
-            //         });
-            //     });
-            // }
+                    ui.horizontal_centered(|ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.image((self.render_texture_id, size));
+                            let _response = ui.interact(
+                                ui.clip_rect(),
+                                egui::Id::new("render region"),
+                                egui::Sense::all(),
+                            );
+                        });
+                    });
+                });
+            }
         });
 
         self.egui_state

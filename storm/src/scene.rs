@@ -88,7 +88,29 @@ impl Scene {
         }
     }
 
-    pub fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
+    pub fn render(&self, render_pass: &mut wgpu::RenderPass) {
+        render_pass.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[]);
+        for mesh_instances in self.meshes.iter() {
+            let instances_count = mesh_instances.nodes.len() as u32;
+            render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
+            for primitive in mesh_instances.primitives.iter() {
+                render_pass.set_pipeline(&primitive.pipeline);
+                for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
+                    render_pass.set_vertex_buffer(slot as u32 + 1, vertex_buffer.slice(..));
+                }
+                match &primitive.index_buffer {
+                    Some(index_buffer) => {
+                        render_pass.set_index_buffer(
+                            index_buffer.buffer.slice(index_buffer.offset..),
+                            index_buffer.format,
+                        );
+                        render_pass.draw_indexed(0..primitive.vertex_count, 0, 0..instances_count);
+                    }
+                    None => render_pass.draw(0..primitive.vertex_count, 0..instances_count),
+                }
+            }
+        }
+    }
 }
 
 impl Index<Id<Node>> for Scene {

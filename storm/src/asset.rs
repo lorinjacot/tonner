@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Range};
+use std::collections::BTreeMap;
 
 use wgpu::util::DeviceExt;
 
@@ -52,7 +52,8 @@ impl Storm {
                         }
                     });
 
-                    let mut vertex_buffers: BTreeMap<usize, VertexBufferLayout> = BTreeMap::new();
+                    let mut vertex_buffers: BTreeMap<wgpu::Buffer, VertexBufferLayout> =
+                        BTreeMap::new();
                     for (semantic, accessor) in primitive.attributes() {
                         let attribute = match &accessors[accessor.index()] {
                             Some(Accessor::Attribute(attribute)) => attribute.clone(),
@@ -75,7 +76,7 @@ impl Storm {
                             _ => panic!("unsupported primitive attribute"),
                         };
                         vertex_buffers
-                            .entry(attribute.view)
+                            .entry(attribute.buffer)
                             .or_insert_with(|| VertexBufferLayout {
                                 array_stride: attribute.array_stride,
                                 attributes: Vec::with_capacity(1),
@@ -87,24 +88,19 @@ impl Storm {
                                 shader_location,
                             });
                     }
-                    let (vertex_buffers, mut vertex_buffer_layouts): (_, Vec<_>) = vertex_buffers
-                        .iter()
-                        .map(|(view, layout)| {
-                            (
-                                views[*view].as_ref().unwrap().buffer.clone(),
-                                wgpu::VertexBufferLayout {
-                                    array_stride: layout.array_stride,
-                                    step_mode: wgpu::VertexStepMode::Vertex,
-                                    attributes: &layout.attributes,
-                                },
-                            )
-                        })
-                        .unzip();
+                    let mut vertex_buffer_layouts = Vec::with_capacity(1 + vertex_buffers.len());
                     vertex_buffer_layouts.push(wgpu::VertexBufferLayout {
                         array_stride: 4,
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &wgpu::vertex_attr_array![0 => Uint32],
                     });
+                    vertex_buffer_layouts.extend(vertex_buffers.values().map(|layout| {
+                        wgpu::VertexBufferLayout {
+                            array_stride: layout.array_stride,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &layout.attributes,
+                        }
+                    }));
 
                     let pipeline_layout =
                         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -146,6 +142,8 @@ impl Storm {
                         multiview: None,
                         cache: None,
                     });
+
+                    let vertex_buffers = vertex_buffers.into_keys().collect();
 
                     primitives.push(Primitive {
                         pipeline,
@@ -262,12 +260,9 @@ impl IndexBuffer {
                     buffer
                 }
             };
-            let start = indices.offset() as u64;
-            let end = start + (indices.count() * indices.size()) as u64;
-            let bounds = start..end;
             Self {
                 buffer,
-                bounds,
+                offset: indices.offset() as u64,
                 format,
             }
         }
@@ -276,9 +271,7 @@ impl IndexBuffer {
 
 #[derive(Debug, Clone)]
 struct Attribute {
-    view: usize,
     buffer: wgpu::Buffer,
-    bounds: Range<u64>,
     array_stride: wgpu::BufferAddress,
     format: wgpu::VertexFormat,
     offset: u64,
@@ -336,17 +329,11 @@ impl Attribute {
                     buffer
                 }
             };
-            let start = accessor.offset() as u64;
-            let end = start + (accessor.count() * accessor.size()) as u64;
-            let bounds = start..end;
-            let offset = accessor.offset() as u64;
             Self {
-                view: view_idx,
                 buffer,
-                bounds,
                 array_stride,
                 format,
-                offset,
+                offset: accessor.offset() as u64,
             }
         }
     }

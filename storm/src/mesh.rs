@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::{DenseEntry, Id, storage::SetEntry};
 
 pub struct Mesh {
@@ -44,6 +42,6 @@ pub struct Primitive {
 #[derive(Debug, Clone)]
 pub(super) struct IndexBuffer {
     pub(super) buffer: wgpu::Buffer,
-    pub(super) bounds: Range<u64>,
+    pub(super) offset: u64,
     pub(super) format: wgpu::IndexFormat,
 }

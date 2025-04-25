@@ -23,7 +23,7 @@ impl Explorer {
                         let mut active_scene = storm.active_scene;
                         for (id, scene) in storm.scenes() {
                             if ui
-                                .selectable_value(&mut active_scene, Some(id), &scene.label)
+                                .selectable_value(&mut active_scene, Some(*id), &scene.label)
                                 .clicked()
                             {
                                 self.node_modal = None;
@@ -52,7 +52,7 @@ impl Explorer {
                 )
                 .show_ui(ui, |ui| {
                     for (id, camera) in scene.cameras.iter() {
-                        ui.selectable_value(&mut active_camera, Some(id), &camera.name.0);
+                        ui.selectable_value(&mut active_camera, Some(*id), &camera.name.0);
                     }
                 });
 
@@ -69,7 +69,7 @@ impl Explorer {
                     for (id, environment_map) in storm.environment_maps() {
                         ui.selectable_value(
                             &mut active_environment_map,
-                            Some(id),
+                            Some(*id),
                             &environment_map.name.0,
                         );
                     }

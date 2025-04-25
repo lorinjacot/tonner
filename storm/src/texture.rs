@@ -7,8 +7,10 @@ use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
+use crate::storage::DenseEntry;
+
 use super::{
-    Asset, Iter, Name, Storm,
+    Asset, Name, Storm,
     storage::{Id, SparseMap, SparseSet},
 };
 
@@ -67,11 +69,11 @@ pub const CUBE_VERTEX_BUFFER_LAYOUT: &[wgpu::VertexBufferLayout] = &[wgpu::Verte
 }];
 
 pub struct TextureManager {
-    textures: SparseSet<Texture>,
-    images: SparseSet<Image>,
-    samplers: SparseSet<Sampler>,
-    cubemaps: SparseSet<Cubemap>,
-    environment_maps: SparseSet<EnvironmentMap>,
+    textures: SparseSet<(Id<Texture>, Texture)>,
+    images: SparseSet<(Id<Image>, Image)>,
+    samplers: SparseSet<(Id<Sampler>, Sampler)>,
+    cubemaps: SparseSet<(Id<Cubemap>, Cubemap)>,
+    environment_maps: SparseSet<(Id<EnvironmentMap>, EnvironmentMap)>,
     default_sampler: Option<Id<Sampler>>,
     cubemap_sampler: wgpu::Sampler,
     shader_module: wgpu::ShaderModule,
@@ -80,7 +82,7 @@ pub struct TextureManager {
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     view_projection_bind_groups: [wgpu::BindGroup; 6],
-    assets: SparseMap<AssetData, Asset>,
+    assets: SparseMap<(Id<Asset>, AssetData)>,
 }
 
 impl TextureManager {
@@ -200,7 +202,7 @@ impl TextureManager {
     }
 
     pub fn register_asset(&mut self, id: Id<Asset>, images: Vec<gltf::image::Data>) {
-        self.assets.insert(
+        self.assets.insert((
             id,
             AssetData {
                 data: images,
@@ -208,7 +210,7 @@ impl TextureManager {
                 image_mapping: Vec::new(),
                 sampler_mapping: Vec::new(),
             },
-        );
+        ));
     }
 
     pub fn create_texture_view_sampler(
@@ -219,6 +221,7 @@ impl TextureManager {
     ) -> Id<Texture> {
         self.textures
             .push(Texture(TextureViewSampler(texture, view, sampler)))
+            .id()
     }
 
     pub fn create_dynamic_image(
@@ -293,7 +296,7 @@ impl TextureManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Texture> {
-        match self.assets[asset].texture_mapping.get(texture.index()) {
+        match self.assets[asset].1.texture_mapping.get(texture.index()) {
             Some(Some(id)) => *id,
             _ => self.create_texture(asset, texture, srgb, device, queue),
         }
@@ -309,9 +312,12 @@ impl TextureManager {
     ) -> Id<Texture> {
         let image = self.load_image(asset, texture.source(), srgb, device, queue);
         let sampler = self.load_sampler(asset, texture.sampler(), device);
-        let id = self.textures.push(Texture(ImageSampler(image, sampler)));
+        let id = self
+            .textures
+            .push(Texture(ImageSampler(image, sampler)))
+            .id();
 
-        let mapping = &mut self.assets[asset].texture_mapping;
+        let mapping = &mut self.assets[asset].1.texture_mapping;
         match mapping.get_mut(texture.index()) {
             Some(entry) => *entry = Some(id),
             None => {
@@ -331,7 +337,7 @@ impl TextureManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Image> {
-        match self.assets[asset].image_mapping.get(image.index()) {
+        match self.assets[asset].1.image_mapping.get(image.index()) {
             Some(Some(id)) => *id,
             _ => self.create_image(asset, image, srgb, device, queue),
         }
@@ -345,7 +351,7 @@ impl TextureManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Image> {
-        let asset = &mut self.assets[asset];
+        let asset = &mut self.assets[asset].1;
 
         let data = &asset.data[image.index()];
         let mut create = |format: wgpu::TextureFormat, bytes| {
@@ -375,7 +381,7 @@ impl TextureManager {
 
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            let id = self.images.push(Image { texture, view });
+            let id = self.images.push(Image { texture, view }).id();
 
             match asset.image_mapping.get_mut(image.index()) {
                 Some(entry) => *entry = Some(id),
@@ -443,7 +449,7 @@ impl TextureManager {
         device: &wgpu::Device,
     ) -> Id<Sampler> {
         match sampler.index() {
-            Some(index) => match self.assets[asset].sampler_mapping.get(index) {
+            Some(index) => match self.assets[asset].1.sampler_mapping.get(index) {
                 Some(Some(id)) => *id,
                 _ => self.create_sampler(asset, sampler, device),
             },
@@ -483,11 +489,11 @@ impl TextureManager {
             ..Default::default()
         });
 
-        let id = self.samplers.push(Sampler { inner });
+        let id = self.samplers.push(Sampler { inner }).id();
 
         match sampler.index() {
             Some(index) => {
-                let mapping = &mut self.assets[asset].sampler_mapping;
+                let mapping = &mut self.assets[asset].1.sampler_mapping;
                 match mapping.get_mut(index) {
                     Some(entry) => *entry = Some(id),
                     None => {
@@ -508,34 +514,34 @@ impl TextureManager {
         _equirectangular_map: Id<Texture>,
     ) -> Id<EnvironmentMap> {
         let name = Name::from_name_or_else(|| self.environment_maps.next_id(), name);
-        self.environment_maps.push(EnvironmentMap { name })
+        self.environment_maps.push(EnvironmentMap { name }).id()
     }
 
     pub fn environment_map(&self, id: Id<EnvironmentMap>) -> Option<&EnvironmentMap> {
-        self.environment_maps.get(id)
+        Some(&self.environment_maps.get(id)?.1)
     }
 
-    pub fn environment_maps(&self) -> Iter<'_, EnvironmentMap, EnvironmentMap> {
+    pub fn environment_maps(&self) -> std::slice::Iter<'_, (Id<EnvironmentMap>, EnvironmentMap)> {
         self.environment_maps.iter()
     }
 
     pub fn texture(&self, id: Id<Texture>) -> Option<&wgpu::Texture> {
-        self.textures.get(id).map(|texture| match &texture.0 {
-            ImageSampler(image, _) => &self.images[*image].texture,
+        self.textures.get(id).map(|texture| match &texture.1.0 {
+            ImageSampler(image, _) => &self.images[*image].1.texture,
             TextureViewSampler(texture, _, _) => texture,
         })
     }
 
     pub fn view(&self, id: Id<Texture>) -> Option<&wgpu::TextureView> {
-        self.textures.get(id).map(|texture| match &texture.0 {
-            ImageSampler(image, _) => &self.images[*image].view,
+        self.textures.get(id).map(|texture| match &texture.1.0 {
+            ImageSampler(image, _) => &self.images[*image].1.view,
             TextureViewSampler(_, view, _) => view,
         })
     }
 
     pub fn sampler(&self, id: Id<Texture>) -> Option<&wgpu::Sampler> {
-        self.textures.get(id).map(|texture| match &texture.0 {
-            ImageSampler(_, sampler) => &self.samplers[*sampler].inner,
+        self.textures.get(id).map(|texture| match &texture.1.0 {
+            ImageSampler(_, sampler) => &self.samplers[*sampler].1.inner,
             TextureViewSampler(_, _, sampler) => sampler,
         })
     }
@@ -714,7 +720,7 @@ impl Cubemap {
             ..Default::default()
         });
 
-        storm.textures.cubemaps.push(Cubemap { view })
+        storm.textures.cubemaps.push(Cubemap { view }).id()
     }
 }
 

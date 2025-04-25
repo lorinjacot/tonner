@@ -5,15 +5,17 @@ use std::{
 
 use wgpu::util::DeviceExt;
 
+use crate::storage::DenseEntry;
+
 use super::{
-    storage::{Id, SparseMap, SparseSet},
     Asset,
+    storage::{Id, SparseMap, SparseSet},
 };
 
 pub struct BufferManager {
-    buffers: SparseSet<Buffer>,
-    accessors: SparseSet<Accessor>,
-    assets: SparseMap<AssetData, Asset>,
+    buffers: SparseSet<(Id<Buffer>, Buffer)>,
+    accessors: SparseSet<(Id<Accessor>, Accessor)>,
+    assets: SparseMap<(Id<Asset>, AssetData)>,
 }
 
 impl BufferManager {
@@ -26,18 +28,18 @@ impl BufferManager {
     }
 
     pub fn register_asset(&mut self, id: Id<Asset>, buffers: Vec<gltf::buffer::Data>) {
-        self.assets.insert(
+        self.assets.insert((
             id,
             AssetData {
                 data: buffers,
                 buffer_view_mapping: Vec::new(),
                 accessor_mapping: Vec::new(),
             },
-        );
+        ));
     }
 
     pub fn create_buffer(&mut self, buffer: wgpu::Buffer, stride: u64) -> Id<Buffer> {
-        self.buffers.push(Buffer { buffer, stride })
+        self.buffers.push(Buffer { buffer, stride }).id()
     }
 
     pub fn create_accessor(
@@ -49,14 +51,16 @@ impl BufferManager {
         normalized: bool,
         dimensions: gltf_json::accessor::Type,
     ) -> Id<Accessor> {
-        self.accessors.push(Accessor {
-            buffer,
-            start,
-            end,
-            data_type,
-            normalized,
-            dimensions,
-        })
+        self.accessors
+            .push(Accessor {
+                buffer,
+                start,
+                end,
+                data_type,
+                normalized,
+                dimensions,
+            })
+            .id()
     }
 
     pub fn load_buffer_view(
@@ -68,6 +72,7 @@ impl BufferManager {
         device: &wgpu::Device,
     ) -> Id<Buffer> {
         match self.assets[asset]
+            .1
             .buffer_view_mapping
             .get(buffer_view.index())
         {
@@ -87,7 +92,7 @@ impl BufferManager {
         let offset = buffer_view.offset();
         let length = buffer_view.length();
 
-        let asset = &mut self.assets[asset];
+        let asset = &mut self.assets[asset].1;
         let contents = &asset.data[buffer_view.buffer().index()][offset..offset + length];
 
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -96,13 +101,16 @@ impl BufferManager {
             usage,
         });
 
-        let id = self.buffers.push(Buffer {
-            buffer,
-            stride: buffer_view
-                .stride()
-                .map(|value| value as u64)
-                .unwrap_or(default_stride),
-        });
+        let id = self
+            .buffers
+            .push(Buffer {
+                buffer,
+                stride: buffer_view
+                    .stride()
+                    .map(|value| value as u64)
+                    .unwrap_or(default_stride),
+            })
+            .id();
 
         match asset.buffer_view_mapping.get_mut(buffer_view.index()) {
             Some(entry) => *entry = Some(id),
@@ -127,6 +135,7 @@ impl BufferManager {
             .assets
             .entry(asset)
             .or_default()
+            .1
             .accessor_mapping
             .get(accessor.index())
         {
@@ -152,16 +161,19 @@ impl BufferManager {
 
         let start = accessor.offset() as u64;
         let end = start + accessor.count() as u64 * accessor.size() as u64;
-        let id = self.accessors.push(Accessor {
-            buffer,
-            start,
-            end,
-            data_type: accessor.data_type(),
-            normalized: accessor.normalized(),
-            dimensions: accessor.dimensions(),
-        });
+        let id = self
+            .accessors
+            .push(Accessor {
+                buffer,
+                start,
+                end,
+                data_type: accessor.data_type(),
+                normalized: accessor.normalized(),
+                dimensions: accessor.dimensions(),
+            })
+            .id();
 
-        let mapping = &mut self.assets[asset].accessor_mapping;
+        let mapping = &mut self.assets[asset].1.accessor_mapping;
         match mapping.get_mut(accessor.index()) {
             Some(entry) => *entry = Some(id),
             None => {
@@ -174,7 +186,7 @@ impl BufferManager {
     }
 
     pub fn buffer_data(&self, asset: Id<Asset>) -> Option<&Vec<gltf::buffer::Data>> {
-        self.assets.get(asset).map(|asset| &asset.data)
+        self.assets.get(asset).map(|asset| &asset.1.data)
     }
 }
 
@@ -182,7 +194,7 @@ impl Index<Id<Buffer>> for BufferManager {
     type Output = Buffer;
 
     fn index(&self, index: Id<Buffer>) -> &Self::Output {
-        &self.buffers[index]
+        &self.buffers[index].1
     }
 }
 
@@ -190,7 +202,7 @@ impl Index<Id<Accessor>> for BufferManager {
     type Output = Accessor;
 
     fn index(&self, index: Id<Accessor>) -> &Self::Output {
-        &self.accessors[index]
+        &self.accessors[index].1
     }
 }
 

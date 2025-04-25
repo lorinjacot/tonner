@@ -2,10 +2,10 @@ mod buffer;
 mod material;
 mod math;
 mod mesh;
+mod resource;
 mod scene;
 mod storage;
 mod texture;
-mod resource;
 
 use std::{fmt::Display, path::Path};
 
@@ -14,15 +14,15 @@ use material::MaterialManager;
 use mesh::MeshManager;
 use resource::Resources;
 use scene::SceneManager;
-use storage::SparseSet;
-use texture::{Cubemap, EnvironmentMap, TextureManager};
+use storage::{DenseEntry, SparseSet};
+use texture::{EnvironmentMap, TextureManager};
 
 pub use scene::{Node, Scene};
-pub use storage::{Id, Iter};
+pub use storage::Id;
 
 pub struct Storm {
     resources: Resources,
-    assets: SparseSet<Asset>,
+    assets: SparseSet<(Id<Asset>, Asset)>,
     textures: TextureManager,
     materials: MaterialManager,
     buffers: BufferManager,
@@ -72,11 +72,11 @@ impl Storm {
         let (document, buffers, images) = gltf::import(path)?;
 
         let scenes = Vec::with_capacity(document.scenes().len());
-        let id = self.assets.push(Asset { document, scenes });
+        let id = self.assets.push(Asset { document, scenes }).id();
         self.buffers.register_asset(id, buffers);
         self.textures.register_asset(id, images);
 
-        let asset = &mut self.assets[id];
+        let asset = &mut self.assets[id].1;
         for scene in asset.document.scenes() {
             asset.scenes.push(self.scenes.load_scene(
                 id,
@@ -98,7 +98,7 @@ impl Storm {
         Ok(id)
     }
 
-    pub fn scenes(&self) -> Iter<'_, Scene, Scene> {
+    pub fn scenes(&self) -> std::slice::Iter<'_, (Id<Scene>, Scene)> {
         self.scenes.iter()
     }
 
@@ -118,14 +118,15 @@ impl Storm {
             device,
             queue,
         );
-        self.textures.create_environment_map(name, equirectangular_map)
+        self.textures
+            .create_environment_map(name, equirectangular_map)
     }
 
     pub fn environment_map(&self, id: Id<EnvironmentMap>) -> Option<&EnvironmentMap> {
         self.textures.environment_map(id)
     }
 
-    pub fn environment_maps(&self) -> Iter<'_, EnvironmentMap, EnvironmentMap> {
+    pub fn environment_maps(&self) -> std::slice::Iter<'_, (Id<EnvironmentMap>, EnvironmentMap)> {
         self.textures.environment_maps()
     }
 

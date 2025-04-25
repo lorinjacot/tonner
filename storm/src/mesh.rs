@@ -10,7 +10,7 @@ use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::buffer::Buffer;
+use crate::{buffer::Buffer, storage::DenseEntry};
 
 use super::{
     Asset,
@@ -38,10 +38,10 @@ const TRANSFORM_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array
 ];
 
 pub struct MeshManager {
-    meshes: SparseSet<Mesh>,
-    assets: SparseMap<Vec<Option<Id<Mesh>>>, Asset>,
+    meshes: SparseSet<(Id<Mesh>, Mesh)>,
+    assets: SparseMap<(Id<Asset>, Vec<Option<Id<Mesh>>>)>,
     shader_module: wgpu::ShaderModule,
-    pipelines: SparseSet<PrimitivePipeline>,
+    pipelines: SparseSet<(Id<PrimitivePipeline>, PrimitivePipeline)>,
     pipeline_layout: wgpu::PipelineLayout,
     render_format: wgpu::TextureFormat,
     dummy_vertex_buffer: Id<Buffer>,
@@ -97,7 +97,7 @@ impl MeshManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Mesh> {
-        match self.assets.entry(asset).or_default().get(mesh.index()) {
+        match self.assets.entry(asset).or_default().1.get(mesh.index()) {
             Some(Some(id)) => *id,
             _ => self.create_mesh(asset, mesh, buffers, textures, materials, device, queue),
         }
@@ -115,13 +115,13 @@ impl MeshManager {
     ) -> Id<Mesh> {
         use gltf::mesh::Semantic::*;
 
-        let mut primitives: SparseMap<Vec<Primitive>, PrimitivePipeline> = SparseMap::new();
+        let mut primitives: SparseMap<(Id<PrimitivePipeline>, Vec<Primitive>)> = SparseMap::new();
 
         for primitive in mesh.primitives() {
             if let Some(positions) = primitive.get(&Positions) {
                 let attributes_count = positions.count() as u32;
                 let usage = wgpu::BufferUsages::VERTEX;
-                let mut attributes_buffers: SparseMap<Vec<wgpu::VertexAttribute>, Buffer> =
+                let mut attributes_buffers: SparseMap<(Id<Buffer>, Vec<wgpu::VertexAttribute>)> =
                     SparseMap::new();
 
                 let (vertex_buffers, vertex_layouts, primitive_flats, indices, vertex_count): (
@@ -138,6 +138,7 @@ impl MeshManager {
                             attributes_buffers
                                 .entry(position.buffer())
                                 .or_default()
+                                .1
                                 .push(position.vertex_attribute_layout(POSITION_LOCATION));
                         }
 
@@ -147,6 +148,7 @@ impl MeshManager {
                             attributes_buffers
                                 .entry(normal.buffer())
                                 .or_default()
+                                .1
                                 .push(normal.vertex_attribute_layout(NORMAL_LOCATION));
                         }
 
@@ -178,7 +180,7 @@ impl MeshManager {
                                         )
                                     },
                                 );
-                                attributes_buffers.entry(buffer).or_default().push(layout)
+                                attributes_buffers.entry(buffer).or_default().1.push(layout)
                             };
 
                         init_attribute(
@@ -357,7 +359,7 @@ impl MeshManager {
                     if vertex_layouts == pipeline.vertex_layouts
                         && material_flags == pipeline.material_flags
                     {
-                        Some(id)
+                        Some(*id)
                     } else {
                         None
                     }
@@ -420,14 +422,16 @@ impl MeshManager {
                         multiview: None,
                         cache: None,
                     });
-                    self.pipelines.push(PrimitivePipeline {
-                        pipeline,
-                        vertex_layouts,
-                        material_flags,
-                    })
+                    self.pipelines
+                        .push(PrimitivePipeline {
+                            pipeline,
+                            vertex_layouts,
+                            material_flags,
+                        })
+                        .id()
                 });
 
-                primitives.entry(pipeline).or_default().push(Primitive {
+                primitives.entry(pipeline).or_default().1.push(Primitive {
                     indices,
                     vertex_buffers,
                     vertex_count,
@@ -436,9 +440,9 @@ impl MeshManager {
             }
         }
 
-        let id = self.meshes.push(Mesh { primitives });
+        let id = self.meshes.push(Mesh { primitives }).id();
 
-        let mapping = &mut self.assets[asset];
+        let mapping = &mut self.assets[asset].1;
         match mapping.get_mut(mesh.index()) {
             Some(entry) => *entry = Some(id),
             None => {
@@ -572,7 +576,7 @@ impl Index<Id<Mesh>> for MeshManager {
     type Output = Mesh;
 
     fn index(&self, index: Id<Mesh>) -> &Self::Output {
-        &self.meshes[index]
+        &self.meshes[index].1
     }
 }
 
@@ -580,12 +584,12 @@ impl Index<Id<PrimitivePipeline>> for MeshManager {
     type Output = wgpu::RenderPipeline;
 
     fn index(&self, index: Id<PrimitivePipeline>) -> &Self::Output {
-        &self.pipelines[index].pipeline
+        &self.pipelines[index].1.pipeline
     }
 }
 
 pub struct Mesh {
-    pub primitives: SparseMap<Vec<Primitive>, PrimitivePipeline>,
+    pub primitives: SparseMap<(Id<PrimitivePipeline>, Vec<Primitive>)>,
 }
 
 pub struct Primitive {

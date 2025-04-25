@@ -9,20 +9,22 @@ use bytemuck::{Pod, Zeroable, cast_slice};
 use controls::{Controls, OrbitControls};
 use glam::{Mat3, Mat4, Quat, Vec3};
 
+use crate::storage::DenseEntry;
+
 use super::{
     Asset, Name,
     buffer::BufferManager,
     material::MaterialManager,
     math,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
-    storage::{Entry, Id, Iter, SparseMap, SparseSet},
+    storage::{Entry, Id, SparseMap, SparseSet},
     texture::{EnvironmentMap, TextureManager},
 };
 
 pub struct SceneManager {
-    scenes: SparseSet<Scene>,
+    scenes: SparseSet<(Id<Scene>, Scene)>,
     camera_bind_group_layout: wgpu::BindGroupLayout,
-    assets: SparseMap<Vec<Option<Id<Scene>>>, Asset>,
+    assets: SparseMap<(Id<Asset>, Vec<Option<Id<Scene>>>)>,
 }
 
 impl SceneManager {
@@ -57,11 +59,11 @@ impl SceneManager {
     }
 
     pub fn get(&self, scene: Id<Scene>) -> Option<&Scene> {
-        self.scenes.get(scene)
+        Some(&self.scenes.get(scene)?.1)
     }
 
     pub fn get_mut(&mut self, scene: Id<Scene>) -> Option<&mut Scene> {
-        self.scenes.get_mut(scene)
+        Some(&mut self.scenes.get_mut(scene)?.1)
     }
 
     pub fn load_scene(
@@ -75,7 +77,7 @@ impl SceneManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Id<Scene> {
-        match self.assets.entry(asset).or_default().get(scene.index()) {
+        match self.assets.entry(asset).or_default().1.get(scene.index()) {
             Some(Some(id)) => *id,
             _ => self.create_scene(
                 asset, scene, buffers, textures, materials, meshes, device, queue,
@@ -144,9 +146,9 @@ impl SceneManager {
             .controls
             .push(OrbitControls::new(target, cursor, camera, &scene.nodes).into());
 
-        let id = self.scenes.push(scene);
+        let id = self.scenes.push(scene).id();
 
-        let mapping = &mut self.assets[asset];
+        let mapping = &mut self.assets[asset].1;
         match mapping.get_mut(gltf_scene.index()) {
             Some(entry) => *entry = Some(id),
             None => {
@@ -158,7 +160,7 @@ impl SceneManager {
         id
     }
 
-    pub fn iter(&self) -> Iter<'_, Scene, Scene> {
+    pub fn iter(&self) -> std::slice::Iter<'_, (Id<Scene>, Scene)> {
         self.scenes.iter()
     }
 }
@@ -167,13 +169,13 @@ impl Index<Id<Scene>> for SceneManager {
     type Output = Scene;
 
     fn index(&self, index: Id<Scene>) -> &Self::Output {
-        &self.scenes[index]
+        &self.scenes[index].1
     }
 }
 
 impl IndexMut<Id<Scene>> for SceneManager {
     fn index_mut(&mut self, index: Id<Scene>) -> &mut Self::Output {
-        &mut self.scenes[index]
+        &mut self.scenes[index].1
     }
 }
 
@@ -214,13 +216,14 @@ fn create_node(
         for (pipeline, primitives) in &mesh.primitives {
             match scene
                 .primitives
-                .entry(pipeline)
-                .or_insert_with(|| (meshes[pipeline].clone(), SparseMap::new()))
+                .entry(*pipeline)
+                .or_insert_with(|| (meshes[*pipeline].clone(), SparseMap::new()))
+                .1
                 .1
                 .entry(mesh_id)
             {
                 Entry::Occupied(entry) => {
-                    let (_, nodes, buffer) = entry.into_mut();
+                    let (_, (_, nodes, buffer)) = entry.into_mut();
                     nodes.push(node_id);
                     *buffer = device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("Node transforms buffer"),
@@ -253,45 +256,39 @@ fn create_node(
         scene.create_camera(camera.name(), projection, node_id, device);
     }
 
-    let children: Vec<_> = gltf_node
-        .children()
-        .map(|child| {
-            create_node(
-                asset,
-                child,
-                Some(node_id),
-                scene,
-                buffers,
-                textures,
-                materials,
-                meshes,
-                device,
-                queue,
-            )
-        })
-        .collect();
-
-    let node = &mut scene.nodes[node_id];
-    node.children = children;
+    gltf_node.children().for_each(|child| {
+        create_node(
+            asset,
+            child,
+            Some(node_id),
+            scene,
+            buffers,
+            textures,
+            materials,
+            meshes,
+            device,
+            queue,
+        );
+    });
 
     node_id
 }
 
 pub struct Scene {
     pub label: String,
-    nodes: SparseSet<Node>,
+    nodes: SparseSet<(Id<Node>, Node)>,
     root_nodes: Vec<Id<Node>>,
-    primitives: SparseMap<
+    primitives: SparseMap<(
+        Id<PrimitivePipeline>,
         (
             wgpu::RenderPipeline,
-            SparseMap<(Vec<Primitive>, Vec<Id<Node>>, wgpu::Buffer), Mesh>,
+            SparseMap<(Id<Mesh>, (Vec<Primitive>, Vec<Id<Node>>, wgpu::Buffer))>,
         ),
-        PrimitivePipeline,
-    >,
-    pub cameras: SparseMap<Camera, Node>,
+    )>,
+    pub cameras: SparseMap<(Id<Node>, Camera)>,
     pub active_camera: Option<Id<Node>>,
     pub environment_map: Option<Id<EnvironmentMap>>,
-    controls: SparseSet<Controls>,
+    controls: SparseSet<(Id<Controls>, Controls)>,
     camera_bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -301,11 +298,11 @@ impl Scene {
     }
 
     pub fn camera(&self, id: Id<Node>) -> Option<&Camera> {
-        self.cameras.get(id)
+        Some(&self.cameras.get(id)?.1)
     }
 
     pub fn aspect_ratio(&self) -> Option<f32> {
-        match self.cameras[self.active_camera?].projection {
+        match self.cameras[self.active_camera?].1.projection {
             Projection::Perspective { aspect_ratio, .. } => aspect_ratio,
             Projection::Orthographic { x_mag, y_mag, .. } => Some(x_mag / y_mag),
         }
@@ -327,7 +324,7 @@ impl Scene {
         node: Id<Node>,
         device: &wgpu::Device,
     ) {
-        let name = Name::from_name_or_else(|| &self.nodes[node].name, name);
+        let name = Name::from_name_or_else(|| &self.nodes[node].1.name, name);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{name} camera buffer")),
             size: size_of::<CameraUniform>() as u64,
@@ -342,7 +339,7 @@ impl Scene {
                 resource: buffer.as_entire_binding(),
             }],
         });
-        self.cameras.insert(
+        self.cameras.insert((
             node,
             Camera {
                 name,
@@ -350,30 +347,32 @@ impl Scene {
                 buffer,
                 bind_group,
             },
-        );
+        ));
     }
 
     pub fn take_input(&mut self, inputs: &mut egui::InputState, viewport_size: egui::Vec2) {
-        for controls in self.controls.values_mut() {
+        for controls in self.controls.iter_mut() {
             controls
+                .1
                 .0
                 .take_input(inputs, viewport_size, &self.nodes, &self.cameras);
         }
     }
 
     pub fn update(&mut self, viewport_aspect_ratio: f32, queue: &wgpu::Queue) {
-        for controls in self.controls.values_mut() {
+        for controls in self.controls.iter_mut() {
             controls
+                .1
                 .0
                 .update(viewport_aspect_ratio, &mut self.nodes, &mut self.cameras);
         }
 
-        for (_, mesh_map) in self.primitives.values() {
-            for (_, nodes, buffer) in mesh_map.values() {
+        for (_, (_, mesh_map)) in self.primitives.iter() {
+            for (_, (_, nodes, buffer)) in mesh_map.iter() {
                 let transforms: Vec<_> = nodes
                     .iter()
                     .map(|node| {
-                        let world_matrix = self.nodes[*node].world_matrix;
+                        let world_matrix = self.nodes[*node].1.world_matrix;
                         Transform {
                             point: world_matrix.to_cols_array(),
                             vector: Mat3::from_mat4(world_matrix.inverse())
@@ -387,8 +386,8 @@ impl Scene {
         }
 
         if let Some(id) = self.active_camera {
-            let node = &self.nodes[id];
-            let camera = &self.cameras[id];
+            let node = &self.nodes[id].1;
+            let camera = &self.cameras[id].1;
 
             let position = node.world_matrix.transform_point3(Vec3::ZERO);
             let view = Mat4::look_to_rh(
@@ -414,14 +413,14 @@ impl Scene {
             .map(|camera| self.cameras.get(camera))
             .flatten()
         {
-            Some(camera) => &camera.bind_group,
+            Some(camera) => &camera.1.bind_group,
             None => return,
         };
 
-        for (pipeline, by_mesh) in self.primitives.values() {
+        for (_, (pipeline, by_mesh)) in self.primitives.iter() {
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, camera, &[]);
-            for (primitives, nodes, transforms) in by_mesh.values() {
+            for (_, (primitives, nodes, transforms)) in by_mesh.iter() {
                 let node_count = nodes.len() as u32;
                 render_pass.set_vertex_buffer(0, transforms.slice(..));
 
@@ -449,13 +448,13 @@ impl Index<Id<Node>> for Scene {
     type Output = Node;
 
     fn index(&self, index: Id<Node>) -> &Self::Output {
-        &self.nodes[index]
+        &self.nodes[index].1
     }
 }
 
 impl IndexMut<Id<Node>> for Scene {
     fn index_mut(&mut self, index: Id<Node>) -> &mut Self::Output {
-        &mut self.nodes[index]
+        &mut self.nodes[index].1
     }
 }
 
@@ -489,9 +488,9 @@ impl Node {
     }
 }
 
-impl SparseSet<Node> {
+impl SparseSet<(Id<Node>, Node)> {
     fn update_global_matrix(&mut self, node: Id<Node>, parent: Mat4) {
-        let node = &mut self[node];
+        let node = &mut self[node].1;
         let world_matrix = parent * node.local_matrix();
         node.world_matrix = world_matrix;
         for child in node.children.to_vec() {
@@ -500,11 +499,11 @@ impl SparseSet<Node> {
     }
 
     fn set_local_transform(&mut self, node: Id<Node>, transform: math::Transform) {
-        let parent = match self[node].parent {
-            Some(parent) => self[parent].world_matrix,
+        let parent = match self[node].1.parent {
+            Some(parent) => self[parent].1.world_matrix,
             None => Mat4::IDENTITY,
         };
-        let node = &mut self[node];
+        let node = &mut self[node].1;
         node.local_transform = transform;
         let world_matrix = parent * node.local_matrix();
         node.world_matrix = world_matrix;
@@ -549,17 +548,21 @@ impl<'a> NodeBuilder<'a> {
 
     pub fn build(&mut self) -> Id<Node> {
         let world_matrix = match self.parent {
-            Some(parent_id) => self.scene.nodes[parent_id].world_matrix * self.transform.matrix(),
+            Some(parent_id) => self.scene.nodes[parent_id].1.world_matrix * self.transform.matrix(),
             None => self.transform.matrix(),
         };
         let name = Name::from_name_or_else(|| self.scene.nodes.next_id(), self.name);
-        let id = self.scene.nodes.push(Node {
-            name,
-            local_transform: self.transform,
-            world_matrix,
-            parent: self.parent,
-            children: Vec::new(),
-        });
+        let id = self
+            .scene
+            .nodes
+            .push(Node {
+                name,
+                local_transform: self.transform,
+                world_matrix,
+                parent: self.parent,
+                children: Vec::new(),
+            })
+            .id();
         match self.parent {
             Some(parent) => self.scene[parent].children.push(id),
             None => self.scene.root_nodes.push(id),

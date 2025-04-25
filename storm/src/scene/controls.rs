@@ -20,15 +20,15 @@ pub trait ControlsTrait {
         &mut self,
         inputs: &mut egui::InputState,
         viewport_size: egui::Vec2,
-        nodes: &SparseSet<Node>,
-        cameras: &SparseMap<Camera, Node>,
+        nodes: &SparseSet<(Id<Node>, Node)>,
+        cameras: &SparseMap<(Id<Node>, Camera)>,
     );
 
     fn update(
         &mut self,
         viewport_aspect_ratio: f32,
-        nodes: &mut SparseSet<Node>,
-        cameras: &mut SparseMap<Camera, Node>,
+        nodes: &mut SparseSet<(Id<Node>, Node)>,
+        cameras: &mut SparseMap<(Id<Node>, Camera)>,
     );
 }
 
@@ -109,14 +109,14 @@ impl OrbitControls {
         target: Id<Node>,
         cursor: Id<Node>,
         camera: Id<Node>,
-        nodes: &SparseSet<Node>,
+        nodes: &SparseSet<(Id<Node>, Node)>,
     ) -> Self {
         assert_eq!(
-            nodes[target].parent, nodes[cursor].parent,
+            nodes[target].1.parent, nodes[cursor].1.parent,
             "The target, cursor and camera must share the same parent"
         );
         assert_eq!(
-            nodes[target].parent, nodes[camera].parent,
+            nodes[target].1.parent, nodes[camera].1.parent,
             "The target, cursor and camera must share the same parent"
         );
         OrbitControls {
@@ -171,8 +171,8 @@ impl ControlsTrait for OrbitControls {
         &mut self,
         inputs: &mut egui::InputState,
         viewport_size: egui::Vec2,
-        nodes: &SparseSet<Node>,
-        cameras: &SparseMap<Camera, Node>,
+        nodes: &SparseSet<(Id<Node>, Node)>,
+        cameras: &SparseMap<(Id<Node>, Camera)>,
     ) {
         if self.enable_rotate && inputs.pointer.primary_down() {
             let delta = 2.0 * PI * inputs.pointer.delta() * self.rotate_speed / viewport_size.y;
@@ -181,12 +181,12 @@ impl ControlsTrait for OrbitControls {
         } else if self.enable_pan && inputs.pointer.secondary_down() {
             let delta = self.pan_speed * inputs.pointer.delta() / viewport_size.y;
             let camera = &nodes[self.camera];
-            let matrix = camera.local_matrix();
-            match cameras[self.camera].projection {
+            let matrix = camera.1.local_matrix();
+            match cameras[self.camera].1.projection {
                 Projection::Perspective { y_fov, .. } => {
                     // perspective
-                    let position = camera.local_position();
-                    let target = nodes[self.target].local_position();
+                    let position = camera.1.local_position();
+                    let target = nodes[self.target].1.local_position();
                     let offset = position - target;
                     let mut target_distance = offset.length();
 
@@ -215,11 +215,11 @@ impl ControlsTrait for OrbitControls {
     fn update(
         &mut self,
         viewport_aspect_ratio: f32,
-        nodes: &mut SparseSet<Node>,
-        cameras: &mut SparseMap<Camera, Node>,
+        nodes: &mut SparseSet<(Id<Node>, Node)>,
+        cameras: &mut SparseMap<(Id<Node>, Camera)>,
     ) {
-        let mut camera = nodes[self.camera].local_transform();
-        let mut target = nodes[self.target].local_transform();
+        let mut camera = nodes[self.camera].1.local_transform();
+        let mut target = nodes[self.target].1.local_transform();
         let mut offset = camera.position() - target.position();
 
         let mut radius = offset.length();
@@ -276,15 +276,15 @@ impl ControlsTrait for OrbitControls {
             .clamp(0.000001, PI - 0.000001); // make safe
 
         // Limit the target distance from the cursor to create a sphere around the center of interest
-        let cursor = nodes[self.cursor].local_transform();
+        let cursor = nodes[self.cursor].1.local_transform();
         let mut distance = target.position() - cursor.position();
         distance = distance.clamp_length(*self.target_radius.start(), *self.target_radius.end());
         target.set_position(distance + cursor.position());
 
         let camera_instance = &mut cameras[self.camera];
-        let camera_projection = camera_instance.projection_matrix(viewport_aspect_ratio);
+        let camera_projection = camera_instance.1.projection_matrix(viewport_aspect_ratio);
         let orthographic_camera_zoom =
-            if let Projection::Orthographic { ref mut zoom, .. } = camera_instance.projection {
+            if let Projection::Orthographic { ref mut zoom, .. } = camera_instance.1.projection {
                 Some(zoom)
             } else {
                 None
@@ -307,7 +307,7 @@ impl ControlsTrait for OrbitControls {
         if self.zoom_to_cursor && self.perform_cursor_zoom {
             let new_radius = if let Some(zoom) = orthographic_camera_zoom {
                 nodes.set_local_transform(self.camera, camera);
-                let camera_world_matrix = nodes[self.camera].world_matrix();
+                let camera_world_matrix = nodes[self.camera].1.world_matrix();
 
                 // adjust the ortho camera position based on zoom changes
                 let mouse_before = self.mouse.extend(0.0);
@@ -318,6 +318,7 @@ impl ControlsTrait for OrbitControls {
 
                 let mouse_after = (camera_world_matrix
                     * cameras[self.camera]
+                        .1
                         .projection_matrix(viewport_aspect_ratio)
                         .inverse())
                 .project_point3(mouse_before);
@@ -347,13 +348,14 @@ impl ControlsTrait for OrbitControls {
                         .transform_vector3(target.position())
                         .normalize()
                         * new_radius
-                        + nodes[self.camera].local_position(),
+                        + nodes[self.camera].1.local_position(),
                 );
             } else {
                 // get the ray and translation plane to compute target
                 let ray = Ray {
-                    origin: nodes[self.camera].local_position(),
+                    origin: nodes[self.camera].1.local_position(),
                     direction: nodes[self.camera]
+                        .1
                         .local_matrix()
                         .transform_vector3(-Vec3::Z)
                         .normalize(),

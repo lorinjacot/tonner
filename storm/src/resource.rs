@@ -10,7 +10,7 @@ mod asset;
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    assets: SparseSet<Asset>,
+    assets: SparseSet<(Id<Asset>, Asset)>,
 }
 
 impl Resources {

@@ -8,6 +8,8 @@ use bitflags::bitflags;
 use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
+use crate::storage::DenseEntry;
+
 use super::{
     Asset,
     storage::{Id, SparseMap, SparseSet},
@@ -61,10 +63,10 @@ impl MaterialFlags {
 }
 
 pub struct MaterialManager {
-    materials: SparseSet<Material>,
+    materials: SparseSet<(Id<Material>, Material)>,
     bind_group_layout: wgpu::BindGroupLayout,
     default_material: Option<Id<Material>>,
-    mappings: SparseMap<Vec<Option<Id<Material>>>, Asset>,
+    mappings: SparseMap<(Id<Asset>, Vec<Option<Id<Material>>>)>,
     dummy_texture: Id<Texture>,
 }
 
@@ -221,7 +223,7 @@ impl MaterialManager {
         queue: &wgpu::Queue,
     ) -> Id<Material> {
         match material.index() {
-            Some(index) => match self.mappings.entry(asset).or_default().get(index) {
+            Some(index) => match self.mappings.entry(asset).or_default().1.get(index) {
                 Some(Some(id)) => *id,
                 _ => self.create_material(asset, material, textures, device, queue),
             },
@@ -367,11 +369,11 @@ impl MaterialManager {
             entries: &entries,
         });
 
-        let id = self.materials.push(Material { bind_group, flags });
+        let id = self.materials.push(Material { bind_group, flags }).id();
 
         match material.index() {
             Some(index) => {
-                let mapping = &mut self.mappings[asset];
+                let mapping = &mut self.mappings[asset].1;
                 match mapping.get_mut(index) {
                     Some(entry) => *entry = Some(id),
                     None => {
@@ -395,7 +397,7 @@ impl Index<Id<Material>> for MaterialManager {
     type Output = Material;
 
     fn index(&self, index: Id<Material>) -> &Self::Output {
-        &self.materials[index]
+        &self.materials[index].1
     }
 }
 

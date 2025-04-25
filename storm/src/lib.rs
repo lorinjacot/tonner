@@ -1,5 +1,6 @@
 pub use asset::Asset;
 pub use math::Transform;
+use mesh::Mesh;
 pub use scene::Node;
 pub use scene::Scene;
 use storage::SparseSet;
@@ -7,12 +8,14 @@ pub use storage::{DenseEntry, Id};
 
 mod asset;
 mod math;
+mod mesh;
 mod scene;
 mod storage;
 
 pub struct Storm {
     render_texture_format: wgpu::TextureFormat,
     assets: SparseSet<Asset>,
+    meshes: SparseSet<Mesh>,
     scenes: SparseSet<Scene>,
     scene: Option<Id<Scene>>,
     primitive_shader_module: wgpu::ShaderModule,
@@ -22,7 +25,9 @@ pub struct Storm {
 impl Storm {
     pub fn new(render_texture_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
         let assets = SparseSet::new();
+        let meshes = SparseSet::new();
         let scenes = SparseSet::new();
+
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
         let scene_bind_group_layout =
@@ -43,6 +48,7 @@ impl Storm {
         Self {
             render_texture_format,
             assets,
+            meshes,
             scenes,
             scene: None,
             primitive_shader_module,

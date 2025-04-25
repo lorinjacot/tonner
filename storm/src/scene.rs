@@ -6,7 +6,8 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     math::Transform,
-    storage::{DenseEntry, Id, SparseSet},
+    mesh::Mesh,
+    storage::{DenseEntry, Id, SetEntry, SparseSet},
 };
 
 pub struct Scene {
@@ -91,9 +92,16 @@ pub struct SceneDescriptor {
 
 impl DenseEntry for Scene {
     type Key = Self;
-    type Value = SceneDescriptor;
 
-    fn new(id: Id<Self::Key>, desc: Self::Value) -> Self {
+    fn id(&self) -> Id<Self::Key> {
+        self.id
+    }
+}
+
+impl SetEntry for Scene {
+    type Descriptor = SceneDescriptor;
+
+    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
         let name = desc.name.unwrap_or_else(|| id.to_string());
         let nodes = SparseSet::new();
         let root_nodes = Vec::new();
@@ -106,10 +114,6 @@ impl DenseEntry for Scene {
             bind_group_layout: desc.bind_group_layout,
             bind_group: None,
         }
-    }
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
     }
 }
 
@@ -135,6 +139,7 @@ impl Node {
 pub struct NodeBuilder<'a> {
     scene: &'a mut Scene,
     desc: NodeDescriptor,
+    mesh: Option<Mesh>,
 }
 
 impl<'a> NodeBuilder<'a> {
@@ -148,6 +153,7 @@ impl<'a> NodeBuilder<'a> {
                 local_transform: Transform::IDENTITY,
                 global_transform: Mat4::IDENTITY,
             },
+            mesh: None,
         }
     }
 
@@ -158,6 +164,11 @@ impl<'a> NodeBuilder<'a> {
 
     pub fn parent(mut self, parent: Option<Id<Node>>) -> Self {
         self.desc.parent = parent;
+        self
+    }
+
+    pub fn mesh(mut self, mesh: Option<Mesh>) -> Self {
+        self.mesh = mesh;
         self
     }
 
@@ -187,9 +198,16 @@ pub struct NodeDescriptor {
 
 impl DenseEntry for Node {
     type Key = Self;
-    type Value = NodeDescriptor;
 
-    fn new(id: Id<Self::Key>, desc: Self::Value) -> Self {
+    fn id(&self) -> Id<Self::Key> {
+        self.id
+    }
+}
+
+impl SetEntry for Node {
+    type Descriptor = NodeDescriptor;
+
+    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
         let name = desc.name.unwrap_or_else(|| id.to_string());
         Self {
             id,
@@ -200,14 +218,23 @@ impl DenseEntry for Node {
             global_transform: desc.global_transform,
         }
     }
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
-    }
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct NodeUniform {
     model: Mat4,
+}
+
+struct MeshNodes {
+    mesh: Mesh,
+    nodes: Vec<Id<Node>>,
+}
+
+impl DenseEntry for MeshNodes {
+    type Key = Mesh;
+
+    fn id(&self) -> Id<Self::Key> {
+        self.mesh.id()
+    }
 }

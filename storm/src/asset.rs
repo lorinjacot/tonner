@@ -4,8 +4,9 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Id, Storm,
+    mesh::{IndexBuffer, MeshDescriptor, Primitive},
     scene::{Node, Scene, SceneDescriptor},
-    storage::DenseEntry,
+    storage::{DenseEntry, SetEntry},
 };
 
 impl Storm {
@@ -19,12 +20,16 @@ impl Storm {
         let mut accessors: Vec<Option<Accessor>> = vec![None; document.accessors().len()];
         let mut views: Vec<Option<View>> = vec![None; document.views().len()];
 
-        let meshes = document
+        let meshes: Vec<_> = document
             .meshes()
-            .map(|mesh| {
-                let name = format!("mesh({}) {}", mesh.index(), mesh.name().unwrap_or(""));
-                let mut primitives = Vec::with_capacity(mesh.primitives().len());
-                for primitive in mesh.primitives() {
+            .map(|gltf_mesh| {
+                let name = format!(
+                    "mesh({}) {}",
+                    gltf_mesh.index(),
+                    gltf_mesh.name().unwrap_or("")
+                );
+                let mut primitives = Vec::with_capacity(gltf_mesh.primitives().len());
+                for primitive in gltf_mesh.primitives() {
                     if primitive.get(&gltf::Semantic::Positions).is_none() {
                         continue;
                     }
@@ -35,8 +40,9 @@ impl Storm {
                             .map(|indices| match &accessors[indices.index()] {
                                 Some(Accessor::IndexBuffer(index_buffer)) => index_buffer.clone(),
                                 None => {
-                                    let index_buffer =
-                                        IndexBuffer::from(&indices, &buffers, &mut views, device);
+                                    let index_buffer = IndexBuffer::from_gltf(
+                                        &indices, &buffers, &mut views, device,
+                                    );
                                     accessors[indices.index()] =
                                         Some(Accessor::IndexBuffer(index_buffer.clone()));
                                     index_buffer
@@ -103,7 +109,7 @@ impl Storm {
                     let pipeline_layout =
                         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                             label: Some(&format!("{name} pipeline layout")),
-                            bind_group_layouts: &[],
+                            bind_group_layouts: &[&self.scene_bind_group_layout],
                             push_constant_ranges: &[],
                         });
 
@@ -147,7 +153,12 @@ impl Storm {
                         vertex_buffers,
                     });
                 }
-                Mesh { primitives }
+                self.meshes
+                    .push(MeshDescriptor {
+                        name: gltf_mesh.name().map(|name| name.to_string()),
+                        primitives,
+                    })
+                    .id()
             })
             .collect();
 
@@ -166,7 +177,7 @@ impl Storm {
             .collect();
         self.scene = document.default_scene().map(|scene| scenes[scene.index()]);
 
-        Ok(self.assets.push((meshes, scenes)))
+        Ok(self.assets.push(()))
     }
 }
 
@@ -186,20 +197,21 @@ impl Node {
 
 pub struct Asset {
     id: Id<Self>,
-    meshes: Vec<Mesh>,
-    scenes: Vec<Id<Scene>>,
 }
 
 impl DenseEntry for Asset {
     type Key = Self;
-    type Value = (Vec<Mesh>, Vec<Id<Scene>>);
-
-    fn new(id: Id<Self::Key>, (meshes, scenes): Self::Value) -> Self {
-        Self { id, meshes, scenes }
-    }
 
     fn id(&self) -> Id<Self::Key> {
         self.id
+    }
+}
+
+impl SetEntry for Asset {
+    type Descriptor = ();
+
+    fn new(id: Id<Self::Key>, _desc: Self::Descriptor) -> Self {
+        Self { id }
     }
 }
 
@@ -209,15 +221,8 @@ enum Accessor {
     Attribute(Attribute),
 }
 
-#[derive(Debug, Clone)]
-struct IndexBuffer {
-    buffer: wgpu::Buffer,
-    bounds: Range<u64>,
-    format: wgpu::IndexFormat,
-}
-
 impl IndexBuffer {
-    fn from(
+    fn from_gltf(
         indices: &gltf::Accessor,
         buffers: &Vec<gltf::buffer::Data>,
         views: &mut Vec<Option<View>>,
@@ -357,16 +362,4 @@ impl View {
         });
         Self { buffer }
     }
-}
-
-#[derive(Clone)]
-pub struct Mesh {
-    primitives: Vec<Primitive>,
-}
-
-#[derive(Clone)]
-struct Primitive {
-    pipeline: wgpu::RenderPipeline,
-    index_buffer: Option<IndexBuffer>,
-    vertex_buffers: Vec<wgpu::Buffer>,
 }

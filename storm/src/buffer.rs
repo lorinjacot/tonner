@@ -13,7 +13,7 @@ use super::{
 pub struct BufferManager {
     buffers: SparseSet<Buffer>,
     accessors: SparseSet<Accessor>,
-    assets: SparseMap<Asset, AssetData>,
+    assets: SparseMap<AssetData, Asset>,
 }
 
 impl BufferManager {

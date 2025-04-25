@@ -39,7 +39,7 @@ const TRANSFORM_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array
 
 pub struct MeshManager {
     meshes: SparseSet<Mesh>,
-    assets: SparseMap<Asset, Vec<Option<Id<Mesh>>>>,
+    assets: SparseMap<Vec<Option<Id<Mesh>>>, Asset>,
     shader_module: wgpu::ShaderModule,
     pipelines: SparseSet<PrimitivePipeline>,
     pipeline_layout: wgpu::PipelineLayout,
@@ -115,13 +115,13 @@ impl MeshManager {
     ) -> Id<Mesh> {
         use gltf::mesh::Semantic::*;
 
-        let mut primitives: SparseMap<PrimitivePipeline, Vec<Primitive>> = SparseMap::new();
+        let mut primitives: SparseMap<Vec<Primitive>, PrimitivePipeline> = SparseMap::new();
 
         for primitive in mesh.primitives() {
             if let Some(positions) = primitive.get(&Positions) {
                 let attributes_count = positions.count() as u32;
                 let usage = wgpu::BufferUsages::VERTEX;
-                let mut attributes_buffers: SparseMap<Buffer, Vec<wgpu::VertexAttribute>> =
+                let mut attributes_buffers: SparseMap<Vec<wgpu::VertexAttribute>, Buffer> =
                     SparseMap::new();
 
                 let (vertex_buffers, vertex_layouts, primitive_flats, indices, vertex_count): (
@@ -585,7 +585,7 @@ impl Index<Id<PrimitivePipeline>> for MeshManager {
 }
 
 pub struct Mesh {
-    pub primitives: SparseMap<PrimitivePipeline, Vec<Primitive>>,
+    pub primitives: SparseMap<Vec<Primitive>, PrimitivePipeline>,
 }
 
 pub struct Primitive {

@@ -80,7 +80,7 @@ pub struct TextureManager {
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     view_projection_bind_groups: [wgpu::BindGroup; 6],
-    assets: SparseMap<Asset, AssetData>,
+    assets: SparseMap<AssetData, Asset>,
 }
 
 impl TextureManager {
@@ -573,57 +573,62 @@ impl Cubemap {
         let sampler = storm.textures.sampler(equirectangular_map).unwrap();
 
         let name = Name::from_name_or_else(|| storm.textures.cubemaps.next_id(), name);
-        let pipeline = storm
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(&format!("{name} creation pipeline")),
-                layout: Some(&storm.textures.equirectangular_to_cube_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &storm.textures.shader_module,
-                    entry_point: Some("vs_cube"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: CUBE_VERTEX_BUFFER_LAYOUT,
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &storm.textures.shader_module,
-                    entry_point: Some("fs_equirectangular_to_cube"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(texture.format().into())],
-                }),
-                multiview: None,
-                cache: None,
-            });
+        let pipeline =
+            storm
+                .resources
+                .device()
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(&format!("{name} creation pipeline")),
+                    layout: Some(&storm.textures.equirectangular_to_cube_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &storm.textures.shader_module,
+                        entry_point: Some("vs_cube"),
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        buffers: CUBE_VERTEX_BUFFER_LAYOUT,
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        unclipped_depth: false,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        conservative: false,
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState {
+                        count: 1,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &storm.textures.shader_module,
+                        entry_point: Some("fs_equirectangular_to_cube"),
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        targets: &[Some(texture.format().into())],
+                    }),
+                    multiview: None,
+                    cache: None,
+                });
 
         let equirectangular_bind_group =
-            storm.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("equirectangular bind group"),
-                layout: &storm.textures.equirectangular_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(sampler),
-                    },
-                ],
-            });
+            storm
+                .resources
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("equirectangular bind group"),
+                    layout: &storm.textures.equirectangular_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                    ],
+                });
 
         Self::from_pipeline(
             Some(&name.0),
@@ -649,20 +654,24 @@ impl Cubemap {
     ) -> Id<Self> {
         let name = Name::from_name_or_else(|| storm.textures.cubemaps.next_id(), name);
 
-        let texture = storm.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(&format!("{name} texture")),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 6,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let texture = storm
+            .resources
+            .device()
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("{name} texture")),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
 
         for base_array_layer in 0..6 {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

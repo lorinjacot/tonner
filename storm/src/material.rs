@@ -64,7 +64,7 @@ pub struct MaterialManager {
     materials: SparseSet<Material>,
     bind_group_layout: wgpu::BindGroupLayout,
     default_material: Option<Id<Material>>,
-    mappings: SparseMap<Asset, Vec<Option<Id<Material>>>>,
+    mappings: SparseMap<Vec<Option<Id<Material>>>, Asset>,
     dummy_texture: Id<Texture>,
 }
 

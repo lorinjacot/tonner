@@ -5,12 +5,14 @@ mod mesh;
 mod scene;
 mod storage;
 mod texture;
+mod resource;
 
 use std::{fmt::Display, path::Path};
 
 use buffer::BufferManager;
 use material::MaterialManager;
 use mesh::MeshManager;
+use resource::Resources;
 use scene::SceneManager;
 use storage::SparseSet;
 use texture::{Cubemap, EnvironmentMap, TextureManager};
@@ -19,8 +21,7 @@ pub use scene::{Node, Scene};
 pub use storage::{Id, Iter};
 
 pub struct Storm {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    resources: Resources,
     assets: SparseSet<Asset>,
     textures: TextureManager,
     materials: MaterialManager,
@@ -50,8 +51,7 @@ impl Storm {
         );
 
         Self {
-            device,
-            queue,
+            resources: Resources::new(device, queue),
             assets,
             textures,
             materials,

@@ -5,24 +5,24 @@ use std::{
     ops::{Index, IndexMut, Range},
 };
 
-use bytemuck::{cast_slice, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use controls::{Controls, OrbitControls};
 use glam::{Mat3, Mat4, Quat, Vec3};
 
 use super::{
+    Asset, Name,
     buffer::BufferManager,
     material::MaterialManager,
     math,
     mesh::{Mesh, MeshManager, PrimitivePipeline},
     storage::{Entry, Id, Iter, SparseMap, SparseSet},
     texture::{EnvironmentMap, TextureManager},
-    Asset, Name,
 };
 
 pub struct SceneManager {
     scenes: SparseSet<Scene>,
     camera_bind_group_layout: wgpu::BindGroupLayout,
-    assets: SparseMap<Asset, Vec<Option<Id<Scene>>>>,
+    assets: SparseMap<Vec<Option<Id<Scene>>>, Asset>,
 }
 
 impl SceneManager {
@@ -282,13 +282,13 @@ pub struct Scene {
     nodes: SparseSet<Node>,
     root_nodes: Vec<Id<Node>>,
     primitives: SparseMap<
-        PrimitivePipeline,
         (
             wgpu::RenderPipeline,
-            SparseMap<Mesh, (Vec<Primitive>, Vec<Id<Node>>, wgpu::Buffer)>,
+            SparseMap<(Vec<Primitive>, Vec<Id<Node>>, wgpu::Buffer), Mesh>,
         ),
+        PrimitivePipeline,
     >,
-    pub cameras: SparseMap<Node, Camera>,
+    pub cameras: SparseMap<Camera, Node>,
     pub active_camera: Option<Id<Node>>,
     pub environment_map: Option<Id<EnvironmentMap>>,
     controls: SparseSet<Controls>,

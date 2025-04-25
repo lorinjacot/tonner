@@ -21,14 +21,14 @@ pub trait ControlsTrait {
         inputs: &mut egui::InputState,
         viewport_size: egui::Vec2,
         nodes: &SparseSet<Node>,
-        cameras: &SparseMap<Node, Camera>,
+        cameras: &SparseMap<Camera, Node>,
     );
 
     fn update(
         &mut self,
         viewport_aspect_ratio: f32,
         nodes: &mut SparseSet<Node>,
-        cameras: &mut SparseMap<Node, Camera>,
+        cameras: &mut SparseMap<Camera, Node>,
     );
 }
 
@@ -172,7 +172,7 @@ impl ControlsTrait for OrbitControls {
         inputs: &mut egui::InputState,
         viewport_size: egui::Vec2,
         nodes: &SparseSet<Node>,
-        cameras: &SparseMap<Node, Camera>,
+        cameras: &SparseMap<Camera, Node>,
     ) {
         if self.enable_rotate && inputs.pointer.primary_down() {
             let delta = 2.0 * PI * inputs.pointer.delta() * self.rotate_speed / viewport_size.y;
@@ -216,7 +216,7 @@ impl ControlsTrait for OrbitControls {
         &mut self,
         viewport_aspect_ratio: f32,
         nodes: &mut SparseSet<Node>,
-        cameras: &mut SparseMap<Node, Camera>,
+        cameras: &mut SparseMap<Camera, Node>,
     ) {
         let mut camera = nodes[self.camera].local_transform();
         let mut target = nodes[self.target].local_transform();

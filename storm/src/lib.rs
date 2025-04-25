@@ -1,9 +1,12 @@
 pub use asset::Asset;
-use scene::Scene;
-pub use storage::Id;
+pub use math::Transform;
+pub use scene::Node;
+pub use scene::Scene;
 use storage::SparseSet;
+pub use storage::{DenseEntry, Id};
 
 mod asset;
+mod math;
 mod scene;
 mod storage;
 
@@ -13,7 +16,7 @@ pub struct Storm {
     render_texture_format: wgpu::TextureFormat,
     assets: SparseSet<Asset>,
     scenes: SparseSet<Scene>,
-    active_scene: Option<Id<Scene>>,
+    scene: Option<Id<Scene>>,
     primitive_shader_module: wgpu::ShaderModule,
 }
 
@@ -34,9 +37,25 @@ impl Storm {
             render_texture_format,
             assets,
             scenes,
-            active_scene: None,
+            scene: None,
             primitive_shader_module,
         }
+    }
+
+    pub fn scene(&self) -> Option<&Scene> {
+        self.scene.map(|scene| &self.scenes[scene])
+    }
+
+    pub fn scene_mut(&mut self) -> Option<&mut Scene> {
+        self.scene.map(|scene| &mut self.scenes[scene])
+    }
+
+    pub fn set_scene(&mut self, id: Option<Id<Scene>>) {
+        self.scene = id;
+    }
+
+    pub fn scenes(&self) -> std::slice::Iter<'_, Scene> {
+        self.scenes.iter()
     }
 
     pub fn update(&mut self, _aspect_ration: f32) {}

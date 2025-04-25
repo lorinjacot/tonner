@@ -2,12 +2,11 @@ use std::{collections::BTreeMap, ops::Range};
 
 use wgpu::util::DeviceExt;
 
-use crate::{Id, Storm, storage::DenseEntry};
-
-pub struct Asset {
-    id: Id<Self>,
-    meshes: Vec<Mesh>,
-}
+use crate::{
+    Id, Storm,
+    scene::{Node, Scene, SceneDescriptor},
+    storage::DenseEntry,
+};
 
 impl Storm {
     pub fn load_gltf(&mut self, path: impl AsRef<std::path::Path>) -> Result<&Asset, gltf::Error> {
@@ -62,11 +61,11 @@ impl Storm {
                         };
                         let shader_location = match semantic {
                             gltf::Semantic::Positions => 7,
-                            gltf::Semantic::Normals => 8,
-                            gltf::Semantic::Tangents => 9,
-                            gltf::Semantic::TexCoords(0) => 10,
-                            gltf::Semantic::TexCoords(1) => 11,
-                            gltf::Semantic::Colors(0) => 12,
+                            // gltf::Semantic::Normals => 8,
+                            // gltf::Semantic::Tangents => 9,
+                            // gltf::Semantic::TexCoords(0) => 10,
+                            // gltf::Semantic::TexCoords(1) => 11,
+                            // gltf::Semantic::Colors(0) => 12,
                             _ => panic!("unsupported primitive attribute"),
                         };
                         vertex_buffers
@@ -152,8 +151,36 @@ impl Storm {
             })
             .collect();
 
+        for gltf_scene in document.scenes() {
+            let scene = self.scenes.push(SceneDescriptor {
+                name: gltf_scene.name().map(|name| name.to_string()),
+            });
+            for gltf_node in gltf_scene.nodes() {
+                Node::from_gltf(&gltf_node, None, scene);
+            }
+        }
+
         Ok(self.assets.push(meshes))
     }
+}
+
+impl Node {
+    fn from_gltf<'a>(
+        node: &gltf::Node,
+        parent: Option<Id<Node>>,
+        scene: &'a mut Scene,
+    ) -> &'a mut Self {
+        scene
+            .node_builder()
+            .name(node.name().map(|name| name.to_string()))
+            .parent(parent)
+            .build()
+    }
+}
+
+pub struct Asset {
+    id: Id<Self>,
+    meshes: Vec<Mesh>,
 }
 
 impl DenseEntry for Asset {

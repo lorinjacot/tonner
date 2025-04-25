@@ -4,10 +4,13 @@ use std::sync::Arc;
 use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
+use explorer::Explorer;
 use storm::Storm;
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
+
+mod explorer;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -103,6 +106,7 @@ struct Engine {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     storm: Storm,
+    explorer: Explorer,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
     render_texture: wgpu::Texture,
@@ -169,6 +173,8 @@ impl Engine {
             }
         }
 
+        let explorer = Explorer::new();
+
         let egui_state = egui_winit::State::new(
             egui_ctx,
             egui::ViewportId::ROOT,
@@ -190,6 +196,7 @@ impl Engine {
             surface,
             surface_config,
             storm,
+            explorer,
             egui_state,
             egui_renderer,
             render_texture,
@@ -201,7 +208,8 @@ impl Engine {
     fn draw(&mut self) {
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
-        let full_output = self.egui_state.egui_ctx().run(raw_input, |_ctx| {
+        let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
+            egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
             // if let Some(scene) = self.storm.active_scene_mut() {
             //     egui::CentralPanel::default().show(&ctx, |ui| {
             //         let size = match scene.aspect_ratio() {

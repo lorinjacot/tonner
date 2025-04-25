@@ -2,7 +2,7 @@ use std::{
     fmt::{Debug, Display},
     iter::repeat_n,
     marker::PhantomData,
-    ops::{Deref, Index, IndexMut},
+    ops::{Index, IndexMut},
 };
 
 pub struct Id<T> {

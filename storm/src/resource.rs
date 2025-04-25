@@ -1,8 +1,8 @@
 use std::{ops::Deref, sync::Arc};
 
-use asset::Asset;
+pub use asset::{Asset, AssetManager, import_gltf};
 
-use crate::{Id, storage::SparseSet};
+use crate::{Id, storage::DenseEntry};
 
 mod asset;
 
@@ -10,13 +10,12 @@ mod asset;
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    assets: SparseSet<(Id<Asset>, Asset)>,
+    assets: AssetManager,
 }
 
 impl Resources {
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        let assets = SparseSet::new();
-
+        let assets = AssetManager::new();
         Self {
             device,
             queue,
@@ -34,26 +33,42 @@ impl Resources {
 }
 
 /// Immutable resource
-pub struct Res<V, K = V> {
-    id: Id<K>,
-    name: String,
-    value: Arc<V>,
+#[derive(Clone)]
+pub struct Res<T> {
+    id: Id<T>,
+    value: Arc<(String, T)>,
 }
 
-impl<V, K> Res<V, K> {
-    pub fn id(&self) -> Id<K> {
+impl<T> Res<T> {
+    pub fn name(&self) -> &str {
+        &self.value.0
+    }
+
+    pub fn id(&self) -> Id<T> {
         self.id
     }
+}
 
-    pub fn name(&self) -> &str {
-        &self.name
+impl<T> Deref for Res<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value.1
     }
 }
 
-impl<V, K> Deref for Res<V, K> {
-    type Target = V;
+impl<T> DenseEntry for Res<T> {
+    type Key = T;
+    type Value = (Option<String>, T);
 
-    fn deref(&self) -> &Self::Target {
-        &self.value
+    fn new(id: Id<Self::Key>, value: Self::Value) -> Self {
+        Self {
+            id,
+            value: Arc::new((value.0.unwrap_or_else(|| id.to_string()), value.1)),
+        }
+    }
+
+    fn id(&self) -> Id<Self::Key> {
+        self.id
     }
 }

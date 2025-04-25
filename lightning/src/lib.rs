@@ -167,12 +167,9 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut storm = Storm::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
+        let mut storm = Storm::new(device.clone(), queue.clone());
         if let Some(path) = load_asset {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Engine::new command encoder"),
-            });
-            if let Err(err) = storm.load_asset(path, &device, &queue, &mut encoder) {
+            if let Err(err) = storm.import_gltf(path) {
                 panic!("{err}");
             }
         }

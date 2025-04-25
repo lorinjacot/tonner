@@ -9,93 +9,39 @@ mod texture;
 
 use std::{fmt::Display, path::Path};
 
-use buffer::BufferManager;
-use material::MaterialManager;
-use mesh::MeshManager;
 use resource::Resources;
 use scene::SceneManager;
-use storage::{DenseEntry, SparseSet};
 use texture::{EnvironmentMap, TextureManager};
 
+pub use resource::{Asset, Res};
 pub use scene::{Node, Scene};
 pub use storage::Id;
 
 pub struct Storm {
     resources: Resources,
-    assets: SparseSet<(Id<Asset>, Asset)>,
     textures: TextureManager,
-    materials: MaterialManager,
-    buffers: BufferManager,
-    meshes: MeshManager,
     scenes: SceneManager,
     pub active_scene: Option<Id<Scene>>,
 }
 
 impl Storm {
-    pub fn new(
-        render_format: wgpu::TextureFormat,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-    ) -> Self {
-        let assets = SparseSet::new();
-        let mut textures = TextureManager::new(&device);
-        let materials = MaterialManager::new(&mut textures, &device);
-        let mut buffers = BufferManager::new();
+    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let textures = TextureManager::new(&device);
         let scenes = SceneManager::new(&device);
-        let meshes = MeshManager::new(
-            scenes.camera_bind_group_layout(),
-            &materials,
-            &mut buffers,
-            render_format,
-            &device,
-        );
 
         Self {
             resources: Resources::new(device, queue),
-            assets,
             textures,
-            materials,
-            buffers,
-            meshes,
             scenes,
             active_scene: None,
         }
     }
 
-    pub fn load_asset(
-        &mut self,
-        path: impl AsRef<Path>,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Id<Asset>, gltf::Error> {
-        let (document, buffers, images) = gltf::import(path)?;
-
-        let scenes = Vec::with_capacity(document.scenes().len());
-        let id = self.assets.push(Asset { document, scenes }).id();
-        self.buffers.register_asset(id, buffers);
-        self.textures.register_asset(id, images);
-
-        let asset = &mut self.assets[id].1;
-        for scene in asset.document.scenes() {
-            asset.scenes.push(self.scenes.load_scene(
-                id,
-                scene,
-                &mut self.buffers,
-                &mut self.textures,
-                &mut self.materials,
-                &mut self.meshes,
-                device,
-                queue,
-            ));
-        }
-
-        self.active_scene = asset
-            .document
-            .default_scene()
-            .map(|scene| asset.scenes[scene.index()]);
-
-        Ok(id)
+    pub fn import_gltf<P>(&mut self, path: P) -> Result<&mut Res<Asset>, gltf::Error>
+    where
+        P: AsRef<Path>,
+    {
+        resource::import_gltf(path, &mut self.resources)
     }
 
     pub fn scenes(&self) -> std::slice::Iter<'_, (Id<Scene>, Scene)> {
@@ -149,11 +95,6 @@ impl Storm {
     pub fn active_scene_mut(&mut self) -> Option<&mut Scene> {
         self.scenes.get_mut(self.active_scene?)
     }
-}
-
-pub struct Asset {
-    document: gltf::Document,
-    scenes: Vec<Id<Scene>>,
 }
 
 #[derive(Clone)]

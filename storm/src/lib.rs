@@ -14,6 +14,7 @@ pub struct Storm {
     assets: SparseSet<Asset>,
     scenes: SparseSet<Scene>,
     active_scene: Option<Id<Scene>>,
+    primitive_shader_module: wgpu::ShaderModule,
 }
 
 impl Storm {
@@ -24,6 +25,8 @@ impl Storm {
     ) -> Self {
         let assets = SparseSet::new();
         let scenes = SparseSet::new();
+        let primitive_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
         Self {
             device,
@@ -32,6 +35,7 @@ impl Storm {
             assets,
             scenes,
             active_scene: None,
+            primitive_shader_module,
         }
     }
 

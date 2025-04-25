@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::BTreeMap, ops::Range};
 
 use wgpu::util::DeviceExt;
 
@@ -6,48 +6,162 @@ use crate::{Id, Storm, storage::DenseEntry};
 
 pub struct Asset {
     id: Id<Self>,
+    meshes: Vec<Mesh>,
 }
 
 impl Storm {
-    pub fn load_gltf(&mut self, path: impl AsRef<std::path::Path>) -> Result<Asset, gltf::Error> {
-        let (document, buffers, images) = gltf::import(path)?;
+    pub fn load_gltf(&mut self, path: impl AsRef<std::path::Path>) -> Result<&Asset, gltf::Error> {
+        let (document, buffers, _images) = gltf::import(path)?;
 
         let mut accessors: Vec<Option<Accessor>> = vec![None; document.accessors().len()];
         let mut views: Vec<Option<View>> = vec![None; document.views().len()];
-        let _meshes: Vec<Option<Mesh>> = vec![None; document.meshes().len()];
 
-        for mesh in document.meshes() {
-            for primitive in mesh.primitives() {
-                if primitive.get(&gltf::Semantic::Positions).is_none() {
-                    continue;
-                }
+        let meshes = document
+            .meshes()
+            .map(|mesh| {
+                let name = format!("mesh({}) {}", mesh.index(), mesh.name().unwrap_or(""));
+                let mut primitives = Vec::with_capacity(mesh.primitives().len());
+                for primitive in mesh.primitives() {
+                    if primitive.get(&gltf::Semantic::Positions).is_none() {
+                        continue;
+                    }
 
-                let index_buffer =
-                    primitive
-                        .indices()
-                        .map(|indices| match &accessors[indices.index()] {
-                            Some(Accessor::IndexBuffer(index_buffer)) => index_buffer.clone(),
+                    let index_buffer =
+                        primitive
+                            .indices()
+                            .map(|indices| match &accessors[indices.index()] {
+                                Some(Accessor::IndexBuffer(index_buffer)) => index_buffer.clone(),
+                                None => {
+                                    let index_buffer = IndexBuffer::from(
+                                        &indices,
+                                        &buffers,
+                                        &mut views,
+                                        &self.device,
+                                    );
+                                    accessors[indices.index()] =
+                                        Some(Accessor::IndexBuffer(index_buffer.clone()));
+                                    index_buffer
+                                }
+                                _ => panic!(
+                                    "primitive indices accessors cannot be used for other purposes"
+                                ),
+                            });
+
+                    let mut vertex_buffers: BTreeMap<usize, VertexBufferLayout> = BTreeMap::new();
+                    for (semantic, accessor) in primitive.attributes() {
+                        let attribute = match &accessors[accessor.index()] {
+                            Some(Accessor::Attribute(attribute)) => attribute.clone(),
                             None => {
-                                let idx = indices.index();
-                                let index_buffer =
-                                    IndexBuffer::from(indices, &buffers, &mut views, &self.device);
-                                accessors[idx] = Some(Accessor::IndexBuffer(index_buffer.clone()));
-                                index_buffer
+                                let attribute =
+                                    Attribute::from(&accessor, &buffers, &mut views, &self.device);
+                                accessors[accessor.index()] =
+                                    Some(Accessor::Attribute(attribute.clone()));
+                                attribute
                             }
-                        });
-            }
-        }
+                            _ => panic!("attributes accessors cannot be used for other purposes"),
+                        };
+                        let shader_location = match semantic {
+                            gltf::Semantic::Positions => 7,
+                            gltf::Semantic::Normals => 8,
+                            gltf::Semantic::Tangents => 9,
+                            gltf::Semantic::TexCoords(0) => 10,
+                            gltf::Semantic::TexCoords(1) => 11,
+                            gltf::Semantic::Colors(0) => 12,
+                            _ => panic!("unsupported primitive attribute"),
+                        };
+                        vertex_buffers
+                            .entry(attribute.view)
+                            .or_insert_with(|| VertexBufferLayout {
+                                array_stride: attribute.array_stride,
+                                attributes: Vec::with_capacity(1),
+                            })
+                            .attributes
+                            .push(wgpu::VertexAttribute {
+                                format: attribute.format,
+                                offset: attribute.offset,
+                                shader_location,
+                            });
+                    }
+                    let (vertex_buffers, vertex_buffer_layouts): (_, Vec<_>) = vertex_buffers
+                        .iter()
+                        .map(|(view, layout)| {
+                            (
+                                views[*view].as_ref().unwrap().buffer.clone(),
+                                wgpu::VertexBufferLayout {
+                                    array_stride: layout.array_stride,
+                                    step_mode: wgpu::VertexStepMode::Vertex,
+                                    attributes: &layout.attributes,
+                                },
+                            )
+                        })
+                        .unzip();
 
-        todo!()
+                    let pipeline_layout =
+                        self.device
+                            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                                label: Some(&format!("{name} pipeline layout")),
+                                bind_group_layouts: &[],
+                                push_constant_ranges: &[],
+                            });
+
+                    let pipeline =
+                        self.device
+                            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                                label: Some(&format!("{name} pipeline")),
+                                layout: Some(&pipeline_layout),
+                                vertex: wgpu::VertexState {
+                                    module: &self.primitive_shader_module,
+                                    entry_point: Some("vs_main"),
+                                    compilation_options: wgpu::PipelineCompilationOptions::default(
+                                    ),
+                                    buffers: &vertex_buffer_layouts,
+                                },
+                                primitive: wgpu::PrimitiveState {
+                                    topology: wgpu::PrimitiveTopology::TriangleList,
+                                    strip_index_format: None,
+                                    front_face: wgpu::FrontFace::Ccw,
+                                    cull_mode: None,
+                                    unclipped_depth: false,
+                                    polygon_mode: wgpu::PolygonMode::Fill,
+                                    conservative: false,
+                                },
+                                depth_stencil: None,
+                                multisample: wgpu::MultisampleState {
+                                    count: 1,
+                                    mask: !0,
+                                    alpha_to_coverage_enabled: false,
+                                },
+                                fragment: Some(wgpu::FragmentState {
+                                    module: &self.primitive_shader_module,
+                                    entry_point: Some("fs_main"),
+                                    compilation_options: wgpu::PipelineCompilationOptions::default(
+                                    ),
+                                    targets: &[Some(self.render_texture_format.into())],
+                                }),
+                                multiview: None,
+                                cache: None,
+                            });
+
+                    primitives.push(Primitive {
+                        pipeline,
+                        index_buffer,
+                        vertex_buffers,
+                    });
+                }
+                Mesh { primitives }
+            })
+            .collect();
+
+        Ok(self.assets.push(meshes))
     }
 }
 
 impl DenseEntry for Asset {
     type Key = Self;
-    type Value = ();
+    type Value = Vec<Mesh>;
 
-    fn new(id: Id<Self::Key>, _value: Self::Value) -> Self {
-        Self { id }
+    fn new(id: Id<Self::Key>, meshes: Self::Value) -> Self {
+        Self { id, meshes }
     }
 
     fn id(&self) -> Id<Self::Key> {
@@ -58,6 +172,7 @@ impl DenseEntry for Asset {
 #[derive(Clone)]
 enum Accessor {
     IndexBuffer(IndexBuffer),
+    Attribute(Attribute),
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +184,7 @@ struct IndexBuffer {
 
 impl IndexBuffer {
     fn from(
-        indices: gltf::Accessor,
+        indices: &gltf::Accessor,
         buffers: &Vec<gltf::buffer::Data>,
         views: &mut Vec<Option<View>>,
         device: &wgpu::Device,
@@ -89,7 +204,7 @@ impl IndexBuffer {
             let buffer = match &views[view_idx] {
                 Some(view) => view.buffer.clone(),
                 None => {
-                    let view = View::from(view, buffers, wgpu::BufferUsages::INDEX, device);
+                    let view = View::from(&view, buffers, wgpu::BufferUsages::INDEX, device);
                     let buffer = view.buffer.clone();
                     views[view_idx] = Some(view);
                     buffer
@@ -107,6 +222,84 @@ impl IndexBuffer {
     }
 }
 
+#[derive(Debug, Clone)]
+struct Attribute {
+    view: usize,
+    buffer: wgpu::Buffer,
+    bounds: Range<u64>,
+    array_stride: wgpu::BufferAddress,
+    format: wgpu::VertexFormat,
+    offset: u64,
+}
+
+struct VertexBufferLayout {
+    array_stride: wgpu::BufferAddress,
+    attributes: Vec<wgpu::VertexAttribute>,
+}
+
+impl Attribute {
+    fn from(
+        accessor: &gltf::Accessor,
+        buffers: &Vec<gltf::buffer::Data>,
+        views: &mut Vec<Option<View>>,
+        device: &wgpu::Device,
+    ) -> Self {
+        #[rustfmt::skip]
+        let format = match (accessor.data_type(), accessor.dimensions()) {
+            (gltf::accessor::DataType::U8, gltf_json::accessor::Type::Scalar) => wgpu::VertexFormat::Uint8,
+            (gltf::accessor::DataType::U8, gltf_json::accessor::Type::Vec2) => wgpu::VertexFormat::Uint8x2,
+            (gltf::accessor::DataType::U8, gltf_json::accessor::Type::Vec4) => wgpu::VertexFormat::Uint8x4,
+            (gltf::accessor::DataType::U16, gltf_json::accessor::Type::Scalar) => wgpu::VertexFormat::Uint16,
+            (gltf::accessor::DataType::U16, gltf_json::accessor::Type::Vec2) => wgpu::VertexFormat::Uint16x2,
+            (gltf::accessor::DataType::U16, gltf_json::accessor::Type::Vec4) => wgpu::VertexFormat::Uint16x4,
+            (gltf::accessor::DataType::U32, gltf_json::accessor::Type::Scalar) => wgpu::VertexFormat::Uint32,
+            (gltf::accessor::DataType::U32, gltf_json::accessor::Type::Vec2) => wgpu::VertexFormat::Uint32x2,
+            (gltf::accessor::DataType::U32, gltf_json::accessor::Type::Vec3) => wgpu::VertexFormat::Uint32x3,
+            (gltf::accessor::DataType::U32, gltf_json::accessor::Type::Vec4) => wgpu::VertexFormat::Uint32x4,
+            (gltf::accessor::DataType::I8, gltf_json::accessor::Type::Scalar) => wgpu::VertexFormat::Sint8,
+            (gltf::accessor::DataType::I8, gltf_json::accessor::Type::Vec2) => wgpu::VertexFormat::Sint8x2,
+            (gltf::accessor::DataType::I8, gltf_json::accessor::Type::Vec4) => wgpu::VertexFormat::Sint8x4,
+            (gltf::accessor::DataType::I16, gltf_json::accessor::Type::Scalar) => wgpu::VertexFormat::Sint16,
+            (gltf::accessor::DataType::I16, gltf_json::accessor::Type::Vec2) => wgpu::VertexFormat::Sint16x2,
+            (gltf::accessor::DataType::I16, gltf_json::accessor::Type::Vec4) => wgpu::VertexFormat::Sint16x4,
+            (gltf::accessor::DataType::F32, gltf_json::accessor::Type::Scalar) => wgpu::VertexFormat::Float32,
+            (gltf::accessor::DataType::F32, gltf_json::accessor::Type::Vec2) => wgpu::VertexFormat::Float32x2,
+            (gltf::accessor::DataType::F32, gltf_json::accessor::Type::Vec3) => wgpu::VertexFormat::Float32x3,
+            (gltf::accessor::DataType::F32, gltf_json::accessor::Type::Vec4) => wgpu::VertexFormat::Float32x4,
+            _ => panic!("unsupported vertex format")
+        };
+
+        if accessor.sparse().is_some() {
+            todo!("sparse attribute accessor")
+        } else {
+            let view = accessor.view().expect("dense accessor must have a view");
+            let array_stride = view.stride().unwrap_or(accessor.size()) as wgpu::BufferAddress;
+            let view_idx = view.index();
+            let buffer = match &views[view_idx] {
+                Some(view) => view.buffer.clone(),
+                None => {
+                    let view = View::from(&view, buffers, wgpu::BufferUsages::VERTEX, device);
+                    let buffer = view.buffer.clone();
+                    views[view_idx] = Some(view);
+                    buffer
+                }
+            };
+            let start = accessor.offset() as u64;
+            let end = start + (accessor.count() * accessor.size()) as u64;
+            let bounds = start..end;
+            let offset = accessor.offset() as u64;
+            Self {
+                view: view_idx,
+                buffer,
+                bounds,
+                array_stride,
+                format,
+                offset,
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 struct View {
     buffer: wgpu::Buffer,
@@ -114,7 +307,7 @@ struct View {
 
 impl View {
     fn from(
-        view: gltf::buffer::View,
+        view: &gltf::buffer::View,
         buffers: &Vec<gltf::buffer::Data>,
         usage: wgpu::BufferUsages,
         device: &wgpu::Device,
@@ -133,7 +326,7 @@ impl View {
 }
 
 #[derive(Clone)]
-struct Mesh {
+pub struct Mesh {
     primitives: Vec<Primitive>,
 }
 
@@ -141,5 +334,5 @@ struct Mesh {
 struct Primitive {
     pipeline: wgpu::RenderPipeline,
     index_buffer: Option<IndexBuffer>,
-    vertex_buffers: Vec<(wgpu::Buffer, Range<u64>)>,
+    vertex_buffers: Vec<wgpu::Buffer>,
 }

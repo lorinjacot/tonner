@@ -8,7 +8,7 @@ impl DenseEntry for Scene {
     type Key = Self;
     type Value = ();
 
-    fn new(id: Id<Self::Key>, value: Self::Value) -> Self {
+    fn new(id: Id<Self::Key>, _value: Self::Value) -> Self {
         Scene { id }
     }
 

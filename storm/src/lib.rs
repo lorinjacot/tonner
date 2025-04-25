@@ -35,10 +35,6 @@ impl Storm {
         }
     }
 
-    pub fn load_gltf(&mut self, _path: impl AsRef<std::path::Path>) -> Result<Asset, gltf::Error> {
-        todo!()
-    }
-
     pub fn update(&mut self, _aspect_ration: f32) {}
 
     pub fn render(&self, _render_pass: &mut wgpu::RenderPass) {}

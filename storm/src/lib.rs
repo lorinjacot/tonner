@@ -1,15 +1,21 @@
 pub use asset::Asset;
+pub use environment::Environment;
+use environment::EnvironmentBuilder;
 pub use math::Transform;
-use mesh::Mesh;
-pub use scene::{Camera, Node, Scene, camera};
+pub use mesh::Mesh;
+pub use scene::camera;
+pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
 pub use storage::{DenseEntry, Id};
+use texture::TextureBuilder;
 
 mod asset;
+mod environment;
 pub mod math;
 mod mesh;
 mod scene;
 mod storage;
+mod texture;
 
 pub struct Storm {
     device: wgpu::Device,
@@ -17,6 +23,7 @@ pub struct Storm {
     render_texture_format: wgpu::TextureFormat,
     assets: SparseSet<Asset>,
     meshes: SparseSet<Mesh>,
+    environments: SparseSet<Environment>,
     scenes: SparseSet<Scene>,
     scene: Option<Id<Scene>>,
     primitive_shader_module: wgpu::ShaderModule,
@@ -31,6 +38,7 @@ impl Storm {
     ) -> Self {
         let assets = SparseSet::new();
         let meshes = SparseSet::new();
+        let environments = SparseSet::new();
         let scenes = SparseSet::new();
 
         let primitive_shader_module =
@@ -68,11 +76,20 @@ impl Storm {
             render_texture_format,
             assets,
             meshes,
+            environments,
             scenes,
             scene: None,
             primitive_shader_module,
             render_bind_group_layout,
         }
+    }
+
+    fn texture_builder(&self) -> TextureBuilder {
+        TextureBuilder::new(self)
+    }
+
+    pub fn environment_builder<'a, 's>(&'s mut self) -> EnvironmentBuilder<'a, 's> {
+        EnvironmentBuilder::new(self)
     }
 
     pub fn scene(&self) -> Option<&Scene> {

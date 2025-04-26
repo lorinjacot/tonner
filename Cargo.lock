@@ -2301,6 +2301,7 @@ dependencies = [
  "glam",
  "gltf",
  "gltf-json",
+ "image",
  "wgpu",
 ]
 

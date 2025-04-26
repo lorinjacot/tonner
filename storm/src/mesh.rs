@@ -2,7 +2,7 @@ use crate::{DenseEntry, Id, storage::SetEntry};
 
 pub struct Mesh {
     id: Id<Mesh>,
-    name: String,
+    pub name: String,
     pub(super) primitives: Vec<Primitive>,
 }
 

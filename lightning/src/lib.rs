@@ -213,6 +213,20 @@ impl Engine {
             })
             .collect();
 
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Engine::new command encoder"),
+        });
+
+        let radiance_image = include_bytes!("../../assets/environments/newport_loft.hdr");
+        let radiance_image = std::io::Cursor::new(radiance_image);
+        let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
+        let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
+        storm
+            .environment_builder()
+            .name("newport_loft".to_string())
+            .from_equirectangular_map(&radiance_image)
+            .build(&mut encoder);
+
         let explorer = Explorer::new();
 
         let egui_state = egui_winit::State::new(

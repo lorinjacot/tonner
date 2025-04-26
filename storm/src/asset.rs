@@ -14,10 +14,37 @@ impl Storm {
     pub fn open_gltf(&mut self, path: impl AsRef<std::path::Path>) -> Result<&Asset, gltf::Error> {
         let (document, buffers, _images) = gltf::import(path)?;
 
+        let mesh_mapping = self.load_meshes(&document, &buffers);
+
+        let scenes: Vec<Id<Scene>> = document
+            .scenes()
+            .map(|gltf_scene| {
+                let scene = self.scenes.push(SceneDescriptor {
+                    name: gltf_scene.name().map(|name| name.to_string()),
+                    render_bind_group_layout: self.render_bind_group_layout.clone(),
+                    device: self.device.clone(),
+                    queue: self.queue.clone(),
+                });
+                for node in gltf_scene.nodes() {
+                    scene.build_gltf_node(node, None, &mut self.meshes, &mesh_mapping);
+                }
+                scene.id()
+            })
+            .collect();
+        self.scene = document.default_scene().map(|scene| scenes[scene.index()]);
+
+        Ok(self.assets.push(()))
+    }
+
+    fn load_meshes(
+        &mut self,
+        document: &gltf::Document,
+        buffers: &Vec<gltf::buffer::Data>,
+    ) -> Vec<Id<Mesh>> {
         let mut accessors: Vec<Option<Accessor>> = vec![None; document.accessors().len()];
         let mut views: Vec<Option<View>> = vec![None; document.views().len()];
 
-        let meshes: Vec<_> = document
+        document
             .meshes()
             .map(|gltf_mesh| {
                 let name = format!(
@@ -165,49 +192,22 @@ impl Storm {
                     })
                     .id()
             })
-            .collect();
-
-        let scenes: Vec<Id<Scene>> = document
-            .scenes()
-            .map(|gltf_scene| {
-                let scene = self.scenes.push(SceneDescriptor {
-                    name: gltf_scene.name().map(|name| name.to_string()),
-                    render_bind_group_layout: self.render_bind_group_layout.clone(),
-                    device: self.device.clone(),
-                    queue: self.queue.clone(),
-                });
-                for gltf_node in gltf_scene.nodes() {
-                    Node::from_gltf(
-                        &gltf_node,
-                        None,
-                        scene,
-                        &mut self.meshes,
-                        &meshes,
-                        &self.device,
-                    );
-                }
-                scene.id()
-            })
-            .collect();
-        self.scene = document.default_scene().map(|scene| scenes[scene.index()]);
-
-        Ok(self.assets.push(()))
+            .collect()
     }
 }
 
-impl Node {
-    fn from_gltf<'a>(
-        node: &gltf::Node,
+impl Scene {
+    fn build_gltf_node(
+        &mut self,
+        node: gltf::Node,
         parent: Option<Id<Node>>,
-        scene: &'a mut Scene,
         meshes: &mut SparseSet<Mesh>,
-        meshes_mapping: &[Id<Mesh>],
-        device: &wgpu::Device,
+        mesh_mapping: &[Id<Mesh>],
     ) -> Id<Node> {
         let mesh = node
             .mesh()
-            .map(|gltf_mesh| &meshes[meshes_mapping[gltf_mesh.index()]]);
-        let mut builder = scene
+            .map(|gltf_mesh| &meshes[mesh_mapping[gltf_mesh.index()]]);
+        let mut builder = self
             .node_builder()
             .name(node.name().map(|name| name.to_string()))
             .parent(parent);
@@ -227,7 +227,7 @@ impl Node {
         };
         let id = builder.mesh(mesh).build().id();
         for child in node.children() {
-            Node::from_gltf(&child, Some(id), scene, meshes, meshes_mapping, device);
+            self.build_gltf_node(child, Some(id), meshes, mesh_mapping);
         }
         id
     }

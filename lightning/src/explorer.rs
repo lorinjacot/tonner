@@ -42,7 +42,7 @@ impl Explorer {
 
             ui.separator();
             ui.label("Camera");
-            let active_camera = scene.camera();
+            let active_camera = scene.active_camera();
             let mut active_camera_id = active_camera.map(|camera| camera.id());
             egui::ComboBox::from_id_salt("Camera")
                 .selected_text(active_camera.map_or("", |camera| &camera.name))
@@ -75,7 +75,7 @@ impl Explorer {
             //     let scene = storm.active_scene_mut().unwrap();
 
             let scene = storm.scene_mut().unwrap();
-            scene.set_camera(active_camera_id);
+            scene.set_active_camera(active_camera_id);
             // scene.environment_map = active_environment_map;
 
             if let Some(node) = self.node_modal {

@@ -5,13 +5,14 @@ use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
 use explorer::Explorer;
-use storm::Storm;
+use glam::Vec3;
+use storm::{DenseEntry, Storm};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
+mod controls;
 mod explorer;
-// mod controls;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -172,6 +173,37 @@ impl Engine {
             if let Err(err) = storm.open_gltf(path) {
                 panic!("{err}");
             }
+        }
+        for scene in storm.scenes_mut() {
+            let target = scene
+                .node_builder()
+                .name("Orbit camera target".to_string().into())
+                .build()
+                .id();
+            let cursor = scene
+                .node_builder()
+                .name("Orbit camera cursor".to_string().into())
+                .build()
+                .id();
+            let camera = scene
+                .node_builder()
+                .name("Orbit camera node".to_string().into())
+                .local_position(1.5 * Vec3::Z)
+                .camera(
+                    storm::camera::CameraDescriptor {
+                        name: Some("Orbit camera".to_string()),
+                        projection: storm::camera::Projection::Perspective {
+                            aspect_ratio: None,
+                            y_fov: f32::to_radians(90.0),
+                            z_far: Some(100.0),
+                            z_near: 0.01,
+                        },
+                    }
+                    .into(),
+                )
+                .build()
+                .id();
+            scene.set_active_camera(camera.into());
         }
 
         let explorer = Explorer::new();

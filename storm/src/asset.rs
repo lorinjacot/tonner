@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use glam::{Mat4, Quat};
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -206,13 +207,25 @@ impl Node {
         let mesh = node
             .mesh()
             .map(|gltf_mesh| &meshes[meshes_mapping[gltf_mesh.index()]]);
-        let id = scene
+        let mut builder = scene
             .node_builder()
             .name(node.name().map(|name| name.to_string()))
-            .parent(parent)
-            .mesh(mesh)
-            .build(device)
-            .id();
+            .parent(parent);
+        builder = match node.transform() {
+            gltf::scene::Transform::Decomposed {
+                translation,
+                rotation,
+                scale,
+            } => builder.translation_rotation_scale(
+                translation.into(),
+                Quat::from_array(rotation),
+                scale.into(),
+            ),
+            gltf::scene::Transform::Matrix { matrix } => {
+                builder.local_matrix(Mat4::from_cols_array_2d(&matrix))
+            }
+        };
+        let id = builder.mesh(mesh).build().id();
         for child in node.children() {
             Node::from_gltf(&child, Some(id), scene, meshes, meshes_mapping, device);
         }

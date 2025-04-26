@@ -1,8 +1,9 @@
-use std::ops::{Index, IndexMut};
+use std::ops::{Deref, Index, IndexMut};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
 pub use camera::Camera;
-use glam::{Mat4, Vec3, usize};
+use camera::CameraDescriptor;
+use glam::{Mat4, Quat, Vec3, usize};
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -11,7 +12,7 @@ use crate::{
     storage::{DenseEntry, Id, SetEntry, SparseMap, SparseSet},
 };
 
-mod camera;
+pub mod camera;
 
 pub struct Scene {
     id: Id<Self>,
@@ -23,13 +24,17 @@ pub struct Scene {
     root_nodes: Vec<Id<Node>>,
     meshes: SparseMap<MeshInstances>,
     cameras: SparseMap<Camera>,
-    camera: Option<Id<Node>>,
+    active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
     render_bind_group_layout: wgpu::BindGroupLayout,
     render_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl Scene {
+    pub fn node_handle(&mut self, id: Id<Node>) -> NodeHandle {
+        NodeHandle { id, scene: self }
+    }
+
     pub fn node_builder(&mut self) -> NodeBuilder {
         NodeBuilder::new(self)
     }
@@ -38,18 +43,26 @@ impl Scene {
         &self.root_nodes
     }
 
-    pub fn camera(&self) -> Option<&Camera> {
-        self.camera.map(|id| &self.cameras[id])
+    pub fn camera(&self, id: Id<Node>) -> Option<&Camera> {
+        self.cameras.get(id)
     }
 
-    pub fn set_camera(&mut self, camera: Option<Id<Node>>) {
+    pub fn camera_mut(&mut self, id: Id<Node>) -> Option<&mut Camera> {
+        self.cameras.get_mut(id)
+    }
+
+    pub fn active_camera(&self) -> Option<&Camera> {
+        self.active_camera.map(|id| &self.cameras[id])
+    }
+
+    pub fn set_active_camera(&mut self, camera: Option<Id<Node>>) {
         if let Some(camera) = camera {
             assert!(
                 self.cameras.contains(camera),
                 "no camera associated with node {camera}"
             )
         }
-        self.camera = camera;
+        self.active_camera = camera;
     }
 
     pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
@@ -62,7 +75,7 @@ impl Scene {
                 .nodes
                 .iter()
                 .map(|node| NodeUniform {
-                    model: node.global_transform,
+                    model: node.world_matrix,
                 })
                 .collect();
 
@@ -85,13 +98,15 @@ impl Scene {
             }
         };
 
-        if let Some(camera) = self.camera {
-            let projection = self.cameras[camera].projection(viewport_aspect_ration);
+        if let Some(camera) = self.active_camera {
+            let projection = self.cameras[camera]
+                .projection
+                .matrix(viewport_aspect_ration);
             let camera = &self.nodes[camera];
             let view = Mat4::look_to_lh(
-                camera.global_position(),
-                camera.global_transform.transform_vector3(-Vec3::Z),
-                camera.global_transform.transform_vector3(Vec3::Y),
+                camera.world_position(),
+                camera.world_matrix.transform_vector3(-Vec3::Z),
+                camera.world_matrix.transform_vector3(Vec3::Y),
             );
             let camera_uniform = CameraUniform {
                 view_projection: projection * view,
@@ -137,9 +152,9 @@ impl Scene {
                             },
                         ],
                     }))
-            } else {
-                self.render_bind_group = None;
             }
+        } else {
+            self.render_bind_group = None;
         }
     }
 
@@ -216,7 +231,7 @@ impl SetEntry for Scene {
         let camera_buffer = desc.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
             size: size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -230,7 +245,7 @@ impl SetEntry for Scene {
             root_nodes,
             meshes,
             cameras,
-            camera: None,
+            active_camera: None,
             camera_buffer,
             render_bind_group_layout: desc.render_bind_group_layout,
             render_bind_group: None,
@@ -244,10 +259,15 @@ pub struct Node {
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
     local_transform: Transform,
-    global_transform: Mat4,
+    world_matrix: Mat4,
+    mesh: Option<Id<Mesh>>,
 }
 
 impl Node {
+    pub fn parent(&self) -> Option<Id<Node>> {
+        self.parent
+    }
+
     pub fn children(&self) -> &[Id<Node>] {
         &self.children
     }
@@ -256,8 +276,87 @@ impl Node {
         &self.local_transform
     }
 
-    pub fn global_position(&self) -> Vec3 {
-        self.global_transform.project_point3(Vec3::ZERO)
+    pub fn local_position(&self) -> Vec3 {
+        self.local_transform.translation()
+    }
+
+    pub fn world_matrix(&self) -> Mat4 {
+        self.world_matrix
+    }
+
+    pub fn world_position(&self) -> Vec3 {
+        self.world_matrix.project_point3(Vec3::ZERO)
+    }
+}
+
+pub struct NodeHandle<'a> {
+    id: Id<Node>,
+    scene: &'a mut Scene,
+}
+
+impl<'a> NodeHandle<'a> {
+    fn update_matrices(&mut self, parent_matrix: Mat4) {
+        let node = &mut self.scene[self.id];
+        let world_matrix = parent_matrix * node.local_transform.matrix();
+        node.world_matrix = world_matrix;
+        let children = node.children.clone();
+        for child in children {
+            self.scene.node_handle(child).update_matrices(world_matrix);
+        }
+    }
+
+    pub fn set_local_transform(&mut self, transform: Transform) {
+        let node = &self.scene[self.id];
+        let world_matrix = match node.parent {
+            Some(parent) => self.scene[parent].world_matrix * transform.matrix(),
+            None => transform.matrix(),
+        };
+        let node = &mut self.scene[self.id];
+        node.local_transform = transform;
+        node.world_matrix = world_matrix;
+        let children = node.children.clone();
+        for child in children {
+            self.scene.node_handle(child).update_matrices(world_matrix);
+        }
+    }
+
+    pub fn set_mesh(&mut self, mesh: Option<&Mesh>) {
+        let node = &mut self.scene[self.id];
+        if node.mesh == mesh.map(|mesh| mesh.id()) {
+            return;
+        }
+
+        // remove old mesh
+        self.scene[self.id].mesh.take().map(|old_mesh| {
+            let nodes = &mut self.scene.meshes[old_mesh].nodes;
+            let index = nodes.iter().position(|node| *node == self.id).unwrap();
+            nodes.swap_remove(index);
+        });
+
+        if let Some(mesh) = mesh {
+            self.scene
+                .meshes
+                .instanciate_unchecked(mesh, self.id, &self.scene.device);
+        }
+    }
+
+    pub fn set_camera(&mut self, camera: Option<CameraDescriptor>) {
+        match camera {
+            Some(desc) => {
+                self.scene.cameras.insert(Camera::new(self.id, desc));
+            }
+            None => {
+                self.scene.cameras.remove(self.id);
+            }
+        }
+    }
+}
+
+impl<'a> Deref for NodeHandle<'a> {
+    type Target = Node;
+
+    fn deref(&self) -> &Self::Target {
+        &self.scene[self.id]
     }
 }
 
@@ -265,6 +364,7 @@ pub struct NodeBuilder<'a, 's> {
     scene: &'s mut Scene,
     desc: NodeDescriptor,
     mesh: Option<&'a Mesh>,
+    camera: Option<CameraDescriptor>,
 }
 
 impl<'a, 's> NodeBuilder<'a, 's> {
@@ -276,9 +376,11 @@ impl<'a, 's> NodeBuilder<'a, 's> {
                 name: None,
                 children: Vec::new(),
                 local_transform: Transform::IDENTITY,
-                global_transform: Mat4::IDENTITY,
+                world_matrix: Mat4::IDENTITY,
+                mesh: None,
             },
             mesh: None,
+            camera: None,
         }
     }
 
@@ -292,45 +394,63 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         self
     }
 
-    pub fn mesh(mut self, mesh: Option<&'a Mesh>) -> Self {
-        self.mesh = mesh;
+    pub fn translation_rotation_scale(
+        mut self,
+        translation: Vec3,
+        rotation: Quat,
+        scale: Vec3,
+    ) -> Self {
+        self.desc
+            .local_transform
+            .translation_rotation_scale(translation, rotation, scale);
         self
     }
 
-    pub fn build(mut self, device: &wgpu::Device) -> &'s mut Node {
+    pub fn local_position(mut self, position: Vec3) -> Self {
+        self.desc.local_transform.set_translation(position);
+        self
+    }
+
+    pub fn local_matrix(mut self, matrix: Mat4) -> Self {
+        self.desc.local_transform.set_matrix(matrix);
+        self
+    }
+
+    pub fn mesh(mut self, mesh: Option<&'a Mesh>) -> Self {
+        self.mesh = mesh;
+        self.desc.mesh = mesh.map(|mesh| mesh.id());
+        self
+    }
+
+    pub fn camera(mut self, camera: Option<CameraDescriptor>) -> Self {
+        self.camera = camera;
+        self
+    }
+
+    pub fn build(mut self) -> &'s mut Node {
         let id = self.scene.nodes.next_id();
         match self.desc.parent {
             Some(parent) => {
                 let parent = &mut self.scene.nodes[parent];
                 parent.children.push(id);
-                self.desc.global_transform =
-                    parent.global_transform * self.desc.local_transform.matrix();
+                self.desc.world_matrix = parent.world_matrix * self.desc.local_transform.matrix();
             }
             None => self.scene.root_nodes.push(id),
         }
+        self.scene.nodes_buffer = None;
+        let node = self.scene.nodes.push(self.desc);
+
         if let Some(mesh) = self.mesh {
             self.scene
                 .meshes
-                .entry(mesh.id())
-                .or_insert_with(|| {
-                    let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("Mesh instance vertex buffer"),
-                        size: size_of::<u32>() as u64,
-                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-                    MeshInstances {
-                        mesh: mesh.id(),
-                        primitives: mesh.primitives.clone(),
-                        nodes: Vec::with_capacity(1),
-                        vertex_buffer,
-                    }
-                })
-                .nodes
-                .push(id);
+                .instanciate_unchecked(mesh, node.id(), &self.scene.device);
         }
-        self.scene.nodes_buffer = None;
-        self.scene.nodes.push(self.desc)
+
+        if let Some(camera) = self.camera {
+            self.scene.cameras.insert(Camera::new(node.id(), camera));
+        }
+
+        node
     }
 }
 
@@ -339,7 +459,8 @@ pub struct NodeDescriptor {
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
     local_transform: Transform,
-    global_transform: Mat4,
+    world_matrix: Mat4,
+    mesh: Option<Id<Mesh>>,
 }
 
 impl DenseEntry for Node {
@@ -361,7 +482,8 @@ impl SetEntry for Node {
             parent: desc.parent,
             children: desc.children,
             local_transform: desc.local_transform,
-            global_transform: desc.global_transform,
+            world_matrix: desc.world_matrix,
+            mesh: desc.mesh,
         }
     }
 }
@@ -390,5 +512,27 @@ impl DenseEntry for MeshInstances {
 
     fn id(&self) -> Id<Self::Key> {
         self.mesh
+    }
+}
+
+impl SparseMap<MeshInstances> {
+    fn instanciate_unchecked(&mut self, mesh: &Mesh, node: Id<Node>, device: &wgpu::Device) {
+        self.entry(mesh.id())
+            .or_insert_with(|| {
+                let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Mesh instance vertex buffer"),
+                    size: size_of::<u32>() as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                MeshInstances {
+                    mesh: mesh.id(),
+                    primitives: mesh.primitives.clone(),
+                    nodes: Vec::with_capacity(1),
+                    vertex_buffer,
+                }
+            })
+            .nodes
+            .push(node);
     }
 }

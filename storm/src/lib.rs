@@ -1,13 +1,12 @@
 pub use asset::Asset;
 pub use math::Transform;
 use mesh::Mesh;
-pub use scene::{Node, Camera};
-pub use scene::Scene;
+pub use scene::{Camera, Node, Scene, camera};
 use storage::SparseSet;
 pub use storage::{DenseEntry, Id};
 
 mod asset;
-mod math;
+pub mod math;
 mod mesh;
 mod scene;
 mod storage;
@@ -25,7 +24,11 @@ pub struct Storm {
 }
 
 impl Storm {
-    pub fn new(render_texture_format: wgpu::TextureFormat, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    pub fn new(
+        render_texture_format: wgpu::TextureFormat,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Self {
         let assets = SparseSet::new();
         let meshes = SparseSet::new();
         let scenes = SparseSet::new();
@@ -86,5 +89,9 @@ impl Storm {
 
     pub fn scenes(&self) -> std::slice::Iter<'_, Scene> {
         self.scenes.iter()
+    }
+
+    pub fn scenes_mut(&mut self) -> std::slice::IterMut<'_, Scene> {
+        self.scenes.iter_mut()
     }
 }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use controls::{Controls, OrbitControls};
 use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
@@ -108,6 +109,7 @@ struct Engine {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     storm: Storm,
+    controls: Vec<OrbitControls>,
     explorer: Explorer,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -174,37 +176,42 @@ impl Engine {
                 panic!("{err}");
             }
         }
-        for scene in storm.scenes_mut() {
-            let target = scene
-                .node_builder()
-                .name("Orbit camera target".to_string().into())
-                .build()
-                .id();
-            let cursor = scene
-                .node_builder()
-                .name("Orbit camera cursor".to_string().into())
-                .build()
-                .id();
-            let camera = scene
-                .node_builder()
-                .name("Orbit camera node".to_string().into())
-                .local_position(1.5 * Vec3::Z)
-                .camera(
-                    storm::camera::CameraDescriptor {
-                        name: Some("Orbit camera".to_string()),
-                        projection: storm::camera::Projection::Perspective {
-                            aspect_ratio: None,
-                            y_fov: f32::to_radians(90.0),
-                            z_far: Some(100.0),
-                            z_near: 0.01,
-                        },
-                    }
-                    .into(),
-                )
-                .build()
-                .id();
-            scene.set_active_camera(camera.into());
-        }
+        let controls = storm
+            .scenes_mut()
+            .map(|scene| {
+                let target = scene
+                    .node_builder()
+                    .name("Orbit camera target".to_string().into())
+                    .build()
+                    .id();
+                let cursor = scene
+                    .node_builder()
+                    .name("Orbit camera cursor".to_string().into())
+                    .build()
+                    .id();
+                let camera = scene
+                    .node_builder()
+                    .name("Orbit camera node".to_string().into())
+                    .local_position(1.5 * Vec3::Z)
+                    .camera(
+                        storm::camera::CameraDescriptor {
+                            name: Some("Orbit camera".to_string()),
+                            projection: storm::camera::Projection::Perspective {
+                                aspect_ratio: None,
+                                y_fov: f32::to_radians(90.0),
+                                z_far: Some(100.0),
+                                z_near: 0.01,
+                            },
+                        }
+                        .into(),
+                    )
+                    .build()
+                    .id();
+                scene.set_active_camera(camera.into());
+
+                OrbitControls::new(scene, target, cursor, camera)
+            })
+            .collect();
 
         let explorer = Explorer::new();
 
@@ -229,6 +236,7 @@ impl Engine {
             surface,
             surface_config,
             storm,
+            controls,
             explorer,
             egui_state,
             egui_renderer,
@@ -243,20 +251,19 @@ impl Engine {
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
-            if let Some(_scene) = self.storm.scene_mut() {
+            if let Some(scene) = self.storm.scene_mut() {
                 egui::CentralPanel::default().show(&ctx, |ui| {
-                    // let size = match scene.aspect_ratio() {
-                    //     Some(aspect_ratio) => {
-                    //         let width = ui.available_width();
-                    //         let height = ui.available_height();
-                    //         egui::vec2(
-                    //             width.min(height * aspect_ratio),
-                    //             height.min(width / aspect_ratio),
-                    //         )
-                    //     }
-                    //     None => ui.available_size(),
-                    // };
-                    let size = ui.available_size();
+                    let size = match scene.aspect_ratio() {
+                        Some(aspect_ratio) => {
+                            let width = ui.available_width();
+                            let height = ui.available_height();
+                            egui::vec2(
+                                width.min(height * aspect_ratio),
+                                height.min(width / aspect_ratio),
+                            )
+                        }
+                        None => ui.available_size(),
+                    };
                     let width = (size.x * ui.pixels_per_point()) as u32;
                     let height = (size.y * ui.pixels_per_point()) as u32;
                     if width != self.render_texture.width()
@@ -277,11 +284,20 @@ impl Engine {
                     ui.horizontal_centered(|ui| {
                         ui.vertical_centered(|ui| {
                             ui.image((self.render_texture_id, size));
-                            let _response = ui.interact(
+                            let response = ui.interact(
                                 ui.clip_rect(),
                                 egui::Id::new("render region"),
                                 egui::Sense::all(),
                             );
+                            if response.hovered() {
+                                ui.input_mut(|inputs| {
+                                    for controls in self.controls.iter_mut() {
+                                        if controls.scene() == scene.id() {
+                                            controls.take_input(inputs, size, scene);
+                                        }
+                                    }
+                                });
+                            }
                         });
                     });
                 });
@@ -302,7 +318,14 @@ impl Engine {
                 });
 
         if let Some(scene) = self.storm.scene_mut() {
-            scene.update(self.render_texture.width() as f32 / self.render_texture.height() as f32);
+            let viewport_aspect_ratio =
+                self.render_texture.width() as f32 / self.render_texture.height() as f32;
+            for controls in self.controls.iter_mut() {
+                if controls.scene() == scene.id() {
+                    controls.update(viewport_aspect_ratio, scene);
+                }
+            }
+            scene.update(viewport_aspect_ratio);
         }
 
         let screen_descriptor = ScreenDescriptor {

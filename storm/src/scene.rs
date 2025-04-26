@@ -51,8 +51,8 @@ impl Scene {
         self.cameras.get_mut(id)
     }
 
-    pub fn active_camera(&self) -> Option<&Camera> {
-        self.active_camera.map(|id| &self.cameras[id])
+    pub fn active_camera(&self) -> Option<Id<Node>> {
+        self.active_camera
     }
 
     pub fn set_active_camera(&mut self, camera: Option<Id<Node>>) {
@@ -67,6 +67,13 @@ impl Scene {
 
     pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
         self.cameras.iter()
+    }
+
+    pub fn aspect_ratio(&self) -> Option<f32> {
+        match self.cameras[self.active_camera?].projection {
+            camera::Projection::Perspective { aspect_ratio, .. } => aspect_ratio,
+            camera::Projection::Orthographic { x_mag, y_mag, .. } => Some(x_mag / y_mag),
+        }
     }
 
     pub fn update(&mut self, viewport_aspect_ration: f32) {
@@ -103,7 +110,7 @@ impl Scene {
                 .projection
                 .matrix(viewport_aspect_ration);
             let camera = &self.nodes[camera];
-            let view = Mat4::look_to_lh(
+            let view = Mat4::look_to_rh(
                 camera.world_position(),
                 camera.world_matrix.transform_vector3(-Vec3::Z),
                 camera.world_matrix.transform_vector3(Vec3::Y),
@@ -435,7 +442,10 @@ impl<'a, 's> NodeBuilder<'a, 's> {
                 parent.children.push(id);
                 self.desc.world_matrix = parent.world_matrix * self.desc.local_transform.matrix();
             }
-            None => self.scene.root_nodes.push(id),
+            None => {
+                self.scene.root_nodes.push(id);
+                self.desc.world_matrix = self.desc.local_transform.matrix()
+            }
         }
         self.scene.nodes_buffer = None;
         let node = self.scene.nodes.push(self.desc);

@@ -10,7 +10,12 @@ struct NodeUniform {
     model: mat4x4<f32>,
 }
 
+struct CameraUniform {
+    view_projection: mat4x4<f32>,
+}
+
 @group(0) @binding(0) var<storage, read> nodes: array<NodeUniform>;
+@group(0) @binding(1) var<uniform> camera: CameraUniform;
 
 @vertex
 fn vs_main(
@@ -20,7 +25,7 @@ fn vs_main(
     let node = nodes[index];
 
     var result: VertexOutput;
-    result.position = node.model * vec4(attributes.position, 1.0);
+    result.position = camera.view_projection * node.model * vec4(attributes.position, 1.0);
     return result;
 }
 

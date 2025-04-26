@@ -11,6 +11,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
 
 mod explorer;
+// mod controls;
 
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -166,9 +167,9 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut storm = Storm::new(RENDER_TEXTURE_FORMAT, &device);
+        let mut storm = Storm::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
         if let Some(path) = load_asset {
-            if let Err(err) = storm.open_gltf(path, &device) {
+            if let Err(err) = storm.open_gltf(path) {
                 panic!("{err}");
             }
         }
@@ -269,11 +270,7 @@ impl Engine {
                 });
 
         if let Some(scene) = self.storm.scene_mut() {
-            scene.update(
-                self.render_texture.width() as f32 / self.render_texture.height() as f32,
-                &self.device,
-                &self.queue,
-            );
+            scene.update(self.render_texture.width() as f32 / self.render_texture.height() as f32);
         }
 
         let screen_descriptor = ScreenDescriptor {

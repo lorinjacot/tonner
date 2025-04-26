@@ -10,11 +10,7 @@ use crate::{
 };
 
 impl Storm {
-    pub fn open_gltf(
-        &mut self,
-        path: impl AsRef<std::path::Path>,
-        device: &wgpu::Device,
-    ) -> Result<&Asset, gltf::Error> {
+    pub fn open_gltf(&mut self, path: impl AsRef<std::path::Path>) -> Result<&Asset, gltf::Error> {
         let (document, buffers, _images) = gltf::import(path)?;
 
         let mut accessors: Vec<Option<Accessor>> = vec![None; document.accessors().len()];
@@ -40,8 +36,12 @@ impl Storm {
                         match &accessors[indices.index()] {
                             Some(Accessor::IndexBuffer(index_buffer)) => index_buffer.clone(),
                             None => {
-                                let index_buffer =
-                                    IndexBuffer::from_gltf(&indices, &buffers, &mut views, device);
+                                let index_buffer = IndexBuffer::from_gltf(
+                                    &indices,
+                                    &buffers,
+                                    &mut views,
+                                    &self.device,
+                                );
                                 accessors[indices.index()] =
                                     Some(Accessor::IndexBuffer(index_buffer.clone()));
                                 index_buffer
@@ -59,7 +59,7 @@ impl Storm {
                             Some(Accessor::Attribute(attribute)) => attribute.clone(),
                             None => {
                                 let attribute =
-                                    Attribute::from(&accessor, &buffers, &mut views, device);
+                                    Attribute::from(&accessor, &buffers, &mut views, &self.device);
                                 accessors[accessor.index()] =
                                     Some(Accessor::Attribute(attribute.clone()));
                                 attribute
@@ -103,45 +103,50 @@ impl Storm {
                     }));
 
                     let pipeline_layout =
-                        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                            label: Some(&format!("{name} pipeline layout")),
-                            bind_group_layouts: &[&self.scene_bind_group_layout],
-                            push_constant_ranges: &[],
-                        });
+                        self.device
+                            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                                label: Some(&format!("{name} pipeline layout")),
+                                bind_group_layouts: &[&self.render_bind_group_layout],
+                                push_constant_ranges: &[],
+                            });
 
-                    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some(&format!("{name} pipeline")),
-                        layout: Some(&pipeline_layout),
-                        vertex: wgpu::VertexState {
-                            module: &self.primitive_shader_module,
-                            entry_point: Some("vs_main"),
-                            compilation_options: wgpu::PipelineCompilationOptions::default(),
-                            buffers: &vertex_buffer_layouts,
-                        },
-                        primitive: wgpu::PrimitiveState {
-                            topology: wgpu::PrimitiveTopology::TriangleList,
-                            strip_index_format: None,
-                            front_face: wgpu::FrontFace::Ccw,
-                            cull_mode: None,
-                            unclipped_depth: false,
-                            polygon_mode: wgpu::PolygonMode::Fill,
-                            conservative: false,
-                        },
-                        depth_stencil: None,
-                        multisample: wgpu::MultisampleState {
-                            count: 1,
-                            mask: !0,
-                            alpha_to_coverage_enabled: false,
-                        },
-                        fragment: Some(wgpu::FragmentState {
-                            module: &self.primitive_shader_module,
-                            entry_point: Some("fs_main"),
-                            compilation_options: wgpu::PipelineCompilationOptions::default(),
-                            targets: &[Some(self.render_texture_format.into())],
-                        }),
-                        multiview: None,
-                        cache: None,
-                    });
+                    let pipeline =
+                        self.device
+                            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                                label: Some(&format!("{name} pipeline")),
+                                layout: Some(&pipeline_layout),
+                                vertex: wgpu::VertexState {
+                                    module: &self.primitive_shader_module,
+                                    entry_point: Some("vs_main"),
+                                    compilation_options: wgpu::PipelineCompilationOptions::default(
+                                    ),
+                                    buffers: &vertex_buffer_layouts,
+                                },
+                                primitive: wgpu::PrimitiveState {
+                                    topology: wgpu::PrimitiveTopology::TriangleList,
+                                    strip_index_format: None,
+                                    front_face: wgpu::FrontFace::Ccw,
+                                    cull_mode: None,
+                                    unclipped_depth: false,
+                                    polygon_mode: wgpu::PolygonMode::Fill,
+                                    conservative: false,
+                                },
+                                depth_stencil: None,
+                                multisample: wgpu::MultisampleState {
+                                    count: 1,
+                                    mask: !0,
+                                    alpha_to_coverage_enabled: false,
+                                },
+                                fragment: Some(wgpu::FragmentState {
+                                    module: &self.primitive_shader_module,
+                                    entry_point: Some("fs_main"),
+                                    compilation_options: wgpu::PipelineCompilationOptions::default(
+                                    ),
+                                    targets: &[Some(self.render_texture_format.into())],
+                                }),
+                                multiview: None,
+                                cache: None,
+                            });
 
                     let vertex_buffers = vertex_buffers.into_keys().collect();
 
@@ -166,10 +171,19 @@ impl Storm {
             .map(|gltf_scene| {
                 let scene = self.scenes.push(SceneDescriptor {
                     name: gltf_scene.name().map(|name| name.to_string()),
-                    bind_group_layout: self.scene_bind_group_layout.clone(),
+                    render_bind_group_layout: self.render_bind_group_layout.clone(),
+                    device: self.device.clone(),
+                    queue: self.queue.clone(),
                 });
                 for gltf_node in gltf_scene.nodes() {
-                    Node::from_gltf(&gltf_node, None, scene, &mut self.meshes, &meshes, device);
+                    Node::from_gltf(
+                        &gltf_node,
+                        None,
+                        scene,
+                        &mut self.meshes,
+                        &meshes,
+                        &self.device,
+                    );
                 }
                 scene.id()
             })

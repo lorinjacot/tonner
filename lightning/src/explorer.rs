@@ -40,20 +40,18 @@ impl Explorer {
                 self.node_ui(ui, *node, scene);
             }
 
-            //     ui.separator();
-            //     ui.label("Camera");
-            //     let mut active_camera = scene.active_camera;
-            //     egui::ComboBox::from_id_salt("Camera")
-            //         .selected_text(
-            //             scene
-            //                 .active_camera
-            //                 .map_or("", |camera| &scene.camera(camera).unwrap().name.0),
-            //         )
-            //         .show_ui(ui, |ui| {
-            //             for (id, camera) in scene.cameras.iter() {
-            //                 ui.selectable_value(&mut active_camera, Some(id), &camera.name.0);
-            //             }
-            //         });
+            ui.separator();
+            ui.label("Camera");
+            let active_camera = scene.camera();
+            let mut active_camera_id = active_camera.map(|camera| camera.id());
+            egui::ComboBox::from_id_salt("Camera")
+                .selected_text(active_camera.map_or("", |camera| &camera.name))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut active_camera_id, None, "");
+                    for camera in scene.cameras() {
+                        ui.selectable_value(&mut active_camera_id, Some(camera.id()), &camera.name);
+                    }
+                });
 
             //     ui.separator();
             //     ui.label("Environment");
@@ -77,7 +75,7 @@ impl Explorer {
             //     let scene = storm.active_scene_mut().unwrap();
 
             let scene = storm.scene_mut().unwrap();
-            // scene.active_camera = active_camera;
+            scene.set_camera(active_camera_id);
             // scene.environment_map = active_environment_map;
 
             if let Some(node) = self.node_modal {

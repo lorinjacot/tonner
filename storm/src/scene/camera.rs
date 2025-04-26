@@ -1,0 +1,77 @@
+use glam::Mat4;
+
+use crate::{DenseEntry, Id};
+
+use super::Node;
+
+pub struct Camera {
+    node: Id<Node>,
+    pub name: String,
+    projection: Projection,
+}
+
+impl Camera {
+    pub fn projection(&self, viewport_aspect_ratio: f32) -> Mat4 {
+        match self.projection {
+            Projection::Orthographic {
+                x_mag,
+                y_mag,
+                z_far,
+                z_near,
+                zoom,
+            } => Mat4::orthographic_rh(
+                -x_mag / zoom,
+                x_mag / zoom,
+                -y_mag / zoom,
+                y_mag / zoom,
+                z_near,
+                z_far,
+            ),
+            Projection::Perspective {
+                aspect_ratio,
+                y_fov,
+                z_far: Some(z_far),
+                z_near,
+            } => Mat4::perspective_rh(
+                y_fov,
+                aspect_ratio.unwrap_or(viewport_aspect_ratio),
+                z_near,
+                z_far,
+            ),
+            Projection::Perspective {
+                aspect_ratio,
+                y_fov,
+                z_far: None,
+                z_near,
+            } => Mat4::perspective_infinite_rh(
+                y_fov,
+                aspect_ratio.unwrap_or(viewport_aspect_ratio),
+                z_near,
+            ),
+        }
+    }
+}
+
+impl DenseEntry for Camera {
+    type Key = Node;
+
+    fn id(&self) -> Id<Self::Key> {
+        self.node
+    }
+}
+
+pub enum Projection {
+    Orthographic {
+        x_mag: f32,
+        y_mag: f32,
+        z_far: f32,
+        z_near: f32,
+        zoom: f32,
+    },
+    Perspective {
+        aspect_ratio: Option<f32>,
+        y_fov: f32,
+        z_far: Option<f32>,
+        z_near: f32,
+    },
+}

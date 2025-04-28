@@ -27,12 +27,22 @@ impl<'a> TextureBuilder<'a> {
             },
             mip_level_count: 1,
             generate_mips: false,
-            usage: wgpu::TextureUsages::empty(),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
         }
     }
 
     pub fn name(mut self, name: &'a str) -> Self {
         self.name = Some(name);
+        self
+    }
+
+    pub fn usage(mut self, usage: wgpu::TextureUsages) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    pub fn empty(mut self, size: wgpu::Extent3d, format: wgpu::TextureFormat) -> Self {
+        self.source = Source::Empty { size, format };
         self
     }
 

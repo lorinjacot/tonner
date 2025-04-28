@@ -28,6 +28,9 @@ pub struct Scene {
     camera_buffer: wgpu::Buffer,
     render_bind_group_layout: wgpu::BindGroupLayout,
     render_bind_group: Option<wgpu::BindGroup>,
+    skybox_bind_group_layout: wgpu::BindGroupLayout,
+    skybox_bind_group: Option<wgpu::BindGroup>,
+    skybox_pipeline: wgpu::RenderPipeline,
 }
 
 impl Scene {
@@ -115,8 +118,10 @@ impl Scene {
                 camera.world_matrix().transform_vector3(-Vec3::Z),
                 camera.world_matrix().transform_vector3(Vec3::Y),
             );
+            let view_projection = projection * view;
             let camera_uniform = CameraUniform {
-                view_projection: projection * view,
+                view_projection,
+                view_projection_inv: view_projection.inverse(),
             };
             self.queue
                 .write_buffer(&self.camera_buffer, 0, cast_slice(&[camera_uniform]));
@@ -192,6 +197,12 @@ impl Scene {
                     }
                 }
             }
+
+            if let Some(skybox_bind_group) = self.skybox_bind_group.as_ref() {
+                render_pass.set_pipeline(&self.skybox_pipeline);
+                render_pass.set_bind_group(1, skybox_bind_group, &[]);
+                render_pass.draw(0..3, 0..1);
+            }
         }
     }
 }
@@ -212,9 +223,11 @@ impl IndexMut<Id<Node>> for Scene {
 
 pub struct SceneDescriptor {
     pub(super) name: Option<String>,
-    pub(super) render_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
+    pub(super) render_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) skybox_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) skybox_pipeline: wgpu::RenderPipeline,
 }
 
 impl DenseEntry for Scene {
@@ -256,6 +269,9 @@ impl SetEntry for Scene {
             camera_buffer,
             render_bind_group_layout: desc.render_bind_group_layout,
             render_bind_group: None,
+            skybox_bind_group_layout: desc.skybox_bind_group_layout,
+            skybox_bind_group: None,
+            skybox_pipeline: desc.skybox_pipeline,
         }
     }
 }
@@ -270,6 +286,7 @@ struct NodeUniform {
 #[repr(C)]
 struct CameraUniform {
     view_projection: Mat4,
+    view_projection_inv: Mat4,
 }
 
 struct MeshInstances {

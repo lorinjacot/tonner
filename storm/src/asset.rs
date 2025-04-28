@@ -21,9 +21,11 @@ impl Storm {
             .map(|gltf_scene| {
                 let scene = self.scenes.push(SceneDescriptor {
                     name: gltf_scene.name().map(|name| name.to_string()),
-                    render_bind_group_layout: self.render_bind_group_layout.clone(),
                     device: self.device.clone(),
                     queue: self.queue.clone(),
+                    render_bind_group_layout: self.render_bind_group_layout.clone(),
+                    skybox_bind_group_layout: self.skybox_bind_group_layout.clone(),
+                    skybox_pipeline: self.skybox_pipeline.clone(),
                 });
                 for node in gltf_scene.nodes() {
                     scene.build_gltf_node(node, None, &mut self.meshes, &mesh_mapping);

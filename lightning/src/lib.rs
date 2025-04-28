@@ -227,6 +227,8 @@ impl Engine {
             .from_equirectangular_map(&radiance_image)
             .build(&mut encoder);
 
+        queue.submit([encoder.finish()]);
+
         let explorer = Explorer::new();
 
         let egui_state = egui_winit::State::new(
@@ -242,6 +244,8 @@ impl Engine {
 
         let (render_texture, render_texture_view, render_texture_id) =
             create_render_texture(size.width, size.height, &mut egui_renderer, &device);
+
+        device.stop_capture();
 
         Self {
             device,
@@ -265,7 +269,7 @@ impl Engine {
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
-            if let Some(scene) = self.storm.scene_mut() {
+            if let Some(scene) = self.storm.active_scene() {
                 egui::CentralPanel::default().show(&ctx, |ui| {
                     let size = match scene.aspect_ratio() {
                         Some(aspect_ratio) => {
@@ -331,7 +335,7 @@ impl Engine {
                     label: Some("Engine::draw command encoder"),
                 });
 
-        if let Some(scene) = self.storm.scene_mut() {
+        if let Some(scene) = self.storm.active_scene_mut() {
             let viewport_aspect_ratio =
                 self.render_texture.width() as f32 / self.render_texture.height() as f32;
             for controls in self.controls.iter_mut() {
@@ -361,7 +365,7 @@ impl Engine {
             self.egui_renderer.free_texture(&id);
         }
 
-        if let Some(scene) = self.storm.scene() {
+        if let Some(scene) = self.storm.active_scene() {
             let mut storm_render_pass =
                 command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("storm render pass"),

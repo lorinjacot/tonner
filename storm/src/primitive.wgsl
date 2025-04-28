@@ -12,6 +12,7 @@ struct NodeUniform {
 
 struct CameraUniform {
     view_projection: mat4x4<f32>,
+    view_projection_inv: mat4x4<f32>
 }
 
 @group(0) @binding(0) var<storage, read> nodes: array<NodeUniform>;

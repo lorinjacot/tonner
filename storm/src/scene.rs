@@ -28,7 +28,6 @@ pub struct Scene {
     camera_buffer: wgpu::Buffer,
     render_bind_group_layout: wgpu::BindGroupLayout,
     render_bind_group: Option<wgpu::BindGroup>,
-    skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group: Option<wgpu::BindGroup>,
     skybox_pipeline: wgpu::RenderPipeline,
 }
@@ -55,7 +54,6 @@ impl Scene {
             camera_buffer,
             render_bind_group_layout: resources.render_bind_group_layout.clone(),
             render_bind_group: None,
-            skybox_bind_group_layout: resources.skybox_bind_group_layout.clone(),
             skybox_bind_group: None,
             skybox_pipeline: resources.skybox_pipeline.clone(),
         }
@@ -107,24 +105,7 @@ impl Scene {
     }
 
     pub fn set_environment(&mut self, environment: &Environment) {
-        self.skybox_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Skybox bind group"),
-            layout: &self.skybox_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        environment.environment_cubemap_view(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(
-                        environment.environment_cubemap_sampler(),
-                    ),
-                },
-            ],
-        }))
+        self.skybox_bind_group = Some(environment.skybox_bind_group().clone());
     }
 
     pub fn update(&mut self, viewport_aspect_ration: f32) {

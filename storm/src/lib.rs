@@ -36,9 +36,33 @@ impl Resources {
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> Self {
+        let skybox_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Skybox bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
         let meshes = SparseSet::new();
         let environments = SparseSet::new();
-        let environment_builder_data = EnvironmentBuilderData::new(&device);
+        let environment_builder_data =
+            EnvironmentBuilderData::new(&device, &skybox_bind_group_layout);
 
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
@@ -64,29 +88,6 @@ impl Resources {
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
-                        count: None,
-                    },
-                ],
-            });
-
-        let skybox_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Skybox bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::Cube,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                 ],

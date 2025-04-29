@@ -2,7 +2,7 @@ use std::ops::{Index, IndexMut};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
 pub use camera::Camera;
-use glam::{Mat3, Mat4, Vec3, usize};
+use glam::{Mat3, Mat4, Vec3, Vec4, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
 use wgpu::util::DeviceExt;
 
@@ -150,8 +150,12 @@ impl Scene {
                     let model = node.world_matrix();
                     let model_normal = Mat3::from_mat4(model.inverse().transpose());
                     NodeUniform {
-                        model: model.to_cols_array(),
-                        model_normal: model_normal.to_cols_array(),
+                        model,
+                        model_normal: [
+                            model_normal.x_axis.extend(0.0),
+                            model_normal.y_axis.extend(0.0),
+                            model_normal.z_axis.extend(0.0),
+                        ],
                     }
                 })
                 .collect();
@@ -309,8 +313,8 @@ impl IndexMut<Id<Node>> for Scene {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct NodeUniform {
-    model: [f32; 4 * 4],
-    model_normal: [f32; 3 * 3],
+    model: Mat4,
+    model_normal: [Vec4; 3],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

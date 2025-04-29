@@ -15,6 +15,8 @@ use winit::window::Window;
 mod controls;
 mod explorer;
 
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
@@ -118,6 +120,7 @@ struct Engine {
     render_texture: wgpu::Texture,
     render_texture_view: wgpu::TextureView,
     render_texture_id: egui::TextureId,
+    depth_texture_view: wgpu::TextureView,
 }
 
 impl Engine {
@@ -250,6 +253,8 @@ impl Engine {
         let (render_texture, render_texture_view, render_texture_id) =
             create_render_texture(size.width, size.height, &mut egui_renderer, &device);
 
+        let depth_texture_view = create_depth_texture_view(size.width, size.height, &device);
+
         device.stop_capture();
 
         Self {
@@ -268,6 +273,7 @@ impl Engine {
             render_texture,
             render_texture_view,
             render_texture_id,
+            depth_texture_view,
         }
     }
 
@@ -308,6 +314,8 @@ impl Engine {
                             &mut self.egui_renderer,
                             &self.device,
                         );
+                        self.depth_texture_view =
+                            create_depth_texture_view(width, height, &self.device);
                     }
 
                     ui.horizontal_centered(|ui| {
@@ -390,7 +398,14 @@ impl Engine {
                             store: wgpu::StoreOp::Store,
                         },
                     })],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_texture_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
@@ -468,4 +483,26 @@ fn create_render_texture(
     );
 
     (render_texture, render_texture_view, render_texture_id)
+}
+
+fn create_depth_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {
+    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("depth texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+
+    depth_texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("Depth texture view"),
+        ..Default::default()
+    })
 }

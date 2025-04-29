@@ -175,15 +175,15 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut resources = Resources::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
-        let (mut scenes, active_scene) = load_asset.map_or_else(
-            || (Vec::new(), None),
-            |path| open_gltf(path, &mut resources).unwrap(),
-        );
-
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Engine::new command encoder"),
         });
+
+        let mut resources = Resources::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
+        let (mut scenes, active_scene) = load_asset.map_or_else(
+            || (Vec::new(), None),
+            |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
+        );
 
         let radiance_image = include_bytes!("../../assets/environments/newport_loft.hdr");
         let radiance_image = std::io::Cursor::new(radiance_image);

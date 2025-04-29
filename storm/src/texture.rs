@@ -3,6 +3,7 @@ use wgpu::util::DeviceExt;
 
 use crate::Resources;
 
+#[must_use]
 pub struct TextureBuilder<'a> {
     resources: &'a Resources,
     name: Option<&'a str>,
@@ -46,6 +47,20 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
+    pub fn bytes(
+        mut self,
+        size: wgpu::Extent3d,
+        format: wgpu::TextureFormat,
+        bytes: &'a [u8],
+    ) -> Self {
+        self.source = Source::Bytes {
+            size,
+            format,
+            bytes,
+        };
+        self
+    }
+
     pub fn from_dynamic_image(mut self, dynamic_image: &'a DynamicImage, srgb: bool) -> Self {
         self.source = Source::DynamicImage {
             dynamic_image,
@@ -70,6 +85,25 @@ impl<'a> TextureBuilder<'a> {
                         view_formats: &[],
                     })
             }
+            Source::Bytes {
+                size,
+                format,
+                bytes,
+            } => self.resources.device.create_texture_with_data(
+                &self.resources.queue,
+                &wgpu::TextureDescriptor {
+                    label: self.name,
+                    size,
+                    mip_level_count: self.mip_level_count,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: self.usage,
+                    view_formats: &[],
+                },
+                wgpu::util::TextureDataOrder::LayerMajor,
+                bytes,
+            ),
             Source::DynamicImage {
                 dynamic_image,
                 srgb,
@@ -128,6 +162,11 @@ enum Source<'a> {
     Empty {
         size: wgpu::Extent3d,
         format: wgpu::TextureFormat,
+    },
+    Bytes {
+        size: wgpu::Extent3d,
+        format: wgpu::TextureFormat,
+        bytes: &'a [u8],
     },
     DynamicImage {
         dynamic_image: &'a DynamicImage,

@@ -289,11 +289,20 @@ pub struct Environment {
     id: Id<Environment>,
     pub name: String,
     skybox_bind_group: wgpu::BindGroup,
+    irradiance_map: (wgpu::TextureView, wgpu::Sampler),
 }
 
 impl Environment {
     pub fn skybox_bind_group(&self) -> &wgpu::BindGroup {
         &self.skybox_bind_group
+    }
+
+    pub fn irradiance_map_view(&self) -> &wgpu::TextureView {
+        &self.irradiance_map.0
+    }
+
+    pub fn irradiance_map_sampler(&self) -> &wgpu::Sampler {
+        &self.irradiance_map.1
     }
 }
 
@@ -308,6 +317,7 @@ impl DenseEntry for Environment {
 pub struct EnvironmentDescriptor {
     name: Option<String>,
     skybox_bind_group: wgpu::BindGroup,
+    irradiance_map: (wgpu::TextureView, wgpu::Sampler),
 }
 
 impl SetEntry for Environment {
@@ -319,6 +329,7 @@ impl SetEntry for Environment {
             id,
             name,
             skybox_bind_group: desc.skybox_bind_group,
+            irradiance_map: desc.irradiance_map,
         }
     }
 }
@@ -526,6 +537,12 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             ..Default::default()
         });
 
+        let irradiance_map_sampler = self
+            .resources
+            .environment_builder_data
+            .environment_map_sampler
+            .clone();
+
         let irradiance_map_bind_group =
             self.resources
                 .device
@@ -539,12 +556,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::Sampler(
-                                &self
-                                    .resources
-                                    .environment_builder_data
-                                    .environment_map_sampler,
-                            ),
+                            resource: wgpu::BindingResource::Sampler(&irradiance_map_sampler),
                         },
                     ],
                 });
@@ -552,6 +564,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
         self.resources.environments.push(EnvironmentDescriptor {
             name: self.name,
             skybox_bind_group: irradiance_map_bind_group,
+            irradiance_map: (irradiance_map_view, irradiance_map_sampler),
         })
     }
 }

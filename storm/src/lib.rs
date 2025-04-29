@@ -2,7 +2,8 @@ pub use asset::open_gltf;
 pub use environment::Environment;
 use environment::{EnvironmentBuilder, EnvironmentBuilderData};
 pub use math::Transform;
-pub use mesh::Mesh;
+use mesh::MeshBuilderData;
+pub use mesh::{Mesh, MeshBuilder, PrimitiveBuilder};
 pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
@@ -22,9 +23,9 @@ pub struct Resources {
     queue: wgpu::Queue,
     render_texture_format: wgpu::TextureFormat,
     meshes: SparseSet<Mesh>,
+    mesh_builder_data: MeshBuilderData,
     environments: SparseSet<Environment>,
     environment_builder_data: EnvironmentBuilderData,
-    primitive_shader_module: wgpu::ShaderModule,
     render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,
@@ -36,6 +37,52 @@ impl Resources {
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> Self {
+        let render_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("render bind group layout"),
+                entries: &[
+                    // nodes
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // camera
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // irradiance map
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
         let skybox_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Skybox bind group layout"),
@@ -60,38 +107,11 @@ impl Resources {
             });
 
         let meshes = SparseSet::new();
+        let mesh_builder_data = MeshBuilderData::new(&device, &render_bind_group_layout);
+
         let environments = SparseSet::new();
         let environment_builder_data =
             EnvironmentBuilderData::new(&device, &skybox_bind_group_layout);
-
-        let primitive_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
-        let render_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("render bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
 
         let module = &device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
         let skybox_pipeline_layout =
@@ -145,13 +165,21 @@ impl Resources {
             queue,
             render_texture_format,
             meshes,
+            mesh_builder_data,
             environments,
             environment_builder_data,
-            primitive_shader_module,
             render_bind_group_layout,
             skybox_bind_group_layout,
             skybox_pipeline,
         }
+    }
+
+    pub fn primitive_builder(&mut self) -> PrimitiveBuilder {
+        PrimitiveBuilder::new(self)
+    }
+
+    pub fn mesh_builder(&mut self) -> MeshBuilder {
+        MeshBuilder::new(self)
     }
 
     fn texture_builder(&self) -> TextureBuilder {

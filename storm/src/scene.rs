@@ -26,6 +26,8 @@ pub struct Scene {
     cameras: SparseMap<Camera>,
     active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
+    irradiance_map_view: wgpu::TextureView,
+    irradiance_map_sampler: wgpu::Sampler,
     render_bind_group_layout: wgpu::BindGroupLayout,
     render_bind_group: Option<wgpu::BindGroup>,
     skybox_bind_group: Option<wgpu::BindGroup>,
@@ -33,12 +35,39 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub(super) fn new(name: String, resources: &Resources) -> Self {
+    pub(super) fn new(
+        name: String,
+        resources: &Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Self {
         let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
             size: size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
+        });
+        let irradiance_map_texture = resources
+            .texture_builder()
+            .name("Irradiance map texture")
+            .bytes(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                wgpu::TextureFormat::Rgba8Unorm,
+                &[u8::MAX; 4 * 6],
+            )
+            .build(encoder);
+        let irradiance_map_view =
+            irradiance_map_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("Irradiance map view"),
+                dimension: Some(wgpu::TextureViewDimension::Cube),
+                ..Default::default()
+            });
+        let irradiance_map_sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Irrandiance map sampler"),
+            ..Default::default()
         });
 
         Self {
@@ -52,6 +81,8 @@ impl Scene {
             cameras: SparseMap::new(),
             active_camera: None,
             camera_buffer,
+            irradiance_map_view,
+            irradiance_map_sampler,
             render_bind_group_layout: resources.render_bind_group_layout.clone(),
             render_bind_group: None,
             skybox_bind_group: None,
@@ -106,6 +137,8 @@ impl Scene {
 
     pub fn set_environment(&mut self, environment: &Environment) {
         self.skybox_bind_group = Some(environment.skybox_bind_group().clone());
+        self.irradiance_map_view = environment.irradiance_map_view().clone();
+        self.irradiance_map_sampler = environment.irradiance_map_sampler().clone();
     }
 
     pub fn update(&mut self, viewport_aspect_ration: f32) {
@@ -188,16 +221,31 @@ impl Scene {
             if self.render_bind_group.is_none() {
                 self.render_bind_group =
                     Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("{} scene bind group", self.name)),
+                        label: Some(&format!("{} render bind group", self.name)),
                         layout: &self.render_bind_group_layout,
                         entries: &[
+                            // nodes
                             wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: nodes_buffer.as_entire_binding(),
                             },
+                            // camera
                             wgpu::BindGroupEntry {
                                 binding: 1,
                                 resource: self.camera_buffer.as_entire_binding(),
+                            },
+                            // irradiance map
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &self.irradiance_map_view,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &self.irradiance_map_sampler,
+                                ),
                             },
                         ],
                     }))
@@ -221,7 +269,7 @@ impl Scene {
                     match &primitive.index_buffer {
                         Some(index_buffer) => {
                             render_pass.set_index_buffer(
-                                index_buffer.buffer.slice(index_buffer.offset..),
+                                index_buffer.buffer.slice(..),
                                 index_buffer.format,
                             );
                             render_pass.draw_indexed(

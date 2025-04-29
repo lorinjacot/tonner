@@ -1,5 +1,5 @@
 use egui::Ui;
-use storm::{DenseEntry, Id, Node, Scene, Storm, Transform};
+use storm::{DenseEntry, Id, Node, Scene, Transform};
 
 pub struct Explorer {
     node_modal: Option<Id<Node>>,
@@ -10,30 +10,29 @@ impl Explorer {
         Self { node_modal: None }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, storm: &mut Storm) {
+    pub fn ui(&mut self, ui: &mut Ui, scenes: &mut [Scene], active_scene: &mut Option<usize>) {
         ui.heading("Explorer");
-        if storm.scenes().len() > 0 {
+        if scenes.len() > 0 {
             ui.horizontal(|ui| {
                 ui.label("Scene");
                 egui::ComboBox::from_id_salt("Scene")
-                    .selected_text(storm.active_scene().map_or("", |scene| &scene.name))
+                    .selected_text(active_scene.map_or("", |index| &scenes[index].name))
                     .show_ui(ui, |ui| {
-                        let mut active_scene = storm.active_scene().map(|scene| scene.id());
-                        ui.selectable_value(&mut active_scene, None, "");
-                        for scene in storm.scenes() {
+                        ui.selectable_value(active_scene, None, "");
+                        for (index, scene) in scenes.iter().enumerate() {
                             if ui
-                                .selectable_value(&mut active_scene, Some(scene.id()), &scene.name)
+                                .selectable_value(active_scene, Some(index), &scene.name)
                                 .clicked()
                             {
                                 self.node_modal = None;
                             };
                         }
-                        storm.set_active_scene(active_scene);
                     })
             });
         }
 
-        if let Some(scene) = storm.active_scene() {
+        if let Some(active_scene) = active_scene {
+            let scene = &scenes[*active_scene];
             ui.separator();
             ui.label("Nodes");
             for node in scene.root_nodes() {
@@ -73,7 +72,7 @@ impl Explorer {
 
             //     let scene = storm.active_scene_mut().unwrap();
 
-            let scene = storm.active_scene_mut().unwrap();
+            let scene = &mut scenes[*active_scene];
             scene.set_active_camera(active_camera);
             // scene.environment_map = active_environment_map;
 

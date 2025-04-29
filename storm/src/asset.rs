@@ -4,40 +4,41 @@ use glam::{Mat4, Quat};
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Id, Storm,
+    Id, Resources,
     mesh::{IndexBuffer, Mesh, MeshDescriptor, Primitive},
-    scene::{Node, Scene, SceneDescriptor},
-    storage::{DenseEntry, SetEntry, SparseSet},
+    scene::{Node, Scene},
+    storage::{DenseEntry, SparseSet},
 };
 
-impl Storm {
-    pub fn open_gltf(&mut self, path: impl AsRef<std::path::Path>) -> Result<&Asset, gltf::Error> {
-        let (document, buffers, _images) = gltf::import(path)?;
+pub fn open_gltf<'r>(
+    path: impl AsRef<std::path::Path>,
+    resources: &'r mut Resources,
+) -> Result<(Vec<Scene>, Option<usize>), gltf::Error> {
+    let (document, buffers, _images) = gltf::import(path)?;
 
-        let mesh_mapping = self.load_meshes(&document, &buffers);
+    let mesh_mapping = resources.load_meshes(&document, &buffers);
 
-        let scenes: Vec<Id<Scene>> = document
-            .scenes()
-            .map(|gltf_scene| {
-                let scene = self.scenes.push(SceneDescriptor {
-                    name: gltf_scene.name().map(|name| name.to_string()),
-                    device: self.device.clone(),
-                    queue: self.queue.clone(),
-                    render_bind_group_layout: self.render_bind_group_layout.clone(),
-                    skybox_bind_group_layout: self.skybox_bind_group_layout.clone(),
-                    skybox_pipeline: self.skybox_pipeline.clone(),
-                });
-                for node in gltf_scene.nodes() {
-                    scene.build_gltf_node(node, None, &mut self.meshes, &mesh_mapping);
-                }
-                scene.id()
-            })
-            .collect();
-        self.scene = document.default_scene().map(|scene| scenes[scene.index()]);
+    let scenes = document
+        .scenes()
+        .map(|gltf_scene| {
+            let mut scene = Scene::new(
+                gltf_scene
+                    .name()
+                    .map_or_else(|| gltf_scene.index().to_string(), |name| name.to_string()),
+                resources,
+            );
+            for node in gltf_scene.nodes() {
+                scene.build_gltf_node(node, None, &mut resources.meshes, &mesh_mapping);
+            }
+            scene
+        })
+        .collect();
 
-        Ok(self.assets.push(()))
-    }
+    let default_scene = document.default_scene().map(|scene| scene.index());
+    Ok((scenes, default_scene))
+}
 
+impl Resources {
     fn load_meshes(
         &mut self,
         document: &gltf::Document,
@@ -76,9 +77,11 @@ impl Storm {
                                     Some(Accessor::IndexBuffer(index_buffer.clone()));
                                 index_buffer
                             }
-                            _ => panic!(
-                                "primitive indices accessors cannot be used for other purposes"
-                            ),
+                            _ => {
+                                panic!(
+                                    "primitive indices accessors cannot be used for other purposes"
+                                )
+                            }
                         }
                     });
 
@@ -232,26 +235,6 @@ impl Scene {
             self.build_gltf_node(child, Some(id), meshes, mesh_mapping);
         }
         id
-    }
-}
-
-pub struct Asset {
-    id: Id<Self>,
-}
-
-impl DenseEntry for Asset {
-    type Key = Self;
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
-    }
-}
-
-impl SetEntry for Asset {
-    type Descriptor = ();
-
-    fn new(id: Id<Self::Key>, _desc: Self::Descriptor) -> Self {
-        Self { id }
     }
 }
 

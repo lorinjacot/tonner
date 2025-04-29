@@ -32,6 +32,6 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 @group(1) @binding(1) var skybox_sampler: sampler;
 
 @fragment
-fn fs_sky(vertex: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(skybox_texture, skybox_sampler, vertex.uv);
 }

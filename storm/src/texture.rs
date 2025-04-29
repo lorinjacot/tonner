@@ -1,10 +1,10 @@
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::Storm;
+use crate::Resources;
 
 pub struct TextureBuilder<'a> {
-    storm: &'a Storm,
+    resources: &'a Resources,
     name: Option<&'a str>,
     source: Source<'a>,
     mip_level_count: u32,
@@ -13,9 +13,9 @@ pub struct TextureBuilder<'a> {
 }
 
 impl<'a> TextureBuilder<'a> {
-    pub fn new(storm: &'a Storm) -> Self {
+    pub fn new(resources: &'a Resources) -> Self {
         Self {
-            storm,
+            resources,
             name: None,
             source: Source::Empty {
                 size: wgpu::Extent3d {
@@ -57,16 +57,18 @@ impl<'a> TextureBuilder<'a> {
     pub fn build(self, _encoder: &mut wgpu::CommandEncoder) -> wgpu::Texture {
         let texture = match self.source {
             Source::Empty { size, format } => {
-                self.storm.device.create_texture(&wgpu::TextureDescriptor {
-                    label: self.name,
-                    size,
-                    mip_level_count: self.mip_level_count,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: self.usage,
-                    view_formats: &[],
-                })
+                self.resources
+                    .device
+                    .create_texture(&wgpu::TextureDescriptor {
+                        label: self.name,
+                        size,
+                        mip_level_count: self.mip_level_count,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: self.usage,
+                        view_formats: &[],
+                    })
             }
             Source::DynamicImage {
                 dynamic_image,
@@ -94,8 +96,8 @@ impl<'a> TextureBuilder<'a> {
                 if srgb {
                     format = format.add_srgb_suffix();
                 }
-                self.storm.device.create_texture_with_data(
-                    &self.storm.queue,
+                self.resources.device.create_texture_with_data(
+                    &self.resources.queue,
                     &wgpu::TextureDescriptor {
                         label: self.name,
                         size: wgpu::Extent3d {

@@ -7,7 +7,7 @@ use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
 use explorer::Explorer;
 use glam::Vec3;
-use storm::{DenseEntry, Storm};
+use storm::{DenseEntry, Resources, Scene, open_gltf};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
@@ -108,7 +108,9 @@ struct Engine {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
-    storm: Storm,
+    _resources: Resources,
+    scenes: Vec<Scene>,
+    active_scene: Option<usize>,
     controls: Vec<OrbitControls>,
     explorer: Explorer,
     egui_state: egui_winit::State,
@@ -170,15 +172,34 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut storm = Storm::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
-        if let Some(path) = load_asset {
-            if let Err(err) = storm.open_gltf(path) {
-                panic!("{err}");
-            }
-        }
-        let controls = storm
-            .scenes_mut()
-            .map(|scene| {
+        let mut resources = Resources::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
+        let (mut scenes, active_scene) = load_asset.map_or_else(
+            || (Vec::new(), None),
+            |path| open_gltf(path, &mut resources).unwrap(),
+        );
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Engine::new command encoder"),
+        });
+
+        let radiance_image = include_bytes!("../../assets/environments/newport_loft.hdr");
+        let radiance_image = std::io::Cursor::new(radiance_image);
+        let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
+        let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
+        let environment = resources
+            .environment_builder()
+            .name("newport_loft".to_string())
+            .from_equirectangular_map(&radiance_image)
+            .build(&mut encoder);
+
+        queue.submit([encoder.finish()]);
+
+        let controls = scenes
+            .iter_mut()
+            .enumerate()
+            .map(|(index, scene)| {
+                scene.set_environment(environment);
+
                 let target = scene
                     .node_builder()
                     .name("Orbit camera target".to_string().into())
@@ -198,7 +219,7 @@ impl Engine {
                             name: Some("Orbit camera".to_string()),
                             projection: storm::camera::Projection::Perspective {
                                 aspect_ratio: None,
-                                y_fov: f32::to_radians(90.0),
+                                y_fov: f32::to_radians(65.0),
                                 z_far: Some(100.0),
                                 z_near: 0.01,
                             },
@@ -209,25 +230,9 @@ impl Engine {
                     .id();
                 scene.set_active_camera(camera.into());
 
-                OrbitControls::new(scene, target, cursor, camera)
+                OrbitControls::new(index, scene, target, cursor, camera)
             })
             .collect();
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Engine::new command encoder"),
-        });
-
-        let radiance_image = include_bytes!("../../assets/environments/newport_loft.hdr");
-        let radiance_image = std::io::Cursor::new(radiance_image);
-        let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
-        let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
-        storm
-            .environment_builder()
-            .name("newport_loft".to_string())
-            .from_equirectangular_map(&radiance_image)
-            .build(&mut encoder);
-
-        queue.submit([encoder.finish()]);
 
         let explorer = Explorer::new();
 
@@ -253,7 +258,9 @@ impl Engine {
             window,
             surface,
             surface_config,
-            storm,
+            _resources: resources,
+            scenes,
+            active_scene,
             controls,
             explorer,
             egui_state,
@@ -268,8 +275,12 @@ impl Engine {
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
-            egui::SidePanel::left("explorer").show(ctx, |ui| self.explorer.ui(ui, &mut self.storm));
-            if let Some(scene) = self.storm.active_scene() {
+            egui::SidePanel::left("explorer").show(ctx, |ui| {
+                self.explorer
+                    .ui(ui, &mut self.scenes, &mut self.active_scene)
+            });
+            if let Some(scene_index) = self.active_scene {
+                let scene = &self.scenes[scene_index];
                 egui::CentralPanel::default().show(&ctx, |ui| {
                     let size = match scene.aspect_ratio() {
                         Some(aspect_ratio) => {
@@ -310,7 +321,7 @@ impl Engine {
                             if response.hovered() {
                                 ui.input_mut(|inputs| {
                                     for controls in self.controls.iter_mut() {
-                                        if controls.scene() == scene.id() {
+                                        if controls.scene() == scene_index {
                                             controls.take_input(inputs, size, scene);
                                         }
                                     }
@@ -335,11 +346,12 @@ impl Engine {
                     label: Some("Engine::draw command encoder"),
                 });
 
-        if let Some(scene) = self.storm.active_scene_mut() {
+        if let Some(scene_index) = self.active_scene {
+            let scene = &mut self.scenes[scene_index];
             let viewport_aspect_ratio =
                 self.render_texture.width() as f32 / self.render_texture.height() as f32;
             for controls in self.controls.iter_mut() {
-                if controls.scene() == scene.id() {
+                if controls.scene() == scene_index {
                     controls.update(viewport_aspect_ratio, scene);
                 }
             }
@@ -365,7 +377,8 @@ impl Engine {
             self.egui_renderer.free_texture(&id);
         }
 
-        if let Some(scene) = self.storm.active_scene() {
+        if let Some(scene_index) = self.active_scene {
+            let scene = &self.scenes[scene_index];
             let mut storm_render_pass =
                 command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("storm render pass"),

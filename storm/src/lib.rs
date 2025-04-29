@@ -1,4 +1,4 @@
-pub use asset::Asset;
+pub use asset::open_gltf;
 pub use environment::Environment;
 use environment::{EnvironmentBuilder, EnvironmentBuilderData};
 pub use math::Transform;
@@ -17,33 +17,28 @@ mod scene;
 mod storage;
 mod texture;
 
-pub struct Storm {
+pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
     render_texture_format: wgpu::TextureFormat,
-    assets: SparseSet<Asset>,
     meshes: SparseSet<Mesh>,
     environments: SparseSet<Environment>,
     environment_builder_data: EnvironmentBuilderData,
-    scenes: SparseSet<Scene>,
-    scene: Option<Id<Scene>>,
     primitive_shader_module: wgpu::ShaderModule,
     render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,
 }
 
-impl Storm {
+impl Resources {
     pub fn new(
         render_texture_format: wgpu::TextureFormat,
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> Self {
-        let assets = SparseSet::new();
         let meshes = SparseSet::new();
         let environments = SparseSet::new();
         let environment_builder_data = EnvironmentBuilderData::new(&device);
-        let scenes = SparseSet::new();
 
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
@@ -142,12 +137,9 @@ impl Storm {
             device,
             queue,
             render_texture_format,
-            assets,
             meshes,
             environments,
             environment_builder_data,
-            scenes,
-            scene: None,
             primitive_shader_module,
             render_bind_group_layout,
             skybox_bind_group_layout,
@@ -161,29 +153,5 @@ impl Storm {
 
     pub fn environment_builder<'a, 's>(&'s mut self) -> EnvironmentBuilder<'a, 's> {
         EnvironmentBuilder::new(self)
-    }
-
-    pub fn scene(&self, id: Id<Scene>) -> Option<&Scene> {
-        self.scenes.get(id)
-    }
-
-    pub fn scenes(&self) -> std::slice::Iter<'_, Scene> {
-        self.scenes.iter()
-    }
-
-    pub fn scenes_mut(&mut self) -> std::slice::IterMut<'_, Scene> {
-        self.scenes.iter_mut()
-    }
-
-    pub fn active_scene(&self) -> Option<&Scene> {
-        self.scene.map(|scene| &self.scenes[scene])
-    }
-
-    pub fn active_scene_mut(&mut self) -> Option<&mut Scene> {
-        self.scene.map(|scene| &mut self.scenes[scene])
-    }
-
-    pub fn set_active_scene(&mut self, id: Option<Id<Scene>>) {
-        self.scene = id;
     }
 }

@@ -7,15 +7,15 @@ pub use node::{Node, NodeBuilder, NodeHandle};
 use wgpu::util::DeviceExt;
 
 use crate::{
+    Environment, Resources,
     mesh::{Mesh, Primitive},
-    storage::{DenseEntry, Id, SetEntry, SparseMap, SparseSet},
+    storage::{DenseEntry, Id, SparseMap, SparseSet},
 };
 
 pub mod camera;
 mod node;
 
 pub struct Scene {
-    id: Id<Self>,
     pub name: String,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -34,6 +34,33 @@ pub struct Scene {
 }
 
 impl Scene {
+    pub(super) fn new(name: String, resources: &Resources) -> Self {
+        let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Camera buffer"),
+            size: size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            name,
+            device: resources.device.clone(),
+            queue: resources.queue.clone(),
+            nodes: SparseSet::new(),
+            nodes_buffer: None,
+            root_nodes: Vec::new(),
+            meshes: SparseMap::new(),
+            cameras: SparseMap::new(),
+            active_camera: None,
+            camera_buffer,
+            render_bind_group_layout: resources.render_bind_group_layout.clone(),
+            render_bind_group: None,
+            skybox_bind_group_layout: resources.skybox_bind_group_layout.clone(),
+            skybox_bind_group: None,
+            skybox_pipeline: resources.skybox_pipeline.clone(),
+        }
+    }
+
     pub fn node_handle(&mut self, id: Id<Node>) -> NodeHandle {
         NodeHandle { id, scene: self }
     }
@@ -77,6 +104,27 @@ impl Scene {
             camera::Projection::Perspective { aspect_ratio, .. } => aspect_ratio,
             camera::Projection::Orthographic { x_mag, y_mag, .. } => Some(x_mag / y_mag),
         }
+    }
+
+    pub fn set_environment(&mut self, environment: &Environment) {
+        self.skybox_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Skybox bind group"),
+            layout: &self.skybox_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        environment.environment_cubemap_view(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(
+                        environment.environment_cubemap_sampler(),
+                    ),
+                },
+            ],
+        }))
     }
 
     pub fn update(&mut self, viewport_aspect_ration: f32) {
@@ -218,61 +266,6 @@ impl Index<Id<Node>> for Scene {
 impl IndexMut<Id<Node>> for Scene {
     fn index_mut(&mut self, index: Id<Node>) -> &mut Self::Output {
         &mut self.nodes[index]
-    }
-}
-
-pub struct SceneDescriptor {
-    pub(super) name: Option<String>,
-    pub(super) device: wgpu::Device,
-    pub(super) queue: wgpu::Queue,
-    pub(super) render_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) skybox_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) skybox_pipeline: wgpu::RenderPipeline,
-}
-
-impl DenseEntry for Scene {
-    type Key = Self;
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
-    }
-}
-
-impl SetEntry for Scene {
-    type Descriptor = SceneDescriptor;
-
-    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
-        let name = desc.name.unwrap_or_else(|| id.to_string());
-        let nodes = SparseSet::new();
-        let root_nodes = Vec::new();
-        let meshes = SparseMap::new();
-        let cameras = SparseMap::new();
-
-        let camera_buffer = desc.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Camera buffer"),
-            size: size_of::<CameraUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        Scene {
-            id,
-            name,
-            device: desc.device,
-            queue: desc.queue,
-            nodes,
-            nodes_buffer: None,
-            root_nodes,
-            meshes,
-            cameras,
-            active_camera: None,
-            camera_buffer,
-            render_bind_group_layout: desc.render_bind_group_layout,
-            render_bind_group: None,
-            skybox_bind_group_layout: desc.skybox_bind_group_layout,
-            skybox_bind_group: None,
-            skybox_pipeline: desc.skybox_pipeline,
-        }
     }
 }
 

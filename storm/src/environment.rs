@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Storm, storage::SetEntry};
+use crate::{DenseEntry, Id, Resources, storage::SetEntry};
 
 pub const CUBE_VERTICES: &[Vec3] = &[
     // front face
@@ -231,6 +231,18 @@ impl EnvironmentBuilderData {
 pub struct Environment {
     id: Id<Environment>,
     pub name: String,
+    environment_cubemap_view: wgpu::TextureView,
+    environment_cubemap_sampler: wgpu::Sampler,
+}
+
+impl Environment {
+    pub fn environment_cubemap_view(&self) -> &wgpu::TextureView {
+        &self.environment_cubemap_view
+    }
+
+    pub fn environment_cubemap_sampler(&self) -> &wgpu::Sampler {
+        &self.environment_cubemap_sampler
+    }
 }
 
 impl DenseEntry for Environment {
@@ -243,6 +255,8 @@ impl DenseEntry for Environment {
 
 pub struct EnvironmentDescriptor {
     name: Option<String>,
+    environment_cubemap_view: wgpu::TextureView,
+    environment_cubemap_sampler: wgpu::Sampler,
 }
 
 impl SetEntry for Environment {
@@ -250,21 +264,26 @@ impl SetEntry for Environment {
 
     fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
         let name = desc.name.unwrap_or_else(|| id.to_string());
-        Self { id, name }
+        Self {
+            id,
+            name,
+            environment_cubemap_sampler: desc.environment_cubemap_sampler,
+            environment_cubemap_view: desc.environment_cubemap_view,
+        }
     }
 }
 
-pub struct EnvironmentBuilder<'a, 's> {
+pub struct EnvironmentBuilder<'a, 'r> {
+    resources: &'r mut Resources,
     name: Option<String>,
-    storm: &'s mut Storm,
     source: Source<'a>,
 }
 
-impl<'a, 's> EnvironmentBuilder<'a, 's> {
-    pub fn new(storm: &'s mut Storm) -> Self {
+impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
+    pub fn new(resources: &'r mut Resources) -> Self {
         Self {
+            resources,
             name: None,
-            storm,
             source: Source::None,
         }
     }
@@ -279,14 +298,15 @@ impl<'a, 's> EnvironmentBuilder<'a, 's> {
         self
     }
 
-    pub fn build(self, encoder: &'a mut wgpu::CommandEncoder) -> &'s mut Environment {
+    pub fn build(self, encoder: &'a mut wgpu::CommandEncoder) -> &'r mut Environment {
         let name = self.name.as_ref().map_or("", |name| name);
-        let data = &self.storm.environment_builder_data;
+        let data = &self.resources.environment_builder_data;
+        let environment_cubemap_view;
         match self.source {
-            Source::None => (),
+            Source::None => panic!("no environment support"),
             Source::EquirectangularMap(radiance_image) => {
                 let radiance_texture = self
-                    .storm
+                    .resources
                     .texture_builder()
                     .name(&format!("{name} radiance texture"))
                     .from_dynamic_image(radiance_image, false)
@@ -297,7 +317,7 @@ impl<'a, 's> EnvironmentBuilder<'a, 's> {
                         ..Default::default()
                     });
                 let radiance_bind_group =
-                    self.storm
+                    self.resources
                         .device
                         .create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some(&format!("{name} randiance bind group")),
@@ -319,7 +339,7 @@ impl<'a, 's> EnvironmentBuilder<'a, 's> {
                         });
 
                 let environment_cubemap_texture = self
-                    .storm
+                    .resources
                     .texture_builder()
                     .name(&format!("{name} environment cubemap"))
                     .empty(
@@ -330,8 +350,17 @@ impl<'a, 's> EnvironmentBuilder<'a, 's> {
                         },
                         ENVIRONMENT_CUBEMAP_FORMAT,
                     )
-                    .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+                    .usage(
+                        wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                    )
                     .build(encoder);
+                environment_cubemap_view =
+                    environment_cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
+                        label: Some(&format!("{name} environment cubemap view")),
+                        dimension: Some(wgpu::TextureViewDimension::Cube),
+                        ..Default::default()
+                    });
 
                 for face in 0..6 {
                     let environment_map_view =
@@ -371,9 +400,11 @@ impl<'a, 's> EnvironmentBuilder<'a, 's> {
             }
         }
 
-        self.storm
-            .environments
-            .push(EnvironmentDescriptor { name: self.name })
+        self.resources.environments.push(EnvironmentDescriptor {
+            name: self.name,
+            environment_cubemap_view,
+            environment_cubemap_sampler: data.environment_cubemap_sampler.clone(),
+        })
     }
 }
 

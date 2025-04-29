@@ -5,7 +5,9 @@ use std::{
 
 use glam::{Mat4, Vec2, Vec3};
 use storm::{
-    camera::Projection, math::{Plane, Ray}, DenseEntry, Id, Node, Scene
+    Id, Node, Scene,
+    camera::Projection,
+    math::{Plane, Ray},
 };
 
 pub trait Controls {
@@ -21,7 +23,7 @@ pub trait Controls {
 
 /// Adapted from three.js OrbitControls
 pub struct OrbitControls {
-    scene: Id<Scene>,
+    scene: usize,
 
     /// The focus point of the controls, the camera orbits around this.
     /// It can be updated at any point to change the focus of the controls.
@@ -94,7 +96,13 @@ pub struct OrbitControls {
 }
 
 impl OrbitControls {
-    pub fn new(scene: &Scene, target: Id<Node>, cursor: Id<Node>, camera: Id<Node>) -> Self {
+    pub fn new(
+        scene_index: usize,
+        scene: &Scene,
+        target: Id<Node>,
+        cursor: Id<Node>,
+        camera: Id<Node>,
+    ) -> Self {
         assert_eq!(
             scene[target].parent(),
             scene[cursor].parent(),
@@ -106,7 +114,7 @@ impl OrbitControls {
             "The target, cursor and camera must share the same parent"
         );
         OrbitControls {
-            scene: scene.id(),
+            scene: scene_index,
             target,
             camera,
             cursor,
@@ -134,7 +142,7 @@ impl OrbitControls {
         }
     }
 
-    pub fn scene(&self) -> Id<Scene> {
+    pub fn scene(&self) -> usize {
         self.scene
     }
 

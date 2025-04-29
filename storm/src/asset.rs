@@ -62,6 +62,10 @@ impl Resources {
                         None => continue,
                     };
 
+                    if primitive.get(&gltf::Semantic::Normals).is_none() {
+                        todo!("generate normals");
+                    }
+
                     let index_buffer = primitive.indices().map(|indices| {
                         vertex_count = indices.count() as u32;
                         match &accessors[indices.index()] {
@@ -101,12 +105,12 @@ impl Resources {
                         };
                         let shader_location = match semantic {
                             gltf::Semantic::Positions => 1,
-                            // gltf::Semantic::Normals => 2,
+                            gltf::Semantic::Normals => 2,
                             // gltf::Semantic::Tangents => 3,
                             // gltf::Semantic::TexCoords(0) => 4,
                             // gltf::Semantic::TexCoords(1) => 5,
                             // gltf::Semantic::Colors(0) => 6,
-                            _ => panic!("unsupported primitive attribute"),
+                            _ => panic!("unsupported primitive attribute {semantic:?}"),
                         };
                         vertex_buffers
                             .entry(attribute.buffer)

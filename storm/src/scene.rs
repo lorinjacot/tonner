@@ -2,7 +2,7 @@ use std::ops::{Index, IndexMut};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
 pub use camera::Camera;
-use glam::{Mat4, Vec3, usize};
+use glam::{Mat3, Mat4, Vec3, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
 use wgpu::util::DeviceExt;
 
@@ -113,8 +113,13 @@ impl Scene {
             let data: Vec<_> = self
                 .nodes
                 .iter()
-                .map(|node| NodeUniform {
-                    model: node.world_matrix(),
+                .map(|node| {
+                    let model = node.world_matrix();
+                    let model_normal = Mat3::from_mat4(model.inverse().transpose());
+                    NodeUniform {
+                        model: model.to_cols_array(),
+                        model_normal: model_normal.to_cols_array(),
+                    }
                 })
                 .collect();
 
@@ -142,6 +147,7 @@ impl Scene {
                 .projection
                 .matrix(viewport_aspect_ration);
             let camera = &self.nodes[camera];
+            let position = camera.world_position();
             let view = Mat4::look_to_rh(
                 camera.world_position(),
                 camera.world_matrix().transform_vector3(-Vec3::Z),
@@ -151,6 +157,8 @@ impl Scene {
             let camera_uniform = CameraUniform {
                 view_projection,
                 view_projection_inv: view_projection.inverse(),
+                position,
+                _padding: 0.0,
             };
             self.queue
                 .write_buffer(&self.camera_buffer, 0, cast_slice(&[camera_uniform]));
@@ -253,7 +261,8 @@ impl IndexMut<Id<Node>> for Scene {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct NodeUniform {
-    model: Mat4,
+    model: [f32; 4 * 4],
+    model_normal: [f32; 3 * 3],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -261,6 +270,8 @@ struct NodeUniform {
 struct CameraUniform {
     view_projection: Mat4,
     view_projection_inv: Mat4,
+    position: Vec3,
+    _padding: f32,
 }
 
 struct MeshInstances {

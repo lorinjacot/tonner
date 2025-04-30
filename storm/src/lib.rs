@@ -3,7 +3,7 @@ pub use environment::Environment;
 use environment::{EnvironmentBuilder, EnvironmentBuilderData};
 pub use math::Transform;
 use mesh::MeshBuilderData;
-pub use mesh::{Mesh, MeshBuilder, PrimitiveBuilder};
+pub use mesh::{Material, MaterialBuilder, Mesh, MeshBuilder, PrimitiveBuilder};
 pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
@@ -172,6 +172,10 @@ impl Resources {
             skybox_bind_group_layout,
             skybox_pipeline,
         }
+    }
+
+    pub fn material_builder(&mut self) -> MaterialBuilder {
+        MaterialBuilder::new(self)
     }
 
     pub fn primitive_builder(&mut self) -> PrimitiveBuilder {

@@ -267,6 +267,7 @@ impl Scene {
                 render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
                 for primitive in mesh_instances.primitives.iter() {
                     render_pass.set_pipeline(&primitive.pipeline);
+                    render_pass.set_bind_group(1, &primitive.material, &[]);
                     for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
                         render_pass.set_vertex_buffer(slot as u32 + 1, vertex_buffer.slice(..));
                     }

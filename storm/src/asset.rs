@@ -1,7 +1,7 @@
 use glam::{Mat4, Quat};
 
 use crate::{
-    Id, Resources,
+    Id, MaterialBuilder, Resources,
     mesh::{Indices, Mesh},
     scene::{Node, Scene},
     storage::{DenseEntry, SparseSet},
@@ -14,6 +14,11 @@ pub fn open_gltf<'r>(
 ) -> Result<(Vec<Scene>, Option<usize>), gltf::Error> {
     let (document, buffers, _images) = gltf::import(path)?;
 
+    let materials: Vec<_> = document
+        .materials()
+        .map(|material| resources.material_builder().from_gltf(material).build())
+        .collect();
+
     let mesh_mapping: Vec<_> = document
         .meshes()
         .map(|mesh| {
@@ -21,6 +26,14 @@ pub fn open_gltf<'r>(
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 if let Some(position) = reader.read_positions() {
+                    if reader.read_normals().is_none() {
+                        todo!("generate normals")
+                    }
+                    let material = primitive.material();
+                    let material = match material.index() {
+                        Some(index) => &materials[index],
+                        None => &resources.material_builder().from_gltf(material).build(),
+                    };
                     let mut primitive_builder = resources.primitive_builder();
                     let indices;
                     primitive_builder = match reader.read_indices() {
@@ -40,6 +53,7 @@ pub fn open_gltf<'r>(
                                 .map(|normals| normals.collect::<Vec<_>>())
                                 .as_deref(),
                         )
+                        .material(material)
                         .build();
                     primitives.push(primitive);
                 }
@@ -72,6 +86,15 @@ pub fn open_gltf<'r>(
 
     let default_scene = document.default_scene().map(|scene| scene.index());
     Ok((scenes, default_scene))
+}
+
+impl<'r> MaterialBuilder<'r> {
+    fn from_gltf(self, material: gltf::Material) -> Self {
+        let pbr_metallic_roughness = material.pbr_metallic_roughness();
+        self.base_color_factor(pbr_metallic_roughness.base_color_factor())
+            .metallic_factor(pbr_metallic_roughness.metallic_factor())
+            .roughness_factor(pbr_metallic_roughness.roughness_factor())
+    }
 }
 
 impl Scene {

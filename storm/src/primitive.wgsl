@@ -27,6 +27,14 @@ struct CameraUniform {
 @group(0) @binding(2) var irradiance_map_texture: texture_cube<f32>;
 @group(0) @binding(3) var irradiance_map_sampler: sampler;
 
+struct MaterialUniform {
+    base_color_factor: vec4<f32>,
+    metallic_factor: f32,
+    roughness_factor: f32,
+}
+
+@group(1) @binding(0) var<uniform> material: MaterialUniform;
+
 @vertex
 fn vs_main(
     @location(0) index: u32,
@@ -45,9 +53,9 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(vertex.world_normal);
     let view = normalize(camera.position - vertex.world_position);
 
-    let albedo = vec3(1.0, 0.0, 0.0);
-    let metallic = 1.0;
-    let roughness = 0.0;
+    let albedo = material.base_color_factor.rgb;
+    let metallic = material.metallic_factor;
+    let roughness = material.roughness_factor;
     let ambiance_occlusion = 1.0;
 
     var f0 = vec3(0.04);

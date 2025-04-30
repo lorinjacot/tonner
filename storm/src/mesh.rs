@@ -1,4 +1,4 @@
-use bytemuck::cast_slice;
+use bytemuck::{Pod, Zeroable, cast_slice};
 use wgpu::util::DeviceExt;
 
 use crate::{DenseEntry, Id, Resources, storage::SetEntry};
@@ -77,6 +77,7 @@ pub struct PrimitiveBuilder<'a, 'r> {
     normals: Option<&'a [[f32; 3]]>,
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_buffer_layouts: Vec<VertexBufferLayout>,
+    material: Option<&'a Material>,
 }
 
 impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
@@ -89,6 +90,7 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
             normals: None,
             vertex_buffers: Vec::with_capacity(2),
             vertex_buffer_layouts: Vec::with_capacity(2),
+            material: None,
         }
     }
 
@@ -109,6 +111,11 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
 
     pub fn normals(mut self, normals: Option<&'a [[f32; 3]]>) -> Self {
         self.normals = normals;
+        self
+    }
+
+    pub fn material(mut self, material: &'a Material) -> Self {
+        self.material = Some(material);
         self
     }
 
@@ -199,11 +206,17 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
 
         let vertex_buffers = self.vertex_buffers;
 
+        let material = self.material.map_or_else(
+            || self.resources.material_builder().build().bind_group,
+            |material| material.bind_group.clone(),
+        );
+
         Primitive {
             pipeline,
             index_buffer,
             vertex_buffers,
             vertex_count: self.vertex_count,
+            material,
         }
     }
 
@@ -243,12 +256,82 @@ struct VertexBufferLayout {
     attributes: Vec<wgpu::VertexAttribute>,
 }
 
+pub struct Material {
+    bind_group: wgpu::BindGroup,
+}
+
+#[must_use]
+pub struct MaterialBuilder<'r> {
+    resources: &'r mut Resources,
+    uniform: MaterialUniform,
+}
+
+impl<'r> MaterialBuilder<'r> {
+    pub fn new(resources: &'r mut Resources) -> Self {
+        let uniform = MaterialUniform {
+            base_color_factor: [1.0; 4],
+            metallic_factor: 1.0,
+            roughness_factor: 1.0,
+            _padding: [0.0; 2],
+        };
+        Self { resources, uniform }
+    }
+
+    pub fn base_color_factor(mut self, base_color_factor: [f32; 4]) -> Self {
+        self.uniform.base_color_factor = base_color_factor;
+        self
+    }
+
+    pub fn metallic_factor(mut self, metallic_factor: f32) -> Self {
+        self.uniform.metallic_factor = metallic_factor;
+        self
+    }
+
+    pub fn roughness_factor(mut self, roughness_factor: f32) -> Self {
+        self.uniform.roughness_factor = roughness_factor;
+        self
+    }
+
+    pub fn build(self) -> Material {
+        let uniform_buffer =
+            self.resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Material uniform buffer"),
+                    contents: cast_slice(&[self.uniform]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+        let bind_group = self
+            .resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Material bind gorup"),
+                layout: &self.resources.mesh_builder_data.material_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                }],
+            });
+        Material { bind_group }
+    }
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct MaterialUniform {
+    base_color_factor: [f32; 4],
+    metallic_factor: f32,
+    roughness_factor: f32,
+    _padding: [f32; 2],
+}
+
 #[derive(Clone)]
 pub struct Primitive {
     pub(super) pipeline: wgpu::RenderPipeline,
     pub(super) index_buffer: Option<IndexBuffer>,
     pub(super) vertex_buffers: Vec<wgpu::Buffer>,
     pub(super) vertex_count: u32,
+    pub(super) material: wgpu::BindGroup,
 }
 
 #[derive(Debug, Clone)]
@@ -258,16 +341,32 @@ pub(super) struct IndexBuffer {
 }
 
 pub(super) struct MeshBuilderData {
+    material_bind_group_layout: wgpu::BindGroupLayout,
     primitive_pipeline_layout: wgpu::PipelineLayout,
     primitive_shader_module: wgpu::ShaderModule,
 }
 
 impl MeshBuilderData {
     pub fn new(device: &wgpu::Device, render_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Material bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&format!("Primitive pipeline layout")),
-                bind_group_layouts: &[render_bind_group_layout],
+                bind_group_layouts: &[render_bind_group_layout, &material_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -275,6 +374,7 @@ impl MeshBuilderData {
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
         Self {
+            material_bind_group_layout,
             primitive_pipeline_layout,
             primitive_shader_module,
         }

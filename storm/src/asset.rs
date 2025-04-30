@@ -1,8 +1,8 @@
 use glam::{Mat4, Quat};
 
 use crate::{
-    Id, MaterialBuilder, Resources,
-    mesh::{Indices, Mesh},
+    Id, Resources,
+    mesh::{Colors, Indices, MaterialBuilder, Mesh, TexCoords},
     scene::{Node, Scene},
     storage::{DenseEntry, SparseSet},
 };
@@ -45,6 +45,45 @@ pub fn open_gltf<'r>(
                         }
                         None => primitive_builder.vertex_count(position.len() as u32),
                     };
+                    for set in 0.. {
+                        match reader.read_tex_coords(set) {
+                            Some(tex_coords) => {
+                                let tex_coords = match tex_coords {
+                                    gltf::mesh::util::ReadTexCoords::U8(iter) => {
+                                        TexCoords::U8(iter.collect())
+                                    }
+                                    gltf::mesh::util::ReadTexCoords::U16(iter) => {
+                                        TexCoords::U16(iter.collect())
+                                    }
+                                    gltf::mesh::util::ReadTexCoords::F32(iter) => {
+                                        TexCoords::F32(iter.collect())
+                                    }
+                                };
+                                primitive_builder = primitive_builder.tex_coords(set, tex_coords);
+                            }
+                            None => break,
+                        }
+                    }
+                    for set in 0.. {
+                        match reader.read_colors(set) {
+                            Some(colors) => {
+                                let colors = match colors {
+                                    gltf::mesh::util::ReadColors::RgbaU8(iter) => {
+                                        Colors::RgbaU8(iter.collect())
+                                    }
+                                    gltf::mesh::util::ReadColors::RgbaU16(iter) => {
+                                        Colors::RgbaU16(iter.collect())
+                                    }
+                                    gltf::mesh::util::ReadColors::RgbaF32(iter) => {
+                                        Colors::RgbaF32(iter.collect())
+                                    }
+                                    _ => Colors::RgbaF32(colors.into_rgba_f32().collect()),
+                                };
+                                primitive_builder = primitive_builder.colors(set, colors);
+                            }
+                            None => break,
+                        }
+                    }
                     let primitive = primitive_builder
                         .positions(Some(&position.collect::<Vec<_>>()))
                         .normals(
@@ -88,7 +127,7 @@ pub fn open_gltf<'r>(
     Ok((scenes, default_scene))
 }
 
-impl<'r> MaterialBuilder<'r> {
+impl<'a, 'r> MaterialBuilder<'a, 'r> {
     fn from_gltf(self, material: gltf::Material) -> Self {
         let pbr_metallic_roughness = material.pbr_metallic_roughness();
         self.base_color_factor(pbr_metallic_roughness.base_color_factor())

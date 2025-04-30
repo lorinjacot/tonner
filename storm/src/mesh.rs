@@ -1,3 +1,8 @@
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
+
 use bytemuck::{Pod, Zeroable, cast_slice};
 use wgpu::util::DeviceExt;
 
@@ -75,6 +80,11 @@ pub struct PrimitiveBuilder<'a, 'r> {
     indices: Indices<'a>,
     positions: Option<&'a [[f32; 3]]>,
     normals: Option<&'a [[f32; 3]]>,
+    tex_coords: BTreeMap<Attribute, TexCoords<'a>>,
+    has_tex_coord_0: f64,
+    has_tex_coord_1: f64,
+    colors: BTreeMap<Attribute, Colors<'a>>,
+    has_color_0: f64,
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_buffer_layouts: Vec<VertexBufferLayout>,
     material: Option<&'a Material>,
@@ -88,6 +98,11 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
             indices: Indices::None,
             positions: None,
             normals: None,
+            tex_coords: BTreeMap::new(),
+            has_tex_coord_0: 0.0,
+            has_tex_coord_1: 0.0,
+            colors: BTreeMap::new(),
+            has_color_0: 0.0,
             vertex_buffers: Vec::with_capacity(2),
             vertex_buffer_layouts: Vec::with_capacity(2),
             material: None,
@@ -114,24 +129,175 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
         self
     }
 
+    pub fn tex_coords(mut self, set: u32, tex_coords: TexCoords<'a>) -> Self {
+        let attribute = match set {
+            0 => {
+                self.has_tex_coord_0 = 1.0;
+                Attribute::TexCoord0
+            }
+            1 => {
+                self.has_tex_coord_1 = 1.0;
+                Attribute::TexCoord1
+            }
+            _ => panic!("only two texture coordinate sets supported"),
+        };
+        self.tex_coords.insert(attribute, tex_coords);
+        self
+    }
+
+    pub fn colors(mut self, set: u32, colors: Colors<'a>) -> Self {
+        let attribute = match set {
+            0 => {
+                self.has_color_0 = 1.0;
+                Attribute::Color0
+            }
+            _ => panic!("only one color sets supported"),
+        };
+        self.colors.insert(attribute, colors);
+        self
+    }
+
     pub fn material(mut self, material: &'a Material) -> Self {
         self.material = Some(material);
         self
     }
 
     pub fn build(mut self) -> Primitive {
+        let default_material;
+        let material = match self.material {
+            Some(material) => material,
+            None => {
+                default_material = self.resources.material_builder().build();
+                &default_material
+            }
+        };
+
+        let mut create_vertex_buffer =
+            |name, contents, array_stride, format, attribute: Attribute| {
+                let device = &self.resources.device;
+                self.vertex_buffers.push(device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(name),
+                        contents,
+                        usage: wgpu::BufferUsages::VERTEX,
+                    },
+                ));
+                self.vertex_buffer_layouts.push(VertexBufferLayout {
+                    array_stride,
+                    attributes: vec![wgpu::VertexAttribute {
+                        format,
+                        offset: 0,
+                        shader_location: attribute as u32,
+                    }],
+                });
+            };
+
         if let Some(positions) = self.positions {
-            self.create_vertex_buffer(
+            create_vertex_buffer(
                 "Position vertex buffer",
                 cast_slice(positions),
+                4 * 3,
+                wgpu::VertexFormat::Float32x3,
                 Attribute::Position,
             );
         }
         if let Some(normals) = self.normals {
-            self.create_vertex_buffer(
+            create_vertex_buffer(
                 "Normal vertex buffer",
                 cast_slice(normals),
+                4 * 3,
+                wgpu::VertexFormat::Float32x3,
                 Attribute::Normal,
+            );
+        }
+        for (attribute, tex_coords) in self.tex_coords.iter() {
+            let (array_stride, contents, format) = match tex_coords {
+                TexCoords::U8(slice) => (1 * 3, cast_slice(slice), wgpu::VertexFormat::Unorm8x2),
+                TexCoords::U16(slice) => (2 * 3, cast_slice(slice), wgpu::VertexFormat::Unorm16x2),
+                TexCoords::F32(slice) => (4 * 3, cast_slice(slice), wgpu::VertexFormat::Float32x2),
+            };
+            create_vertex_buffer(
+                "Texture coordinate vertex buffer",
+                contents,
+                array_stride,
+                format,
+                *attribute,
+            );
+        }
+        for (attribute, colors) in self.colors.iter() {
+            let (array_stride, contents, format) = match colors {
+                Colors::RgbaU8(slice) => (1 * 4, cast_slice(slice), wgpu::VertexFormat::Unorm8x4),
+                Colors::RgbaU16(slice) => (2 * 4, cast_slice(slice), wgpu::VertexFormat::Unorm16x4),
+                Colors::RgbaF32(slice) => (4 * 4, cast_slice(slice), wgpu::VertexFormat::Float32x4),
+            };
+            create_vertex_buffer(
+                "Texture coordinate vertex buffer",
+                contents,
+                array_stride,
+                format,
+                *attribute,
+            );
+        }
+
+        let find = |attribute: Attribute| {
+            self.vertex_buffer_layouts
+                .iter()
+                .find(|layout| {
+                    layout
+                        .attributes
+                        .iter()
+                        .find(|vertex_attribute| {
+                            vertex_attribute.shader_location == attribute as u32
+                        })
+                        .is_some()
+                })
+                .is_some()
+        };
+        let has_tex_coord_0 = find(Attribute::TexCoord0);
+        let has_tex_coord_1 = find(Attribute::TexCoord1);
+        let has_color_0 = find(Attribute::Color0);
+
+        let mut create_vertex_buffer = |name, contents, format, attribute: Attribute| {
+            let device = &self.resources.device;
+            self.vertex_buffers.push(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some(name),
+                    contents,
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
+            ));
+            self.vertex_buffer_layouts.push(VertexBufferLayout {
+                array_stride: 0,
+                attributes: vec![wgpu::VertexAttribute {
+                    format,
+                    offset: 0,
+                    shader_location: attribute as u32,
+                }],
+            });
+        };
+
+        if !has_tex_coord_0 {
+            create_vertex_buffer(
+                "Dummy tex_coord_0 vertex buffer",
+                &[u8::MAX; 2],
+                wgpu::VertexFormat::Unorm8x2,
+                Attribute::TexCoord0,
+            );
+        }
+        if !has_tex_coord_1 {
+            create_vertex_buffer(
+                "Dummy tex_coord_1 vertex buffer",
+                &[u8::MAX; 2],
+                wgpu::VertexFormat::Unorm8x2,
+                Attribute::TexCoord1,
+            );
+        }
+        if !has_color_0 {
+            create_vertex_buffer(
+                "Dummy color_0 vertex buffer",
+                &[u8::MAX; 4],
+                wgpu::VertexFormat::Unorm8x4,
+                Attribute::Color0,
             );
         }
 
@@ -151,13 +317,25 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
                 attributes: &layout.attributes,
             }
         }));
+
+        let constants = &mut HashMap::with_capacity(3);
+        constants.insert("has_tex_coord_0".to_string(), bool_to_f64(has_tex_coord_0));
+        constants.insert("has_tex_coord_1".to_string(), bool_to_f64(has_tex_coord_1));
+        constants.insert("has_color_0".to_string(), bool_to_f64(has_color_0));
+        constants.insert(
+            "has_base_color_texture".to_string(),
+            bool_to_f64(material.has_base_color_texture),
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&format!("Primitive pipeline")),
             layout: Some(&data.primitive_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &data.primitive_shader_module,
                 entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 buffers: &vertex_buffer_layouts,
             },
             primitive: wgpu::PrimitiveState {
@@ -184,7 +362,10 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
             fragment: Some(wgpu::FragmentState {
                 module: &data.primitive_shader_module,
                 entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 targets: &[Some(self.resources.render_texture_format.into())],
             }),
             multiview: None,
@@ -206,37 +387,13 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
 
         let vertex_buffers = self.vertex_buffers;
 
-        let material = self.material.map_or_else(
-            || self.resources.material_builder().build().bind_group,
-            |material| material.bind_group.clone(),
-        );
-
         Primitive {
             pipeline,
             index_buffer,
             vertex_buffers,
             vertex_count: self.vertex_count,
-            material,
+            material: material.bind_group.clone(),
         }
-    }
-
-    fn create_vertex_buffer(&mut self, name: &str, contents: &[u8], attribute: Attribute) {
-        let device = &self.resources.device;
-        self.vertex_buffers.push(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(name),
-                contents,
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-        );
-        self.vertex_buffer_layouts.push(VertexBufferLayout {
-            array_stride: 3 * 4,
-            attributes: vec![wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x3,
-                offset: 0,
-                shader_location: attribute as u32,
-            }],
-        });
     }
 }
 
@@ -245,10 +402,26 @@ pub enum Indices<'a> {
     Slice(&'a [u32]),
 }
 
+pub enum TexCoords<'a> {
+    U8(Cow<'a, [[u8; 2]]>),
+    U16(Cow<'a, [[u16; 2]]>),
+    F32(Cow<'a, [[f32; 2]]>),
+}
+
+pub enum Colors<'a> {
+    RgbaU8(Cow<'a, [[u8; 4]]>),
+    RgbaU16(Cow<'a, [[u16; 4]]>),
+    RgbaF32(Cow<'a, [[f32; 4]]>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Attribute {
     Position = 1,
     Normal = 2,
+    TexCoord0 = 4,
+    TexCoord1 = 5,
+    Color0 = 6,
 }
 
 struct VertexBufferLayout {
@@ -258,23 +431,33 @@ struct VertexBufferLayout {
 
 pub struct Material {
     bind_group: wgpu::BindGroup,
+    has_base_color_texture: bool,
 }
 
 #[must_use]
-pub struct MaterialBuilder<'r> {
+pub struct MaterialBuilder<'a, 'r> {
     resources: &'r mut Resources,
+    base_color_texture: Option<&'a wgpu::TextureView>,
+    base_color_sampler: Option<&'a wgpu::Sampler>,
     uniform: MaterialUniform,
 }
 
-impl<'r> MaterialBuilder<'r> {
+impl<'a, 'r> MaterialBuilder<'a, 'r> {
     pub fn new(resources: &'r mut Resources) -> Self {
         let uniform = MaterialUniform {
             base_color_factor: [1.0; 4],
+            base_color_tex_coord: 0,
             metallic_factor: 1.0,
             roughness_factor: 1.0,
-            _padding: [0.0; 2],
+            _padding: 0.0,
         };
-        Self { resources, uniform }
+
+        Self {
+            resources,
+            base_color_texture: None,
+            base_color_sampler: None,
+            uniform,
+        }
     }
 
     pub fn base_color_factor(mut self, base_color_factor: [f32; 4]) -> Self {
@@ -293,6 +476,11 @@ impl<'r> MaterialBuilder<'r> {
     }
 
     pub fn build(self) -> Material {
+        let data = &self.resources.mesh_builder_data;
+        let has_base_color_texture = self.base_color_texture.is_some();
+        let base_color_texture = self.base_color_texture.unwrap_or(&data.default_texture);
+        let base_color_sampler = self.base_color_sampler.unwrap_or(&data.default_sampler);
+
         let uniform_buffer =
             self.resources
                 .device
@@ -307,12 +495,27 @@ impl<'r> MaterialBuilder<'r> {
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Material bind gorup"),
                 layout: &self.resources.mesh_builder_data.material_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                }],
+                entries: &[
+                    // Base color texture
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(base_color_texture),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(base_color_sampler),
+                    },
+                    // Material uniform
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                ],
             });
-        Material { bind_group }
+        Material {
+            bind_group,
+            has_base_color_texture,
+        }
     }
 }
 
@@ -320,9 +523,10 @@ impl<'r> MaterialBuilder<'r> {
 #[repr(C)]
 struct MaterialUniform {
     base_color_factor: [f32; 4],
+    base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
-    _padding: [f32; 2],
+    _padding: f32,
 }
 
 #[derive(Clone)]
@@ -344,6 +548,8 @@ pub(super) struct MeshBuilderData {
     material_bind_group_layout: wgpu::BindGroupLayout,
     primitive_pipeline_layout: wgpu::PipelineLayout,
     primitive_shader_module: wgpu::ShaderModule,
+    default_texture: wgpu::TextureView,
+    default_sampler: wgpu::Sampler,
 }
 
 impl MeshBuilderData {
@@ -351,16 +557,36 @@ impl MeshBuilderData {
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Material bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    // Base color texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // Material Uniform
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
             });
 
         let primitive_pipeline_layout =
@@ -373,10 +599,41 @@ impl MeshBuilderData {
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
+        let default_texture = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Material default texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor {
+                label: Some("Material default texture view"),
+                ..Default::default()
+            });
+
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Material default sampler"),
+            ..Default::default()
+        });
+
         Self {
             material_bind_group_layout,
             primitive_pipeline_layout,
             primitive_shader_module,
+            default_texture,
+            default_sampler,
         }
     }
+}
+
+fn bool_to_f64(value: bool) -> f64 {
+    if value { 1.0 } else { 0.0 }
 }

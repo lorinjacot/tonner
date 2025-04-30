@@ -185,7 +185,7 @@ impl Engine {
             |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
         );
 
-        let radiance_image = include_bytes!("../../assets/environments/newport_loft.hdr");
+        let radiance_image = include_bytes!("../../asset/environments/newport_loft.hdr");
         let radiance_image = std::io::Cursor::new(radiance_image);
         let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
         let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();

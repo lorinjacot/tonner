@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use controls::{Controls, OrbitControls};
 use egui::ViewportBuilder;
@@ -110,10 +111,7 @@ struct Engine {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
-    _resources: Resources,
-    scenes: Vec<Scene>,
-    active_scene: Option<usize>,
-    controls: Vec<OrbitControls>,
+    data: Arc<EngineData>,
     explorer: Explorer,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -121,6 +119,17 @@ struct Engine {
     render_texture_view: wgpu::TextureView,
     render_texture_id: egui::TextureId,
     depth_texture_view: wgpu::TextureView,
+}
+
+struct EngineData {
+    resources: Mutex<Resources>,
+    scenes: Mutex<Scenes>,
+    controls: Mutex<Vec<OrbitControls>>,
+}
+
+struct Scenes {
+    all: Vec<Scene>,
+    active: Option<usize>,
 }
 
 impl Engine {
@@ -175,67 +184,96 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Engine::new command encoder"),
+        let resources = Mutex::new(Resources::new(
+            RENDER_TEXTURE_FORMAT,
+            device.clone(),
+            queue.clone(),
+        ));
+        let scenes = Mutex::new(Scenes {
+            all: Vec::new(),
+            active: None,
+        });
+        let controls = Mutex::new(Vec::new());
+
+        let data = Arc::new(EngineData {
+            resources,
+            scenes,
+            controls,
         });
 
-        let mut resources = Resources::new(RENDER_TEXTURE_FORMAT, device.clone(), queue.clone());
-        let (mut scenes, active_scene) = load_asset.map_or_else(
-            || (Vec::new(), None),
-            |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
-        );
+        // background scene loading
+        let thread_data = data.clone();
+        let thread_device = device.clone();
+        let thread_queue = queue.clone();
+        thread::spawn(move || {
+            let mut encoder =
+                thread_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Engine::new background thread command encoder"),
+                });
 
-        let radiance_image = include_bytes!("../../asset/environments/newport_loft.hdr");
-        let radiance_image = std::io::Cursor::new(radiance_image);
-        let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
-        let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
-        let environment = resources
-            .environment_builder()
-            .name("newport_loft".to_string())
-            .from_equirectangular_map(&radiance_image)
-            .build(&mut encoder);
+            {
+                let mut resources = thread_data.resources.lock().unwrap();
 
-        queue.submit([encoder.finish()]);
-
-        let controls = scenes
-            .iter_mut()
-            .enumerate()
-            .map(|(index, scene)| {
-                scene.set_environment(environment);
-
-                let target = scene
-                    .node_builder()
-                    .name("Orbit camera target".to_string().into())
-                    .build()
+                let radiance_image = include_bytes!("../../asset/environments/newport_loft.hdr");
+                let radiance_image = std::io::Cursor::new(radiance_image);
+                let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
+                let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
+                let environment = resources
+                    .environment_builder()
+                    .name("newport_loft".to_string())
+                    .from_equirectangular_map(&radiance_image)
+                    .build(&mut encoder)
                     .id();
-                let cursor = scene
-                    .node_builder()
-                    .name("Orbit camera cursor".to_string().into())
-                    .build()
-                    .id();
-                let camera = scene
-                    .node_builder()
-                    .name("Orbit camera node".to_string().into())
-                    .local_position(1.5 * Vec3::Z)
-                    .camera(
-                        storm::camera::CameraDescriptor {
-                            name: Some("Orbit camera".to_string()),
-                            projection: storm::camera::Projection::Perspective {
-                                aspect_ratio: None,
-                                y_fov: f32::to_radians(65.0),
-                                z_far: Some(100.0),
-                                z_near: 0.01,
-                            },
-                        }
-                        .into(),
-                    )
-                    .build()
-                    .id();
-                scene.set_active_camera(camera.into());
 
-                OrbitControls::new(index, scene, target, cursor, camera)
-            })
-            .collect();
+                let (mut scenes, active_scene) = load_asset.map_or_else(
+                    || (Vec::new(), None),
+                    |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
+                );
+
+                let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
+                    scene.set_environment(environment, &resources);
+
+                    let target = scene
+                        .node_builder()
+                        .name("Orbit camera target".to_string().into())
+                        .build()
+                        .id();
+                    let cursor = scene
+                        .node_builder()
+                        .name("Orbit camera cursor".to_string().into())
+                        .build()
+                        .id();
+                    let camera = scene
+                        .node_builder()
+                        .name("Orbit camera node".to_string().into())
+                        .local_position(1.5 * Vec3::Z)
+                        .camera(
+                            storm::camera::CameraDescriptor {
+                                name: Some("Orbit camera".to_string()),
+                                projection: storm::camera::Projection::Perspective {
+                                    aspect_ratio: None,
+                                    y_fov: f32::to_radians(65.0),
+                                    z_far: Some(100.0),
+                                    z_near: 0.01,
+                                },
+                            }
+                            .into(),
+                        )
+                        .build()
+                        .id();
+                    scene.set_active_camera(camera.into());
+
+                    OrbitControls::new(index, scene, target, cursor, camera)
+                });
+
+                thread_data.controls.lock().unwrap().extend(controls);
+                let mut engine_scenes = thread_data.scenes.lock().unwrap();
+                engine_scenes.all.extend(scenes);
+                engine_scenes.active = active_scene;
+            }
+
+            thread_queue.submit([encoder.finish()]);
+        });
 
         let explorer = Explorer::new();
 
@@ -263,10 +301,7 @@ impl Engine {
             window,
             surface,
             surface_config,
-            _resources: resources,
-            scenes,
-            active_scene,
-            controls,
+            data,
             explorer,
             egui_state,
             egui_renderer,
@@ -278,15 +313,17 @@ impl Engine {
     }
 
     fn draw(&mut self) {
+        let scenes = &mut *self.data.scenes.lock().unwrap();
+        let mut controls = self.data.controls.lock().unwrap();
+
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| {
-                self.explorer
-                    .ui(ui, &mut self.scenes, &mut self.active_scene)
+                self.explorer.ui(ui, &mut scenes.all, &mut scenes.active)
             });
-            if let Some(scene_index) = self.active_scene {
-                let scene = &self.scenes[scene_index];
+            if let Some(scene_index) = scenes.active {
+                let scene = &scenes.all[scene_index];
                 egui::CentralPanel::default().show(&ctx, |ui| {
                     let size = match scene.aspect_ratio() {
                         Some(aspect_ratio) => {
@@ -328,7 +365,7 @@ impl Engine {
                             );
                             if response.hovered() {
                                 ui.input_mut(|inputs| {
-                                    for controls in self.controls.iter_mut() {
+                                    for controls in controls.iter_mut() {
                                         if controls.scene() == scene_index {
                                             controls.take_input(inputs, size, scene);
                                         }
@@ -354,11 +391,11 @@ impl Engine {
                     label: Some("Engine::draw command encoder"),
                 });
 
-        if let Some(scene_index) = self.active_scene {
-            let scene = &mut self.scenes[scene_index];
+        if let Some(scene_index) = scenes.active {
+            let scene = &mut scenes.all[scene_index];
             let viewport_aspect_ratio =
                 self.render_texture.width() as f32 / self.render_texture.height() as f32;
-            for controls in self.controls.iter_mut() {
+            for controls in controls.iter_mut() {
                 if controls.scene() == scene_index {
                     controls.update(viewport_aspect_ratio, scene);
                 }
@@ -385,8 +422,8 @@ impl Engine {
             self.egui_renderer.free_texture(&id);
         }
 
-        if let Some(scene_index) = self.active_scene {
-            let scene = &self.scenes[scene_index];
+        if let Some(scene_index) = scenes.active {
+            let scene = &scenes.all[scene_index];
             let mut storm_render_pass =
                 command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("storm render pass"),

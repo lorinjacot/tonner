@@ -135,7 +135,8 @@ impl Scene {
         }
     }
 
-    pub fn set_environment(&mut self, environment: &Environment) {
+    pub fn set_environment(&mut self, environment: Id<Environment>, resources: &Resources) {
+        let environment = &resources.environments[environment];
         self.skybox_bind_group = Some(environment.skybox_bind_group().clone());
         self.irradiance_map_view = environment.irradiance_map_view().clone();
         self.irradiance_map_sampler = environment.irradiance_map_sampler().clone();

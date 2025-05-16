@@ -289,9 +289,9 @@ impl Scene {
 
 fn rgb_to_rgba(bytes: &Vec<u8>, bytes_per_channel: usize) -> Vec<u8> {
     bytes
-        .chunks_exact(bytes_per_channel)
+        .chunks_exact(3 * bytes_per_channel)
         .flat_map(|rgb| {
-            let mut rgba = Vec::with_capacity(bytes_per_channel * 4);
+            let mut rgba = Vec::with_capacity(4 * bytes_per_channel);
             for byte in rgb {
                 rgba.push(*byte);
             }

@@ -465,6 +465,21 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self
     }
 
+    pub fn base_color_tex_coord(mut self, tex_coord: u32) -> Self {
+        self.uniform.base_color_tex_coord = tex_coord;
+        self
+    }
+
+    pub fn base_color_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
+        self.base_color_texture = Some(texture);
+        self
+    }
+
+    pub fn base_color_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
+        self.base_color_sampler = Some(sampler);
+        self
+    }
+
     pub fn metallic_factor(mut self, metallic_factor: f32) -> Self {
         self.uniform.metallic_factor = metallic_factor;
         self

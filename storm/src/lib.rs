@@ -35,6 +35,7 @@ impl Resources {
         render_texture_format: wgpu::TextureFormat,
         device: wgpu::Device,
         queue: wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> Self {
         let render_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -79,6 +80,40 @@ impl Resources {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    // prefilter map
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // BRDF LUT
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
             });
 
@@ -110,7 +145,7 @@ impl Resources {
 
         let environments = SparseSet::new();
         let environment_builder_data =
-            EnvironmentBuilderData::new(&device, &skybox_bind_group_layout);
+            EnvironmentBuilderData::new(&device, encoder, &skybox_bind_group_layout);
 
         let module = &device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
         let skybox_pipeline_layout =

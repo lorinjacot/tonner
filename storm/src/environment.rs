@@ -59,12 +59,17 @@ const IRRADIANCE_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Fl
 
 const PREFILTER_MAP_SIZE: u32 = 128;
 const PREFILTER_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const PREFILTER_MAP_MIP_COUNT: u32 = 5;
+pub const PREFILTER_MAP_MIP_COUNT: u32 = 5;
+
+const BRDF_LUT_SIZE: u32 = 512;
+const BRDF_LUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
 
 pub(super) struct EnvironmentBuilderData {
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     radiance_sampler: wgpu::Sampler,
+    brdf_lut_view: wgpu::TextureView,
+    brdf_lut_sampler: wgpu::Sampler,
     radiance_bind_group_layout: wgpu::BindGroupLayout,
     prefilter_roughness_bind_group_layout: wgpu::BindGroupLayout,
     environment_map_sampler: wgpu::Sampler,
@@ -75,7 +80,11 @@ pub(super) struct EnvironmentBuilderData {
 }
 
 impl EnvironmentBuilderData {
-    pub fn new(device: &wgpu::Device, skybox_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        skybox_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Environment builder cube vertex buffer"),
             contents: cast_slice(CUBE_VERTICES),
@@ -346,10 +355,101 @@ impl EnvironmentBuilderData {
             cache: None,
         });
 
+        let brdf_lut_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("BRDF LUT pipeline layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+
+        let brdf_lut_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("BRDF LUT pipeline"),
+            layout: Some(&brdf_lut_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module,
+                entry_point: Some("vs_main_2d"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module,
+                entry_point: Some("fs_brdf_lut"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(BRDF_LUT_FORMAT.into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let brdf_lut_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("BRDF LUT texture"),
+            size: wgpu::Extent3d {
+                width: BRDF_LUT_SIZE,
+                height: BRDF_LUT_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: BRDF_LUT_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let brdf_lut_view = brdf_lut_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("BRDF LUT texture view"),
+            ..Default::default()
+        });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("BRDF lut render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &brdf_lut_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            render_pass.set_pipeline(&brdf_lut_pipeline);
+            render_pass.draw(0..3, 0..1);
+        }
+
+        let brdf_lut_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("BRDF LUT sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
         Self {
             cube_vertex_buffer,
             cube_index_buffer,
             radiance_sampler,
+            brdf_lut_view,
+            brdf_lut_sampler,
             radiance_bind_group_layout,
             prefilter_roughness_bind_group_layout,
             environment_map_sampler,
@@ -366,6 +466,8 @@ pub struct Environment {
     pub name: String,
     skybox_bind_group: wgpu::BindGroup,
     irradiance_map: (wgpu::TextureView, wgpu::Sampler),
+    prefilter_map: (wgpu::TextureView, wgpu::Sampler),
+    brdf_lut: (wgpu::TextureView, wgpu::Sampler),
 }
 
 impl Environment {
@@ -379,6 +481,22 @@ impl Environment {
 
     pub fn irradiance_map_sampler(&self) -> &wgpu::Sampler {
         &self.irradiance_map.1
+    }
+
+    pub fn prefilter_map_view(&self) -> &wgpu::TextureView {
+        &self.prefilter_map.0
+    }
+
+    pub fn prefilter_map_sampler(&self) -> &wgpu::Sampler {
+        &self.prefilter_map.1
+    }
+
+    pub fn brdf_lut_view(&self) -> &wgpu::TextureView {
+        &self.brdf_lut.0
+    }
+
+    pub fn brdf_lut_sampler(&self) -> &wgpu::Sampler {
+        &self.brdf_lut.1
     }
 }
 
@@ -394,6 +512,8 @@ pub struct EnvironmentDescriptor {
     name: Option<String>,
     skybox_bind_group: wgpu::BindGroup,
     irradiance_map: (wgpu::TextureView, wgpu::Sampler),
+    prefilter_map: (wgpu::TextureView, wgpu::Sampler),
+    brdf_lut: (wgpu::TextureView, wgpu::Sampler),
 }
 
 impl SetEntry for Environment {
@@ -406,6 +526,8 @@ impl SetEntry for Environment {
             name,
             skybox_bind_group: desc.skybox_bind_group,
             irradiance_map: desc.irradiance_map,
+            prefilter_map: desc.prefilter_map,
+            brdf_lut: desc.brdf_lut,
         }
     }
 }
@@ -666,6 +788,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                     dimension: Some(wgpu::TextureViewDimension::D2),
                     base_array_layer: face as u32,
                     array_layer_count: Some(1),
+                    base_mip_level: mip,
                     mip_level_count: Some(1),
                     ..Default::default()
                 });
@@ -696,10 +819,35 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             }
         }
 
+        let prefilter_map_view = prefilter_map.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(&format!("{name} prefilter map view")),
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..Default::default()
+        });
+
+        let prefilter_map_sampler = self
+            .resources
+            .environment_builder_data
+            .environment_map_sampler
+            .clone();
+
+        let brdf_lut = (
+            self.resources
+                .environment_builder_data
+                .brdf_lut_view
+                .clone(),
+            self.resources
+                .environment_builder_data
+                .brdf_lut_sampler
+                .clone(),
+        );
+
         self.resources.environments.push(EnvironmentDescriptor {
             name: self.name,
             skybox_bind_group: environment_map_bind_group,
             irradiance_map: (irradiance_map_view, irradiance_map_sampler),
+            prefilter_map: (prefilter_map_view, prefilter_map_sampler),
+            brdf_lut,
         })
     }
 }

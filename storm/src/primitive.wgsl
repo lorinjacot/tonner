@@ -6,6 +6,7 @@ override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 
 const pi = 3.14159265359;
+override prefilter_map_mip_count: f32;
 
 struct Attributes {
     @location(1) position: vec3<f32>,
@@ -39,6 +40,10 @@ struct CameraUniform {
 @group(0) @binding(1) var<uniform> camera: CameraUniform;
 @group(0) @binding(2) var irradiance_map_texture: texture_cube<f32>;
 @group(0) @binding(3) var irradiance_map_sampler: sampler;
+@group(0) @binding(4) var prefilter_map_texture: texture_cube<f32>;
+@group(0) @binding(5) var prefilter_map_sampler: sampler;
+@group(0) @binding(6) var brdf_lut_texture: texture_2d<f32>;
+@group(0) @binding(7) var brdf_lut_sampler: sampler;
 
 struct MaterialUniform {
     base_color_factor: vec4<f32>,
@@ -47,12 +52,6 @@ struct MaterialUniform {
     roughness_factor: f32,
     metallic_roughness_tex_coord: u32
 }
-
-@group(1) @binding(0) var base_color_texture: texture_2d<f32>;
-@group(1) @binding(1) var base_color_sampler: sampler;
-@group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
-@group(1) @binding(3) var metallic_roughness_sampler: sampler;
-@group(1) @binding(4) var<uniform> material: MaterialUniform;
 
 @vertex
 fn vs_main(
@@ -76,6 +75,12 @@ fn vs_main(
     return result;
 }
 
+@group(1) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(1) @binding(1) var base_color_sampler: sampler;
+@group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
+@group(1) @binding(3) var metallic_roughness_sampler: sampler;
+@group(1) @binding(4) var<uniform> material: MaterialUniform;
+
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     var tex_coords: array<vec2<f32>, 2>;
@@ -88,6 +93,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
     let normal = normalize(vertex.world_normal);
     let view = normalize(camera.position - vertex.world_position);
+    let reflected = reflect(-view, normal);
 
     var base_color = material.base_color_factor;
     if has_base_color_texture {
@@ -124,11 +130,29 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     var lo = vec3(0.0);
     // todo: iterate over lights
   
-    let ks = fresnelSchlickRoughness(max(dot(normal, view), 0.0), f0, roughness);
-    let kd = 1.0 - ks;
+    let f = fresnelSchlickRoughness(max(dot(normal, view), 0.0), f0, roughness);
+
+    let ks = f;
+    var kd = 1.0 - ks;
+    kd *= 1.0 - metallic;
+
     let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
     let diffuse = irradiance * albedo;
-    let ambient = (kd * diffuse) * ambiance_occlusion;
+
+    let prefiltered_color = textureSampleLevel(
+        prefilter_map_texture,
+        prefilter_map_sampler,
+        reflected,
+        roughness * prefilter_map_mip_count,
+    ).rgb;
+    let env_brdf = textureSample(
+        brdf_lut_texture,
+        brdf_lut_sampler,
+        vec2(max(dot(normal, view), 0.0), roughness),
+    ).rg;
+    let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
+
+    let ambient = (kd * diffuse + specular) * ambiance_occlusion;
     var color = ambient + lo;
 
     color = color / (color + vec3(1.0));

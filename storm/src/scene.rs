@@ -28,6 +28,10 @@ pub struct Scene {
     camera_buffer: wgpu::Buffer,
     irradiance_map_view: wgpu::TextureView,
     irradiance_map_sampler: wgpu::Sampler,
+    prefilter_map_view: wgpu::TextureView,
+    prefilter_map_sampler: wgpu::Sampler,
+    brdf_lut_view: wgpu::TextureView,
+    brdf_lut_sampler: wgpu::Sampler,
     render_bind_group_layout: wgpu::BindGroupLayout,
     render_bind_group: Option<wgpu::BindGroup>,
     skybox_bind_group: Option<wgpu::BindGroup>,
@@ -70,6 +74,52 @@ impl Scene {
             ..Default::default()
         });
 
+        let prefilter_map_texture = resources
+            .texture_builder()
+            .name("Prefilter map texture")
+            .bytes(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                wgpu::TextureFormat::Rgba8Unorm,
+                &[u8::MAX; 4 * 6],
+            )
+            .build(encoder);
+        let prefilter_map_view = prefilter_map_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Prefilter map view"),
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            ..Default::default()
+        });
+        let prefilter_map_sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Prefilter map sampler"),
+            ..Default::default()
+        });
+
+        let brdf_lut_texture = resources
+            .texture_builder()
+            .name("BRDF LUT texture")
+            .bytes(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                wgpu::TextureFormat::Rg8Unorm,
+                &[u8::MAX; 2],
+            )
+            .build(encoder);
+        let brdf_lut_view = brdf_lut_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("BRDF LUT view"),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            ..Default::default()
+        });
+        let brdf_lut_sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("BRDF LUT sampler"),
+            ..Default::default()
+        });
+
         Self {
             name,
             device: resources.device.clone(),
@@ -83,6 +133,10 @@ impl Scene {
             camera_buffer,
             irradiance_map_view,
             irradiance_map_sampler,
+            prefilter_map_view,
+            prefilter_map_sampler,
+            brdf_lut_view,
+            brdf_lut_sampler,
             render_bind_group_layout: resources.render_bind_group_layout.clone(),
             render_bind_group: None,
             skybox_bind_group: None,
@@ -140,6 +194,10 @@ impl Scene {
         self.skybox_bind_group = Some(environment.skybox_bind_group().clone());
         self.irradiance_map_view = environment.irradiance_map_view().clone();
         self.irradiance_map_sampler = environment.irradiance_map_sampler().clone();
+        self.prefilter_map_view = environment.prefilter_map_view().clone();
+        self.prefilter_map_sampler = environment.prefilter_map_sampler().clone();
+        self.brdf_lut_view = environment.brdf_lut_view().clone();
+        self.brdf_lut_sampler = environment.brdf_lut_sampler().clone();
     }
 
     pub fn update(&mut self, viewport_aspect_ration: f32) {
@@ -251,6 +309,28 @@ impl Scene {
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.irradiance_map_sampler,
                                 ),
+                            },
+                            // prefilter map
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &self.prefilter_map_view,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &self.prefilter_map_sampler,
+                                ),
+                            },
+                            // BRDF LUT
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: wgpu::BindingResource::TextureView(&self.brdf_lut_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: wgpu::BindingResource::Sampler(&self.brdf_lut_sampler),
                             },
                         ],
                     }))

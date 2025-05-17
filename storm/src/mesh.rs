@@ -6,7 +6,7 @@ use std::{
 use bytemuck::{Pod, Zeroable, cast_slice};
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, storage::SetEntry};
+use crate::{DenseEntry, Id, Resources, environment::PREFILTER_MAP_MIP_COUNT, storage::SetEntry};
 
 pub struct Mesh {
     id: Id<Mesh>,
@@ -329,6 +329,10 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
         constants.insert(
             "has_metallic_roughness_texture".to_string(),
             bool_to_f64(material.has_metallic_roughness_texture),
+        );
+        constants.insert(
+            "prefilter_map_mip_count".to_string(),
+            PREFILTER_MAP_MIP_COUNT as f64,
         );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&format!("Primitive pipeline")),

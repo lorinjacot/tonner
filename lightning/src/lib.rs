@@ -184,11 +184,16 @@ impl Engine {
             .unwrap();
         surface.configure(&device, &surface_config);
 
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Engine::new command encoder"),
+        });
         let resources = Mutex::new(Resources::new(
             RENDER_TEXTURE_FORMAT,
             device.clone(),
             queue.clone(),
+            &mut encoder,
         ));
+        queue.submit([encoder.finish()]);
         let scenes = Mutex::new(Scenes {
             all: Vec::new(),
             active: None,

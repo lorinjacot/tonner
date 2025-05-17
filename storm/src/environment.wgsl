@@ -152,3 +152,92 @@ fn importanceSampleGGX(xi: vec2<f32>, normal: vec3<f32>, roughness: f32) -> vec3
     let sample_vec = tangent * halfway.x + bitangent * halfway.y + normal * halfway.z;
     return normalize(sample_vec);
 }
+
+struct VertexOutput2d {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main_2d(
+    @builtin(vertex_index) vertex_index: u32
+) -> VertexOutput2d {
+    let positions = array(
+        vec4(-1.0,-1.0, 0.0, 1.0),
+        vec4( 3.0,-1.0, 0.0, 1.0),
+        vec4(-1.0, 3.0, 0.0, 1.0),
+    );
+    let uvs = array(
+        vec2(0.0, 0.0),
+        vec2(2.0, 0.0),
+        vec2(0.0, 2.0),
+    );
+
+    var result: VertexOutput2d;
+    result.position = positions[vertex_index];
+    result.uv = uvs[vertex_index];
+    return result;
+}
+
+@fragment
+fn fs_brdf_lut(
+    vertex: VertexOutput2d
+) -> @location(0) vec2<f32> {
+    let integrated_brdf = integrateBRDF(vertex.uv.x, vertex.uv.y);
+    return integrated_brdf;
+}
+
+fn integrateBRDF(n_dot_v: f32, roughness: f32) -> vec2<f32> {
+    let view = vec3(
+        sqrt(1.0 - n_dot_v * n_dot_v),
+        0.0,
+        n_dot_v,
+    );
+
+    var a = 0.0;
+    var b = 0.0;
+
+    var normal = vec3(0.0, 0.0, 1.0);
+
+    const sample_count = 1024u;
+    for (var i = 0u; i < sample_count; i++) {
+        let xi = hammersley(i, sample_count);
+        let halfway = importanceSampleGGX(xi, normal, roughness);
+        let light  = normalize(2.0 * dot(view, halfway) * halfway - view);
+
+        let n_dot_l = max(light.z, 0.0);
+        let n_dot_h = max(halfway.z, 0.0);
+        let v_dot_h = max(dot(view, halfway), 0.0);
+
+        if n_dot_l > 0.0 {
+            let g = geometrySmith(normal, view, light, roughness);
+            let g_vis = (g * v_dot_h) / (n_dot_h * n_dot_v);
+            let fc = pow(1.0 - v_dot_h, 5.0);
+
+            a += (1.0 - fc) * g_vis;
+            b += fc * g_vis;
+        }
+    }
+    a /= f32(sample_count);
+    b /= f32(sample_count);
+    return vec2(a, b);
+}
+
+fn geometrySchlickGGX(n_dot_v: f32, roughness: f32) -> f32 {
+    let a = roughness;
+    let k = (a * a) / 2.0;
+
+    let nom   = n_dot_v;
+    let denom = n_dot_v * (1.0 - k) + k;
+
+    return nom / denom;
+}
+
+fn geometrySmith(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, roughness: f32) -> f32 {
+    let n_dot_v = max(dot(normal, view), 0.0);
+    let n_dot_l = max(dot(normal, light), 0.0);
+    let ggx2 = geometrySchlickGGX(n_dot_v, roughness);
+    let ggx1 = geometrySchlickGGX(n_dot_l, roughness);
+
+    return ggx1 * ggx2;
+} 

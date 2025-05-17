@@ -1,4 +1,4 @@
-use std::f32::consts::FRAC_PI_2;
+use std::{collections::HashMap, f32::consts::FRAC_PI_2};
 
 use bytemuck::{bytes_of, cast_slice};
 use glam::{Mat4, Vec3, vec3};
@@ -191,6 +191,8 @@ impl EnvironmentBuilderData {
             });
 
         let module = &device.create_shader_module(wgpu::include_wgsl!("environment.wgsl"));
+        let constants = &mut HashMap::new();
+        constants.insert("prefilter_map_size".to_string(), PREFILTER_MAP_SIZE as f64);
 
         let equirectangular_to_cubemap_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -199,7 +201,10 @@ impl EnvironmentBuilderData {
                 vertex: wgpu::VertexState {
                     module,
                     entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants,
+                        ..Default::default()
+                    },
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: size_of::<Vec3>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
@@ -228,7 +233,10 @@ impl EnvironmentBuilderData {
                 fragment: Some(wgpu::FragmentState {
                     module,
                     entry_point: Some("fs_equirectangular_to_cubemap"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants,
+                        ..Default::default()
+                    },
                     targets: &[Some(ENVIRONMENT_MAP_FORMAT.into())],
                 }),
                 multiview: None,
@@ -251,7 +259,10 @@ impl EnvironmentBuilderData {
             vertex: wgpu::VertexState {
                 module,
                 entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: size_of::<Vec3>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -280,7 +291,10 @@ impl EnvironmentBuilderData {
             fragment: Some(wgpu::FragmentState {
                 module,
                 entry_point: Some("fs_irradiance"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 targets: &[Some(IRRADIANCE_MAP_FORMAT.into())],
             }),
             multiview: None,
@@ -319,7 +333,10 @@ impl EnvironmentBuilderData {
             vertex: wgpu::VertexState {
                 module,
                 entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: size_of::<Vec3>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -348,7 +365,10 @@ impl EnvironmentBuilderData {
             fragment: Some(wgpu::FragmentState {
                 module,
                 entry_point: Some("fs_prefilter"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 targets: &[Some(PREFILTER_MAP_FORMAT.into())],
             }),
             multiview: None,
@@ -368,7 +388,10 @@ impl EnvironmentBuilderData {
             vertex: wgpu::VertexState {
                 module,
                 entry_point: Some("vs_main_2d"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 buffers: &[],
             },
             primitive: wgpu::PrimitiveState {
@@ -389,7 +412,10 @@ impl EnvironmentBuilderData {
             fragment: Some(wgpu::FragmentState {
                 module,
                 entry_point: Some("fs_brdf_lut"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants,
+                    ..Default::default()
+                },
                 targets: &[Some(BRDF_LUT_FORMAT.into())],
             }),
             multiview: None,

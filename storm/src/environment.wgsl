@@ -1,4 +1,5 @@
 const pi = 3.14159265359;
+override prefilter_map_size: f32;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -84,7 +85,13 @@ fn fs_irradiance(
 fn fs_prefilter(
     vertex: VertexOutput,
 ) -> @location(0) vec4<f32> {
-    let normal = normalize(vertex.local_position);
+    let tex_coord = vec3(
+        vertex.local_position.x,
+        vertex.local_position.y,
+        -vertex.local_position.z,
+    );
+
+    let normal = normalize(tex_coord);
     let view = normal;
 
     const sample_count = 1024u;
@@ -97,10 +104,24 @@ fn fs_prefilter(
 
         let n_dot_l = max(dot(normal, light), 0.0);
         if n_dot_l > 0.0 {
-            prefiltered_color += textureSample(
+            // sample from the environment's mip level based on roughness/pdf
+            let d = distributionGGX(normal, halfway, roughness);
+            let n_dot_h = max(dot(normal, halfway), 0.0);
+            let h_dot_v = max(dot(halfway, view), 0.0);
+            let pdf = d * n_dot_h / (4.0 * h_dot_v) + 0.0001;
+
+            let sa_texel  = 4.0 * pi / (6.0 * prefilter_map_size * prefilter_map_size);
+            let sa_sample = 1.0 / (f32(sample_count) * pdf + 0.0001);
+
+            var mip_level = 0.0;
+            if roughness > 0.0 {
+                mip_level = 0.5 * log2(sa_sample / sa_texel);
+            }
+            prefiltered_color += textureSampleLevel(
                 environment_cubemap_texture,
                 environment_cubemap_sampler,
                 light,
+                mip_level,
             ).rgb * n_dot_l;
             total_weight += n_dot_l;
         }
@@ -108,6 +129,19 @@ fn fs_prefilter(
     prefiltered_color = prefiltered_color / total_weight;
 
     return vec4(prefiltered_color, 1.0);
+}
+
+fn distributionGGX(normal: vec3<f32>, halfway: vec3<f32>, roughness: f32) -> f32 {
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let n_dot_h = max(dot(normal, halfway), 0.0);
+    let n_dot_h2 = n_dot_h * n_dot_h;
+
+    let nom   = a2;
+    var denom = (n_dot_h2 * (a2 - 1.0) + 1.0);
+    denom = pi * denom * denom;
+
+    return nom / denom;
 }
 
 fn radicalInverse_VdC(bits: u32) -> f32

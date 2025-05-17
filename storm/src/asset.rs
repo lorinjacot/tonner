@@ -244,6 +244,15 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
                 .base_color_texture(texture)
                 .base_color_sampler(sampler);
         }
+        if let Some(metallic_roughness_texture) =
+            pbr_metallic_roughness.metallic_roughness_texture()
+        {
+            let (texture, sampler) = textures[metallic_roughness_texture.texture().index()];
+            self = self
+                .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
+                .metallic_roughness_texture(texture)
+                .metallic_roughness_sampler(sampler);
+        }
         self.base_color_factor(pbr_metallic_roughness.base_color_factor())
             .metallic_factor(pbr_metallic_roughness.metallic_factor())
             .roughness_factor(pbr_metallic_roughness.roughness_factor())

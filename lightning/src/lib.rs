@@ -142,7 +142,7 @@ impl Engine {
         let window = create_window(
             &egui_ctx,
             event_loop,
-            &ViewportBuilder::default().with_maximized(false),
+            &ViewportBuilder::default().with_maximized(true),
         )
         .unwrap();
         let window = Arc::new(window);
@@ -292,8 +292,6 @@ impl Engine {
             create_render_texture(size.width, size.height, &mut egui_renderer, &device);
 
         let depth_texture_view = create_depth_texture_view(size.width, size.height, &device);
-
-        device.stop_capture();
 
         Self {
             device,

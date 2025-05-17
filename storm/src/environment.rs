@@ -1,6 +1,6 @@
 use std::f32::consts::FRAC_PI_2;
 
-use bytemuck::cast_slice;
+use bytemuck::{bytes_of, cast_slice};
 use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
@@ -57,15 +57,21 @@ const ENVIRONMENT_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16F
 const IRRADIANCE_MAP_SIZE: u32 = 32;
 const IRRADIANCE_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
+const PREFILTER_MAP_SIZE: u32 = 128;
+const PREFILTER_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const PREFILTER_MAP_MIP_COUNT: u32 = 5;
+
 pub(super) struct EnvironmentBuilderData {
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     radiance_sampler: wgpu::Sampler,
     radiance_bind_group_layout: wgpu::BindGroupLayout,
+    prefilter_roughness_bind_group_layout: wgpu::BindGroupLayout,
     environment_map_sampler: wgpu::Sampler,
     view_projection_bind_groups: [wgpu::BindGroup; 6],
     equirectangular_to_cubemap_pipeline: wgpu::RenderPipeline,
     irradiance_pipeline: wgpu::RenderPipeline,
+    prefilter_pipeline: wgpu::RenderPipeline,
 }
 
 impl EnvironmentBuilderData {
@@ -272,15 +278,85 @@ impl EnvironmentBuilderData {
             cache: None,
         });
 
+        let prefilter_roughness_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Roughness uniform bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let prefilter_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Prefilter pipeline layout"),
+                bind_group_layouts: &[
+                    &view_projection_bind_group_layout,
+                    &skybox_bind_group_layout,
+                    &prefilter_roughness_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let prefilter_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Prefilter pipeline"),
+            layout: Some(&prefilter_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: size_of::<Vec3>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module,
+                entry_point: Some("fs_prefilter"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(PREFILTER_MAP_FORMAT.into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
         Self {
             cube_vertex_buffer,
             cube_index_buffer,
             radiance_sampler,
             radiance_bind_group_layout,
+            prefilter_roughness_bind_group_layout,
             environment_map_sampler,
             view_projection_bind_groups,
             equirectangular_to_cubemap_pipeline,
             irradiance_pipeline,
+            prefilter_pipeline,
         }
     }
 }
@@ -543,27 +619,86 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             .environment_map_sampler
             .clone();
 
-        let irradiance_map_bind_group =
-            self.resources
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Environment map bind group"),
-                    layout: &self.resources.skybox_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
+        let prefilter_map = self
+            .resources
+            .texture_builder()
+            .name(&format!("{name} prefilter map"))
+            .empty(
+                wgpu::Extent3d {
+                    width: PREFILTER_MAP_SIZE,
+                    height: PREFILTER_MAP_SIZE,
+                    depth_or_array_layers: 6,
+                },
+                PREFILTER_MAP_FORMAT,
+            )
+            .mip_level_count(PREFILTER_MAP_MIP_COUNT)
+            .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+            .build(encoder);
+
+        for mip in 0..PREFILTER_MAP_MIP_COUNT {
+            let roughness = mip as f32 / (PREFILTER_MAP_MIP_COUNT - 1) as f32;
+            let roughness_buffer =
+                self.resources
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("prefilter roughness buffer"),
+                        contents: bytes_of(&roughness),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+            let roughness_bind_group =
+                self.resources
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("prefilter roughness bind group"),
+                        layout: &self
+                            .resources
+                            .environment_builder_data
+                            .prefilter_roughness_bind_group_layout,
+                        entries: &[wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&irradiance_map_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&irradiance_map_sampler),
-                        },
-                    ],
+                            resource: roughness_buffer.as_entire_binding(),
+                        }],
+                    });
+
+            for face in 0..6 {
+                let prefilter_map_view = prefilter_map.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("prefilter map attachment render view"),
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    base_array_layer: face as u32,
+                    array_layer_count: Some(1),
+                    mip_level_count: Some(1),
+                    ..Default::default()
                 });
+
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("prefilter render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &prefilter_map_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                render_pass.set_pipeline(&data.prefilter_pipeline);
+                render_pass.set_vertex_buffer(0, data.cube_vertex_buffer.slice(..));
+                render_pass
+                    .set_index_buffer(data.cube_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.set_bind_group(0, &data.view_projection_bind_groups[face], &[]);
+                render_pass.set_bind_group(1, &environment_map_bind_group, &[]);
+                render_pass.set_bind_group(2, &roughness_bind_group, &[]);
+                render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
+            }
+        }
 
         self.resources.environments.push(EnvironmentDescriptor {
             name: self.name,
-            skybox_bind_group: irradiance_map_bind_group,
+            skybox_bind_group: environment_map_bind_group,
             irradiance_map: (irradiance_map_view, irradiance_map_sampler),
         })
     }

@@ -37,6 +37,11 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
+    pub fn mip_level_count(mut self, mip_level_count: u32) -> Self {
+        self.mip_level_count = mip_level_count;
+        self
+    }
+
     pub fn usage(mut self, usage: wgpu::TextureUsages) -> Self {
         self.usage = usage;
         self

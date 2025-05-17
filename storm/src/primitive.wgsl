@@ -3,6 +3,7 @@ override has_tex_coord_1: bool;
 override has_color_0: bool;
 
 override has_base_color_texture: bool;
+override has_metallic_roughness_texture: bool;
 
 const pi = 3.14159265359;
 
@@ -44,11 +45,14 @@ struct MaterialUniform {
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
+    metallic_roughness_tex_coord: u32
 }
 
 @group(1) @binding(0) var base_color_texture: texture_2d<f32>;
 @group(1) @binding(1) var base_color_sampler: sampler;
-@group(1) @binding(2) var<uniform> material: MaterialUniform;
+@group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
+@group(1) @binding(3) var metallic_roughness_sampler: sampler;
+@group(1) @binding(4) var<uniform> material: MaterialUniform;
 
 @vertex
 fn vs_main(
@@ -98,8 +102,19 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     let albedo = base_color.rgb;
-    let metallic = material.metallic_factor;
-    let roughness = material.roughness_factor;
+
+    var metallic = material.metallic_factor;
+    var roughness = material.roughness_factor;
+    if has_metallic_roughness_texture {
+        let metallic_roughness = textureSample(
+            metallic_roughness_texture,
+            metallic_roughness_sampler,
+            tex_coords[material.metallic_roughness_tex_coord],
+        );
+        roughness *= metallic_roughness.g;
+        metallic *= metallic_roughness.b;
+    }
+
     let ambiance_occlusion = 1.0;
 
     var f0 = vec3(0.04);

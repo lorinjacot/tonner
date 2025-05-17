@@ -326,6 +326,10 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
             "has_base_color_texture".to_string(),
             bool_to_f64(material.has_base_color_texture),
         );
+        constants.insert(
+            "has_metallic_roughness_texture".to_string(),
+            bool_to_f64(material.has_metallic_roughness_texture),
+        );
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&format!("Primitive pipeline")),
             layout: Some(&data.primitive_pipeline_layout),
@@ -432,6 +436,7 @@ struct VertexBufferLayout {
 pub struct Material {
     bind_group: wgpu::BindGroup,
     has_base_color_texture: bool,
+    has_metallic_roughness_texture: bool,
 }
 
 #[must_use]
@@ -439,6 +444,8 @@ pub struct MaterialBuilder<'a, 'r> {
     resources: &'r mut Resources,
     base_color_texture: Option<&'a wgpu::TextureView>,
     base_color_sampler: Option<&'a wgpu::Sampler>,
+    metallic_roughness_texture: Option<&'a wgpu::TextureView>,
+    metallic_roughness_sampler: Option<&'a wgpu::Sampler>,
     uniform: MaterialUniform,
 }
 
@@ -449,13 +456,15 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             base_color_tex_coord: 0,
             metallic_factor: 1.0,
             roughness_factor: 1.0,
-            _padding: 0.0,
+            metallic_roughness_tex_coord: 0,
         };
 
         Self {
             resources,
             base_color_texture: None,
             base_color_sampler: None,
+            metallic_roughness_texture: None,
+            metallic_roughness_sampler: None,
             uniform,
         }
     }
@@ -490,11 +499,33 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self
     }
 
+    pub fn metallic_roughness_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
+        self.metallic_roughness_texture = Some(texture);
+        self
+    }
+
+    pub fn metallic_roughness_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
+        self.metallic_roughness_sampler = Some(sampler);
+        self
+    }
+
+    pub fn metallic_roughness_tex_coord(mut self, tex_coord: u32) -> Self {
+        self.uniform.metallic_roughness_tex_coord = tex_coord;
+        self
+    }
+
     pub fn build(self) -> Material {
         let data = &self.resources.mesh_builder_data;
         let has_base_color_texture = self.base_color_texture.is_some();
+        let has_metallic_roughness_texture = self.metallic_roughness_texture.is_some();
         let base_color_texture = self.base_color_texture.unwrap_or(&data.default_texture);
         let base_color_sampler = self.base_color_sampler.unwrap_or(&data.default_sampler);
+        let metallic_roughness_texture = self
+            .metallic_roughness_texture
+            .unwrap_or(&data.default_texture);
+        let metallic_roughness_sampler = self
+            .metallic_roughness_sampler
+            .unwrap_or(&data.default_sampler);
 
         let uniform_buffer =
             self.resources
@@ -520,9 +551,18 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
                         binding: 1,
                         resource: wgpu::BindingResource::Sampler(base_color_sampler),
                     },
-                    // Material uniform
+                    // metallic roughness texture
                     wgpu::BindGroupEntry {
                         binding: 2,
+                        resource: wgpu::BindingResource::TextureView(metallic_roughness_texture),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(metallic_roughness_sampler),
+                    },
+                    // Material uniform
+                    wgpu::BindGroupEntry {
+                        binding: 4,
                         resource: uniform_buffer.as_entire_binding(),
                     },
                 ],
@@ -530,6 +570,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         Material {
             bind_group,
             has_base_color_texture,
+            has_metallic_roughness_texture,
         }
     }
 }
@@ -541,7 +582,7 @@ struct MaterialUniform {
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
-    _padding: f32,
+    metallic_roughness_tex_coord: u32,
 }
 
 #[derive(Clone)]
@@ -590,9 +631,26 @@ impl MeshBuilderData {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
-                    // Material Uniform
+                    // metallic roughness texture
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // Material Uniform
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,

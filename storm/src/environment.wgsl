@@ -77,3 +77,78 @@ fn fs_irradiance(
 
     return vec4(irradiance, 1.0);
 }
+
+@group(2) @binding(0) var<uniform> roughness: f32;
+
+@fragment
+fn fs_prefilter(
+    vertex: VertexOutput,
+) -> @location(0) vec4<f32> {
+    let normal = normalize(vertex.local_position);
+    let view = normal;
+
+    const sample_count = 1024u;
+    var total_weight = 0.0;   
+    var prefiltered_color = vec3(0.0);
+    for (var i = 0u; i < sample_count; i++) {
+        let xi = hammersley(i, sample_count);
+        let halfway = importanceSampleGGX(xi, normal, roughness);
+        let light = normalize(2.0 * dot(view, halfway) * halfway - view);
+
+        let n_dot_l = max(dot(normal, light), 0.0);
+        if n_dot_l > 0.0 {
+            prefiltered_color += textureSample(
+                environment_cubemap_texture,
+                environment_cubemap_sampler,
+                light,
+            ).rgb * n_dot_l;
+            total_weight += n_dot_l;
+        }
+    }
+    prefiltered_color = prefiltered_color / total_weight;
+
+    return vec4(prefiltered_color, 1.0);
+}
+
+fn radicalInverse_VdC(bits: u32) -> f32
+{
+    var b = bits;
+    b = (b << 16u) | (b >> 16u);
+    b = ((b & 0x55555555u) << 1u) | ((b & 0xAAAAAAAAu) >> 1u);
+    b = ((b & 0x33333333u) << 2u) | ((b & 0xCCCCCCCCu) >> 2u);
+    b = ((b & 0x0F0F0F0Fu) << 4u) | ((b & 0xF0F0F0F0u) >> 4u);
+    b = ((b & 0x00FF00FFu) << 8u) | ((b & 0xFF00FF00u) >> 8u);
+    return f32(b) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+fn hammersley(i: u32, n: u32) -> vec2<f32>
+{
+    return vec2(f32(i)/f32(n), radicalInverse_VdC(i));
+}
+
+fn importanceSampleGGX(xi: vec2<f32>, normal: vec3<f32>, roughness: f32) -> vec3<f32>
+{
+    let a = roughness * roughness;
+	
+    let phi = 2.0 * pi * xi.x;
+    let cos_theta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+    let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+	
+    // from spherical coordinates to cartesian coordinates
+    let halfway = vec3(
+        cos(phi) * sin_theta,
+        sin(phi) * sin_theta,
+        cos_theta
+    );
+	
+    // from tangent-space vector to world-space sample vector
+    var up = vec3(0.0, 0.0, 1.0);
+    if abs(normal.z) >= 0.999 {
+        up = vec3(1.0, 0.0, 0.0);
+    }
+    let tangent   = normalize(cross(up, normal));
+    let bitangent = cross(normal, tangent);
+	
+    let sample_vec = tangent * halfway.x + bitangent * halfway.y + normal * halfway.z;
+    return normalize(sample_vec);
+}

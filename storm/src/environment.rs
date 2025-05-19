@@ -585,9 +585,8 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
 
     pub fn build(self, encoder: &'a mut wgpu::CommandEncoder) -> &'r mut Environment {
         let name = self.name.as_ref().map_or("", |name| name);
-        let data = &self.resources.environment_builder_data;
         let environment_map_view = match self.source {
-            Source::None => panic!("no environment support"),
+            Source::None => todo!("no environment support"),
             Source::EquirectangularMap(radiance_image) => {
                 let radiance_texture = self
                     .resources
@@ -600,6 +599,8 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                         label: Some(&format!("{name} radiance view")),
                         ..Default::default()
                     });
+
+                let data = &self.resources.environment_builder_data;
                 let radiance_bind_group =
                     self.resources
                         .device
@@ -638,43 +639,58 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                         wgpu::TextureUsages::RENDER_ATTACHMENT
                             | wgpu::TextureUsages::TEXTURE_BINDING,
                     )
-                    .build(encoder);
+                    .generate_mips()
+                    .build_callback(
+                        encoder,
+                        move |environment_cubemap_texture, resources, encoder| {
+                            for face in 0..6 {
+                                let environment_map_view = environment_cubemap_texture.create_view(
+                                    &wgpu::TextureViewDescriptor {
+                                        label: Some("environmnent cubemap render view"),
+                                        dimension: Some(wgpu::TextureViewDimension::D2),
+                                        base_array_layer: face as u32,
+                                        array_layer_count: Some(1),
+                                        base_mip_level: 0,
+                                        mip_level_count: Some(1),
+                                        ..Default::default()
+                                    },
+                                );
 
-                for face in 0..6 {
-                    let environment_map_view =
-                        environment_cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
-                            label: Some("environmnent cubemap render view"),
-                            dimension: Some(wgpu::TextureViewDimension::D2),
-                            base_array_layer: face as u32,
-                            array_layer_count: Some(1),
-                            ..Default::default()
-                        });
+                                let mut render_pass =
+                                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                        label: Some("Equirectangular to cubemap render pass"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &environment_map_view,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        timestamp_writes: None,
+                                        occlusion_query_set: None,
+                                    });
 
-                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("Equirectangular to cubemap render pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &environment_map_view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    });
-
-                    render_pass.set_pipeline(&data.equirectangular_to_cubemap_pipeline);
-                    render_pass.set_vertex_buffer(0, data.cube_vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(
-                        data.cube_index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint16,
+                                let data = &resources.environment_builder_data;
+                                render_pass.set_pipeline(&data.equirectangular_to_cubemap_pipeline);
+                                render_pass.set_vertex_buffer(0, data.cube_vertex_buffer.slice(..));
+                                render_pass.set_index_buffer(
+                                    data.cube_index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint16,
+                                );
+                                render_pass.set_bind_group(
+                                    0,
+                                    &data.view_projection_bind_groups[face],
+                                    &[],
+                                );
+                                render_pass.set_bind_group(1, &radiance_bind_group, &[]);
+                                render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
+                            }
+                        },
                     );
-                    render_pass.set_bind_group(0, &data.view_projection_bind_groups[face], &[]);
-                    render_pass.set_bind_group(1, &radiance_bind_group, &[]);
-                    render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
-                }
 
                 environment_cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
                     label: Some(&format!("{name} environment cubemap view")),
@@ -746,6 +762,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                 occlusion_query_set: None,
             });
 
+            let data = &self.resources.environment_builder_data;
             render_pass.set_pipeline(&data.irradiance_pipeline);
             render_pass.set_vertex_buffer(0, data.cube_vertex_buffer.slice(..));
             render_pass
@@ -834,6 +851,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                     occlusion_query_set: None,
                 });
 
+                let data = &self.resources.environment_builder_data;
                 render_pass.set_pipeline(&data.prefilter_pipeline);
                 render_pass.set_vertex_buffer(0, data.cube_vertex_buffer.slice(..));
                 render_pass

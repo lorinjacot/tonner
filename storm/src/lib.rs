@@ -7,7 +7,7 @@ pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
 pub use storage::{DenseEntry, Id};
-use texture::TextureBuilder;
+use texture::{TextureBuilder, TextureBuilderData};
 
 mod asset;
 mod environment;
@@ -21,6 +21,7 @@ pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
     render_texture_format: wgpu::TextureFormat,
+    texture_builder_data: TextureBuilderData,
     meshes: SparseSet<mesh::Mesh>,
     mesh_builder_data: MeshBuilderData,
     environments: SparseSet<Environment>,
@@ -139,6 +140,8 @@ impl Resources {
                     },
                 ],
             });
+            
+        let texture_builder_data = TextureBuilderData::new(&device);
 
         let meshes = SparseSet::new();
         let mesh_builder_data = MeshBuilderData::new(&device, &render_bind_group_layout);
@@ -198,6 +201,7 @@ impl Resources {
             device,
             queue,
             render_texture_format,
+            texture_builder_data,
             meshes,
             mesh_builder_data,
             environments,
@@ -220,7 +224,7 @@ impl Resources {
         mesh::MeshBuilder::new(self)
     }
 
-    fn texture_builder(&self) -> TextureBuilder {
+    fn texture_builder(&mut self) -> TextureBuilder {
         TextureBuilder::new(self)
     }
 

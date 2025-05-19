@@ -41,7 +41,7 @@ pub struct Scene {
 impl Scene {
     pub(super) fn new(
         name: String,
-        resources: &Resources,
+        resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Self {
         let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {

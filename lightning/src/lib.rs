@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::f32::consts::PI;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -234,51 +232,6 @@ impl Engine {
 
             let mut scene = Scene::new("Sphere demo".to_string(), &mut resources, &mut encoder);
 
-            const X_SEGMENTS: usize = 64;
-            const Y_SEGMENTS: usize = 64;
-
-            let vertex_count = (X_SEGMENTS + 1) * (Y_SEGMENTS + 1);
-            let mut positions = Vec::with_capacity(vertex_count);
-            let mut uv = Vec::with_capacity(vertex_count);
-            let mut normals = Vec::with_capacity(vertex_count);
-
-            for x in 0..=X_SEGMENTS {
-                for y in 0..=Y_SEGMENTS {
-                    let x_segment = x as f32 / X_SEGMENTS as f32;
-                    let y_segment = y as f32 / Y_SEGMENTS as f32;
-                    let x_pos = (x_segment * 2.0 * PI).cos() * (y_segment * PI).sin();
-                    let y_pos = (y_segment * PI).cos();
-                    let z_pos = (x_segment * 2.0 * PI).sin() * (y_segment * PI).sin();
-
-                    positions.push([x_pos, y_pos, z_pos]);
-                    uv.push([x_segment, y_segment]);
-                    normals.push([x_pos, y_pos, z_pos]);
-                }
-            }
-            let positions: Cow<'_, [[f32; 3]]> = Cow::Borrowed(&positions);
-            let uv: Cow<'_, [[f32; 2]]> = Cow::Borrowed(&uv);
-            let normals: Cow<'_, [[f32; 3]]> = Cow::Borrowed(&normals);
-
-            let vertex_count = Y_SEGMENTS * (X_SEGMENTS + 1) * 2;
-            let mut indices = Vec::with_capacity(vertex_count);
-            let mut odd_row = false;
-            for y in 0..Y_SEGMENTS {
-                // even rows: y == 0, y == 2; and so on
-                if !odd_row {
-                    for x in 0..=X_SEGMENTS {
-                        indices.push((y * (X_SEGMENTS + 1) + x) as u32);
-                        indices.push(((y + 1) * (X_SEGMENTS + 1) + x) as u32);
-                    }
-                } else {
-                    for x in (0..=X_SEGMENTS).rev() {
-                        indices.push(((y + 1) * (X_SEGMENTS + 1) + x) as u32);
-                        indices.push((y * (X_SEGMENTS + 1) + x) as u32);
-                    }
-                }
-                odd_row = !odd_row;
-            }
-            let indices: Cow<'_, [u32]> = Cow::Borrowed(&indices);
-
             let nr_rows = 7;
             let nr_columns = 7;
             let spacing = 2.5;
@@ -289,17 +242,14 @@ impl Engine {
 
                     let material = resources
                         .material_builder()
+                        .base_color_factor([1.0, 0.0, 0.0, 1.0])
                         .metallic_factor(metallic)
                         .roughness_factor(roughness)
-                        .base_color_factor([1.0, 0.0, 0.0, 1.0])
                         .build();
 
                     let primitive = resources
                         .primitive_builder()
-                        .positions(positions.clone())
-                        .tex_coords(0, mesh::TexCoords::F32(uv.clone()))
-                        .normals(normals.clone())
-                        .indices(mesh::Indices::U32(indices.clone()))
+                        .sphere(&mesh::SphereDescriptor::default())
                         .material(&material)
                         .build();
 

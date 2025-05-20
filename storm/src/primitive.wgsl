@@ -59,9 +59,11 @@ fn vs_main(
     attributes: Attributes,
 ) -> VertexOutput {
     let node = nodes[index];
+    let world_position = node.model * vec4(attributes.position, 1.0);
 
     var result: VertexOutput;
-    result.position = camera.view_projection * node.model * vec4(attributes.position, 1.0);
+    result.position = camera.view_projection * world_position;
+    result.world_position = world_position.xyz;
     result.world_normal = node.model_normal * attributes.normal;
     if has_tex_coord_0 {
         result.tex_coord_0 = attributes.tex_coord_0;

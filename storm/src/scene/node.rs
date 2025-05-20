@@ -4,7 +4,7 @@ use glam::{Mat4, Quat, Vec3};
 
 use crate::{DenseEntry, Id, Transform, mesh::Mesh, storage::SetEntry};
 
-use super::{Camera, Scene, camera::CameraDescriptor};
+use super::{Camera, PointLight, Scene, camera::CameraDescriptor};
 
 pub struct Node {
     id: Id<Node>,
@@ -118,6 +118,7 @@ pub struct NodeBuilder<'a, 's> {
     desc: NodeDescriptor,
     mesh: Option<&'a Mesh>,
     camera: Option<CameraDescriptor>,
+    point_light: Option<Vec3>,
 }
 
 impl<'a, 's> NodeBuilder<'a, 's> {
@@ -134,6 +135,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
             },
             mesh: None,
             camera: None,
+            point_light: None,
         }
     }
 
@@ -180,6 +182,11 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         self
     }
 
+    pub fn point_light(mut self, color: Vec3) -> Self {
+        self.point_light = Some(color);
+        self
+    }
+
     pub fn build(mut self) -> &'s mut Node {
         let id = self.scene.nodes.next_id();
         match self.desc.parent {
@@ -204,6 +211,13 @@ impl<'a, 's> NodeBuilder<'a, 's> {
 
         if let Some(camera) = self.camera {
             self.scene.cameras.insert(Camera::new(node.id(), camera));
+        }
+
+        if let Some(color) = self.point_light {
+            self.scene.point_lights.insert(PointLight {
+                node: node.id(),
+                color,
+            });
         }
 
         node

@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use bytemuck::{Pod, Zeroable, cast_slice};
+use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
 use glam::{Mat3, Mat4, Vec3, Vec4, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
@@ -26,6 +26,8 @@ pub struct Scene {
     cameras: SparseMap<Camera>,
     active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
+    point_lights: SparseMap<PointLight>,
+    lights_buffer: Option<wgpu::Buffer>,
     irradiance_map_view: wgpu::TextureView,
     irradiance_map_sampler: wgpu::Sampler,
     prefilter_map_view: wgpu::TextureView,
@@ -131,6 +133,8 @@ impl Scene {
             cameras: SparseMap::new(),
             active_camera: None,
             camera_buffer,
+            point_lights: SparseMap::new(),
+            lights_buffer: None,
             irradiance_map_view,
             irradiance_map_sampler,
             prefilter_map_view,
@@ -238,6 +242,61 @@ impl Scene {
             }
         };
 
+        let lights_buffer = {
+            let mut point_lights: Vec<_> = self
+                .point_lights
+                .iter()
+                .map(|light| {
+                    let position = self.nodes[light.node].world_position();
+                    PointLightUniform {
+                        position: position.to_array(),
+                        _pad0: 0,
+                        color: light.color.to_array(),
+                        _pad1: 0,
+                    }
+                })
+                .collect();
+            let point_light_count = point_lights.len() as u32;
+            if point_light_count == 0 {
+                point_lights.push(PointLightUniform {
+                    position: [0.0; 3],
+                    _pad0: 0,
+                    color: [0.0; 3],
+                    _pad1: 0,
+                });
+            }
+
+            let light_storage = LightStorage {
+                point_light_count,
+                _pad: [0; 3],
+            };
+            let light_storage_size =
+                size_of::<LightStorage>() + point_lights.len() * size_of::<PointLightUniform>();
+
+            let data = &mut Vec::with_capacity(light_storage_size);
+            data.extend_from_slice(bytes_of(&light_storage));
+            data.extend_from_slice(cast_slice(&point_lights));
+            assert_eq!(data.len(), light_storage_size);
+
+            match &self.lights_buffer {
+                Some(buffer) if buffer.size() as usize >= light_storage_size => {
+                    self.queue.write_buffer(&buffer, 0, data);
+                    buffer
+                }
+                _ => {
+                    self.render_bind_group = None;
+                    let buffer =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Lights buffer"),
+                                contents: data,
+                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                            });
+                    self.lights_buffer.insert(buffer)
+                }
+            }
+        };
+
         if let Some(camera) = self.active_camera {
             let projection = self.cameras[camera]
                 .projection
@@ -297,39 +356,44 @@ impl Scene {
                                 binding: 1,
                                 resource: self.camera_buffer.as_entire_binding(),
                             },
-                            // irradiance map
+                            // lights
                             wgpu::BindGroupEntry {
                                 binding: 2,
+                                resource: lights_buffer.as_entire_binding(),
+                            },
+                            // irradiance map
+                            wgpu::BindGroupEntry {
+                                binding: 3,
                                 resource: wgpu::BindingResource::TextureView(
                                     &self.irradiance_map_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 3,
+                                binding: 4,
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.irradiance_map_sampler,
                                 ),
                             },
                             // prefilter map
                             wgpu::BindGroupEntry {
-                                binding: 4,
+                                binding: 5,
                                 resource: wgpu::BindingResource::TextureView(
                                     &self.prefilter_map_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 5,
+                                binding: 6,
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.prefilter_map_sampler,
                                 ),
                             },
                             // BRDF LUT
                             wgpu::BindGroupEntry {
-                                binding: 6,
+                                binding: 7,
                                 resource: wgpu::BindingResource::TextureView(&self.brdf_lut_view),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 7,
+                                binding: 8,
                                 resource: wgpu::BindingResource::Sampler(&self.brdf_lut_sampler),
                             },
                         ],
@@ -406,6 +470,35 @@ struct CameraUniform {
     view_projection_inv: Mat4,
     position: Vec3,
     _padding: f32,
+}
+
+struct PointLight {
+    node: Id<Node>,
+    color: Vec3,
+}
+
+impl DenseEntry for PointLight {
+    type Key = Node;
+
+    fn id(&self) -> Id<Self::Key> {
+        self.node
+    }
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct LightStorage {
+    point_light_count: u32,
+    _pad: [u32; 3],
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct PointLightUniform {
+    position: [f32; 3],
+    _pad0: u32,
+    color: [f32; 3],
+    _pad1: u32,
 }
 
 struct MeshInstances {

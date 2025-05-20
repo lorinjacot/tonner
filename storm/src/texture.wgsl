@@ -13,9 +13,9 @@ fn vs_main(
         vec4(-1.0, 3.0, 0.0, 1.0),
     );
     let uvs = array(
-        vec2(0.0, 0.0),
-        vec2(2.0, 0.0),
-        vec2(0.0, 2.0),
+        vec2(0.0, 1.0),
+        vec2(2.0, 1.0),
+        vec2(0.0,-1.0),
     );
 
     var result: VertexOutput;

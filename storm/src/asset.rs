@@ -138,13 +138,12 @@ pub fn open_gltf<'r>(
                         None => default_material.as_ref().unwrap(),
                     };
                     let mut primitive_builder = resources.primitive_builder();
-                    let indices;
                     primitive_builder = match reader.read_indices() {
-                        Some(indices_reader) => {
-                            indices = indices_reader.into_u32().collect::<Vec<_>>();
+                        Some(indices) => {
+                            let indices = indices.into_u32();
                             primitive_builder
                                 .vertex_count(indices.len() as u32)
-                                .indices(Indices::Slice(&indices))
+                                .indices(Indices::U32(indices.collect()))
                         }
                         None => primitive_builder.vertex_count(position.len() as u32),
                     };
@@ -187,14 +186,11 @@ pub fn open_gltf<'r>(
                             None => break,
                         }
                     }
+                    if let Some(normals) = reader.read_normals() {
+                        primitive_builder = primitive_builder.normals(normals.collect());
+                    }
                     let primitive = primitive_builder
-                        .positions(Some(&position.collect::<Vec<_>>()))
-                        .normals(
-                            reader
-                                .read_normals()
-                                .map(|normals| normals.collect::<Vec<_>>())
-                                .as_deref(),
-                        )
+                        .positions(position.collect())
                         .material(material)
                         .build();
                     primitives.push(primitive);
@@ -202,7 +198,11 @@ pub fn open_gltf<'r>(
             }
             resources
                 .mesh_builder()
-                .name(mesh.name().map(|name| name.to_string()))
+                .name(format!(
+                    "Gltf mesh {} {}",
+                    mesh.index(),
+                    mesh.name().unwrap_or("")
+                ))
                 .primitives(primitives)
                 .build()
                 .id()

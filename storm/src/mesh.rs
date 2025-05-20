@@ -55,8 +55,8 @@ impl<'r> MeshBuilder<'r> {
         }
     }
 
-    pub fn name(mut self, name: Option<String>) -> Self {
-        self.name = name;
+    pub fn name(mut self, name: String) -> Self {
+        self.name = Some(name);
         self
     }
 
@@ -78,8 +78,8 @@ pub struct PrimitiveBuilder<'a, 'r> {
     resources: &'r mut Resources,
     vertex_count: u32,
     indices: Indices<'a>,
-    positions: Option<&'a [[f32; 3]]>,
-    normals: Option<&'a [[f32; 3]]>,
+    positions: Option<Cow<'a, [[f32; 3]]>>,
+    normals: Option<Cow<'a, [[f32; 3]]>>,
     tex_coords: BTreeMap<Attribute, TexCoords<'a>>,
     has_tex_coord_0: f64,
     has_tex_coord_1: f64,
@@ -119,13 +119,13 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
         self
     }
 
-    pub fn positions(mut self, positions: Option<&'a [[f32; 3]]>) -> Self {
-        self.positions = positions;
+    pub fn positions(mut self, positions: Cow<'a, [[f32; 3]]>) -> Self {
+        self.positions = Some(positions);
         self
     }
 
-    pub fn normals(mut self, normals: Option<&'a [[f32; 3]]>) -> Self {
-        self.normals = normals;
+    pub fn normals(mut self, normals: Cow<'a, [[f32; 3]]>) -> Self {
+        self.normals = Some(normals);
         self
     }
 
@@ -192,7 +192,7 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
                 });
             };
 
-        if let Some(positions) = self.positions {
+        if let Some(positions) = &self.positions {
             create_vertex_buffer(
                 "Position vertex buffer",
                 cast_slice(positions),
@@ -201,7 +201,7 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
                 Attribute::Position,
             );
         }
-        if let Some(normals) = self.normals {
+        if let Some(normals) = &self.normals {
             create_vertex_buffer(
                 "Normal vertex buffer",
                 cast_slice(normals),
@@ -382,10 +382,10 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
 
         let index_buffer = match self.indices {
             Indices::None => None,
-            Indices::Slice(slice) => {
+            Indices::U32(slice) => {
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Primitive index buffer"),
-                    contents: cast_slice(slice),
+                    contents: cast_slice(&slice),
                     usage: wgpu::BufferUsages::INDEX,
                 });
                 let format = wgpu::IndexFormat::Uint32;
@@ -407,7 +407,7 @@ impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
 
 pub enum Indices<'a> {
     None,
-    Slice(&'a [u32]),
+    U32(Cow<'a, [u32]>),
 }
 
 pub enum TexCoords<'a> {

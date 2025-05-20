@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::f32::consts::PI;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -8,7 +9,7 @@ use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
 use explorer::Explorer;
-use glam::{Vec3, vec2, vec3};
+use glam::{Vec3, vec3};
 use storm::{DenseEntry, Resources, Scene, mesh, open_gltf};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -231,69 +232,101 @@ impl Engine {
                 .build(&mut encoder)
                 .id();
 
-            let sphere = {
-                const X_SEGMENTS: usize = 64;
-                const Y_SEGMENTS: usize = 64;
+            let mut scene = Scene::new("Sphere demo".to_string(), &mut resources, &mut encoder);
 
-                let vertex_count = (X_SEGMENTS + 1) * (Y_SEGMENTS + 1);
-                let mut positions = Vec::with_capacity(vertex_count);
-                let mut uv = Vec::with_capacity(vertex_count);
-                let mut normals = Vec::with_capacity(vertex_count);
+            const X_SEGMENTS: usize = 64;
+            const Y_SEGMENTS: usize = 64;
 
-                for x in 0..=X_SEGMENTS {
-                    for y in 0..=Y_SEGMENTS {
-                        let x_segment = x as f32 / X_SEGMENTS as f32;
-                        let y_segment = y as f32 / Y_SEGMENTS as f32;
-                        let x_pos = (x_segment * 2.0 * PI).cos() * (y_segment * PI).sin();
-                        let y_pos = (y_segment * PI).cos();
-                        let z_pos = (x_segment * 2.0 * PI).sin() * (y_segment * PI).sin();
+            let vertex_count = (X_SEGMENTS + 1) * (Y_SEGMENTS + 1);
+            let mut positions = Vec::with_capacity(vertex_count);
+            let mut uv = Vec::with_capacity(vertex_count);
+            let mut normals = Vec::with_capacity(vertex_count);
 
-                        positions.push([x_pos, y_pos, z_pos]);
-                        uv.push([x_segment, y_segment]);
-                        normals.push([x_pos, y_pos, z_pos]);
+            for x in 0..=X_SEGMENTS {
+                for y in 0..=Y_SEGMENTS {
+                    let x_segment = x as f32 / X_SEGMENTS as f32;
+                    let y_segment = y as f32 / Y_SEGMENTS as f32;
+                    let x_pos = (x_segment * 2.0 * PI).cos() * (y_segment * PI).sin();
+                    let y_pos = (y_segment * PI).cos();
+                    let z_pos = (x_segment * 2.0 * PI).sin() * (y_segment * PI).sin();
+
+                    positions.push([x_pos, y_pos, z_pos]);
+                    uv.push([x_segment, y_segment]);
+                    normals.push([x_pos, y_pos, z_pos]);
+                }
+            }
+            let positions: Cow<'_, [[f32; 3]]> = Cow::Borrowed(&positions);
+            let uv: Cow<'_, [[f32; 2]]> = Cow::Borrowed(&uv);
+            let normals: Cow<'_, [[f32; 3]]> = Cow::Borrowed(&normals);
+
+            let vertex_count = Y_SEGMENTS * (X_SEGMENTS + 1) * 2;
+            let mut indices = Vec::with_capacity(vertex_count);
+            let mut odd_row = false;
+            for y in 0..Y_SEGMENTS {
+                // even rows: y == 0, y == 2; and so on
+                if !odd_row {
+                    for x in 0..=X_SEGMENTS {
+                        indices.push((y * (X_SEGMENTS + 1) + x) as u32);
+                        indices.push(((y + 1) * (X_SEGMENTS + 1) + x) as u32);
+                    }
+                } else {
+                    for x in (0..=X_SEGMENTS).rev() {
+                        indices.push(((y + 1) * (X_SEGMENTS + 1) + x) as u32);
+                        indices.push((y * (X_SEGMENTS + 1) + x) as u32);
                     }
                 }
-                assert_eq!(positions.len(), vertex_count);
+                odd_row = !odd_row;
+            }
+            let indices: Cow<'_, [u32]> = Cow::Borrowed(&indices);
 
-                let vertex_count = Y_SEGMENTS * (X_SEGMENTS + 1) * 2;
-                let mut indices = Vec::with_capacity(vertex_count);
-                let mut odd_row = false;
-                for y in 0..Y_SEGMENTS {
-                    // even rows: y == 0, y == 2; and so on
-                    if !odd_row {
-                        for x in 0..=X_SEGMENTS {
-                            indices.push((y * (X_SEGMENTS + 1) + x) as u32);
-                            indices.push(((y + 1) * (X_SEGMENTS + 1) + x) as u32);
-                        }
-                    } else {
-                        for x in (0..=X_SEGMENTS).rev() {
-                            indices.push(((y + 1) * (X_SEGMENTS + 1) + x) as u32);
-                            indices.push((y * (X_SEGMENTS + 1) + x) as u32);
-                        }
-                    }
-                    odd_row = !odd_row;
+            let nr_rows = 7;
+            let nr_columns = 7;
+            let spacing = 2.5;
+            for row in 0..nr_rows {
+                let metallic = row as f32 / nr_rows as f32;
+                for col in 0..nr_columns {
+                    let roughness = (col as f32 / nr_columns as f32).clamp(0.5, 1.0);
+
+                    let material = resources
+                        .material_builder()
+                        .metallic_factor(metallic)
+                        .roughness_factor(roughness)
+                        .base_color_factor([1.0, 0.0, 0.0, 1.0])
+                        .build();
+
+                    let primitive = resources
+                        .primitive_builder()
+                        .positions(positions.clone())
+                        .tex_coords(0, mesh::TexCoords::F32(uv.clone()))
+                        .normals(normals.clone())
+                        .indices(mesh::Indices::U32(indices.clone()))
+                        .material(&material)
+                        .build();
+
+                    let mesh = resources
+                        .mesh_builder()
+                        .name("Sphere".to_string())
+                        .primitives(vec![primitive])
+                        .build();
+
+                    let x = (col - nr_columns / 2) as f32 * spacing;
+                    let y = (row - nr_rows / 2) as f32 * spacing;
+
+                    scene
+                        .node_builder()
+                        .name(format!("metallic={metallic} roughness={roughness}"))
+                        .local_position(vec3(x, y, -2.0))
+                        .mesh(&mesh)
+                        .build();
                 }
-                assert_eq!(indices.len(), vertex_count);
+            }
 
-                let primitive = resources
-                    .primitive_builder()
-                    .positions(positions.into())
-                    .tex_coords(0, mesh::TexCoords::F32(uv.into()))
-                    .normals(normals.into())
-                    .indices(mesh::Indices::U32(indices.into()))
-                    .build();
-
-                resources
-                    .mesh_builder()
-                    .name("Sphere".to_string())
-                    .primitives(vec![primitive])
-                    .build()
-            };
-
-            let (mut scenes, active_scene) = load_asset.map_or_else(
+            let (mut scenes, mut active_scene) = load_asset.map_or_else(
                 || (Vec::new(), None),
                 |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
             );
+            active_scene.get_or_insert(scenes.len());
+            scenes.push(scene);
 
             let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
                 scene.set_environment(environment, &resources);

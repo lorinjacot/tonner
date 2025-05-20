@@ -2,9 +2,9 @@ use std::ops::Deref;
 
 use glam::{Mat4, Quat, Vec3};
 
-use crate::{mesh::Mesh, storage::SetEntry, DenseEntry, Id, Transform};
+use crate::{DenseEntry, Id, Transform, mesh::Mesh, storage::SetEntry};
 
-use super::{camera::CameraDescriptor, Camera, Scene};
+use super::{Camera, Scene, camera::CameraDescriptor};
 
 pub struct Node {
     id: Id<Node>,
@@ -137,8 +137,8 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         }
     }
 
-    pub fn name(mut self, name: Option<String>) -> Self {
-        self.desc.name = name;
+    pub fn name(mut self, name: String) -> Self {
+        self.desc.name = Some(name);
         self
     }
 
@@ -169,9 +169,9 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         self
     }
 
-    pub fn mesh(mut self, mesh: Option<&'a Mesh>) -> Self {
-        self.mesh = mesh;
-        self.desc.mesh = mesh.map(|mesh| mesh.id());
+    pub fn mesh(mut self, mesh: &'a Mesh) -> Self {
+        self.mesh = Some(mesh);
+        self.desc.mesh = Some(mesh.id());
         self
     }
 

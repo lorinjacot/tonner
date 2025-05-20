@@ -39,7 +39,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub(super) fn new(
+    pub fn new(
         name: String,
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,

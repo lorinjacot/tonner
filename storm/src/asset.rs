@@ -267,13 +267,17 @@ impl Scene {
         meshes: &mut SparseSet<Mesh>,
         mesh_mapping: &[Id<Mesh>],
     ) -> Id<Node> {
-        let mesh = node
-            .mesh()
-            .map(|gltf_mesh| &meshes[mesh_mapping[gltf_mesh.index()]]);
         let mut builder = self
             .node_builder()
-            .name(node.name().map(|name| name.to_string()))
+            .name(format!(
+                "Gltf node {} {}",
+                node.index(),
+                node.name().unwrap_or("")
+            ))
             .parent(parent);
+        if let Some(mesh) = node.mesh() {
+            builder = builder.mesh(&meshes[mesh_mapping[mesh.index()]]);
+        }
         builder = match node.transform() {
             gltf::scene::Transform::Decomposed {
                 translation,
@@ -288,7 +292,7 @@ impl Scene {
                 builder.local_matrix(Mat4::from_cols_array_2d(&matrix))
             }
         };
-        let id = builder.mesh(mesh).build().id();
+        let id = builder.build().id();
         for child in node.children() {
             self.build_gltf_node(child, Some(id), meshes, mesh_mapping);
         }

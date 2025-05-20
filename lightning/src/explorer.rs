@@ -89,17 +89,19 @@ impl Explorer {
 
     fn node_ui(&mut self, ui: &mut Ui, id: Id<Node>, scene: &Scene) {
         let node = &scene[id];
-        ui.collapsing(&node.name, |ui| {
-            for node in node.children() {
-                self.node_ui(ui, *node, scene);
-            }
-        })
-        .header_response
-        .context_menu(|ui| {
-            if ui.button("Properties").clicked() {
-                self.node_modal = Some(id);
-            }
-        });
+        egui::CollapsingHeader::new(&node.name)
+            .id_salt(node.id())
+            .show(ui, |ui| {
+                for node in node.children() {
+                    self.node_ui(ui, *node, scene);
+                }
+            })
+            .header_response
+            .context_menu(|ui| {
+                if ui.button("Properties").clicked() {
+                    self.node_modal = Some(id);
+                }
+            });
     }
 
     fn node_modal_ui(&self, ui: &mut Ui, id: Id<Node>, scene: &mut Scene) {

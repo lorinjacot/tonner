@@ -1,8 +1,5 @@
 use std::{
-    fmt::{Debug, Display},
-    iter::repeat_n,
-    marker::PhantomData,
-    ops::{Index, IndexMut},
+    fmt::{Debug, Display}, hash::Hash, iter::repeat_n, marker::PhantomData, ops::{Index, IndexMut}
 };
 
 pub struct Id<T> {
@@ -45,6 +42,13 @@ impl<T> PartialEq for Id<T> {
 }
 
 impl<T> Eq for Id<T> {}
+
+impl<T> Hash for Id<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.sparse.hash(state);
+        self.version.hash(state);
+    }
+}
 
 #[derive(Clone)]
 struct SparseEntry {

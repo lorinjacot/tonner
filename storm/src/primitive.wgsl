@@ -26,8 +26,8 @@ struct VertexOutput {
 }
 
 struct NodeUniform {
-    model: mat4x4<f32>,
-    model_normal: mat3x3<f32>,
+    matrix: mat4x4<f32>,
+    normal_matrix: mat3x3<f32>,
 }
 
 struct CameraUniform {
@@ -70,12 +70,12 @@ fn vs_main(
     attributes: Attributes,
 ) -> VertexOutput {
     let node = nodes[index];
-    let world_position = node.model * vec4(attributes.position, 1.0);
+    let world_position = node.matrix * vec4(attributes.position, 1.0);
 
     var result: VertexOutput;
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
-    result.world_normal = node.model_normal * attributes.normal;
+    result.world_normal = node.normal_matrix * attributes.normal;
     if has_tex_coord_0 {
         result.tex_coord_0 = attributes.tex_coord_0;
     }
@@ -199,19 +199,11 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     return vec4(color, 1.0);
 }
 
-fn fresnelSchlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-    return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-}
-
-fn fresnelSchlickRoughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
-    return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
-}   
-
 fn distributionGGX(normal: vec3<f32>, halfway: vec3<f32>, roughness: f32) -> f32 {
-    let a      = roughness*roughness;
-    let a2     = a*a;
+    let a = roughness * roughness;
+    let a2 = a * a;
     let n_dot_h  = max(dot(normal, halfway), 0.0);
-    let n_dot_h2 = n_dot_h*n_dot_h;
+    let n_dot_h2 = n_dot_h * n_dot_h;
 	
     let num   = a2;
     var denom = (n_dot_h2 * (a2 - 1.0) + 1.0);
@@ -237,4 +229,12 @@ fn geometrySmith(normal: vec3<f32>, view: vec3<f32>, light: vec3<f32>, roughness
     let ggx1  = geometrySchlickGGX(n_dot_l, roughness);
 	
     return ggx1 * ggx2;
+}
+
+fn fresnelSchlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+
+fn fresnelSchlickRoughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
+    return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }

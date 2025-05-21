@@ -238,7 +238,7 @@ impl Engine {
             for row in 0..nr_rows {
                 let metallic = row as f32 / nr_rows as f32;
                 for col in 0..nr_columns {
-                    let roughness = (col as f32 / nr_columns as f32).clamp(0.5, 1.0);
+                    let roughness = (col as f32 / nr_columns as f32).clamp(0.05, 1.0);
 
                     let material = resources
                         .material_builder()

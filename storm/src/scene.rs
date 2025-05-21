@@ -210,14 +210,14 @@ impl Scene {
                 .nodes
                 .iter()
                 .map(|node| {
-                    let model = node.world_matrix();
-                    let model_normal = Mat3::from_mat4(model.inverse().transpose());
+                    let matrix = node.world_matrix();
+                    let normal_matrix = Mat3::from_mat4(matrix.inverse().transpose());
                     NodeUniform {
-                        model,
-                        model_normal: [
-                            model_normal.x_axis.extend(0.0),
-                            model_normal.y_axis.extend(0.0),
-                            model_normal.z_axis.extend(0.0),
+                        matrix,
+                        normal_matrix: [
+                            normal_matrix.x_axis.extend(0.0),
+                            normal_matrix.y_axis.extend(0.0),
+                            normal_matrix.z_axis.extend(0.0),
                         ],
                     }
                 })
@@ -459,8 +459,8 @@ impl IndexMut<Id<Node>> for Scene {
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct NodeUniform {
-    model: Mat4,
-    model_normal: [Vec4; 3],
+    matrix: Mat4,
+    normal_matrix: [Vec4; 3],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

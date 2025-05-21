@@ -35,9 +35,11 @@ impl Explorer {
             let scene = &scenes[*active_scene];
             ui.separator();
             ui.label("Nodes");
-            for node in scene.root_nodes() {
-                self.node_ui(ui, *node, scene);
-            }
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for node in scene.root_nodes() {
+                    self.node_ui(ui, *node, scene);
+                }
+            });
 
             ui.separator();
             ui.label("Camera");

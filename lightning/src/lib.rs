@@ -271,6 +271,29 @@ impl Engine {
                 }
             }
 
+            let light_positions = [
+                vec3(-10.0, 10.0, 10.0),
+                vec3(10.0, 10.0, 10.0),
+                vec3(-10.0, -10.0, 10.0),
+                vec3(10.0, -10.0, 10.0),
+            ];
+            let light_colors = [
+                vec3(300.0, 300.0, 300.0),
+                vec3(300.0, 300.0, 300.0),
+                vec3(300.0, 300.0, 300.0),
+                vec3(300.0, 300.0, 300.0),
+            ];
+
+            for (i, (position, color)) in light_positions.into_iter().zip(light_colors).enumerate()
+            {
+                scene
+                    .node_builder()
+                    .name(format!("Light {i}"))
+                    .local_position(position)
+                    .point_light(color)
+                    .build();
+            }
+
             let (mut scenes, mut active_scene) = load_asset.map_or_else(
                 || (Vec::new(), None),
                 |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),

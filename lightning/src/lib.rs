@@ -230,7 +230,7 @@ impl Engine {
                 .build(&mut encoder)
                 .id();
 
-            let mut scene = Scene::new("Sphere demo".to_string(), &mut resources, &mut encoder);
+            let mut scene = Scene::new("LearnOpenGL PBR spheres grid".to_string(), &mut resources, &mut encoder);
 
             let nr_rows = 7;
             let nr_columns = 7;

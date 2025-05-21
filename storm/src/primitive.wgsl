@@ -168,30 +168,31 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         lo += (kd * albedo / pi + specular) * radiance * n_dot_l;
     }
   
-    // let f = fresnelSchlickRoughness(max(dot(normal, view), 0.0), f0, roughness);
+    let f = fresnelSchlickRoughness(max(dot(normal, view), 0.0), f0, roughness);
 
-    // let ks = f;
-    // var kd = 1.0 - ks;
-    // kd *= 1.0 - metallic;
+    let ks = f;
+    var kd = 1.0 - ks;
+    kd *= 1.0 - metallic;
 
-    // let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
-    // let diffuse = irradiance * albedo;
+    let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
+    let diffuse = irradiance * albedo;
 
-    // let prefiltered_color = textureSampleLevel(
-    //     prefilter_map_texture,
-    //     prefilter_map_sampler,
-    //     reflected,
-    //     roughness * prefilter_map_mip_count,
-    // ).rgb;
-    // let env_brdf = textureSample(
-    //     brdf_lut_texture,
-    //     brdf_lut_sampler,
-    //     vec2(max(dot(normal, view), 0.0), roughness),
-    // ).rg;
-    // let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
+    let prefiltered_color = textureSampleLevel(
+        prefilter_map_texture,
+        prefilter_map_sampler,
+        reflected,
+        roughness * prefilter_map_mip_count,
+    ).rgb;
+    let env_brdf = textureSample(
+        brdf_lut_texture,
+        brdf_lut_sampler,
+        vec2(max(dot(normal, view), 0.0), roughness),
+    ).rg;
+    let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
 
-    // let ambient = (kd * diffuse + specular) * ambiance_occlusion;
-    let ambient = vec3(0.03) * albedo * ambiance_occlusion;
+    let ambient = (kd * diffuse + specular) * ambiance_occlusion;
+    // let ambient = (kd * diffuse) * ambiance_occlusion;
+    // let ambient = vec3(0.03) * albedo * ambiance_occlusion;
     var color = ambient + lo;
 
     color = color / (color + vec3(1.0));

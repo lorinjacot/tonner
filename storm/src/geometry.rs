@@ -5,16 +5,10 @@ use bytemuck::cast_slice;
 use glam::vec3;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, storage::SetEntry};
+use crate::{DenseEntry, Id, Resources};
 
 pub struct Geometry {
     id: Id<Self>,
-    vertex_buffers: Vec<wgpu::Buffer>,
-    vertex_buffer_layouts: Vec<VertexBufferLayout>,
-    attributes: Attributes,
-}
-
-pub struct GeometryDescriptor {
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_buffer_layouts: Vec<VertexBufferLayout>,
     attributes: Attributes,
@@ -25,19 +19,6 @@ impl DenseEntry for Geometry {
 
     fn id(&self) -> Id<Self::Key> {
         self.id
-    }
-}
-
-impl SetEntry for Geometry {
-    type Descriptor = GeometryDescriptor;
-
-    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
-        Self {
-            id,
-            vertex_buffers: desc.vertex_buffers,
-            vertex_buffer_layouts: desc.vertex_buffer_layouts,
-            attributes: desc.attributes,
-        }
     }
 }
 
@@ -194,15 +175,12 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     }
 
     pub fn build(self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
-        let mut desc = GeometryDescriptor {
-            vertex_buffers: Vec::new(),
-            vertex_buffer_layouts: Vec::new(),
-            attributes: self.attributes,
-        };
+        let mut vertex_buffers = Vec::new();
+        let mut vertex_buffer_layouts = Vec::new();
 
         let mut create_vertex_buffer =
             |name, contents, array_stride, format, attribute: Attribute| {
-                desc.vertex_buffers
+                vertex_buffers
                     .push(self.resources.device.create_buffer_init(
                         &wgpu::util::BufferInitDescriptor {
                             label: Some(name),
@@ -210,7 +188,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                             usage: wgpu::BufferUsages::VERTEX,
                         },
                     ));
-                desc.vertex_buffer_layouts.push(VertexBufferLayout {
+                vertex_buffer_layouts.push(VertexBufferLayout {
                     array_stride,
                     attributes: vec![wgpu::VertexAttribute {
                         format,
@@ -252,14 +230,14 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         }
 
         let mut check_tex_coord = |attribute: Attribute, flag: Attributes| {
-            if !desc.attributes.contains(flag) {
-                desc.vertex_buffers.push(
+            if !self.attributes.contains(flag) {
+                vertex_buffers.push(
                     self.resources
                         .geometry_builder_data
                         .dummy_tex_coord_buffer
                         .clone(),
                 );
-                desc.vertex_buffer_layouts.push(VertexBufferLayout {
+                vertex_buffer_layouts.push(VertexBufferLayout {
                     array_stride: 0,
                     attributes: vec![wgpu::VertexAttribute {
                         format: wgpu::VertexFormat::Unorm8x2,
@@ -272,7 +250,14 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         check_tex_coord(Attribute::TexCoord0, Attributes::TEX_COORD_0);
         check_tex_coord(Attribute::TexCoord1, Attributes::TEX_COORD_1);
 
-        self.resources.geometries.push(desc)
+        let id = self.resources.geometries.next_id();
+        let geometry = Geometry {
+            id,
+            vertex_buffers,
+            vertex_buffer_layouts,
+            attributes: self.attributes,
+        };
+        self.resources.geometries.insert(geometry)
     }
 }
 

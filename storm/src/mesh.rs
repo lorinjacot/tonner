@@ -8,7 +8,7 @@ use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::vec3;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, environment::PREFILTER_MAP_MIP_COUNT, storage::SetEntry};
+use crate::{DenseEntry, Id, Resources, environment::PREFILTER_MAP_MIP_COUNT};
 
 pub struct Mesh {
     id: Id<Mesh>,
@@ -16,28 +16,11 @@ pub struct Mesh {
     pub(super) primitives: Vec<Primitive>,
 }
 
-pub struct MeshDescriptor {
-    pub name: Option<String>,
-    pub primitives: Vec<Primitive>,
-}
-
 impl DenseEntry for Mesh {
     type Key = Self;
 
     fn id(&self) -> Id<Self::Key> {
         self.id
-    }
-}
-
-impl SetEntry for Mesh {
-    type Descriptor = MeshDescriptor;
-
-    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
-        Self {
-            id,
-            name: desc.name.unwrap_or_else(|| id.to_string()),
-            primitives: desc.primitives,
-        }
     }
 }
 
@@ -68,10 +51,13 @@ impl<'r> MeshBuilder<'r> {
     }
 
     pub fn build(self) -> &'r mut Mesh {
-        self.resources.meshes.push(MeshDescriptor {
-            name: self.name,
+        let id = self.resources.meshes.next_id();
+        let mesh = Mesh {
+            id,
+            name: self.name.unwrap_or_else(|| format!("Mesh {id}")),
             primitives: self.primitives,
-        })
+        };
+        self.resources.meshes.insert(mesh)
     }
 }
 

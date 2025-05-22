@@ -1,6 +1,7 @@
 pub use asset::open_gltf;
 pub use environment::Environment;
 use environment::{EnvironmentBuilder, EnvironmentBuilderData};
+use geometry::{Geometry, GeometryBuilder, GeometryBuilderData};
 pub use math::Transform;
 use mesh::MeshBuilderData;
 pub use scene::camera;
@@ -11,6 +12,7 @@ use texture::{TextureBuilder, TextureBuilderData};
 
 mod asset;
 mod environment;
+pub mod geometry;
 pub mod math;
 pub mod mesh;
 mod scene;
@@ -20,6 +22,8 @@ mod texture;
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    geometry_builder_data: GeometryBuilderData,
+    geometries: SparseSet<Geometry>,
     render_texture_format: wgpu::TextureFormat,
     texture_builder_data: TextureBuilderData,
     meshes: SparseSet<mesh::Mesh>,
@@ -151,7 +155,10 @@ impl Resources {
                     },
                 ],
             });
-            
+
+        let geometry_builder_data = GeometryBuilderData::new(&device);
+        let geometries = SparseSet::new();
+
         let texture_builder_data = TextureBuilderData::new(&device);
 
         let meshes = SparseSet::new();
@@ -212,6 +219,8 @@ impl Resources {
             device,
             queue,
             render_texture_format,
+            geometry_builder_data,
+            geometries,
             texture_builder_data,
             meshes,
             mesh_builder_data,
@@ -221,6 +230,10 @@ impl Resources {
             skybox_bind_group_layout,
             skybox_pipeline,
         }
+    }
+
+    pub fn geometry_builder(&mut self) -> GeometryBuilder {
+        GeometryBuilder::new(self)
     }
 
     pub fn material_builder(&mut self) -> mesh::MaterialBuilder {

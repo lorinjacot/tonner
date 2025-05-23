@@ -311,9 +311,10 @@ impl Scene {
             let view_projection = projection * view;
             let camera_uniform = CameraUniform {
                 view_projection,
-                view_projection_inv: view_projection.inverse(),
+                view,
+                projection_inverse: projection.inverse(),
                 position,
-                _padding: 0.0,
+                _pad: 0,
             };
             self.queue
                 .write_buffer(&self.camera_buffer, 0, cast_slice(&[camera_uniform]));
@@ -467,9 +468,10 @@ struct NodeUniform {
 #[repr(C)]
 struct CameraUniform {
     view_projection: Mat4,
-    view_projection_inv: Mat4,
+    view: Mat4,
+    projection_inverse: Mat4,
     position: Vec3,
-    _padding: f32,
+    _pad: u32,
 }
 
 struct PointLight {

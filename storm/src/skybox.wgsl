@@ -5,7 +5,8 @@ struct VertexOutput {
 
 struct CameraUniform {
     view_projection: mat4x4<f32>,
-    view_projection_inv: mat4x4<f32>,
+    view: mat4x4<f32>,
+    projection_inverse: mat4x4<f32>,
     position: vec3<f32>,
 }
 
@@ -23,8 +24,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
         1.0
     );
 
+    let view_inverse = transpose(mat3x3(
+        camera.view[0].xyz,
+        camera.view[1].xyz,
+        camera.view[2].xyz,
+    ));
+    let unprojected = camera.projection_inverse * pos;
+
     var result: VertexOutput;
-    result.uv = (camera.view_projection_inv * pos).xyz;
+    result.uv = view_inverse * unprojected.xyz;
     result.position = pos;
     return result;
 }

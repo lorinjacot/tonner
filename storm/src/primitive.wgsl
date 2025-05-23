@@ -29,7 +29,8 @@ struct NodeUniform {
 
 struct CameraUniform {
     view_projection: mat4x4<f32>,
-    view_projection_inv: mat4x4<f32>,
+    view: mat4x4<f32>,
+    projection_inverse: mat4x4<f32>,
     position: vec3<f32>,
 }
 

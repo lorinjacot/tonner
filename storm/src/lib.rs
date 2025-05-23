@@ -1,14 +1,10 @@
 pub use asset::open_gltf;
 pub use environment::Environment;
-use environment::{EnvironmentBuilder, EnvironmentBuilderData};
-use geometry::{Geometry, GeometryBuilder, GeometryBuilderData};
 pub use math::Transform;
-use mesh::{Material, MeshBuilderData};
 pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
 pub use storage::{DenseEntry, Id};
-use texture::{TextureBuilder, TextureBuilderData};
 
 mod asset;
 mod environment;
@@ -22,15 +18,15 @@ mod texture;
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    geometry_builder_data: GeometryBuilderData,
-    geometries: SparseSet<Geometry>,
+    geometry_builder_data: geometry::GeometryBuilderData,
+    geometries: SparseSet<geometry::Geometry>,
     render_texture_format: wgpu::TextureFormat,
-    texture_builder_data: TextureBuilderData,
-    materials: SparseSet<Material>,
+    texture_builder_data: texture::TextureBuilderData,
+    materials: SparseSet<mesh::Material>,
     meshes: SparseSet<mesh::Mesh>,
-    mesh_builder_data: MeshBuilderData,
+    mesh_builder_data: mesh::MeshBuilderData,
     environments: SparseSet<Environment>,
-    environment_builder_data: EnvironmentBuilderData,
+    environment_builder_data: environment::EnvironmentBuilderData,
     render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,
@@ -157,18 +153,18 @@ impl Resources {
                 ],
             });
 
-        let geometry_builder_data = GeometryBuilderData::new(&device);
+        let geometry_builder_data = geometry::GeometryBuilderData::new(&device);
         let geometries = SparseSet::new();
 
-        let texture_builder_data = TextureBuilderData::new(&device);
+        let texture_builder_data = texture::TextureBuilderData::new(&device);
 
         let materials = SparseSet::new();
         let meshes = SparseSet::new();
-        let mesh_builder_data = MeshBuilderData::new(&device, &render_bind_group_layout);
+        let mesh_builder_data = mesh::MeshBuilderData::new(&device, &render_bind_group_layout);
 
         let environments = SparseSet::new();
         let environment_builder_data =
-            EnvironmentBuilderData::new(&device, encoder, &skybox_bind_group_layout);
+            environment::EnvironmentBuilderData::new(&device, encoder, &skybox_bind_group_layout);
 
         let module = &device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
         let skybox_pipeline_layout =
@@ -235,8 +231,8 @@ impl Resources {
         }
     }
 
-    pub fn geometry_builder(&mut self) -> GeometryBuilder {
-        GeometryBuilder::new(self)
+    pub fn geometry_builder(&mut self) -> geometry::GeometryBuilder {
+        geometry::GeometryBuilder::new(self)
     }
 
     pub fn material_builder(&mut self) -> mesh::MaterialBuilder {
@@ -247,11 +243,11 @@ impl Resources {
         mesh::MeshBuilder::new(self)
     }
 
-    fn texture_builder(&mut self) -> TextureBuilder {
-        TextureBuilder::new(self)
+    fn texture_builder(&mut self) -> texture::TextureBuilder {
+        texture::TextureBuilder::new(self)
     }
 
-    pub fn environment_builder<'a, 's>(&'s mut self) -> EnvironmentBuilder<'a, 's> {
-        EnvironmentBuilder::new(self)
+    pub fn environment_builder<'a, 's>(&'s mut self) -> environment::EnvironmentBuilder<'a, 's> {
+        environment::EnvironmentBuilder::new(self)
     }
 }

@@ -81,8 +81,8 @@ impl<'r> MeshBuilder<'r> {
                         bool_to_f64(material.has_metallic_roughness_texture),
                     );
                     constants.insert(
-                        "prefilter_map_mip_count".to_string(),
-                        PREFILTER_MAP_MIP_COUNT as f64,
+                        "max_prefilter_map_mip".to_string(),
+                        (PREFILTER_MAP_MIP_COUNT - 1) as f64,
                     );
                     let data = &self.resources.mesh_builder_data;
                     let pipeline = self.resources.device.create_render_pipeline(

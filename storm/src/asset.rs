@@ -11,12 +11,20 @@ use crate::{
     storage::{DenseEntry, SparseSet},
 };
 
+const SUPPORTED_EXTENSIONS: &[&str] = &[];
+
 pub fn open_gltf<'r>(
     path: impl AsRef<std::path::Path>,
     resources: &'r mut Resources,
     encoder: &mut wgpu::CommandEncoder,
 ) -> Result<(Vec<Scene>, Option<usize>), gltf::Error> {
     let (document, buffers, images) = gltf::import(path)?;
+
+    for extension in document.extensions_required() {
+        if !SUPPORTED_EXTENSIONS.contains(&extension) {
+            panic!("unsupported gltf extension {extension}");
+        }
+    }
 
     let images: Vec<_> = document
         .images()

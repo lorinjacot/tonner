@@ -1,7 +1,7 @@
 override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 
-override prefilter_map_mip_count: f32;
+override max_prefilter_map_mip: f32;
 
 const pi = 3.14159265359;
 
@@ -166,7 +166,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         prefilter_map_texture,
         prefilter_map_sampler,
         reflected,
-        roughness * prefilter_map_mip_count,
+        roughness * max_prefilter_map_mip,
     ).rgb;
     let env_brdf = textureSample(
         brdf_lut_texture,

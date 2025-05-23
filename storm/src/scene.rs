@@ -211,7 +211,7 @@ impl Scene {
                 .iter()
                 .map(|node| {
                     let matrix = node.world_matrix();
-                    let normal_matrix = Mat3::from_mat4(matrix.inverse().transpose());
+                    let normal_matrix = Mat3::from_mat4(matrix).inverse().transpose();
                     NodeUniform {
                         matrix,
                         normal_matrix: [

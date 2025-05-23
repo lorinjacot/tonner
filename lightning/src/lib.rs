@@ -7,8 +7,7 @@ use egui::ViewportBuilder;
 use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
 use explorer::Explorer;
-use glam::{Vec3, vec3};
-use storm::geometry::SphereDescriptor;
+use glam::Vec3;
 use storm::{DenseEntry, Resources, Scene, open_gltf};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -224,91 +223,20 @@ impl Engine {
             let radiance_image = std::io::Cursor::new(radiance_image);
             let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
             let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
-            let _environment = resources
+            let environment = resources
                 .environment_builder()
                 .name("newport_loft".to_string())
                 .from_equirectangular_map(&radiance_image)
                 .build(&mut encoder)
                 .id();
 
-            let mut scene = Scene::new(
-                "LearnOpenGL PBR spheres grid".to_string(),
-                &mut resources,
-                &mut encoder,
-            );
-
-            let sphere = resources
-                .geometry_builder()
-                .sphere(&SphereDescriptor::default())
-                .build(&mut encoder)
-                .id();
-
-            let nr_rows = 7;
-            let nr_columns = 7;
-            let spacing = 2.5;
-            for row in 0..nr_rows {
-                let metallic = row as f32 / nr_rows as f32;
-                for col in 0..nr_columns {
-                    let roughness = (col as f32 / nr_columns as f32).clamp(0.05, 1.0);
-
-                    let material = resources
-                        .material_builder()
-                        .base_color_factor([1.0, 0.0, 0.0, 1.0])
-                        .metallic_factor(metallic)
-                        .roughness_factor(roughness)
-                        .build()
-                        .id();
-
-                    let mesh = resources
-                        .mesh_builder()
-                        .name("Sphere".to_string())
-                        .primitives([(sphere, material)])
-                        .build();
-
-                    let x = (col - nr_columns / 2) as f32 * spacing;
-                    let y = (row - nr_rows / 2) as f32 * spacing;
-
-                    scene
-                        .node_builder()
-                        .name(format!("metallic={metallic} roughness={roughness}"))
-                        .local_position(vec3(x, y, -2.0))
-                        .mesh(&mesh)
-                        .build();
-                }
-            }
-
-            let light_positions = [
-                vec3(-10.0, 10.0, 10.0),
-                vec3(10.0, 10.0, 10.0),
-                vec3(-10.0, -10.0, 10.0),
-                vec3(10.0, -10.0, 10.0),
-            ];
-            let light_colors = [
-                vec3(300.0, 300.0, 300.0),
-                vec3(300.0, 300.0, 300.0),
-                vec3(300.0, 300.0, 300.0),
-                vec3(300.0, 300.0, 300.0),
-            ];
-
-            for (i, (position, color)) in light_positions.into_iter().zip(light_colors).enumerate()
-            {
-                scene
-                    .node_builder()
-                    .name(format!("Light {i}"))
-                    .local_position(position)
-                    .point_light(color)
-                    .build();
-            }
-
-            let (mut scenes, mut active_scene) = load_asset.map_or_else(
+            let (mut scenes, active_scene) = load_asset.map_or_else(
                 || (Vec::new(), None),
                 |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
             );
-            active_scene.get_or_insert(scenes.len());
-            scenes.push(scene);
 
             let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
-                // scene.set_environment(environment, &resources);
+                scene.set_environment(environment, &resources);
 
                 let target = scene
                     .node_builder()

@@ -1,8 +1,9 @@
 pub use asset::open_gltf;
 pub use environment::Environment;
 use environment::{EnvironmentBuilder, EnvironmentBuilderData};
+use geometry::{Geometry, GeometryBuilder, GeometryBuilderData};
 pub use math::Transform;
-use mesh::MeshBuilderData;
+use mesh::{Material, MeshBuilderData};
 pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
@@ -11,6 +12,7 @@ use texture::{TextureBuilder, TextureBuilderData};
 
 mod asset;
 mod environment;
+pub mod geometry;
 pub mod math;
 pub mod mesh;
 mod scene;
@@ -20,8 +22,11 @@ mod texture;
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    geometry_builder_data: GeometryBuilderData,
+    geometries: SparseSet<Geometry>,
     render_texture_format: wgpu::TextureFormat,
     texture_builder_data: TextureBuilderData,
+    materials: SparseSet<Material>,
     meshes: SparseSet<mesh::Mesh>,
     mesh_builder_data: MeshBuilderData,
     environments: SparseSet<Environment>,
@@ -151,9 +156,13 @@ impl Resources {
                     },
                 ],
             });
-            
+
+        let geometry_builder_data = GeometryBuilderData::new(&device);
+        let geometries = SparseSet::new();
+
         let texture_builder_data = TextureBuilderData::new(&device);
 
+        let materials = SparseSet::new();
         let meshes = SparseSet::new();
         let mesh_builder_data = MeshBuilderData::new(&device, &render_bind_group_layout);
 
@@ -212,7 +221,10 @@ impl Resources {
             device,
             queue,
             render_texture_format,
+            geometry_builder_data,
+            geometries,
             texture_builder_data,
+            materials,
             meshes,
             mesh_builder_data,
             environments,
@@ -223,12 +235,12 @@ impl Resources {
         }
     }
 
-    pub fn material_builder(&mut self) -> mesh::MaterialBuilder {
-        mesh::MaterialBuilder::new(self)
+    pub fn geometry_builder(&mut self) -> GeometryBuilder {
+        GeometryBuilder::new(self)
     }
 
-    pub fn primitive_builder(&mut self) -> mesh::PrimitiveBuilder {
-        mesh::PrimitiveBuilder::new(self)
+    pub fn material_builder(&mut self) -> mesh::MaterialBuilder {
+        mesh::MaterialBuilder::new(self)
     }
 
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {

@@ -8,7 +8,8 @@ use egui_wgpu::ScreenDescriptor;
 use egui_winit::create_window;
 use explorer::Explorer;
 use glam::{Vec3, vec3};
-use storm::{DenseEntry, Resources, Scene, mesh, open_gltf};
+use storm::geometry::SphereDescriptor;
+use storm::{DenseEntry, Resources, Scene, open_gltf};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
@@ -230,7 +231,17 @@ impl Engine {
                 .build(&mut encoder)
                 .id();
 
-            let mut scene = Scene::new("LearnOpenGL PBR spheres grid".to_string(), &mut resources, &mut encoder);
+            let mut scene = Scene::new(
+                "LearnOpenGL PBR spheres grid".to_string(),
+                &mut resources,
+                &mut encoder,
+            );
+
+            let sphere = resources
+                .geometry_builder()
+                .sphere(&SphereDescriptor::default())
+                .build(&mut encoder)
+                .id();
 
             let nr_rows = 7;
             let nr_columns = 7;
@@ -245,18 +256,13 @@ impl Engine {
                         .base_color_factor([1.0, 0.0, 0.0, 1.0])
                         .metallic_factor(metallic)
                         .roughness_factor(roughness)
-                        .build();
-
-                    let primitive = resources
-                        .primitive_builder()
-                        .sphere(&mesh::SphereDescriptor::default())
-                        .material(&material)
-                        .build();
+                        .build()
+                        .id();
 
                     let mesh = resources
                         .mesh_builder()
                         .name("Sphere".to_string())
-                        .primitives(vec![primitive])
+                        .primitives([(sphere, material)])
                         .build();
 
                     let x = (col - nr_columns / 2) as f32 * spacing;

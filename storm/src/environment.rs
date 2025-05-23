@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, storage::SetEntry};
+use crate::{DenseEntry, Id, Resources};
 
 pub const CUBE_VERTICES: &[Vec3] = &[
     // front face
@@ -534,30 +534,6 @@ impl DenseEntry for Environment {
     }
 }
 
-pub struct EnvironmentDescriptor {
-    name: Option<String>,
-    skybox_bind_group: wgpu::BindGroup,
-    irradiance_map: (wgpu::TextureView, wgpu::Sampler),
-    prefilter_map: (wgpu::TextureView, wgpu::Sampler),
-    brdf_lut: (wgpu::TextureView, wgpu::Sampler),
-}
-
-impl SetEntry for Environment {
-    type Descriptor = EnvironmentDescriptor;
-
-    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
-        let name = desc.name.unwrap_or_else(|| id.to_string());
-        Self {
-            id,
-            name,
-            skybox_bind_group: desc.skybox_bind_group,
-            irradiance_map: desc.irradiance_map,
-            prefilter_map: desc.prefilter_map,
-            brdf_lut: desc.brdf_lut,
-        }
-    }
-}
-
 pub struct EnvironmentBuilder<'a, 'r> {
     resources: &'r mut Resources,
     name: Option<String>,
@@ -886,13 +862,16 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                 .clone(),
         );
 
-        self.resources.environments.push(EnvironmentDescriptor {
-            name: self.name,
+        let id = self.resources.environments.next_id();
+        let environment = Environment {
+            id,
+            name: self.name.unwrap_or_else(|| format!("Environment {id}")),
             skybox_bind_group: environment_map_bind_group,
             irradiance_map: (irradiance_map_view, irradiance_map_sampler),
             prefilter_map: (prefilter_map_view, prefilter_map_sampler),
             brdf_lut,
-        })
+        };
+        self.resources.environments.insert(environment)
     }
 }
 

@@ -1,5 +1,9 @@
 use std::{
-    fmt::{Debug, Display}, hash::Hash, iter::repeat_n, marker::PhantomData, ops::{Index, IndexMut}
+    fmt::{Debug, Display},
+    hash::Hash,
+    iter::repeat_n,
+    marker::PhantomData,
+    ops::{Index, IndexMut},
 };
 
 pub struct Id<T> {
@@ -60,12 +64,6 @@ pub trait DenseEntry {
     type Key;
 
     fn id(&self) -> Id<Self::Key>;
-}
-
-pub trait SetEntry: DenseEntry {
-    type Descriptor;
-
-    fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self;
 }
 
 pub struct SparseMap<T: DenseEntry> {
@@ -267,12 +265,12 @@ impl<'a, T: DenseEntry> VacantEntry<'a, T> {
     }
 }
 
-pub struct SparseSet<T: SetEntry> {
+pub struct SparseSet<T: DenseEntry> {
     map: SparseMap<T>,
     deleted: Vec<Id<T::Key>>,
 }
 
-impl<T: SetEntry> SparseSet<T> {
+impl<T: DenseEntry> SparseSet<T> {
     pub fn new() -> Self {
         Self {
             map: SparseMap::new(),
@@ -302,34 +300,8 @@ impl<T: SetEntry> SparseSet<T> {
         }
     }
 
-    pub fn push(&mut self, desc: T::Descriptor) -> &mut T {
-        let dense = self.map.dense.len() as u16;
-        if let Some(deleted) = self.deleted.pop() {
-            let id = Id {
-                sparse: deleted.sparse,
-                version: deleted.version + 1,
-                target: PhantomData,
-            };
-            self.map.sparse[deleted.sparse as usize] = SparseEntry {
-                dense,
-                version: id.version,
-            };
-            self.map.dense.push(T::new(id, desc));
-            self.map.dense.last_mut().unwrap()
-        } else {
-            assert!(dense < u16::MAX, "sparse set is full");
-            let id = Id {
-                sparse: self.map.sparse.len() as u16,
-                version: 0,
-                target: PhantomData,
-            };
-            self.map.sparse.push(SparseEntry {
-                dense,
-                version: id.version,
-            });
-            self.map.dense.push(T::new(id, desc));
-            self.map.dense.last_mut().unwrap()
-        }
+    pub fn insert(&mut self, entry: T) -> &mut T {
+        self.map.insert(entry)
     }
 
     pub fn remove(&mut self, id: Id<T::Key>) -> Option<T> {
@@ -371,7 +343,7 @@ impl<T: SetEntry> SparseSet<T> {
     }
 }
 
-impl<T: SetEntry> Index<Id<T::Key>> for SparseSet<T> {
+impl<T: DenseEntry> Index<Id<T::Key>> for SparseSet<T> {
     type Output = T;
 
     fn index(&self, index: Id<T::Key>) -> &Self::Output {
@@ -379,13 +351,13 @@ impl<T: SetEntry> Index<Id<T::Key>> for SparseSet<T> {
     }
 }
 
-impl<T: SetEntry> IndexMut<Id<T::Key>> for SparseSet<T> {
+impl<T: DenseEntry> IndexMut<Id<T::Key>> for SparseSet<T> {
     fn index_mut(&mut self, index: Id<T::Key>) -> &mut Self::Output {
         self.get_mut(index).expect("no entry found for id")
     }
 }
 
-impl<T: SetEntry> IntoIterator for SparseSet<T> {
+impl<T: DenseEntry> IntoIterator for SparseSet<T> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
 
@@ -394,7 +366,7 @@ impl<T: SetEntry> IntoIterator for SparseSet<T> {
     }
 }
 
-impl<'a, T: SetEntry> IntoIterator for &'a SparseSet<T> {
+impl<'a, T: DenseEntry> IntoIterator for &'a SparseSet<T> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
 
@@ -403,7 +375,7 @@ impl<'a, T: SetEntry> IntoIterator for &'a SparseSet<T> {
     }
 }
 
-impl<'a, T: SetEntry> IntoIterator for &'a mut SparseSet<T> {
+impl<'a, T: DenseEntry> IntoIterator for &'a mut SparseSet<T> {
     type Item = &'a mut T;
     type IntoIter = std::slice::IterMut<'a, T>;
 
@@ -427,14 +399,6 @@ mod tests {
         }
     }
 
-    impl SetEntry for TestData {
-        type Descriptor = String;
-
-        fn new(id: Id<Self::Key>, desc: Self::Descriptor) -> Self {
-            TestData(id, desc)
-        }
-    }
-
     #[derive(Debug)]
     struct TestData2(Id<TestData>, String);
 
@@ -447,11 +411,14 @@ mod tests {
     }
 
     #[test]
-    fn test_push() {
+    fn test_next_id() {
         let mut set: SparseSet<TestData> = SparseSet::new();
 
-        let id_1 = set.push(String::from("data 1")).id();
-        let id_2 = set.push(String::from("data 2")).id();
+        let id_1 = set.next_id();
+        set.insert(TestData(id_1, "data 1".to_string()));
+
+        let id_2 = set.next_id();
+        set.insert(TestData(id_2, "data 2".to_string()));
 
         assert_ne!(id_1, id_2);
         assert_eq!("data 1", set[id_1].1);
@@ -462,8 +429,11 @@ mod tests {
     fn test_contains() {
         let mut set: SparseSet<TestData> = SparseSet::new();
 
-        let mut id_1 = set.push(String::from("data 1")).id();
-        let mut id_2 = set.push(String::from("data 2")).id();
+        let mut id_1 = set.next_id();
+        set.insert(TestData(id_1, "data 1".to_string()));
+
+        let mut id_2 = set.next_id();
+        set.insert(TestData(id_2, "data 2".to_string()));
 
         assert!(set.contains(id_1));
         assert!(set.contains(id_2));
@@ -479,8 +449,11 @@ mod tests {
     fn test_remove() {
         let mut set: SparseSet<TestData> = SparseSet::new();
 
-        let id_1 = set.push(String::from("data 1")).id();
-        let id_2 = set.push(String::from("data 2")).id();
+        let id_1 = set.next_id();
+        set.insert(TestData(id_1, "data 1".to_string()));
+
+        let id_2 = set.next_id();
+        set.insert(TestData(id_2, "data 2".to_string()));
 
         set.remove(id_1);
         assert!(set.get(id_1).is_none());
@@ -498,29 +471,36 @@ mod tests {
     fn test_recycling() {
         let mut set: SparseSet<TestData> = SparseSet::new();
 
-        let id_1_v1 = set.push(String::from("data 1 v1")).id();
-        let id_2_v1 = set.push(String::from("data 2 v1")).id();
+        let id_1_v1 = set.next_id();
+        set.insert(TestData(id_1_v1, "data 1".to_string()));
+
+        let id_2_v1 = set.next_id();
+        set.insert(TestData(id_2_v1, "data 2".to_string()));
 
         set.remove(id_2_v1);
         set.remove(id_1_v1);
         assert!(set.deleted.contains(&id_1_v1));
         assert!(set.deleted.contains(&id_2_v1));
 
-        let id_1_v2 = set.push(String::from("data 1 v2")).id();
+        let id_1_v2 = set.next_id();
+        set.insert(TestData(id_1_v2, "data 1 v2".to_string()));
         assert_ne!(id_1_v1, id_1_v2);
 
         assert!(!set.deleted.contains(&id_1_v1));
         assert!(!set.deleted.contains(&id_1_v2));
         assert!(set.deleted.contains(&id_2_v1));
 
-        let id_2_v2 = set.push(String::from("data 2 v2")).id();
+        let id_2_v2 = set.next_id();
+        set.insert(TestData(id_2_v2, "data 2 v2".to_string()));
         assert_ne!(id_2_v1, id_2_v2);
 
-        let id_3_v1 = set.push(String::from("data 3 v1")).id();
+        let id_3_v1 = set.next_id();
+        set.insert(TestData(id_3_v1, "data 3 v1".to_string()));
         assert!(set[id_3_v1].1 == "data 3 v1");
 
         set.remove(id_2_v2);
-        let id_2_v3 = set.push(String::from("data 2 v3")).id();
+        let id_2_v3 = set.next_id();
+        set.insert(TestData(id_2_v3, "data 2 v3".to_string()));
         assert!(set[id_2_v3].1 == "data 2 v3");
         assert!(set[id_3_v1].1 == "data 3 v1");
         assert!(set.get(id_2_v2).is_none());
@@ -533,9 +513,12 @@ mod tests {
         let mut set: SparseSet<TestData> = SparseSet::new();
         let mut map: SparseMap<TestData2> = SparseMap::new();
 
-        let id_1_v1 = set.push(String::from("data 1 v1")).id();
-        let id_2_v1 = set.push(String::from("data 2 v1")).id();
-        let id_3_v1 = set.push(String::from("data 3 v1")).id();
+        let id_1_v1 = set.next_id();
+        set.insert(TestData(id_1_v1, String::from("data 1 v1")));
+        let id_2_v1 = set.next_id();
+        set.insert(TestData(id_2_v1, String::from("data 2 v1")));
+        let id_3_v1 = set.next_id();
+        set.insert(TestData(id_3_v1, String::from("data 3 v1")));
 
         map.insert(TestData2(id_2_v1, String::from("data2 2 v1")));
         assert!(map.get(id_1_v1).is_none());
@@ -555,8 +538,10 @@ mod tests {
         set.remove(id_2_v1);
         set.remove(id_3_v1);
 
-        let id_2_v2 = set.push(String::from("data 2 v2")).id();
-        let id_3_v2 = set.push(String::from("data 3 v2")).id();
+        let id_2_v2 = set.next_id();
+        set.insert(TestData(id_2_v2, String::from("data 2 v2")));
+        let id_3_v2 = set.next_id();
+        set.insert(TestData(id_3_v2, String::from("data 3 v2")));
 
         assert!(map.get(id_2_v2).is_none());
         assert!(map.get(id_3_v2).is_none());
@@ -567,7 +552,8 @@ mod tests {
         assert_eq!(map[id_3_v2].1, "data2 3 v2");
 
         set.remove(id_1_v1);
-        let id_1_v2 = set.push(String::from("data 1 v2")).id();
+        let id_1_v2 = set.next_id();
+        set.insert(TestData(id_1_v2, String::from("data 1 v2")));
         assert!(map.get(id_1_v2).is_none());
 
         map.insert(TestData2(id_1_v2, String::from("data2 1 v2")));

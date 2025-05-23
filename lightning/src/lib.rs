@@ -224,7 +224,7 @@ impl Engine {
             let radiance_image = std::io::Cursor::new(radiance_image);
             let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
             let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
-            let environment = resources
+            let _environment = resources
                 .environment_builder()
                 .name("newport_loft".to_string())
                 .from_equirectangular_map(&radiance_image)
@@ -308,7 +308,7 @@ impl Engine {
             scenes.push(scene);
 
             let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
-                scene.set_environment(environment, &resources);
+                // scene.set_environment(environment, &resources);
 
                 let target = scene
                     .node_builder()

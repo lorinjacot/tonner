@@ -562,7 +562,33 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
     pub fn build(self, encoder: &'a mut wgpu::CommandEncoder) -> &'r mut Environment {
         let name = self.name.as_ref().map_or("", |name| name);
         let environment_map_view = match self.source {
-            Source::None => todo!("no environment support"),
+            Source::None => {
+                let radiance_texture = self.resources.device.create_texture_with_data(
+                    &self.resources.queue,
+                    &wgpu::TextureDescriptor {
+                        label: Some("Default radiance texture"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 6,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    },
+                    wgpu::util::TextureDataOrder::LayerMajor,
+                    &[0; 6 * 4 * 1],
+                );
+
+                radiance_texture.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("Default radiance texture view"),
+                    dimension: Some(wgpu::TextureViewDimension::Cube),
+                    ..Default::default()
+                })
+            }
             Source::EquirectangularMap(radiance_image) => {
                 let radiance_texture = self
                     .resources

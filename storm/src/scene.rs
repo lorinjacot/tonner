@@ -52,75 +52,19 @@ impl Scene {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let irradiance_map_texture = resources
-            .texture_builder()
-            .name("Irradiance map texture")
-            .bytes(
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 6,
-                },
-                wgpu::TextureFormat::Rgba8Unorm,
-                &[u8::MAX; 4 * 6],
-            )
-            .build(encoder);
-        let irradiance_map_view =
-            irradiance_map_texture.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("Irradiance map view"),
-                dimension: Some(wgpu::TextureViewDimension::Cube),
-                ..Default::default()
-            });
-        let irradiance_map_sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Irrandiance map sampler"),
-            ..Default::default()
-        });
-
-        let prefilter_map_texture = resources
-            .texture_builder()
-            .name("Prefilter map texture")
-            .bytes(
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 6,
-                },
-                wgpu::TextureFormat::Rgba8Unorm,
-                &[u8::MAX; 4 * 6],
-            )
-            .build(encoder);
-        let prefilter_map_view = prefilter_map_texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("Prefilter map view"),
-            dimension: Some(wgpu::TextureViewDimension::Cube),
-            ..Default::default()
-        });
-        let prefilter_map_sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Prefilter map sampler"),
-            ..Default::default()
-        });
-
-        let brdf_lut_texture = resources
-            .texture_builder()
-            .name("BRDF LUT texture")
-            .bytes(
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                wgpu::TextureFormat::Rg8Unorm,
-                &[u8::MAX; 2],
-            )
-            .build(encoder);
-        let brdf_lut_view = brdf_lut_texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("BRDF LUT view"),
-            dimension: Some(wgpu::TextureViewDimension::D2),
-            ..Default::default()
-        });
-        let brdf_lut_sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("BRDF LUT sampler"),
-            ..Default::default()
-        });
+        let environment = match resources.default_environmnent {
+            Some(id) => id,
+            None => {
+                let id = resources
+                    .environment_builder()
+                    .name("Default environment".to_string())
+                    .build(encoder)
+                    .id();
+                resources.default_environmnent = Some(id);
+                id
+            }
+        };
+        let environment = &resources.environments[environment];
 
         Self {
             name,
@@ -135,12 +79,12 @@ impl Scene {
             camera_buffer,
             point_lights: SparseMap::new(),
             lights_buffer: None,
-            irradiance_map_view,
-            irradiance_map_sampler,
-            prefilter_map_view,
-            prefilter_map_sampler,
-            brdf_lut_view,
-            brdf_lut_sampler,
+            irradiance_map_view: environment.irradiance_map_view().clone(),
+            irradiance_map_sampler: environment.irradiance_map_sampler().clone(),
+            prefilter_map_view: environment.prefilter_map_view().clone(),
+            prefilter_map_sampler: environment.prefilter_map_sampler().clone(),
+            brdf_lut_view: environment.brdf_lut_view().clone(),
+            brdf_lut_sampler: environment.brdf_lut_sampler().clone(),
             render_bind_group_layout: resources.render_bind_group_layout.clone(),
             render_bind_group: None,
             skybox_bind_group: None,

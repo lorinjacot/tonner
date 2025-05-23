@@ -1,12 +1,9 @@
-override has_tex_coord_0: bool;
-override has_tex_coord_1: bool;
-override has_color_0: bool;
-
 override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 
-const pi = 3.14159265359;
 override prefilter_map_mip_count: f32;
+
+const pi = 3.14159265359;
 
 struct Attributes {
     @location(1) position: vec3<f32>,
@@ -76,15 +73,9 @@ fn vs_main(
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
     result.world_normal = node.normal_matrix * attributes.normal;
-    if has_tex_coord_0 {
-        result.tex_coord_0 = attributes.tex_coord_0;
-    }
-    if has_tex_coord_1 {
-        result.tex_coord_1 = attributes.tex_coord_1;
-    }
-    if has_color_0 {
-        result.color_0 = attributes.color_0;
-    }
+    result.tex_coord_0 = attributes.tex_coord_0;
+    result.tex_coord_1 = attributes.tex_coord_1;
+    result.color_0 = attributes.color_0;
     return result;
 }
 
@@ -96,24 +87,18 @@ fn vs_main(
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    var tex_coords: array<vec2<f32>, 2>;
-    if has_tex_coord_0 {
-        tex_coords[0] = vertex.tex_coord_0;
-    }
-    if has_tex_coord_1 {
-        tex_coords[1] = vertex.tex_coord_1;
-    }
+    var tex_coords = array(
+        vertex.tex_coord_0,
+        vertex.tex_coord_1,
+    );
 
-    var base_color = material.base_color_factor;
+    var base_color = material.base_color_factor * vertex.color_0;
     if has_base_color_texture {
         base_color *= textureSample(
             base_color_texture,
             base_color_sampler,
             tex_coords[material.base_color_tex_coord],
         );
-    }
-    if has_color_0 {
-        base_color *= vertex.color_0;
     }
 
     let albedo = base_color.rgb;

@@ -6,7 +6,7 @@ use wgpu::AddressMode;
 
 use crate::{
     Id, Resources,
-    mesh::{Colors, Indices, MaterialBuilder, Mesh, TexCoords},
+    mesh::{MaterialBuilder, Mesh},
     scene::{Node, Scene},
     storage::{DenseEntry, SparseSet},
 };
@@ -102,25 +102,10 @@ pub fn open_gltf<'r>(
                 .material_builder()
                 .from_gltf(material, &textures)
                 .build()
+                .id()
         })
         .collect();
-    let default_material = document.meshes().find_map(|mesh| {
-        for primitive in mesh.primitives() {
-            let material = primitive.material();
-            match material.index() {
-                Some(_) => (),
-                None => {
-                    return Some(
-                        resources
-                            .material_builder()
-                            .from_gltf(material, &textures)
-                            .build(),
-                    );
-                }
-            }
-        }
-        None
-    });
+    let mut default_material = None;
 
     let mesh_mapping: Vec<_> = document
         .meshes()
@@ -128,40 +113,30 @@ pub fn open_gltf<'r>(
             let mut primitives = Vec::with_capacity(mesh.primitives().len());
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                if let Some(position) = reader.read_positions() {
-                    if reader.read_normals().is_none() {
-                        todo!("generate normals")
+                if let Some(positions) = reader.read_positions() {
+                    let mut geometry_builder =
+                        resources.geometry_builder().positions(positions.collect());
+                    if let Some(indices) = reader.read_indices() {
+                        geometry_builder =
+                            geometry_builder.indices_u32(indices.into_u32().collect());
                     }
-                    let material = primitive.material();
-                    let material = match material.index() {
-                        Some(index) => &materials[index],
-                        None => default_material.as_ref().unwrap(),
-                    };
-                    let mut primitive_builder = resources.primitive_builder();
-                    primitive_builder = match reader.read_indices() {
-                        Some(indices) => {
-                            let indices = indices.into_u32();
-                            primitive_builder
-                                .vertex_count(indices.len() as u32)
-                                .indices(Indices::U32(indices.collect()))
-                        }
-                        None => primitive_builder.vertex_count(position.len() as u32),
-                    };
+                    if let Some(normals) = reader.read_normals() {
+                        geometry_builder = geometry_builder.normals(normals.collect());
+                    }
                     for set in 0.. {
                         match reader.read_tex_coords(set) {
                             Some(tex_coords) => {
-                                let tex_coords = match tex_coords {
+                                geometry_builder = match tex_coords {
                                     gltf::mesh::util::ReadTexCoords::U8(iter) => {
-                                        TexCoords::U8(iter.collect())
+                                        geometry_builder.tex_coords_u8(set, iter.collect())
                                     }
                                     gltf::mesh::util::ReadTexCoords::U16(iter) => {
-                                        TexCoords::U16(iter.collect())
+                                        geometry_builder.tex_coords_u16(set, iter.collect())
                                     }
                                     gltf::mesh::util::ReadTexCoords::F32(iter) => {
-                                        TexCoords::F32(iter.collect())
+                                        geometry_builder.tex_coords_f32(set, iter.collect())
                                     }
                                 };
-                                primitive_builder = primitive_builder.tex_coords(set, tex_coords);
                             }
                             None => break,
                         }
@@ -169,31 +144,39 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_colors(set) {
                             Some(colors) => {
-                                let colors = match colors {
+                                geometry_builder = match colors {
+                                    gltf::mesh::util::ReadColors::RgbU8(_) => geometry_builder
+                                        .colors_u8(set, colors.into_rgba_u8().collect()),
                                     gltf::mesh::util::ReadColors::RgbaU8(iter) => {
-                                        Colors::RgbaU8(iter.collect())
+                                        geometry_builder.colors_u8(set, iter.collect())
                                     }
+                                    gltf::mesh::util::ReadColors::RgbU16(_) => geometry_builder
+                                        .colors_u16(set, colors.into_rgba_u16().collect()),
                                     gltf::mesh::util::ReadColors::RgbaU16(iter) => {
-                                        Colors::RgbaU16(iter.collect())
+                                        geometry_builder.colors_u16(set, iter.collect())
                                     }
+                                    gltf::mesh::util::ReadColors::RgbF32(_) => geometry_builder
+                                        .colors_f32(set, colors.into_rgba_f32().collect()),
                                     gltf::mesh::util::ReadColors::RgbaF32(iter) => {
-                                        Colors::RgbaF32(iter.collect())
+                                        geometry_builder.colors_f32(set, iter.collect())
                                     }
-                                    _ => Colors::RgbaF32(colors.into_rgba_f32().collect()),
                                 };
-                                primitive_builder = primitive_builder.colors(set, colors);
                             }
                             None => break,
                         }
                     }
-                    if let Some(normals) = reader.read_normals() {
-                        primitive_builder = primitive_builder.normals(normals.collect());
-                    }
-                    let primitive = primitive_builder
-                        .positions(position.collect())
-                        .material(material)
-                        .build();
-                    primitives.push(primitive);
+                    let geometry = geometry_builder.build(encoder).id();
+                    let material = match primitive.material().index() {
+                        Some(index) => materials[index],
+                        None => *default_material.get_or_insert_with(|| {
+                            resources
+                                .material_builder()
+                                .from_gltf(primitive.material(), &textures)
+                                .build()
+                                .id()
+                        }),
+                    };
+                    primitives.push((geometry, material));
                 }
             }
             resources

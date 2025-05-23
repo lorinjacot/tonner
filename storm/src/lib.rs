@@ -3,7 +3,7 @@ pub use environment::Environment;
 use environment::{EnvironmentBuilder, EnvironmentBuilderData};
 use geometry::{Geometry, GeometryBuilder, GeometryBuilderData};
 pub use math::Transform;
-use mesh::MeshBuilderData;
+use mesh::{Material, MeshBuilderData};
 pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 use storage::SparseSet;
@@ -26,6 +26,7 @@ pub struct Resources {
     geometries: SparseSet<Geometry>,
     render_texture_format: wgpu::TextureFormat,
     texture_builder_data: TextureBuilderData,
+    materials: SparseSet<Material>,
     meshes: SparseSet<mesh::Mesh>,
     mesh_builder_data: MeshBuilderData,
     environments: SparseSet<Environment>,
@@ -161,6 +162,7 @@ impl Resources {
 
         let texture_builder_data = TextureBuilderData::new(&device);
 
+        let materials = SparseSet::new();
         let meshes = SparseSet::new();
         let mesh_builder_data = MeshBuilderData::new(&device, &render_bind_group_layout);
 
@@ -222,6 +224,7 @@ impl Resources {
             geometry_builder_data,
             geometries,
             texture_builder_data,
+            materials,
             meshes,
             mesh_builder_data,
             environments,
@@ -238,10 +241,6 @@ impl Resources {
 
     pub fn material_builder(&mut self) -> mesh::MaterialBuilder {
         mesh::MaterialBuilder::new(self)
-    }
-
-    pub fn primitive_builder(&mut self) -> mesh::PrimitiveBuilder {
-        mesh::PrimitiveBuilder::new(self)
     }
 
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {

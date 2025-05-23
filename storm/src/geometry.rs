@@ -1,4 +1,4 @@
-use std::{borrow::Cow, f32::consts::PI, num::NonZeroU32};
+use std::{borrow::Cow, f32::consts::PI};
 
 use bitflags::bitflags;
 use bytemuck::cast_slice;
@@ -9,9 +9,36 @@ use crate::{DenseEntry, Id, Resources};
 
 pub struct Geometry {
     id: Id<Self>,
+    indices: Option<IndexBuffer>,
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_buffer_layouts: Vec<VertexBufferLayout>,
-    attributes: Attributes,
+    vertex_count: u32,
+}
+
+impl Geometry {
+    pub fn vertex_buffer_layouts(
+        &self,
+    ) -> impl Iterator<Item = wgpu::VertexBufferLayout> + ExactSizeIterator {
+        self.vertex_buffer_layouts
+            .iter()
+            .map(|layout| wgpu::VertexBufferLayout {
+                array_stride: layout.array_stride,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &layout.attributes,
+            })
+    }
+
+    pub(super) fn indices(&self) -> &Option<IndexBuffer> {
+        &self.indices
+    }
+
+    pub fn vertex_buffer(&self) -> &[wgpu::Buffer] {
+        &self.vertex_buffers
+    }
+
+    pub fn vertex_count(&self) -> u32 {
+        self.vertex_count
+    }
 }
 
 impl DenseEntry for Geometry {
@@ -22,13 +49,20 @@ impl DenseEntry for Geometry {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct IndexBuffer {
+    pub(super) buffer: wgpu::Buffer,
+    pub(super) format: wgpu::IndexFormat,
+}
+
+#[must_use]
 pub struct GeometryBuilder<'a, 'r> {
     resources: &'r mut Resources,
-    vertex_count: Option<NonZeroU32>,
     indices: Indices<'a>,
     positions: Option<Cow<'a, [[f32; 3]]>>,
     normals: Option<Cow<'a, [[f32; 3]]>>,
-    tex_coords: Vec<(Attribute, Cow<'a, [[f32; 2]]>)>,
+    tex_coords: Vec<(Attribute, TexCoords<'a>)>,
+    colors: Vec<(Attribute, Colors<'a>)>,
     attributes: Attributes,
 }
 
@@ -36,18 +70,13 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     pub fn new(resources: &'r mut Resources) -> Self {
         Self {
             resources,
-            vertex_count: None,
             indices: Indices::None,
             positions: None,
             normals: None,
             tex_coords: Vec::new(),
+            colors: Vec::new(),
             attributes: Attributes::empty(),
         }
-    }
-
-    pub fn vertex_count(mut self, vertex_count: u32) -> Self {
-        self.vertex_count = NonZeroU32::new(vertex_count);
-        self
     }
 
     pub fn indices_u16(mut self, indices: Cow<'a, [u16]>) -> Self {
@@ -72,15 +101,49 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn tex_coords(mut self, set: u32, tex_coords: Cow<'a, [[f32; 2]]>) -> Self {
+    fn tex_coords(mut self, set: u32, tex_coords: TexCoords<'a>) -> Self {
         let (attribute, flag) = match set {
             0 => (Attribute::TexCoord0, Attributes::TEX_COORD_0),
             1 => (Attribute::TexCoord1, Attributes::TEX_COORD_1),
-            _ => panic!("unsupported texure coordinate set"),
+            _ => panic!("unsupported vertex texure coordinate set"),
         };
         self.tex_coords.push((attribute, tex_coords));
         self.attributes.insert(flag);
         self
+    }
+
+    pub fn tex_coords_u8(self, set: u32, tex_coords: Cow<'a, [[u8; 2]]>) -> Self {
+        self.tex_coords(set, TexCoords::U8(tex_coords))
+    }
+
+    pub fn tex_coords_u16(self, set: u32, tex_coords: Cow<'a, [[u16; 2]]>) -> Self {
+        self.tex_coords(set, TexCoords::U16(tex_coords))
+    }
+
+    pub fn tex_coords_f32(self, set: u32, tex_coords: Cow<'a, [[f32; 2]]>) -> Self {
+        self.tex_coords(set, TexCoords::F32(tex_coords))
+    }
+
+    fn colors(mut self, set: u32, colors: Colors<'a>) -> Self {
+        let (attribute, flag) = match set {
+            0 => (Attribute::Color0, Attributes::COLOR_0),
+            _ => panic!("unsupported vertex color set"),
+        };
+        self.colors.push((attribute, colors));
+        self.attributes.insert(flag);
+        self
+    }
+
+    pub fn colors_u8(self, set: u32, colors: Cow<'a, [[u8; 4]]>) -> Self {
+        self.colors(set, Colors::RgbaU8(colors))
+    }
+
+    pub fn colors_u16(self, set: u32, colors: Cow<'a, [[u16; 4]]>) -> Self {
+        self.colors(set, Colors::RgbaU16(colors))
+    }
+
+    pub fn colors_f32(self, set: u32, colors: Cow<'a, [[f32; 4]]>) -> Self {
+        self.colors(set, Colors::RgbaF32(colors))
     }
 
     /// An helper for generating sphere geometries.
@@ -167,11 +230,10 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             }
         }
 
-        self.vertex_count(indices.len() as u32)
-            .indices_u32(indices.into())
+        self.indices_u32(indices.into())
             .positions(positions.into())
             .normals(normals.into())
-            .tex_coords(0, uvs.into())
+            .tex_coords_f32(0, uvs.into())
     }
 
     pub fn build(self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
@@ -180,14 +242,13 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
 
         let mut create_vertex_buffer =
             |name, contents, array_stride, format, attribute: Attribute| {
-                vertex_buffers
-                    .push(self.resources.device.create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some(name),
-                            contents,
-                            usage: wgpu::BufferUsages::VERTEX,
-                        },
-                    ));
+                vertex_buffers.push(self.resources.device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(name),
+                        contents,
+                        usage: wgpu::BufferUsages::VERTEX,
+                    },
+                ));
                 vertex_buffer_layouts.push(VertexBufferLayout {
                     array_stride,
                     attributes: vec![wgpu::VertexAttribute {
@@ -199,6 +260,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             };
 
         let positions = self.positions.expect("positions attribute should be set");
+        let mut vertex_count = positions.len();
         create_vertex_buffer(
             "Positions buffer",
             cast_slice(&positions),
@@ -220,62 +282,128 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         );
 
         for (attribute, tex_coords) in &self.tex_coords {
+            let (contents, array_stride, format) = match tex_coords {
+                TexCoords::U8(slice) => (cast_slice(slice), 2 * 1, wgpu::VertexFormat::Unorm8x2),
+                TexCoords::U16(slice) => (cast_slice(slice), 2 * 2, wgpu::VertexFormat::Unorm16x2),
+                TexCoords::F32(slice) => (cast_slice(slice), 2 * 4, wgpu::VertexFormat::Float32x2),
+            };
             create_vertex_buffer(
                 "Texture coordinate buffer",
-                cast_slice(tex_coords),
-                2 * 4,
-                wgpu::VertexFormat::Float32x2,
+                contents,
+                array_stride,
+                format,
                 *attribute,
             );
         }
 
-        let mut check_tex_coord = |attribute: Attribute, flag: Attributes| {
-            if !self.attributes.contains(flag) {
-                vertex_buffers.push(
-                    self.resources
-                        .geometry_builder_data
-                        .dummy_tex_coord_buffer
-                        .clone(),
-                );
-                vertex_buffer_layouts.push(VertexBufferLayout {
-                    array_stride: 0,
-                    attributes: vec![wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Unorm8x2,
-                        offset: 0,
-                        shader_location: attribute as u32,
-                    }],
-                });
+        for (attribute, colors) in &self.colors {
+            let (contents, array_stride, format) = match colors {
+                Colors::RgbaU8(slice) => (cast_slice(slice), 4 * 1, wgpu::VertexFormat::Unorm8x4),
+                Colors::RgbaU16(slice) => (cast_slice(slice), 4 * 2, wgpu::VertexFormat::Unorm16x4),
+                Colors::RgbaF32(slice) => (cast_slice(slice), 4 * 4, wgpu::VertexFormat::Float32x4),
+            };
+            create_vertex_buffer(
+                "Texture coordinate buffer",
+                contents,
+                array_stride,
+                format,
+                *attribute,
+            );
+        }
+
+        let mut check_attribute =
+            |attribute: Attribute, flag: Attributes, dummy_buffer: &DummyVertexBuffer| {
+                if !self.attributes.contains(flag) {
+                    vertex_buffers.push(dummy_buffer.buffer.clone());
+                    vertex_buffer_layouts.push(VertexBufferLayout {
+                        array_stride: 0,
+                        attributes: vec![wgpu::VertexAttribute {
+                            format: dummy_buffer.format,
+                            offset: 0,
+                            shader_location: attribute as u32,
+                        }],
+                    });
+                }
+            };
+
+        check_attribute(
+            Attribute::TexCoord0,
+            Attributes::TEX_COORD_0,
+            &self.resources.geometry_builder_data.dummy_tex_coords,
+        );
+        check_attribute(
+            Attribute::TexCoord1,
+            Attributes::TEX_COORD_1,
+            &self.resources.geometry_builder_data.dummy_tex_coords,
+        );
+        check_attribute(
+            Attribute::Color0,
+            Attributes::COLOR_0,
+            &self.resources.geometry_builder_data.dummy_colors,
+        );
+
+        let indices = match &self.indices {
+            Indices::None => None,
+            Indices::U16(slice) => {
+                Some((cast_slice(slice), wgpu::IndexFormat::Uint16, slice.len()))
             }
-        };
-        check_tex_coord(Attribute::TexCoord0, Attributes::TEX_COORD_0);
-        check_tex_coord(Attribute::TexCoord1, Attributes::TEX_COORD_1);
+            Indices::U32(slice) => {
+                Some((cast_slice(slice), wgpu::IndexFormat::Uint32, slice.len()))
+            }
+        }
+        .map(|(contents, format, index_count)| {
+            vertex_count = index_count;
+            let buffer =
+                self.resources
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Geometry index buffer"),
+                        contents,
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+            IndexBuffer { buffer, format }
+        });
 
         let id = self.resources.geometries.next_id();
         let geometry = Geometry {
             id,
+            indices,
             vertex_buffers,
             vertex_buffer_layouts,
-            attributes: self.attributes,
+            vertex_count: vertex_count as u32,
         };
         self.resources.geometries.insert(geometry)
     }
 }
 
 pub(super) struct GeometryBuilderData {
-    dummy_tex_coord_buffer: wgpu::Buffer,
+    dummy_tex_coords: DummyVertexBuffer,
+    dummy_colors: DummyVertexBuffer,
 }
 
 impl GeometryBuilderData {
     pub fn new(device: &wgpu::Device) -> Self {
-        let dummy_tex_coord_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Dummy texture coordinate buffer"),
-            size: 2,
-            usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        });
+        let dummy_tex_coords = DummyVertexBuffer {
+            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Dummy vertex texture coordinate buffer"),
+                contents: &[0; 2],
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            format: wgpu::VertexFormat::Unorm8x2,
+        };
+
+        let dummy_colors = DummyVertexBuffer {
+            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Dummy vertex color buffer"),
+                contents: &[u8::MAX; 4],
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            format: wgpu::VertexFormat::Unorm8x4,
+        };
 
         Self {
-            dummy_tex_coord_buffer,
+            dummy_colors,
+            dummy_tex_coords,
         }
     }
 }
@@ -324,13 +452,26 @@ enum Indices<'a> {
     U32(Cow<'a, [u32]>),
 }
 
+enum TexCoords<'a> {
+    U8(Cow<'a, [[u8; 2]]>),
+    U16(Cow<'a, [[u16; 2]]>),
+    F32(Cow<'a, [[f32; 2]]>),
+}
+
+enum Colors<'a> {
+    RgbaU8(Cow<'a, [[u8; 4]]>),
+    RgbaU16(Cow<'a, [[u16; 4]]>),
+    RgbaF32(Cow<'a, [[f32; 4]]>),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(usize)]
 enum Attribute {
-    Position = 0,
-    Normal = 1,
-    TexCoord0 = 2,
-    TexCoord1 = 3,
+    Position = 1,
+    Normal = 2,
+    TexCoord0 = 4,
+    TexCoord1 = 5,
+    Color0 = 6,
 }
 
 bitflags! {
@@ -339,5 +480,11 @@ bitflags! {
         const NORMAL = 1 << 1;
         const TEX_COORD_0 = 1 << 2;
         const TEX_COORD_1 = 1 << 3;
+        const COLOR_0 = 1 << 4;
     }
+}
+
+struct DummyVertexBuffer {
+    buffer: wgpu::Buffer,
+    format: wgpu::VertexFormat,
 }

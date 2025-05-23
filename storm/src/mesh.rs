@@ -1,14 +1,13 @@
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, HashMap},
-    f32::consts::PI,
-};
+use std::{collections::HashMap, f32::consts::PI};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
-use glam::vec3;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, environment::PREFILTER_MAP_MIP_COUNT};
+use crate::{
+    DenseEntry, Id, Resources,
+    environment::PREFILTER_MAP_MIP_COUNT,
+    geometry::{Geometry, IndexBuffer},
+};
 
 pub struct Mesh {
     id: Id<Mesh>,
@@ -28,7 +27,7 @@ impl DenseEntry for Mesh {
 pub struct MeshBuilder<'r> {
     resources: &'r mut Resources,
     name: Option<String>,
-    primitives: Vec<Primitive>,
+    primitives: Vec<(Id<Geometry>, Id<Material>)>,
 }
 
 impl<'r> MeshBuilder<'r> {
@@ -45,489 +44,130 @@ impl<'r> MeshBuilder<'r> {
         self
     }
 
-    pub fn primitives(mut self, primitives: Vec<Primitive>) -> Self {
-        self.primitives = primitives;
+    pub fn primitives(
+        mut self,
+        primitives: impl IntoIterator<Item = (Id<Geometry>, Id<Material>)>,
+    ) -> Self {
+        self.primitives.extend(primitives);
         self
     }
 
     pub fn build(self) -> &'r mut Mesh {
         let id = self.resources.meshes.next_id();
+        let primitives =
+            self.primitives
+                .into_iter()
+                .map(|(geometry, material)| {
+                    let geometry = &self.resources.geometries[geometry];
+                    let material = &self.resources.materials[material];
+
+                    let geometry_layouts = geometry.vertex_buffer_layouts();
+
+                    let mut vertex_buffer_layouts = Vec::with_capacity(1 + geometry_layouts.len());
+                    vertex_buffer_layouts.push(wgpu::VertexBufferLayout {
+                        array_stride: 4,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![0 => Uint32],
+                    });
+                    vertex_buffer_layouts.extend(geometry_layouts);
+
+                    let constants = &mut HashMap::with_capacity(3);
+                    constants.insert(
+                        "has_base_color_texture".to_string(),
+                        bool_to_f64(material.has_base_color_texture),
+                    );
+                    constants.insert(
+                        "has_metallic_roughness_texture".to_string(),
+                        bool_to_f64(material.has_metallic_roughness_texture),
+                    );
+                    constants.insert(
+                        "prefilter_map_mip_count".to_string(),
+                        PREFILTER_MAP_MIP_COUNT as f64,
+                    );
+                    let data = &self.resources.mesh_builder_data;
+                    let pipeline = self.resources.device.create_render_pipeline(
+                        &wgpu::RenderPipelineDescriptor {
+                            label: Some(&format!("Primitive pipeline")),
+                            layout: Some(&data.primitive_pipeline_layout),
+                            vertex: wgpu::VertexState {
+                                module: &data.primitive_shader_module,
+                                entry_point: Some("vs_main"),
+                                compilation_options: wgpu::PipelineCompilationOptions {
+                                    constants,
+                                    ..Default::default()
+                                },
+                                buffers: &vertex_buffer_layouts,
+                            },
+                            primitive: wgpu::PrimitiveState {
+                                topology: wgpu::PrimitiveTopology::TriangleList,
+                                strip_index_format: None,
+                                front_face: wgpu::FrontFace::Ccw,
+                                cull_mode: None,
+                                unclipped_depth: false,
+                                polygon_mode: wgpu::PolygonMode::Fill,
+                                conservative: false,
+                            },
+                            depth_stencil: Some(wgpu::DepthStencilState {
+                                format: wgpu::TextureFormat::Depth24Plus,
+                                depth_write_enabled: true,
+                                depth_compare: wgpu::CompareFunction::LessEqual,
+                                stencil: wgpu::StencilState::default(),
+                                bias: wgpu::DepthBiasState::default(),
+                            }),
+                            multisample: wgpu::MultisampleState {
+                                count: 1,
+                                mask: !0,
+                                alpha_to_coverage_enabled: false,
+                            },
+                            fragment: Some(wgpu::FragmentState {
+                                module: &data.primitive_shader_module,
+                                entry_point: Some("fs_main"),
+                                compilation_options: wgpu::PipelineCompilationOptions {
+                                    constants,
+                                    ..Default::default()
+                                },
+                                targets: &[Some(self.resources.render_texture_format.into())],
+                            }),
+                            multiview: None,
+                            cache: None,
+                        },
+                    );
+
+                    let index_buffer = geometry.indices().clone();
+                    let vertex_buffers = geometry.vertex_buffer().into();
+                    let vertex_count = geometry.vertex_count();
+
+                    Primitive {
+                        pipeline,
+                        index_buffer,
+                        vertex_buffers,
+                        vertex_count,
+                        material: material.bind_group.clone(),
+                    }
+                })
+                .collect();
         let mesh = Mesh {
             id,
             name: self.name.unwrap_or_else(|| format!("Mesh {id}")),
-            primitives: self.primitives,
+            primitives,
         };
         self.resources.meshes.insert(mesh)
     }
 }
 
-#[must_use]
-pub struct PrimitiveBuilder<'a, 'r> {
-    resources: &'r mut Resources,
-    vertex_count: u32,
-    indices: Indices<'a>,
-    positions: Option<Cow<'a, [[f32; 3]]>>,
-    normals: Option<Cow<'a, [[f32; 3]]>>,
-    tex_coords: BTreeMap<Attribute, TexCoords<'a>>,
-    has_tex_coord_0: f64,
-    has_tex_coord_1: f64,
-    colors: BTreeMap<Attribute, Colors<'a>>,
-    has_color_0: f64,
-    vertex_buffers: Vec<wgpu::Buffer>,
-    vertex_buffer_layouts: Vec<VertexBufferLayout>,
-    material: Option<&'a Material>,
-}
-
-impl<'a, 'r> PrimitiveBuilder<'a, 'r> {
-    pub fn new(resources: &'r mut Resources) -> Self {
-        Self {
-            resources,
-            vertex_count: 0,
-            indices: Indices::None,
-            positions: None,
-            normals: None,
-            tex_coords: BTreeMap::new(),
-            has_tex_coord_0: 0.0,
-            has_tex_coord_1: 0.0,
-            colors: BTreeMap::new(),
-            has_color_0: 0.0,
-            vertex_buffers: Vec::with_capacity(2),
-            vertex_buffer_layouts: Vec::with_capacity(2),
-            material: None,
-        }
-    }
-
-    pub fn vertex_count(mut self, vertex_count: u32) -> Self {
-        self.vertex_count = vertex_count;
-        self
-    }
-
-    pub fn indices(mut self, indices: Indices<'a>) -> Self {
-        self.indices = indices;
-        self
-    }
-
-    pub fn indices_u32(self, indices: Cow<'a, [u32]>) -> Self {
-        self.indices(Indices::U32(indices))
-    }
-
-    pub fn positions(mut self, positions: Cow<'a, [[f32; 3]]>) -> Self {
-        self.positions = Some(positions);
-        self
-    }
-
-    pub fn normals(mut self, normals: Cow<'a, [[f32; 3]]>) -> Self {
-        self.normals = Some(normals);
-        self
-    }
-
-    pub fn tex_coords(mut self, set: u32, tex_coords: TexCoords<'a>) -> Self {
-        let attribute = match set {
-            0 => {
-                self.has_tex_coord_0 = 1.0;
-                Attribute::TexCoord0
-            }
-            1 => {
-                self.has_tex_coord_1 = 1.0;
-                Attribute::TexCoord1
-            }
-            _ => panic!("only two texture coordinate sets supported"),
-        };
-        self.tex_coords.insert(attribute, tex_coords);
-        self
-    }
-
-    pub fn tex_coords_f32(self, set: u32, tex_coords: Cow<'a, [[f32; 2]]>) -> Self {
-        self.tex_coords(set, TexCoords::F32(tex_coords))
-    }
-
-    pub fn colors(mut self, set: u32, colors: Colors<'a>) -> Self {
-        let attribute = match set {
-            0 => {
-                self.has_color_0 = 1.0;
-                Attribute::Color0
-            }
-            _ => panic!("only one color sets supported"),
-        };
-        self.colors.insert(attribute, colors);
-        self
-    }
-
-    /// An helper for generating sphere geometries.
-    /// Based on [three.js/SphereGeometry](https://threejs.org/docs/#api/en/geometries/SphereGeometry).
-    ///
-    /// The geometry is created by sweeping and calculating vertexes around the Y axis (horizontal sweep)
-    /// and the Z axis (vertical sweep). Thus, incomplete spheres (akin to 'sphere slices') can be created
-    /// through the use of different values of `phi_start`, `phi_length`, `theta_start` and `theta_length`,
-    /// in order to define the points in which we start (or end) calculating those vertices.
-    pub fn sphere(self, desc: &'a SphereDescriptor) -> Self {
-        let width_segments = desc.width_segments.max(3);
-        let height_segments = desc.height_segments.max(2);
-
-        let theta_end = (desc.theta_start + desc.theta_length).min(PI);
-
-        let row_count = height_segments + 1;
-        let col_count = width_segments + 1;
-        let mut index = 0u32;
-        let mut grid = Vec::with_capacity(row_count);
-
-        let vertex_count = (height_segments + 1) * (width_segments + 1);
-        let mut positions = Vec::with_capacity(vertex_count);
-        let mut normals = Vec::with_capacity(vertex_count);
-        let mut uvs = Vec::with_capacity(vertex_count);
-
-        for y in 0..=height_segments {
-            let mut vertices_row = Vec::with_capacity(col_count);
-            let v = y as f32 / height_segments as f32;
-
-            // special case for the poles
-            let u_offset = if y == 0 && desc.theta_start == 0.0 {
-                0.5 / width_segments as f32
-            } else if y == height_segments && theta_end == PI {
-                -0.5 / width_segments as f32
-            } else {
-                0.0
-            };
-
-            for x in 0..=width_segments {
-                let u = x as f32 / width_segments as f32;
-
-                let phi = desc.phi_start + u * desc.phi_length;
-                let theta = desc.theta_start + v * desc.theta_length;
-
-                let vertex = vec3(
-                    -desc.radius * phi.cos() * theta.sin(),
-                    desc.radius * theta.cos(),
-                    desc.radius * phi.sin() * theta.sin(),
-                );
-
-                positions.push(vertex.to_array());
-                normals.push(vertex.normalize().to_array());
-                uvs.push([u + u_offset, 1.0 - v]);
-
-                vertices_row.push(index);
-                index += 1;
-            }
-
-            grid.push(vertices_row);
-        }
-
-        let mut index_count = (height_segments - 1) * width_segments * 6;
-        if desc.theta_start > 0.0 {
-            index_count += width_segments * 3;
-        }
-        if theta_end < PI {
-            index_count += width_segments * 3;
-        }
-        let mut indices = Vec::with_capacity(index_count);
-
-        for y in 0..height_segments {
-            for x in 0..width_segments {
-                let a = grid[y][x + 1];
-                let b = grid[y][x];
-                let c = grid[y + 1][x];
-                let d = grid[y + 1][x + 1];
-
-                if y != 0 || desc.theta_start > 0.0 {
-                    indices.extend_from_slice(&[a, b, d]);
-                }
-                if y != height_segments - 1 || theta_end < PI {
-                    indices.extend_from_slice(&[b, c, d]);
-                }
-            }
-        }
-
-        self.vertex_count(indices.len() as u32)
-            .indices_u32(indices.into())
-            .positions(positions.into())
-            .normals(normals.into())
-            .tex_coords_f32(0, uvs.into())
-    }
-
-    pub fn material(mut self, material: &'a Material) -> Self {
-        self.material = Some(material);
-        self
-    }
-
-    pub fn build(mut self) -> Primitive {
-        let default_material;
-        let material = match self.material {
-            Some(material) => material,
-            None => {
-                default_material = self.resources.material_builder().build();
-                &default_material
-            }
-        };
-
-        let mut create_vertex_buffer =
-            |name, contents, array_stride, format, attribute: Attribute| {
-                let device = &self.resources.device;
-                self.vertex_buffers.push(device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some(name),
-                        contents,
-                        usage: wgpu::BufferUsages::VERTEX,
-                    },
-                ));
-                self.vertex_buffer_layouts.push(VertexBufferLayout {
-                    array_stride,
-                    attributes: vec![wgpu::VertexAttribute {
-                        format,
-                        offset: 0,
-                        shader_location: attribute as u32,
-                    }],
-                });
-            };
-
-        if let Some(positions) = &self.positions {
-            create_vertex_buffer(
-                "Position vertex buffer",
-                cast_slice(positions),
-                3 * 4,
-                wgpu::VertexFormat::Float32x3,
-                Attribute::Position,
-            );
-        }
-        if let Some(normals) = &self.normals {
-            create_vertex_buffer(
-                "Normal vertex buffer",
-                cast_slice(normals),
-                3 * 4,
-                wgpu::VertexFormat::Float32x3,
-                Attribute::Normal,
-            );
-        }
-        for (attribute, tex_coords) in self.tex_coords.iter() {
-            let (array_stride, contents, format) = match tex_coords {
-                TexCoords::U8(slice) => (2 * 1, cast_slice(slice), wgpu::VertexFormat::Unorm8x2),
-                TexCoords::U16(slice) => (2 * 2, cast_slice(slice), wgpu::VertexFormat::Unorm16x2),
-                TexCoords::F32(slice) => (2 * 4, cast_slice(slice), wgpu::VertexFormat::Float32x2),
-            };
-            create_vertex_buffer(
-                "Texture coordinate vertex buffer",
-                contents,
-                array_stride,
-                format,
-                *attribute,
-            );
-        }
-        for (attribute, colors) in self.colors.iter() {
-            let (array_stride, contents, format) = match colors {
-                Colors::RgbaU8(slice) => (4 * 1, cast_slice(slice), wgpu::VertexFormat::Unorm8x4),
-                Colors::RgbaU16(slice) => (4 * 2, cast_slice(slice), wgpu::VertexFormat::Unorm16x4),
-                Colors::RgbaF32(slice) => (4 * 4, cast_slice(slice), wgpu::VertexFormat::Float32x4),
-            };
-            create_vertex_buffer(
-                "Texture coordinate vertex buffer",
-                contents,
-                array_stride,
-                format,
-                *attribute,
-            );
-        }
-
-        let find = |attribute: Attribute| {
-            self.vertex_buffer_layouts
-                .iter()
-                .find(|layout| {
-                    layout
-                        .attributes
-                        .iter()
-                        .find(|vertex_attribute| {
-                            vertex_attribute.shader_location == attribute as u32
-                        })
-                        .is_some()
-                })
-                .is_some()
-        };
-        let has_tex_coord_0 = find(Attribute::TexCoord0);
-        let has_tex_coord_1 = find(Attribute::TexCoord1);
-        let has_color_0 = find(Attribute::Color0);
-
-        let mut create_vertex_buffer = |name, contents, format, attribute: Attribute| {
-            let device = &self.resources.device;
-            self.vertex_buffers.push(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some(name),
-                    contents,
-                    usage: wgpu::BufferUsages::VERTEX,
-                },
-            ));
-            self.vertex_buffer_layouts.push(VertexBufferLayout {
-                array_stride: 0,
-                attributes: vec![wgpu::VertexAttribute {
-                    format,
-                    offset: 0,
-                    shader_location: attribute as u32,
-                }],
-            });
-        };
-
-        if !has_tex_coord_0 {
-            create_vertex_buffer(
-                "Dummy tex_coord_0 vertex buffer",
-                &[u8::MAX; 2],
-                wgpu::VertexFormat::Unorm8x2,
-                Attribute::TexCoord0,
-            );
-        }
-        if !has_tex_coord_1 {
-            create_vertex_buffer(
-                "Dummy tex_coord_1 vertex buffer",
-                &[u8::MAX; 2],
-                wgpu::VertexFormat::Unorm8x2,
-                Attribute::TexCoord1,
-            );
-        }
-        if !has_color_0 {
-            create_vertex_buffer(
-                "Dummy color_0 vertex buffer",
-                &[u8::MAX; 4],
-                wgpu::VertexFormat::Unorm8x4,
-                Attribute::Color0,
-            );
-        }
-
-        let device = &self.resources.device;
-        let data = &self.resources.mesh_builder_data;
-
-        let mut vertex_buffer_layouts = Vec::with_capacity(1 + self.vertex_buffer_layouts.len());
-        vertex_buffer_layouts.push(wgpu::VertexBufferLayout {
-            array_stride: 4,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Uint32],
-        });
-        vertex_buffer_layouts.extend(self.vertex_buffer_layouts.iter().map(|layout| {
-            wgpu::VertexBufferLayout {
-                array_stride: layout.array_stride,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &layout.attributes,
-            }
-        }));
-
-        let constants = &mut HashMap::with_capacity(3);
-        constants.insert("has_tex_coord_0".to_string(), bool_to_f64(has_tex_coord_0));
-        constants.insert("has_tex_coord_1".to_string(), bool_to_f64(has_tex_coord_1));
-        constants.insert("has_color_0".to_string(), bool_to_f64(has_color_0));
-        constants.insert(
-            "has_base_color_texture".to_string(),
-            bool_to_f64(material.has_base_color_texture),
-        );
-        constants.insert(
-            "has_metallic_roughness_texture".to_string(),
-            bool_to_f64(material.has_metallic_roughness_texture),
-        );
-        constants.insert(
-            "prefilter_map_mip_count".to_string(),
-            PREFILTER_MAP_MIP_COUNT as f64,
-        );
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(&format!("Primitive pipeline")),
-            layout: Some(&data.primitive_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &data.primitive_shader_module,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants,
-                    ..Default::default()
-                },
-                buffers: &vertex_buffer_layouts,
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &data.primitive_shader_module,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants,
-                    ..Default::default()
-                },
-                targets: &[Some(self.resources.render_texture_format.into())],
-            }),
-            multiview: None,
-            cache: None,
-        });
-
-        let index_buffer = match self.indices {
-            Indices::None => None,
-            Indices::U32(slice) => {
-                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Primitive index buffer"),
-                    contents: cast_slice(&slice),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-                let format = wgpu::IndexFormat::Uint32;
-                Some(IndexBuffer { buffer, format })
-            }
-        };
-
-        let vertex_buffers = self.vertex_buffers;
-
-        Primitive {
-            pipeline,
-            index_buffer,
-            vertex_buffers,
-            vertex_count: self.vertex_count,
-            material: material.bind_group.clone(),
-        }
-    }
-}
-
-pub enum Indices<'a> {
-    None,
-    U32(Cow<'a, [u32]>),
-}
-
-pub enum TexCoords<'a> {
-    U8(Cow<'a, [[u8; 2]]>),
-    U16(Cow<'a, [[u16; 2]]>),
-    F32(Cow<'a, [[f32; 2]]>),
-}
-
-pub enum Colors<'a> {
-    RgbaU8(Cow<'a, [[u8; 4]]>),
-    RgbaU16(Cow<'a, [[u16; 4]]>),
-    RgbaF32(Cow<'a, [[f32; 4]]>),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum Attribute {
-    Position = 1,
-    Normal = 2,
-    TexCoord0 = 4,
-    TexCoord1 = 5,
-    Color0 = 6,
-}
-
-struct VertexBufferLayout {
-    array_stride: wgpu::BufferAddress,
-    attributes: Vec<wgpu::VertexAttribute>,
-}
-
 pub struct Material {
+    id: Id<Self>,
     bind_group: wgpu::BindGroup,
     has_base_color_texture: bool,
     has_metallic_roughness_texture: bool,
+}
+
+impl DenseEntry for Material {
+    type Key = Self;
+
+    fn id(&self) -> Id<Self::Key> {
+        self.id
+    }
 }
 
 #[must_use]
@@ -605,7 +245,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self
     }
 
-    pub fn build(self) -> Material {
+    pub fn build(self) -> &'r mut Material {
         let data = &self.resources.mesh_builder_data;
         let has_base_color_texture = self.base_color_texture.is_some();
         let has_metallic_roughness_texture = self.metallic_roughness_texture.is_some();
@@ -658,11 +298,13 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
                     },
                 ],
             });
-        Material {
+        let id = self.resources.materials.next_id();
+        self.resources.materials.insert(Material {
+            id,
             bind_group,
             has_base_color_texture,
             has_metallic_roughness_texture,
-        }
+        })
     }
 }
 
@@ -683,12 +325,6 @@ pub struct Primitive {
     pub(super) vertex_buffers: Vec<wgpu::Buffer>,
     pub(super) vertex_count: u32,
     pub(super) material: wgpu::BindGroup,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct IndexBuffer {
-    pub(super) buffer: wgpu::Buffer,
-    pub(super) format: wgpu::IndexFormat,
 }
 
 pub(super) struct MeshBuilderData {

@@ -1,8 +1,8 @@
-use std::{borrow::Cow, f32::consts::PI};
+use std::{borrow::Cow, f32::consts::PI, iter::repeat_n};
 
 use bitflags::bitflags;
 use bytemuck::cast_slice;
-use glam::vec3;
+use glam::{Vec3, vec3};
 use wgpu::util::DeviceExt;
 
 use crate::{DenseEntry, Id, Resources};
@@ -236,7 +236,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             .tex_coords_f32(0, uvs.into())
     }
 
-    pub fn build(self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
+    pub fn build(mut self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
         let mut vertex_buffers = Vec::new();
         let mut vertex_buffer_layouts = Vec::new();
 
@@ -259,8 +259,37 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                 });
             };
 
-        let positions = self.positions.expect("positions attribute should be set");
+        let mut positions = self.positions.expect("positions attribute should be set");
         let mut vertex_count = positions.len();
+
+        let normals = match self.normals {
+            Some(normals) => normals,
+            None => {
+                let indices: Option<Vec<usize>> = match self.indices {
+                    Indices::None => None,
+                    Indices::U16(slice) => {
+                        Some(slice.iter().map(|index| *index as usize).collect())
+                    }
+                    Indices::U32(slice) => {
+                        Some(slice.iter().map(|index| *index as usize).collect())
+                    }
+                };
+                self.indices = Indices::None;
+                if let Some(indices) = indices {
+                    vertex_count = indices.len();
+                    positions = indices.iter().map(|index| positions[*index]).collect();
+                    for (_, tex_coords) in self.tex_coords.iter_mut() {
+                        *tex_coords = tex_coords.to_unindexed(&indices);
+                    }
+                    for (_, colors) in self.colors.iter_mut() {
+                        *colors = colors.to_unindexed(&indices);
+                    }
+                }
+                let normals = compute_normals(&positions);
+                Cow::Owned(normals)
+            }
+        };
+
         create_vertex_buffer(
             "Positions buffer",
             cast_slice(&positions),
@@ -268,11 +297,6 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             wgpu::VertexFormat::Float32x3,
             Attribute::Position,
         );
-
-        let normals = match self.normals {
-            Some(normals) => normals,
-            None => todo!("compute normals"),
-        };
         create_vertex_buffer(
             "Normals buffer",
             cast_slice(&normals),
@@ -458,10 +482,42 @@ enum TexCoords<'a> {
     F32(Cow<'a, [[f32; 2]]>),
 }
 
+impl<'a> TexCoords<'a> {
+    fn to_unindexed(&self, indices: &[usize]) -> Self {
+        match self {
+            TexCoords::U8(slice) => {
+                TexCoords::U8(indices.iter().map(|index| slice[*index]).collect())
+            }
+            TexCoords::U16(slice) => {
+                TexCoords::U16(indices.iter().map(|index| slice[*index]).collect())
+            }
+            TexCoords::F32(slice) => {
+                TexCoords::F32(indices.iter().map(|index| slice[*index]).collect())
+            }
+        }
+    }
+}
+
 enum Colors<'a> {
     RgbaU8(Cow<'a, [[u8; 4]]>),
     RgbaU16(Cow<'a, [[u16; 4]]>),
     RgbaF32(Cow<'a, [[f32; 4]]>),
+}
+
+impl<'a> Colors<'a> {
+    fn to_unindexed(&self, indices: &[usize]) -> Self {
+        match self {
+            Colors::RgbaU8(slice) => {
+                Colors::RgbaU8(indices.iter().map(|index| slice[*index]).collect())
+            }
+            Colors::RgbaU16(slice) => {
+                Colors::RgbaU16(indices.iter().map(|index| slice[*index]).collect())
+            }
+            Colors::RgbaF32(slice) => {
+                Colors::RgbaF32(indices.iter().map(|index| slice[*index]).collect())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -487,4 +543,24 @@ bitflags! {
 struct DummyVertexBuffer {
     buffer: wgpu::Buffer,
     format: wgpu::VertexFormat,
+}
+
+fn compute_normals(positions: &[[f32; 3]]) -> Vec<[f32; 3]> {
+    let mut normals = Vec::with_capacity(positions.len());
+    let mut iter = positions.iter().copied();
+    while let Some((a, b, c)) = next_triangle(&mut iter) {
+        let ab = b - a;
+        let ac = c - a;
+        let normal = ab.cross(ac).to_array();
+        normals.extend(repeat_n(normal, 3));
+    }
+    normals
+}
+
+fn next_triangle(mut positions: impl Iterator<Item = [f32; 3]>) -> Option<(Vec3, Vec3, Vec3)> {
+    Some((
+        Vec3::from_array(positions.next()?),
+        Vec3::from_array(positions.next()?),
+        Vec3::from_array(positions.next()?),
+    ))
 }

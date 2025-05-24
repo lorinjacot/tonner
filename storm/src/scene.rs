@@ -14,6 +14,7 @@ use crate::{
 
 pub mod camera;
 mod node;
+mod animation;
 
 pub struct Scene {
     pub name: String,

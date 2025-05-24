@@ -305,6 +305,10 @@ impl<T: DenseEntry> SparseSet<T> {
     }
 
     pub fn remove(&mut self, id: Id<T::Key>) -> Option<T> {
+        self.map.remove(id)
+    }
+
+    pub fn delete(&mut self, id: Id<T::Key>) -> Option<T> {
         match self.map.remove(id) {
             Some(value) => {
                 self.deleted.push(id);

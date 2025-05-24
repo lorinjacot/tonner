@@ -11,7 +11,7 @@ pub struct Node {
     pub name: String,
     parent: Option<Id<Node>>,
     children: Vec<Id<Node>>,
-    local_transform: Transform,
+    pub(super) local_transform: Transform,
     world_matrix: Mat4,
     mesh: Option<Id<Mesh>>,
 }
@@ -154,8 +154,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         rotation: Quat,
         scale: Vec3,
     ) -> Self {
-        self
-            .local_transform
+        self.local_transform
             .translation_rotation_scale(translation, rotation, scale);
         self
     }

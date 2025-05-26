@@ -48,29 +48,38 @@ pub struct NodeHandle<'a> {
 }
 
 impl<'a> NodeHandle<'a> {
-    pub(super) fn update_matrices(&mut self, parent_matrix: Mat4) {
+    pub(super) fn update_world_matrices_parent(&mut self, parent_matrix: Mat4) {
         let node = &mut self.scene[self.id];
         let world_matrix = parent_matrix * node.local_transform.matrix();
         node.world_matrix = world_matrix;
         let children = node.children.clone();
         for child in children {
-            self.scene.node_handle(child).update_matrices(world_matrix);
+            self.scene
+                .node_handle(child)
+                .update_world_matrices_parent(world_matrix);
+        }
+    }
+
+    pub(super) fn update_world_matrices(&mut self) {
+        let node = &self.scene[self.id];
+        let world_matrix = match self.parent {
+            Some(parent) => self.scene[parent].world_matrix * node.local_transform().matrix(),
+            None => node.local_transform.matrix(),
+        };
+        let node = &mut self.scene[self.id];
+        node.world_matrix = world_matrix;
+        let children = node.children.clone();
+        for child in children {
+            self.scene
+                .node_handle(child)
+                .update_world_matrices_parent(world_matrix);
         }
     }
 
     pub fn set_local_transform(&mut self, transform: Transform) {
-        let node = &self.scene[self.id];
-        let world_matrix = match node.parent {
-            Some(parent) => self.scene[parent].world_matrix * transform.matrix(),
-            None => transform.matrix(),
-        };
         let node = &mut self.scene[self.id];
         node.local_transform = transform;
-        node.world_matrix = world_matrix;
-        let children = node.children.clone();
-        for child in children {
-            self.scene.node_handle(child).update_matrices(world_matrix);
-        }
+        self.update_world_matrices();
     }
 
     pub fn set_mesh(&mut self, mesh: Option<&Mesh>) {

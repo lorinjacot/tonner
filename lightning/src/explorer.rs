@@ -44,23 +44,53 @@ impl Explorer {
             });
 
             let mut play_animations = Vec::new();
+            let mut resume_animations = Vec::new();
+            let mut paused_animations = Vec::new();
+            let mut stop_animations = Vec::new();
+            let mut repeat_animations = Vec::new();
             ui.push_id("animations", |ui| {
                 ui.separator();
                 ui.label("Animations");
+                ui.horizontal(|ui| {
+                    if ui.button("Play all").clicked() {
+                        play_animations.extend(scene.animations().map(|anim| anim.id()));
+                    };
+                    if ui.button("Resume all").clicked() {
+                        resume_animations.extend(scene.animations().map(|anim| anim.id()));
+                    };
+                    if ui.button("Pause all").clicked() {
+                        paused_animations.extend(scene.animations().map(|anim| anim.id()));
+                    };
+                    if ui.button("Stop all").clicked() {
+                        stop_animations.extend(scene.animations().map(|anim| anim.id()));
+                    };
+                });
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for animation in scene.animations() {
                         egui::CollapsingHeader::new(animation.name())
                             .id_salt(animation.id())
                             .show(ui, |ui| {
-                                match scene.animation_current_timestamp(animation.id()) {
-                                    Some(current_timestamp) => {
-                                        ui.label(&format!("{current_timestamp:.1} sec"));
+                                if scene.animation_is_playing(animation.id()) {
+                                    if ui.button("Stop").clicked() {
+                                        stop_animations.push(animation.id());
                                     }
-                                    None => {
-                                        if ui.button("Play").clicked() {
-                                            play_animations.push(animation.id());
-                                        }
+                                    if ui.button("Pause").clicked() {
+                                        paused_animations.push(animation.id());
                                     }
+                                    ui.label(&format!("{:.1} sec", animation.current_timestamp()));
+                                } else {
+                                    if ui.button("Play").clicked() {
+                                        play_animations.push(animation.id());
+                                    }
+                                    if animation.current_timestamp() != 0.0
+                                        && ui.button("Resume").clicked()
+                                    {
+                                        resume_animations.push(animation.id());
+                                    }
+                                }
+                                let mut repeat = animation.repeat();
+                                if ui.checkbox(&mut repeat, "repeat").changed() {
+                                    repeat_animations.push((animation.id(), repeat));
                                 }
                             });
                     }
@@ -103,7 +133,19 @@ impl Explorer {
             let scene = &mut scenes[*active_scene];
             scene.set_active_camera(active_camera);
             for animation in play_animations {
-                scene.play_animation(animation, true);
+                scene.play_animation(animation);
+            }
+            for animation in resume_animations {
+                scene.resume_animation(animation);
+            }
+            for animation in stop_animations {
+                scene.stop_animation(animation);
+            }
+            for animation in paused_animations {
+                scene.pause_animation(animation);
+            }
+            for (animation, repeat) in repeat_animations {
+                scene.repeat_animation(animation, repeat);
             }
             // scene.environment_map = active_environment_map;
 

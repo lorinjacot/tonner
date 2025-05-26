@@ -239,6 +239,7 @@ pub fn open_gltf<'r>(
                         animation.index(),
                         animation.name().unwrap_or("")
                     ))
+                    .repeat()
                     .channels(channels.into_iter().map(|(node, channel)| {
                         let reader = channel.reader(|buffer| Some(&buffers[buffer.index()].0));
                         let inputs = reader

@@ -66,6 +66,14 @@ pub trait DenseEntry {
     fn id(&self) -> Id<Self::Key>;
 }
 
+impl<T> DenseEntry for Id<T> {
+    type Key = T;
+
+    fn id(&self) -> Id<Self::Key> {
+        *self
+    }
+}
+
 pub struct SparseMap<T: DenseEntry> {
     sparse: Vec<SparseEntry>,
     dense: Vec<T>,

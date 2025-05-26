@@ -9,8 +9,10 @@ use super::{Node, Scene};
 pub struct Animation {
     id: Id<Self>,
     name: String,
-    duration: f32,
     channels: Vec<Channel>,
+    duration: f32,
+    current_timestamp: f32,
+    repeat: bool,
 }
 
 impl DenseEntry for Animation {
@@ -26,26 +28,34 @@ impl Animation {
         &self.name
     }
 
-    fn update(&self, current_timestamp: f32, nodes: &mut SparseSet<Node>) {
+    pub fn current_timestamp(&self) -> f32 {
+        self.current_timestamp
+    }
+
+    pub fn repeat(&self) -> bool {
+        self.repeat
+    }
+
+    fn update(&self, nodes: &mut SparseSet<Node>) {
         self.channels.iter().for_each(|channel| {
             let node = &mut nodes[channel.node];
             match &channel.outputs {
                 Outputs::Translations(slice) => {
                     node.local_transform.set_translation(interpolate_vec3(
-                        current_timestamp,
+                        self.current_timestamp,
                         &channel.inputs,
                         channel.interpolation,
                         &slice,
                     ))
                 }
                 Outputs::Rotations(slice) => node.local_transform.set_rotation(interpolate_quat(
-                    current_timestamp,
+                    self.current_timestamp,
                     &channel.inputs,
                     channel.interpolation,
                     &slice,
                 )),
                 Outputs::Scales(slice) => node.local_transform.set_scale(interpolate_vec3(
-                    current_timestamp,
+                    self.current_timestamp,
                     &channel.inputs,
                     channel.interpolation,
                     &slice,
@@ -59,8 +69,9 @@ impl Animation {
 pub struct AnimationBuilder<'s> {
     scene: &'s mut Scene,
     name: Option<String>,
-    duration: f32,
     channels: Vec<Channel>,
+    duration: f32,
+    repeat: bool,
 }
 
 impl<'s> AnimationBuilder<'s> {
@@ -68,13 +79,19 @@ impl<'s> AnimationBuilder<'s> {
         Self {
             scene,
             name: None,
-            duration: 0.0,
             channels: Vec::new(),
+            duration: 0.0,
+            repeat: false,
         }
     }
 
     pub fn name(mut self, name: String) -> Self {
         self.name = Some(name);
+        self
+    }
+
+    pub fn repeat(mut self) -> Self {
+        self.repeat = true;
         self
     }
 
@@ -94,23 +111,11 @@ impl<'s> AnimationBuilder<'s> {
         self.scene.animations.insert(Animation {
             id,
             name: self.name.unwrap_or_else(|| format!("Animation {id}")),
-            duration: self.duration,
             channels: self.channels,
+            duration: self.duration,
+            current_timestamp: 0.0,
+            repeat: self.repeat,
         })
-    }
-}
-
-pub(super) struct PlayingAnimation {
-    animation: Id<Animation>,
-    current_timestamp: f32,
-    should_loop: bool,
-}
-
-impl DenseEntry for PlayingAnimation {
-    type Key = Animation;
-
-    fn id(&self) -> Id<Self::Key> {
-        self.animation
     }
 }
 
@@ -123,18 +128,41 @@ impl Scene {
         self.animations.iter()
     }
 
-    pub fn play_animation(&mut self, animation: Id<Animation>, should_loop: bool) {
-        self.playing_animations.insert(PlayingAnimation {
-            animation,
-            current_timestamp: 0.0,
-            should_loop,
-        });
+    pub fn play_animation(&mut self, animation: Id<Animation>) {
+        self.animations[animation].current_timestamp = 0.0;
+        self.playing_animations.insert(animation);
     }
 
-    pub fn animation_current_timestamp(&self, animation: Id<Animation>) -> Option<f32> {
-        self.playing_animations
-            .get(animation)
-            .map(|animation| animation.current_timestamp)
+    pub fn resume_animation(&mut self, animation: Id<Animation>) {
+        self.playing_animations.insert(animation);
+    }
+
+    pub fn animation_is_playing(&self, animation: Id<Animation>) -> bool {
+        self.playing_animations.contains(animation)
+    }
+
+    pub fn pause_animation(&mut self, animation: Id<Animation>) {
+        self.playing_animations.remove(animation);
+    }
+
+    pub fn stop_animation(&mut self, animation: Id<Animation>) {
+        let animation = &mut self.animations[animation];
+        animation.current_timestamp = 0.0;
+        animation.update(&mut self.nodes);
+        let nodes: Vec<Id<Node>> = animation
+            .channels
+            .iter()
+            .map(|channel| channel.node)
+            .collect();
+        let animation = animation.id();
+        for node in nodes {
+            self.node_handle(node).update_world_matrices();
+        }
+        self.playing_animations.remove(animation);
+    }
+
+    pub fn repeat_animation(&mut self, animation: Id<Animation>, repeat: bool) {
+        self.animations[animation].repeat = repeat;
     }
 
     pub(super) fn update_animations(&mut self, delta_time: Duration) {
@@ -142,28 +170,23 @@ impl Scene {
         let ended: Vec<Id<Animation>> = self
             .playing_animations
             .iter_mut()
-            .filter_map(
-                |PlayingAnimation {
-                     animation,
-                     current_timestamp,
-                     should_loop,
-                 }| {
-                    *current_timestamp += delta_time;
-                    let animation = &self.animations[*animation];
-                    let ended = if *current_timestamp > animation.duration {
-                        if *should_loop {
-                            *current_timestamp -= animation.duration;
-                            None
-                        } else {
-                            Some(animation.id)
-                        }
-                    } else {
+            .filter_map(|animation| {
+                let animation = &mut self.animations[*animation];
+                animation.current_timestamp += delta_time;
+                let ended = if animation.current_timestamp > animation.duration {
+                    if animation.repeat {
+                        animation.current_timestamp -= animation.duration;
                         None
-                    };
-                    animation.update(*current_timestamp, &mut self.nodes);
-                    ended
-                },
-            )
+                    } else {
+                        animation.current_timestamp = 0.0;
+                        Some(animation.id)
+                    }
+                } else {
+                    None
+                };
+                animation.update(&mut self.nodes);
+                ended
+            })
             .collect();
         for id in ended {
             self.playing_animations.remove(id);

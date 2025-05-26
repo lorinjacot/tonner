@@ -31,7 +31,7 @@ pub struct Scene {
     active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
     animations: SparseSet<animation::Animation>,
-    playing_animations: SparseMap<animation::PlayingAnimation>,
+    playing_animations: SparseMap<Id<animation::Animation>>,
     point_lights: SparseMap<PointLight>,
     lights_buffer: Option<wgpu::Buffer>,
     irradiance_map_view: wgpu::TextureView,
@@ -168,7 +168,8 @@ impl Scene {
 
         let root_nodes = self.root_nodes.clone();
         for node in root_nodes {
-            self.node_handle(node).update_matrices(Mat4::IDENTITY);
+            self.node_handle(node)
+                .update_world_matrices_parent(Mat4::IDENTITY);
         }
 
         let nodes_buffer = {

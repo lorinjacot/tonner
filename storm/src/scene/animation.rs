@@ -208,6 +208,7 @@ pub enum Interpolation {
     CubicSpline,
 }
 
+#[derive(Debug)]
 pub enum Outputs {
     Translations(Vec<[f32; 3]>),
     Rotations(Vec<[f32; 4]>),
@@ -303,10 +304,16 @@ fn interpolate<const N: usize, T>(
     let mut iter = inputs.iter().enumerate();
     while let Some((k, t_k)) = iter.next() {
         if t_c == *t_k {
-            return step_callback(&ouputs[k]);
+            return match interpolation {
+                Interpolation::CubicSpline => step_callback(&ouputs[k + 1]),
+                _ => step_callback(&ouputs[k]),
+            };
         } else if t_c < *t_k {
             if k == 0 {
-                return step_callback(ouputs.first().unwrap());
+                return match interpolation {
+                    Interpolation::CubicSpline => step_callback(&ouputs[1]),
+                    _ => step_callback(ouputs.first().unwrap()),
+                };
             } else {
                 return match interpolation {
                     Interpolation::Step => step_callback(&ouputs[k - 1]),
@@ -316,22 +323,23 @@ fn interpolate<const N: usize, T>(
                         let t_next = *t_k;
                         let v_next = &ouputs[k];
                         let t_d = t_next - t_previous;
-                        let t = (t_c - t_k) / t_d;
+                        let t = (t_c - t_previous) / t_d;
                         linear_callback(t, v_previous, v_next)
                     }
                     Interpolation::CubicSpline => {
-                        let t_previous = inputs[k - 1];
+                        let mut k_prev = k - 1;
+                        let mut k_next = k;
+                        let t_previous = inputs[k_prev];
                         let t_next = *t_k;
                         let t_d = t_next - t_previous;
-                        let t = (t_c - t_k) / t_d;
+                        let t = (t_c - t_previous) / t_d;
 
-                        let n = inputs.len();
-                        let k_prev = k - 1;
-                        let k_next = k;
-                        let b_prev = &ouputs[n + n + k_prev];
-                        let v_prev = &ouputs[n + k_prev];
-                        let v_next = &ouputs[n + k_next];
-                        let a_next = &ouputs[k_next];
+                        k_prev *= 3;
+                        k_next *= 3;
+                        let b_prev = &ouputs[k_prev + 2];
+                        let v_prev = &ouputs[k_prev + 1];
+                        let v_next = &ouputs[k_next + 1];
+                        let a_next = &ouputs[k_next + 0];
 
                         cubic_spline_callback(t, t_d, a_next, v_prev, v_next, b_prev)
                     }
@@ -339,5 +347,8 @@ fn interpolate<const N: usize, T>(
             }
         }
     }
-    step_callback(ouputs.last().unwrap())
+    match interpolation {
+        Interpolation::CubicSpline => step_callback(&ouputs[3 * inputs.len() - 2]),
+        _ => step_callback(ouputs.last().unwrap()),
+    }
 }

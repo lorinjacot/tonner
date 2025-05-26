@@ -33,12 +33,38 @@ impl Explorer {
 
         if let Some(active_scene) = active_scene {
             let scene = &scenes[*active_scene];
-            ui.separator();
-            ui.label("Nodes");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for node in scene.root_nodes() {
-                    self.node_ui(ui, *node, scene);
-                }
+            ui.push_id("nodes", |ui| {
+                ui.separator();
+                ui.label("Nodes");
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for node in scene.root_nodes() {
+                        self.node_ui(ui, *node, scene);
+                    }
+                });
+            });
+
+            let mut play_animations = Vec::new();
+            ui.push_id("animations", |ui| {
+                ui.separator();
+                ui.label("Animations");
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for animation in scene.animations() {
+                        egui::CollapsingHeader::new(animation.name())
+                            .id_salt(animation.id())
+                            .show(ui, |ui| {
+                                match scene.animation_current_timestamp(animation.id()) {
+                                    Some(current_timestamp) => {
+                                        ui.label(&format!("{current_timestamp:.1} sec"));
+                                    }
+                                    None => {
+                                        if ui.button("Play").clicked() {
+                                            play_animations.push(animation.id());
+                                        }
+                                    }
+                                }
+                            });
+                    }
+                });
             });
 
             ui.separator();
@@ -76,6 +102,9 @@ impl Explorer {
 
             let scene = &mut scenes[*active_scene];
             scene.set_active_camera(active_camera);
+            for animation in play_animations {
+                scene.play_animation(animation, true);
+            }
             // scene.environment_map = active_environment_map;
 
             if let Some(node) = self.node_modal {

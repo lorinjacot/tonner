@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use controls::{Controls, OrbitControls};
 use egui::ViewportBuilder;
@@ -319,6 +320,7 @@ impl Engine {
         let mut controls = self.data.controls.lock().unwrap();
 
         let raw_input = self.egui_state.take_egui_input(&self.window);
+        let delta_time = Duration::from_secs_f32(raw_input.predicted_dt);
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| {
@@ -402,7 +404,7 @@ impl Engine {
                     controls.update(viewport_aspect_ratio, scene);
                 }
             }
-            scene.update(viewport_aspect_ratio);
+            scene.update(delta_time, viewport_aspect_ratio);
         }
 
         let screen_descriptor = ScreenDescriptor {

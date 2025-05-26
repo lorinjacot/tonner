@@ -1,4 +1,7 @@
-use std::ops::{Index, IndexMut};
+use std::{
+    ops::{Index, IndexMut},
+    time::Duration,
+};
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
@@ -12,9 +15,9 @@ use crate::{
     storage::{DenseEntry, Id, SparseMap, SparseSet},
 };
 
+pub mod animation;
 pub mod camera;
 mod node;
-mod animation;
 
 pub struct Scene {
     pub name: String,
@@ -27,6 +30,8 @@ pub struct Scene {
     cameras: SparseMap<Camera>,
     active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
+    animations: SparseSet<animation::Animation>,
+    playing_animations: SparseMap<animation::PlayingAnimation>,
     point_lights: SparseMap<PointLight>,
     lights_buffer: Option<wgpu::Buffer>,
     irradiance_map_view: wgpu::TextureView,
@@ -67,6 +72,9 @@ impl Scene {
         };
         let environment = &resources.environments[environment];
 
+        let animations = SparseSet::new();
+        let playing_animations = SparseMap::new();
+
         Self {
             name,
             device: resources.device.clone(),
@@ -80,6 +88,8 @@ impl Scene {
             camera_buffer,
             point_lights: SparseMap::new(),
             lights_buffer: None,
+            animations,
+            playing_animations,
             irradiance_map_view: environment.irradiance_map_view().clone(),
             irradiance_map_sampler: environment.irradiance_map_sampler().clone(),
             prefilter_map_view: environment.prefilter_map_view().clone(),
@@ -99,6 +109,10 @@ impl Scene {
 
     pub fn node_builder(&mut self) -> NodeBuilder {
         NodeBuilder::new(self)
+    }
+
+    pub fn contains_node(&self, node: Id<Node>) -> bool {
+        self.nodes.contains(node)
     }
 
     pub fn root_nodes(&self) -> &[Id<Node>] {
@@ -149,7 +163,14 @@ impl Scene {
         self.brdf_lut_sampler = environment.brdf_lut_sampler().clone();
     }
 
-    pub fn update(&mut self, viewport_aspect_ration: f32) {
+    pub fn update(&mut self, delta_time: Duration, viewport_aspect_ration: f32) {
+        self.update_animations(delta_time);
+
+        let root_nodes = self.root_nodes.clone();
+        for node in root_nodes {
+            self.node_handle(node).update_matrices(Mat4::IDENTITY);
+        }
+
         let nodes_buffer = {
             let data: Vec<_> = self
                 .nodes

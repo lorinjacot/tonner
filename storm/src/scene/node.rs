@@ -48,7 +48,7 @@ pub struct NodeHandle<'a> {
 }
 
 impl<'a> NodeHandle<'a> {
-    fn update_matrices(&mut self, parent_matrix: Mat4) {
+    pub(super) fn update_matrices(&mut self, parent_matrix: Mat4) {
         let node = &mut self.scene[self.id];
         let world_matrix = parent_matrix * node.local_transform.matrix();
         node.world_matrix = world_matrix;

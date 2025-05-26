@@ -219,6 +219,17 @@ impl<'a, T: DenseEntry> IntoIterator for &'a mut SparseMap<T> {
     }
 }
 
+impl<T: DenseEntry> FromIterator<T> for SparseMap<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut map = SparseMap::with_capacity(iter.size_hint().0);
+        for entry in iter {
+            map.insert(entry);
+        }
+        map
+    }
+}
+
 pub enum Entry<'a, T: DenseEntry> {
     Occupied(OccupiedEntry<'a, T>),
     Vacant(VacantEntry<'a, T>),
@@ -302,10 +313,6 @@ impl<T: DenseEntry> SparseSet<T> {
 
     pub fn insert(&mut self, entry: T) -> &mut T {
         self.map.insert(entry)
-    }
-
-    pub fn remove(&mut self, id: Id<T::Key>) -> Option<T> {
-        self.map.remove(id)
     }
 
     pub fn delete(&mut self, id: Id<T::Key>) -> Option<T> {
@@ -459,13 +466,13 @@ mod tests {
         let id_2 = set.next_id();
         set.insert(TestData(id_2, "data 2".to_string()));
 
-        set.remove(id_1);
+        set.delete(id_1);
         assert!(set.get(id_1).is_none());
         assert_eq!("data 2", set[id_2].1);
 
         assert!(set.deleted.contains(&id_1));
 
-        set.remove(id_2);
+        set.delete(id_2);
         assert!(set.get(id_2).is_none());
 
         assert!(set.deleted.contains(&id_2));
@@ -481,8 +488,8 @@ mod tests {
         let id_2_v1 = set.next_id();
         set.insert(TestData(id_2_v1, "data 2".to_string()));
 
-        set.remove(id_2_v1);
-        set.remove(id_1_v1);
+        set.delete(id_2_v1);
+        set.delete(id_1_v1);
         assert!(set.deleted.contains(&id_1_v1));
         assert!(set.deleted.contains(&id_2_v1));
 
@@ -502,7 +509,7 @@ mod tests {
         set.insert(TestData(id_3_v1, "data 3 v1".to_string()));
         assert!(set[id_3_v1].1 == "data 3 v1");
 
-        set.remove(id_2_v2);
+        set.delete(id_2_v2);
         let id_2_v3 = set.next_id();
         set.insert(TestData(id_2_v3, "data 2 v3".to_string()));
         assert!(set[id_2_v3].1 == "data 2 v3");
@@ -539,8 +546,8 @@ mod tests {
         assert!(map.get(id_2_v1).is_none());
         assert!(map.get(id_3_v1).is_none());
 
-        set.remove(id_2_v1);
-        set.remove(id_3_v1);
+        set.delete(id_2_v1);
+        set.delete(id_3_v1);
 
         let id_2_v2 = set.next_id();
         set.insert(TestData(id_2_v2, String::from("data 2 v2")));
@@ -555,7 +562,7 @@ mod tests {
         assert!(map.get(id_2_v2).is_none());
         assert_eq!(map[id_3_v2].1, "data2 3 v2");
 
-        set.remove(id_1_v1);
+        set.delete(id_1_v1);
         let id_1_v2 = set.next_id();
         set.insert(TestData(id_1_v2, String::from("data 1 v2")));
         assert!(map.get(id_1_v2).is_none());

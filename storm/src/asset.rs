@@ -7,7 +7,7 @@ use wgpu::AddressMode;
 use crate::{
     Id, Resources,
     mesh::{MaterialBuilder, Mesh},
-    scene::{Node, Scene},
+    scene::{Node, Scene, animation},
     storage::{DenseEntry, SparseSet},
 };
 
@@ -210,9 +210,77 @@ pub fn open_gltf<'r>(
                 resources,
                 encoder,
             );
+            let mut node_mapping = vec![None; document.nodes().len()];
             for node in gltf_scene.nodes() {
-                scene.build_gltf_node(node, None, &mut resources.meshes, &mesh_mapping);
+                scene.build_gltf_node(
+                    node,
+                    None,
+                    &mut resources.meshes,
+                    &mesh_mapping,
+                    &mut node_mapping,
+                );
             }
+            document.animations().for_each(|animation| {
+                let mut channels = Vec::new();
+                for channel in animation.channels() {
+                    match node_mapping[channel.target().node().index()] {
+                        Some(id) => {
+                            channels.push((id, channel));
+                        }
+                        None => {
+                            return;
+                        }
+                    }
+                }
+                scene
+                    .animation_builder()
+                    .name(format!(
+                        "Gltf animation {} {}",
+                        animation.index(),
+                        animation.name().unwrap_or("")
+                    ))
+                    .repeat()
+                    .channels(channels.into_iter().map(|(node, channel)| {
+                        let reader = channel.reader(|buffer| Some(&buffers[buffer.index()].0));
+                        let inputs = reader
+                            .read_inputs()
+                            .expect("gltf animation sampler missing inputs")
+                            .collect();
+                        let interpolation = match channel.sampler().interpolation() {
+                            gltf::animation::Interpolation::Step => animation::Interpolation::Step,
+                            gltf::animation::Interpolation::Linear => {
+                                animation::Interpolation::Linear
+                            }
+                            gltf::animation::Interpolation::CubicSpline => {
+                                animation::Interpolation::CubicSpline
+                            }
+                        };
+                        let outputs = match reader
+                            .read_outputs()
+                            .expect("gltf animation sampler missing outputs")
+                        {
+                            gltf::animation::util::ReadOutputs::Translations(iter) => {
+                                animation::Outputs::Translations(iter.collect())
+                            }
+                            gltf::animation::util::ReadOutputs::Rotations(rotations) => {
+                                animation::Outputs::Rotations(rotations.into_f32().collect())
+                            }
+                            gltf::animation::util::ReadOutputs::Scales(iter) => {
+                                animation::Outputs::Scales(iter.collect())
+                            }
+                            gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                                todo!("morph target weights animation")
+                            }
+                        };
+                        animation::Channel {
+                            node,
+                            inputs,
+                            interpolation,
+                            outputs,
+                        }
+                    }))
+                    .build();
+            });
             scene
         })
         .collect();
@@ -257,6 +325,7 @@ impl Scene {
         parent: Option<Id<Node>>,
         meshes: &mut SparseSet<Mesh>,
         mesh_mapping: &[Id<Mesh>],
+        node_mapping: &mut [Option<Id<Node>>],
     ) -> Id<Node> {
         let mut builder = self
             .node_builder()
@@ -284,8 +353,9 @@ impl Scene {
             }
         };
         let id = builder.build().id();
+        node_mapping[node.index()] = Some(id);
         for child in node.children() {
-            self.build_gltf_node(child, Some(id), meshes, mesh_mapping);
+            self.build_gltf_node(child, Some(id), meshes, mesh_mapping, node_mapping);
         }
         id
     }

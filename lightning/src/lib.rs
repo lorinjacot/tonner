@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use controls::{Controls, OrbitControls};
 use egui::ViewportBuilder;
@@ -112,6 +113,7 @@ struct Engine {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     data: Arc<EngineData>,
+    last_frame: Instant,
     explorer: Explorer,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -304,6 +306,7 @@ impl Engine {
             surface,
             surface_config,
             data,
+            last_frame: Instant::now(),
             explorer,
             egui_state,
             egui_renderer,
@@ -318,6 +321,8 @@ impl Engine {
         let scenes = &mut *self.data.scenes.lock().unwrap();
         let mut controls = self.data.controls.lock().unwrap();
 
+        let delta_time = self.last_frame.elapsed();
+        self.last_frame = Instant::now();
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
@@ -402,7 +407,7 @@ impl Engine {
                     controls.update(viewport_aspect_ratio, scene);
                 }
             }
-            scene.update(viewport_aspect_ratio);
+            scene.update(delta_time, viewport_aspect_ratio);
         }
 
         let screen_descriptor = ScreenDescriptor {

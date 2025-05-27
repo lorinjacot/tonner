@@ -10,8 +10,8 @@ use egui_winit::create_window;
 use explorer::Explorer;
 use glam::Vec3;
 use resources::Resources;
-use storm::DenseEntry;
 use storm::geometry::{Geometry, GeometryBuilder, GeometryManager};
+use storm::{DenseEntry, StormTrait};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
@@ -506,7 +506,7 @@ impl Engine {
     }
 }
 
-impl storm::Storm for Engine {
+impl StormTrait for Engine {
     type Resources = Resources;
 
     type Geometry = Geometry;

@@ -3,7 +3,7 @@ use std::{collections::HashMap, f32::consts::FRAC_PI_2};
 use bytemuck::{bytes_of, cast_slice};
 use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
-use storm::{DenseEntry, Id, Resources as ResourcesTrait};
+use storm::{DenseEntry, Id, ResourcesTrait};
 use wgpu::util::DeviceExt;
 
 use crate::Resources;

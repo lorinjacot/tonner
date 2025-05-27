@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use image::DynamicImage;
-use storm::Resources as ResourcesTrait;
+use storm::ResourcesTrait;
 use wgpu::util::DeviceExt;
 
 use crate::Resources;

@@ -6,7 +6,7 @@ use wgpu::util::DeviceExt;
 use crate::{environment::PREFILTER_MAP_MIP_COUNT, resources::Resources};
 
 use storm::geometry::{Geometry, IndexBuffer};
-use storm::{DenseEntry, Id, Resources as ResourcesTrait};
+use storm::{DenseEntry, Id, ResourcesTrait};
 
 pub struct Mesh {
     id: Id<Mesh>,

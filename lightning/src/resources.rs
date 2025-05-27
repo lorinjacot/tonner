@@ -1,4 +1,5 @@
 use storm::geometry::GeometryManager;
+use storm::{GeometryManagerTrait, ResourcesTrait, StormTrait};
 use storm::{Id, storage::SparseSet};
 
 use crate::Engine;
@@ -144,7 +145,7 @@ impl Resources {
                 ],
             });
 
-        let geometries = <GeometryManager as storm::GeometryManager<Engine>>::new(&device);
+        let geometries = <GeometryManager as GeometryManagerTrait<Engine>>::new(&device);
 
         let texture_builder_data = TextureBuilderData::new(&device);
 
@@ -238,7 +239,7 @@ impl Resources {
     }
 }
 
-impl storm::Resources<Engine> for Resources {
+impl ResourcesTrait<Engine> for Resources {
     fn device(&self) -> &wgpu::Device {
         &self.device
     }
@@ -247,11 +248,11 @@ impl storm::Resources<Engine> for Resources {
         &self.queue
     }
 
-    fn geometries(&self) -> &<Engine as storm::Storm>::GeometryManager {
+    fn geometries(&self) -> &<Engine as StormTrait>::GeometryManager {
         &self.geometries
     }
 
-    fn geometries_mut(&mut self) -> &mut <Engine as storm::Storm>::GeometryManager {
+    fn geometries_mut(&mut self) -> &mut <Engine as StormTrait>::GeometryManager {
         &mut self.geometries
     }
 }

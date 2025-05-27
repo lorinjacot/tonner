@@ -8,7 +8,7 @@ pub use camera::Camera;
 use glam::{Mat3, Mat4, Vec3, Vec4, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
 use storm::{
-    Resources as ResourcesTrait,
+    ResourcesTrait,
     storage::{DenseEntry, Id, SparseMap, SparseSet},
 };
 use wgpu::util::DeviceExt;

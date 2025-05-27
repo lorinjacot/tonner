@@ -3,7 +3,7 @@ use std::iter::repeat_n;
 use glam::{Mat4, Quat};
 use gltf::texture::WrappingMode;
 use storm::{
-    GeometryBuilder, Resources as ResourcesTrait,
+    GeometryBuilderTrait, ResourcesTrait,
     storage::{DenseEntry, Id, SparseSet},
 };
 use wgpu::AddressMode;

@@ -11,7 +11,8 @@ use glam::{Vec3, vec3};
 use wgpu::util::DeviceExt;
 
 use crate::{
-    DenseEntry, Id, Resources,
+    DenseEntry, GeometryBuilderTrait, GeometryManagerTrait, GeometryTrait, Id, ResourcesTrait,
+    StormTrait,
     storage::{IntoIter, SparseSet},
 };
 
@@ -57,7 +58,7 @@ impl DenseEntry for Geometry {
     }
 }
 
-impl<Storm> crate::Geometry<Storm> for Geometry where Storm: crate::Storm<Geometry = Geometry> {}
+impl<Storm> GeometryTrait<Storm> for Geometry where Storm: StormTrait<Geometry = Geometry> {}
 
 pub struct GeometryManager {
     geometries: SparseSet<Geometry>,
@@ -109,9 +110,9 @@ impl crate::Manager<Geometry> for GeometryManager {
     }
 }
 
-impl<Storm> crate::GeometryManager<Storm> for GeometryManager
+impl<Storm> GeometryManagerTrait<Storm> for GeometryManager
 where
-    Storm: crate::Storm<Geometry = Geometry, GeometryManager = Self>,
+    Storm: StormTrait<Geometry = Geometry, GeometryManager = Self>,
 {
     fn new(device: &wgpu::Device) -> Self {
         let dummy_tex_coords = DummyVertexBuffer {
@@ -149,7 +150,7 @@ pub struct IndexBuffer {
 #[must_use]
 pub struct GeometryBuilder<'a, 'r, Storm>
 where
-    Storm: crate::Storm,
+    Storm: StormTrait,
 {
     resources: &'r mut Storm::Resources,
     indices: Indices<'a>,
@@ -162,7 +163,7 @@ where
 
 impl<'a, 'r, Storm> GeometryBuilder<'a, 'r, Storm>
 where
-    Storm: crate::Storm,
+    Storm: StormTrait,
 {
     pub fn indices_u16(mut self, indices: Cow<'a, [u16]>) -> Self {
         self.indices = Indices::U16(indices);
@@ -322,9 +323,13 @@ where
     }
 }
 
-impl<'a, 'r, Storm> crate::GeometryBuilder<'a, 'r, Storm> for GeometryBuilder<'a, 'r, Storm>
+impl<'a, 'r, Storm> GeometryBuilderTrait<'a, 'r, Storm> for GeometryBuilder<'a, 'r, Storm>
 where
-    Storm: crate::Storm<Geometry = Geometry, GeometryManager = GeometryManager, GeometryBuilder<'a, 'r> = Self>,
+    Storm: StormTrait<
+            Geometry = Geometry,
+            GeometryManager = GeometryManager,
+            GeometryBuilder<'a, 'r> = Self,
+        >,
 {
     fn new(resources: &'r mut Storm::Resources, _encoder: &'a mut wgpu::CommandEncoder) -> Self {
         Self {

@@ -2,14 +2,15 @@ use std::iter::repeat_n;
 
 use glam::{Mat4, Quat};
 use gltf::texture::WrappingMode;
-use storm::{
-    GeometryBuilderTrait, ResourcesTrait,
-    storage::{DenseEntry, Id, SparseSet},
+use storm::{DenseEntry, GeometryBuilderTrait, Id, ResourcesTrait};
+use storm_renderer::{
+    MaterialBuilderTrait, MeshBuilderTrait, ResourcesRendererTrait, material::MaterialBuilder,
+    mesh::Mesh,
 };
 use wgpu::AddressMode;
 
 use crate::{
-    mesh::{MaterialBuilder, Mesh},
+    Engine,
     resources::Resources,
     scene::{Node, Scene, animation},
 };
@@ -109,9 +110,7 @@ pub fn open_gltf<'r>(
     let materials: Vec<_> = document
         .materials()
         .map(|material| {
-            resources
-                .material_builder()
-                .from_gltf(material, &textures)
+            material_from_gltf(resources.material_builder(encoder), material, &textures)
                 .build()
                 .id()
         })
@@ -181,18 +180,20 @@ pub fn open_gltf<'r>(
                     let material = match primitive.material().index() {
                         Some(index) => materials[index],
                         None => *default_material.get_or_insert_with(|| {
-                            resources
-                                .material_builder()
-                                .from_gltf(primitive.material(), &textures)
-                                .build()
-                                .id()
+                            material_from_gltf(
+                                resources.material_builder(encoder),
+                                primitive.material(),
+                                &textures,
+                            )
+                            .build()
+                            .id()
                         }),
                     };
                     primitives.push((geometry, material));
                 }
             }
             resources
-                .mesh_builder()
+                .mesh_builder(encoder)
                 .name(format!(
                     "Gltf mesh {} {}",
                     mesh.index(),
@@ -216,13 +217,7 @@ pub fn open_gltf<'r>(
             );
             let mut node_mapping = vec![None; document.nodes().len()];
             for node in gltf_scene.nodes() {
-                scene.build_gltf_node(
-                    node,
-                    None,
-                    &mut resources.meshes,
-                    &mesh_mapping,
-                    &mut node_mapping,
-                );
+                scene.build_gltf_node(node, None, resources, &mesh_mapping, &mut node_mapping);
             }
             document.animations().for_each(|animation| {
                 let mut channels = Vec::new();
@@ -293,33 +288,30 @@ pub fn open_gltf<'r>(
     Ok((scenes, default_scene))
 }
 
-impl<'a, 'r> MaterialBuilder<'a, 'r> {
-    fn from_gltf(
-        mut self,
-        material: gltf::Material,
-        textures: &'a [(&wgpu::TextureView, &wgpu::Sampler)],
-    ) -> Self {
-        let pbr_metallic_roughness = material.pbr_metallic_roughness();
-        if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
-            let (texture, sampler) = textures[base_color_texture.texture().index()];
-            self = self
-                .base_color_tex_coord(base_color_texture.tex_coord())
-                .base_color_texture(texture)
-                .base_color_sampler(sampler);
-        }
-        if let Some(metallic_roughness_texture) =
-            pbr_metallic_roughness.metallic_roughness_texture()
-        {
-            let (texture, sampler) = textures[metallic_roughness_texture.texture().index()];
-            self = self
-                .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
-                .metallic_roughness_texture(texture)
-                .metallic_roughness_sampler(sampler);
-        }
-        self.base_color_factor(pbr_metallic_roughness.base_color_factor())
-            .metallic_factor(pbr_metallic_roughness.metallic_factor())
-            .roughness_factor(pbr_metallic_roughness.roughness_factor())
+fn material_from_gltf<'a, 'r>(
+    mut builder: MaterialBuilder<'a, 'r, Engine>,
+    material: gltf::Material,
+    textures: &'a [(&wgpu::TextureView, &wgpu::Sampler)],
+) -> MaterialBuilder<'a, 'r, Engine> {
+    let pbr_metallic_roughness = material.pbr_metallic_roughness();
+    if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
+        let (texture, sampler) = textures[base_color_texture.texture().index()];
+        builder = builder
+            .base_color_tex_coord(base_color_texture.tex_coord())
+            .base_color_texture(texture)
+            .base_color_sampler(sampler);
     }
+    if let Some(metallic_roughness_texture) = pbr_metallic_roughness.metallic_roughness_texture() {
+        let (texture, sampler) = textures[metallic_roughness_texture.texture().index()];
+        builder = builder
+            .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
+            .metallic_roughness_texture(texture)
+            .metallic_roughness_sampler(sampler);
+    }
+    builder
+        .base_color_factor(pbr_metallic_roughness.base_color_factor())
+        .metallic_factor(pbr_metallic_roughness.metallic_factor())
+        .roughness_factor(pbr_metallic_roughness.roughness_factor())
 }
 
 impl Scene {
@@ -327,7 +319,7 @@ impl Scene {
         &mut self,
         node: gltf::Node,
         parent: Option<Id<Node>>,
-        meshes: &mut SparseSet<Mesh>,
+        resources: &mut Resources,
         mesh_mapping: &[Id<Mesh>],
         node_mapping: &mut [Option<Id<Node>>],
     ) -> Id<Node> {
@@ -340,7 +332,7 @@ impl Scene {
             ))
             .parent(parent);
         if let Some(mesh) = node.mesh() {
-            builder = builder.mesh(&meshes[mesh_mapping[mesh.index()]]);
+            builder = builder.mesh(&resources.meshes()[mesh_mapping[mesh.index()]]);
         }
         builder = match node.transform() {
             gltf::scene::Transform::Decomposed {
@@ -359,7 +351,7 @@ impl Scene {
         let id = builder.build().id();
         node_mapping[node.index()] = Some(id);
         for child in node.children() {
-            self.build_gltf_node(child, Some(id), meshes, mesh_mapping, node_mapping);
+            self.build_gltf_node(child, Some(id), resources, mesh_mapping, node_mapping);
         }
         id
     }

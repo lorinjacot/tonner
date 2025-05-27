@@ -12,6 +12,9 @@ use glam::Vec3;
 use resources::Resources;
 use storm::geometry::{Geometry, GeometryBuilder, GeometryManager};
 use storm::{DenseEntry, StormTrait};
+use storm_renderer::StormRendererTrait;
+use storm_renderer::material::{Material, MaterialBuilder, MaterialManager};
+use storm_renderer::mesh::{Mesh, MeshBuilder, MeshManager};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
@@ -24,7 +27,6 @@ mod explorer;
 
 mod asset;
 mod environment;
-mod mesh;
 mod resources;
 mod scene;
 mod texture;
@@ -510,8 +512,18 @@ impl StormTrait for Engine {
     type Resources = Resources;
 
     type Geometry = Geometry;
-    type GeometryManager = GeometryManager;
+    type GeometryManager = GeometryManager<Self>;
     type GeometryBuilder<'a, 'r> = GeometryBuilder<'a, 'r, Engine>;
+}
+
+impl StormRendererTrait for Engine {
+    type Material = Material;
+    type MaterialManager = MaterialManager<Self>;
+    type MaterialBuilder<'a, 'r> = MaterialBuilder<'a, 'r, Self>;
+
+    type Mesh = Mesh;
+    type MeshManager = MeshManager<Self>;
+    type MeshBuilder<'a, 'r> = MeshBuilder<'a, 'r, Self>;
 }
 
 fn create_render_texture(

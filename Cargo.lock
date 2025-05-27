@@ -1315,6 +1315,7 @@ dependencies = [
  "profiling",
  "puffin_http",
  "storm",
+ "storm_renderer",
  "wgpu",
  "winit",
 ]
@@ -2305,6 +2306,15 @@ dependencies = [
  "gltf",
  "gltf-json",
  "image",
+ "wgpu",
+]
+
+[[package]]
+name = "storm_renderer"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "storm",
  "wgpu",
 ]
 

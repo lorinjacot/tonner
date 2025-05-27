@@ -16,7 +16,7 @@ pub mod math;
 pub mod storage;
 // mod texture;
 
-pub trait StormTrait: Sized {
+pub trait StormTrait: Sized + 'static {
     type Resources: ResourcesTrait<Self>;
 
     type Geometry: GeometryTrait<Self>;
@@ -60,9 +60,24 @@ pub trait ResourcesTrait<Storm: StormTrait<Resources = Self>>: 'static {
 
 // pub trait Node<S: Storm<Node = Self>> {}
 
+#[derive(Clone)]
+pub struct IndexBuffer {
+    pub buffer: wgpu::Buffer,
+    pub format: wgpu::IndexFormat,
+}
+
 pub trait GeometryTrait<Storm: StormTrait<Geometry = Self>>:
     DenseEntry<Key = Self> + 'static
 {
+    fn indices(&self) -> &Option<IndexBuffer>;
+
+    fn vertex_buffer(&self) -> &[wgpu::Buffer];
+
+    fn vertex_buffer_layouts(
+        &self,
+    ) -> impl Iterator<Item = wgpu::VertexBufferLayout> + ExactSizeIterator;
+
+    fn vertex_count(&self) -> u32;
 }
 
 pub trait GeometryManagerTrait<Storm: StormTrait<GeometryManager = Self>>:

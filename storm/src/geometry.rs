@@ -11,9 +11,9 @@ use glam::{Vec3, vec3};
 use wgpu::util::DeviceExt;
 
 use crate::{
-    DenseEntry, GeometryBuilderTrait, GeometryManagerTrait, GeometryTrait, Id, ResourcesTrait,
-    StormTrait,
-    storage::{IntoIter, SparseSet},
+    DenseEntry, GeometryBuilderTrait, GeometryManagerTrait, GeometryTrait, Id, IndexBuffer,
+    ResourcesTrait, StormTrait,
+    storage::{IntoIter, Iter, IterMut, SparseSet},
 };
 
 pub struct Geometry {
@@ -24,8 +24,27 @@ pub struct Geometry {
     vertex_count: u32,
 }
 
-impl Geometry {
-    pub fn vertex_buffer_layouts(
+impl DenseEntry for Geometry {
+    type Key = Self;
+
+    fn id(&self) -> Id<Self::Key> {
+        self.id
+    }
+}
+
+impl<Storm> GeometryTrait<Storm> for Geometry
+where
+    Storm: StormTrait<Geometry = Geometry>,
+{
+    fn indices(&self) -> &Option<crate::IndexBuffer> {
+        &self.indices
+    }
+
+    fn vertex_buffer(&self) -> &[wgpu::Buffer] {
+        &self.vertex_buffers
+    }
+
+    fn vertex_buffer_layouts(
         &self,
     ) -> impl Iterator<Item = wgpu::VertexBufferLayout> + ExactSizeIterator {
         self.vertex_buffer_layouts
@@ -37,67 +56,64 @@ impl Geometry {
             })
     }
 
-    pub fn indices(&self) -> &Option<IndexBuffer> {
-        &self.indices
-    }
-
-    pub fn vertex_buffer(&self) -> &[wgpu::Buffer] {
-        &self.vertex_buffers
-    }
-
-    pub fn vertex_count(&self) -> u32 {
+    fn vertex_count(&self) -> u32 {
         self.vertex_count
     }
 }
 
-impl DenseEntry for Geometry {
-    type Key = Self;
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
-    }
-}
-
-impl<Storm> GeometryTrait<Storm> for Geometry where Storm: StormTrait<Geometry = Geometry> {}
-
-pub struct GeometryManager {
-    geometries: SparseSet<Geometry>,
+pub struct GeometryManager<Storm>
+where
+    Storm: StormTrait<GeometryManager = Self>,
+{
+    geometries: SparseSet<Storm::Geometry>,
     dummy_tex_coords: DummyVertexBuffer,
     dummy_colors: DummyVertexBuffer,
 }
 
-impl Index<Id<Geometry>> for GeometryManager {
-    type Output = Geometry;
+impl<Storm> Index<Id<Storm::Geometry>> for GeometryManager<Storm>
+where
+    Storm: StormTrait<GeometryManager = Self>,
+{
+    type Output = Storm::Geometry;
 
-    fn index(&self, index: Id<Geometry>) -> &Self::Output {
+    fn index(&self, index: Id<Storm::Geometry>) -> &Self::Output {
         &self.geometries[index]
     }
 }
 
-impl IndexMut<Id<Geometry>> for GeometryManager {
-    fn index_mut(&mut self, index: Id<Geometry>) -> &mut Self::Output {
+impl<Storm> IndexMut<Id<Storm::Geometry>> for GeometryManager<Storm>
+where
+    Storm: StormTrait<GeometryManager = Self>,
+{
+    fn index_mut(&mut self, index: Id<Storm::Geometry>) -> &mut Self::Output {
         &mut self.geometries[index]
     }
 }
 
-impl IntoIterator for GeometryManager {
-    type Item = Geometry;
-    type IntoIter = IntoIter<Geometry>;
+impl<Storm> IntoIterator for GeometryManager<Storm>
+where
+    Storm: StormTrait<GeometryManager = Self>,
+{
+    type Item = Storm::Geometry;
+    type IntoIter = IntoIter<Storm::Geometry>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.geometries.into_iter()
     }
 }
 
-impl crate::Manager<Geometry> for GeometryManager {
-    type Iter<'a> = std::slice::Iter<'a, Geometry>;
-    type IterMut<'a> = std::slice::IterMut<'a, Geometry>;
+impl<Storm> crate::Manager<Storm::Geometry> for GeometryManager<Storm>
+where
+    Storm: StormTrait<GeometryManager = Self>,
+{
+    type Iter<'a> = Iter<'a, Storm::Geometry>;
+    type IterMut<'a> = IterMut<'a, Storm::Geometry>;
 
-    fn get(&self, id: Id<Geometry>) -> Option<&Geometry> {
+    fn get(&self, id: Id<Storm::Geometry>) -> Option<&Storm::Geometry> {
         self.geometries.get(id)
     }
 
-    fn get_mut(&mut self, id: Id<Geometry>) -> Option<&mut Geometry> {
+    fn get_mut(&mut self, id: Id<Storm::Geometry>) -> Option<&mut Storm::Geometry> {
         self.geometries.get_mut(id)
     }
 
@@ -110,7 +126,7 @@ impl crate::Manager<Geometry> for GeometryManager {
     }
 }
 
-impl<Storm> GeometryManagerTrait<Storm> for GeometryManager
+impl<Storm> GeometryManagerTrait<Storm> for GeometryManager<Storm>
 where
     Storm: StormTrait<Geometry = Geometry, GeometryManager = Self>,
 {
@@ -139,12 +155,6 @@ where
             dummy_colors,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct IndexBuffer {
-    pub buffer: wgpu::Buffer,
-    pub format: wgpu::IndexFormat,
 }
 
 #[must_use]
@@ -327,7 +337,7 @@ impl<'a, 'r, Storm> GeometryBuilderTrait<'a, 'r, Storm> for GeometryBuilder<'a, 
 where
     Storm: StormTrait<
             Geometry = Geometry,
-            GeometryManager = GeometryManager,
+            GeometryManager = GeometryManager<Storm>,
             GeometryBuilder<'a, 'r> = Self,
         >,
 {

@@ -3,9 +3,9 @@ use std::ops::Deref;
 use glam::{Mat4, Quat, Vec3};
 
 use storm::{DenseEntry, Id, math::Transform};
+use storm_renderer::mesh::Mesh;
 
 use super::{Camera, PointLight, Scene, camera::CameraDescriptor, instanciate_mesh_unchecked};
-use crate::mesh::Mesh;
 
 pub struct Node {
     id: Id<Node>,

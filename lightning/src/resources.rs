@@ -1,21 +1,22 @@
 use storm::geometry::GeometryManager;
 use storm::{GeometryManagerTrait, ResourcesTrait, StormTrait};
 use storm::{Id, storage::SparseSet};
+use storm_renderer::material::MaterialManager;
+use storm_renderer::mesh::MeshManager;
+use storm_renderer::{MaterialManagerTrait, MeshManagerTrait, ResourcesRendererTrait};
 
 use crate::Engine;
 use crate::environment::{Environment, EnvironmentBuilder, EnvironmentBuilderData};
-use crate::mesh::{Material, MaterialBuilder, Mesh, MeshBuilder, MeshBuilderData};
 use crate::texture::{TextureBuilder, TextureBuilderData};
 
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    geometries: GeometryManager,
-    pub render_texture_format: wgpu::TextureFormat,
+    geometries: GeometryManager<Engine>,
+    materials: MaterialManager<Engine>,
+    meshes: MeshManager<Engine>,
+    render_texture_format: wgpu::TextureFormat,
     pub texture_builder_data: TextureBuilderData,
-    pub materials: SparseSet<Material>,
-    pub meshes: SparseSet<Mesh>,
-    pub mesh_builder_data: MeshBuilderData,
     pub environments: SparseSet<Environment>,
     pub environment_builder_data: EnvironmentBuilderData,
     pub default_environmnent: Option<Id<Environment>>,
@@ -145,13 +146,16 @@ impl Resources {
                 ],
             });
 
-        let geometries = <GeometryManager as GeometryManagerTrait<Engine>>::new(&device);
+        let geometries = GeometryManager::new(&device);
+
+        let materials = MaterialManager::new(&device);
+        let meshes = MeshManager::new(
+            &device,
+            &render_bind_group_layout,
+            materials.bind_group_layout(),
+        );
 
         let texture_builder_data = TextureBuilderData::new(&device);
-
-        let materials = SparseSet::new();
-        let meshes = SparseSet::new();
-        let mesh_builder_data = MeshBuilderData::new(&device, &render_bind_group_layout);
 
         let environments = SparseSet::new();
         let environment_builder_data =
@@ -209,10 +213,9 @@ impl Resources {
             queue,
             render_texture_format,
             geometries,
-            texture_builder_data,
             materials,
             meshes,
-            mesh_builder_data,
+            texture_builder_data,
             environments,
             environment_builder_data,
             default_environmnent: None,
@@ -220,14 +223,6 @@ impl Resources {
             skybox_bind_group_layout,
             skybox_pipeline,
         }
-    }
-
-    pub fn material_builder(&mut self) -> MaterialBuilder {
-        MaterialBuilder::new(self)
-    }
-
-    pub fn mesh_builder(&mut self) -> MeshBuilder {
-        MeshBuilder::new(self)
     }
 
     pub fn texture_builder(&mut self) -> TextureBuilder {
@@ -254,5 +249,29 @@ impl ResourcesTrait<Engine> for Resources {
 
     fn geometries_mut(&mut self) -> &mut <Engine as StormTrait>::GeometryManager {
         &mut self.geometries
+    }
+}
+
+impl ResourcesRendererTrait<Engine> for Resources {
+    fn materials(&self) -> &<Engine as storm_renderer::StormRendererTrait>::MaterialManager {
+        &self.materials
+    }
+
+    fn materials_mut(
+        &mut self,
+    ) -> &mut <Engine as storm_renderer::StormRendererTrait>::MaterialManager {
+        &mut self.materials
+    }
+
+    fn meshes(&self) -> &<Engine as storm_renderer::StormRendererTrait>::MeshManager {
+        &self.meshes
+    }
+
+    fn meshes_mut(&mut self) -> &mut <Engine as storm_renderer::StormRendererTrait>::MeshManager {
+        &mut self.meshes
+    }
+
+    fn render_texture_format(&self) -> wgpu::TextureFormat {
+        self.render_texture_format
     }
 }

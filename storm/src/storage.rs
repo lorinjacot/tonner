@@ -1,3 +1,4 @@
+pub use std::slice::{Iter, IterMut};
 pub use std::vec::IntoIter;
 use std::{
     fmt::{Debug, Display},

@@ -11,9 +11,9 @@ use storm::{
     ResourcesTrait,
     storage::{DenseEntry, Id, SparseMap, SparseSet},
 };
+use storm_renderer::mesh::{Mesh, Primitive};
 use wgpu::util::DeviceExt;
 
-use crate::mesh::{Mesh, Primitive};
 use crate::{environment::Environment, resources::Resources};
 
 pub mod animation;

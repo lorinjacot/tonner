@@ -410,6 +410,10 @@ impl Scene {
     }
 }
 
+impl<Storm: crate::Storm> crate::Scene<Storm> for Scene {
+    
+}
+
 impl Index<Id<Node>> for Scene {
     type Output = Node;
 

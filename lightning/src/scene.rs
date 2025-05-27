@@ -7,12 +7,14 @@ use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
 use glam::{Mat3, Mat4, Vec3, Vec4, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
+use storm::{
+    Resources as ResourcesTrait,
+    storage::{DenseEntry, Id, SparseMap, SparseSet},
+};
 use wgpu::util::DeviceExt;
 
-use crate::environment::Environment;
 use crate::mesh::{Mesh, Primitive};
-use crate::resources::Resources;
-use crate::storage::{DenseEntry, Id, SparseMap, SparseSet};
+use crate::{environment::Environment, resources::Resources};
 
 pub mod animation;
 pub mod camera;
@@ -51,7 +53,7 @@ impl Scene {
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Self {
-        let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
+        let camera_buffer = resources.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
             size: size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -76,8 +78,8 @@ impl Scene {
 
         Self {
             name,
-            device: resources.device.clone(),
-            queue: resources.queue.clone(),
+            device: resources.device().clone(),
+            queue: resources.queue().clone(),
             nodes: SparseSet::new(),
             nodes_buffer: None,
             root_nodes: Vec::new(),
@@ -409,8 +411,6 @@ impl Scene {
     }
 }
 
-impl<Storm: crate::Storm> crate::Scene<Storm> for Scene {}
-
 impl Index<Id<Node>> for Scene {
     type Output = Node;
 
@@ -486,24 +486,28 @@ impl DenseEntry for MeshInstances {
     }
 }
 
-impl SparseMap<MeshInstances> {
-    fn instanciate_unchecked(&mut self, mesh: &Mesh, node: Id<Node>, device: &wgpu::Device) {
-        self.entry(mesh.id())
-            .or_insert_with(|| {
-                let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Mesh instance vertex buffer"),
-                    size: size_of::<u32>() as u64,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                MeshInstances {
-                    mesh: mesh.id(),
-                    primitives: mesh.primitives.clone(),
-                    nodes: Vec::with_capacity(1),
-                    vertex_buffer,
-                }
-            })
-            .nodes
-            .push(node);
-    }
+fn instanciate_mesh_unchecked(
+    meshes: &mut SparseMap<MeshInstances>,
+    mesh: &Mesh,
+    node: Id<Node>,
+    device: &wgpu::Device,
+) {
+    meshes
+        .entry(mesh.id())
+        .or_insert_with(|| {
+            let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Mesh instance vertex buffer"),
+                size: size_of::<u32>() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            MeshInstances {
+                mesh: mesh.id(),
+                primitives: mesh.primitives.clone(),
+                nodes: Vec::with_capacity(1),
+                vertex_buffer,
+            }
+        })
+        .nodes
+        .push(node);
 }

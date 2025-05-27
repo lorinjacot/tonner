@@ -1,25 +1,26 @@
+use storm::geometry::GeometryManager;
+use storm::{Id, storage::SparseSet};
+
+use crate::Engine;
 use crate::environment::{Environment, EnvironmentBuilder, EnvironmentBuilderData};
-use crate::geometry::{Geometry, GeometryBuilder, GeometryBuilderData};
 use crate::mesh::{Material, MaterialBuilder, Mesh, MeshBuilder, MeshBuilderData};
-use crate::storage::{Id, SparseSet};
 use crate::texture::{TextureBuilder, TextureBuilderData};
 
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    geometry_builder_data: GeometryBuilderData,
-    geometries: SparseSet<Geometry>,
-    render_texture_format: wgpu::TextureFormat,
-    texture_builder_data: TextureBuilderData,
-    materials: SparseSet<Material>,
-    meshes: SparseSet<Mesh>,
-    mesh_builder_data: MeshBuilderData,
-    environments: SparseSet<Environment>,
-    environment_builder_data: EnvironmentBuilderData,
-    default_environmnent: Option<Id<Environment>>,
-    render_bind_group_layout: wgpu::BindGroupLayout,
-    skybox_bind_group_layout: wgpu::BindGroupLayout,
-    skybox_pipeline: wgpu::RenderPipeline,
+    geometries: GeometryManager,
+    pub render_texture_format: wgpu::TextureFormat,
+    pub texture_builder_data: TextureBuilderData,
+    pub materials: SparseSet<Material>,
+    pub meshes: SparseSet<Mesh>,
+    pub mesh_builder_data: MeshBuilderData,
+    pub environments: SparseSet<Environment>,
+    pub environment_builder_data: EnvironmentBuilderData,
+    pub default_environmnent: Option<Id<Environment>>,
+    pub render_bind_group_layout: wgpu::BindGroupLayout,
+    pub skybox_bind_group_layout: wgpu::BindGroupLayout,
+    pub skybox_pipeline: wgpu::RenderPipeline,
 }
 
 impl Resources {
@@ -143,8 +144,7 @@ impl Resources {
                 ],
             });
 
-        let geometry_builder_data = GeometryBuilderData::new(&device);
-        let geometries = SparseSet::new();
+        let geometries = <GeometryManager as storm::GeometryManager<Engine>>::new(&device);
 
         let texture_builder_data = TextureBuilderData::new(&device);
 
@@ -207,7 +207,6 @@ impl Resources {
             device,
             queue,
             render_texture_format,
-            geometry_builder_data,
             geometries,
             texture_builder_data,
             materials,
@@ -222,10 +221,6 @@ impl Resources {
         }
     }
 
-    pub fn geometry_builder(&mut self) -> GeometryBuilder {
-        GeometryBuilder::new(self)
-    }
-
     pub fn material_builder(&mut self) -> MaterialBuilder {
         MaterialBuilder::new(self)
     }
@@ -234,7 +229,7 @@ impl Resources {
         MeshBuilder::new(self)
     }
 
-    fn texture_builder(&mut self) -> TextureBuilder {
+    pub fn texture_builder(&mut self) -> TextureBuilder {
         TextureBuilder::new(self)
     }
 
@@ -243,4 +238,20 @@ impl Resources {
     }
 }
 
-impl<Storm> crate::Resources<Storm> for Resources where Storm: crate::Storm<Resources = Resources> {}
+impl storm::Resources<Engine> for Resources {
+    fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    fn geometries(&self) -> &<Engine as storm::Storm>::GeometryManager {
+        &self.geometries
+    }
+
+    fn geometries_mut(&mut self) -> &mut <Engine as storm::Storm>::GeometryManager {
+        &mut self.geometries
+    }
+}

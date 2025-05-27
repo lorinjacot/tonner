@@ -1,5 +1,7 @@
 use egui::Ui;
-use storm::{DenseEntry, Id, Node, Scene, Transform};
+use storm::{DenseEntry, Id, math::Transform};
+
+use crate::{scene::{Node, Scene}};
 
 pub struct Explorer {
     node_modal: Option<Id<Node>>,

@@ -3,12 +3,10 @@ use std::{
     ops::RangeInclusive,
 };
 
+use storm::{Id, math::{Plane, Ray}};
 use glam::{Mat4, Vec2, Vec3};
-use storm::{
-    Id, Node, Scene,
-    camera::Projection,
-    math::{Plane, Ray},
-};
+
+use crate::scene::{Node, Scene, camera::Projection};
 
 pub trait Controls {
     fn take_input(

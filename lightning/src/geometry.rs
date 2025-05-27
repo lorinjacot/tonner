@@ -36,7 +36,7 @@ impl Geometry {
             })
     }
 
-    pub fn indices(&self) -> &Option<IndexBuffer> {
+    pub(super) fn indices(&self) -> &Option<IndexBuffer> {
         &self.indices
     }
 
@@ -141,9 +141,9 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct IndexBuffer {
-    pub buffer: wgpu::Buffer,
-    pub format: wgpu::IndexFormat,
+pub(super) struct IndexBuffer {
+    pub(super) buffer: wgpu::Buffer,
+    pub(super) format: wgpu::IndexFormat,
 }
 
 #[must_use]
@@ -498,6 +498,38 @@ where
             vertex_buffer_layouts,
             vertex_count: vertex_count as u32,
         })
+    }
+}
+
+pub(super) struct GeometryBuilderData {
+    dummy_tex_coords: DummyVertexBuffer,
+    dummy_colors: DummyVertexBuffer,
+}
+
+impl GeometryBuilderData {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let dummy_tex_coords = DummyVertexBuffer {
+            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Dummy vertex texture coordinate buffer"),
+                contents: &[0; 2],
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            format: wgpu::VertexFormat::Unorm8x2,
+        };
+
+        let dummy_colors = DummyVertexBuffer {
+            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Dummy vertex color buffer"),
+                contents: &[u8::MAX; 4],
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            format: wgpu::VertexFormat::Unorm8x4,
+        };
+
+        Self {
+            dummy_colors,
+            dummy_tex_coords,
+        }
     }
 }
 

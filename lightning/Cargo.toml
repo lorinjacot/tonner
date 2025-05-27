@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bytemuck = "1.23.0"
 clap = { version = "4.5.37", features = ["derive"] }
 egui = "0.31.1"
 egui-wgpu = "0.31.1"
 egui-winit = "0.31.1"
 env_logger = "0.11.8"
 glam = "0.30.2"
+gltf = "1.4.1"
 image = { version = "0.25.6", default-features = false, features = ["hdr"] }
 pollster = "0.4.0"
 profiling = { version = "1.0.16", features = ["profile-with-puffin"] }

@@ -1302,12 +1302,14 @@ dependencies = [
 name = "lightning"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "clap",
  "egui",
  "egui-wgpu",
  "egui-winit",
  "env_logger",
  "glam",
+ "gltf",
  "image",
  "pollster",
  "profiling",

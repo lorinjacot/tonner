@@ -1,3 +1,4 @@
+pub use std::vec::IntoIter;
 use std::{
     fmt::{Debug, Display},
     hash::Hash,
@@ -202,7 +203,7 @@ impl<T: DenseEntry> IndexMut<Id<T::Key>> for SparseMap<T> {
 
 impl<T: DenseEntry> IntoIterator for SparseMap<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.dense.into_iter()

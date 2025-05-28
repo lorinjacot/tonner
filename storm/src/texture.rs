@@ -156,9 +156,12 @@ impl<'a> TextureBuilder<'a> {
             },
         };
 
-        if self.generate_mips && self.mip_level_count == 1 {
-            let max_size = size.width.max(size.height) as f32;
-            self.mip_level_count = 1 + max_size.log2() as u32;
+        if self.generate_mips {
+            self.usage.insert(wgpu::TextureUsages::RENDER_ATTACHMENT);
+            if self.mip_level_count == 1 {
+                let max_size = size.width.max(size.height) as f32;
+                self.mip_level_count = 1 + max_size.log2() as u32;
+            }
         }
 
         let (texture, format) = match self.source {
@@ -179,21 +182,58 @@ impl<'a> TextureBuilder<'a> {
                 (texture, format)
             }
             Source::Bytes { format, bytes, .. } => {
-                let texture = self.resources.device.create_texture_with_data(
-                    &self.resources.queue,
-                    &wgpu::TextureDescriptor {
-                        label: self.name,
-                        size,
-                        mip_level_count: self.mip_level_count,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format,
-                        usage: self.usage,
-                        view_formats: &[],
-                    },
-                    wgpu::util::TextureDataOrder::LayerMajor,
-                    bytes,
-                );
+                let desc = wgpu::TextureDescriptor {
+                    label: self.name,
+                    size,
+                    mip_level_count: self.mip_level_count,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: self.usage,
+                    view_formats: &[],
+                };
+                let texture = if self.generate_mips {
+                    let source = self.resources.device.create_texture_with_data(
+                        &self.resources.queue,
+                        &wgpu::TextureDescriptor {
+                            mip_level_count: 1,
+                            usage: wgpu::TextureUsages::COPY_SRC,
+                            ..desc
+                        },
+                        wgpu::util::TextureDataOrder::LayerMajor,
+                        bytes,
+                    );
+                    let destination =
+                        self.resources
+                            .device
+                            .create_texture(&wgpu::TextureDescriptor {
+                                usage: desc.usage | wgpu::TextureUsages::COPY_DST,
+                                ..desc
+                            });
+                    encoder.copy_texture_to_texture(
+                        wgpu::TexelCopyTextureInfoBase {
+                            texture: &source,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::TexelCopyTextureInfoBase {
+                            texture: &destination,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        desc.size,
+                    );
+                    destination
+                } else {
+                    self.resources.device.create_texture_with_data(
+                        &self.resources.queue,
+                        &desc,
+                        wgpu::util::TextureDataOrder::LayerMajor,
+                        bytes,
+                    )
+                };
                 (texture, format)
             }
             Source::DynamicImage {

@@ -1,6 +1,7 @@
 override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 override has_normal_texture: bool;
+override has_occlusion_texture: bool;
 
 override max_prefilter_map_mip: f32;
 
@@ -65,6 +66,8 @@ struct MaterialUniform {
     metallic_roughness_tex_coord: u32,
     normal_scale: f32,
     normal_tex_coord: u32,
+    occlusion_strength: f32,
+    occlusion_tex_coord: u32,
 }
 
 @vertex
@@ -94,7 +97,9 @@ fn vs_main(
 @group(1) @binding(3) var metallic_roughness_sampler: sampler;
 @group(1) @binding(4) var normal_texture: texture_2d<f32>;
 @group(1) @binding(5) var normal_sampler: sampler;
-@group(1) @binding(6) var<uniform> material: MaterialUniform;
+@group(1) @binding(6) var occlusion_texture: texture_2d<f32>;
+@group(1) @binding(7) var occlusion_sampler: sampler;
+@group(1) @binding(8) var<uniform> material: MaterialUniform;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
@@ -126,7 +131,15 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         metallic *= metallic_roughness.b;
     }
 
-    let ambiance_occlusion = 1.0;
+    var ambiance_occlusion = 1.0;
+    if has_occlusion_texture {
+        ambiance_occlusion = textureSample(
+            occlusion_texture,
+            occlusion_sampler,
+            tex_coords[material.occlusion_tex_coord],
+        ).r;
+        ambiance_occlusion = 1.0 + material.occlusion_strength * (ambiance_occlusion - 1.0);
+    }
 
     var normal = normalize(vertex.world_normal);
     if has_normal_texture {

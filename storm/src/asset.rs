@@ -289,6 +289,21 @@ fn create_material(
             )
         });
     }
+    if let Some(info) = material.occlusion_texture() {
+        let texture = info.texture();
+        textures[texture.index()].get_or_insert_with(|| {
+            create_texture(
+                texture,
+                images_data,
+                false,
+                resources,
+                images,
+                samplers,
+                default_sampler,
+                encoder,
+            )
+        });
+    }
     let mut builder = resources
         .material_builder()
         .base_color_factor(pbr_metallic_roughness.base_color_factor())
@@ -319,6 +334,16 @@ fn create_material(
             .normal_tex_coord(normal_texture.tex_coord())
             .normal_texture(texture)
             .normal_sampler(sampler);
+    }
+    if let Some(occlusion_texture) = material.occlusion_texture() {
+        let (texture, sampler) = textures[occlusion_texture.texture().index()]
+            .as_ref()
+            .unwrap();
+        builder = builder
+            .occlusion_strength(occlusion_texture.strength())
+            .occlusion_tex_coord(occlusion_texture.tex_coord())
+            .occlusion_texture(texture)
+            .occlusion_sampler(sampler);
     }
     builder.build().id()
 }

@@ -1,5 +1,7 @@
+use std::sync::Mutex;
+
 use egui::Ui;
-use storm::{DenseEntry, Id, Node, Scene, Transform};
+use storm::{DenseEntry, Id, Node, Resources, Scene, Transform};
 
 pub struct Explorer {
     node_modal: Option<Id<Node>>,
@@ -10,7 +12,13 @@ impl Explorer {
         Self { node_modal: None }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, scenes: &mut [Scene], active_scene: &mut Option<usize>) {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        scenes: &mut [Scene],
+        active_scene: &mut Option<usize>,
+        resources: &Mutex<Resources>,
+    ) {
         ui.heading("Explorer");
         if scenes.len() > 0 {
             ui.horizontal(|ui| {
@@ -109,6 +117,10 @@ impl Explorer {
                     }
                 });
 
+            ui.separator();
+            let mut bloom_amount = scene.bloom_amout();
+            ui.add(egui::Slider::new(&mut bloom_amount, 0..=50).text("Bloom amount"));
+
             //     ui.separator();
             //     ui.label("Environment");
             //     let mut active_environment_map = scene.environment_map;
@@ -146,6 +158,10 @@ impl Explorer {
             }
             for (animation, repeat) in repeat_animations {
                 scene.repeat_animation(animation, repeat);
+            }
+
+            if bloom_amount != scene.bloom_amout() {
+                scene.set_bloom_amount(bloom_amount, &mut resources.lock().unwrap());
             }
             // scene.environment_map = active_environment_map;
 

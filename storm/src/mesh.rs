@@ -1,5 +1,6 @@
 use std::{collections::HashMap, f32::consts::PI};
 
+use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, cast_slice};
 use wgpu::util::DeviceExt;
 
@@ -61,7 +62,7 @@ impl<'r> MeshBuilder<'r> {
                     let geometry = &self.resources.geometries[geometry];
                     let material = &self.resources.materials[material];
 
-                    if material.has_normal_texture {
+                    if material.textures.contains(Textures::NORMAL) {
                         assert!(geometry.has_tangents());
                     }
 
@@ -78,19 +79,23 @@ impl<'r> MeshBuilder<'r> {
                     let constants = &mut HashMap::with_capacity(3);
                     constants.insert(
                         "has_base_color_texture".to_string(),
-                        bool_to_f64(material.has_base_color_texture),
+                        bool_to_f64(material.textures.contains(Textures::BASE_COLOR)),
                     );
                     constants.insert(
                         "has_metallic_roughness_texture".to_string(),
-                        bool_to_f64(material.has_metallic_roughness_texture),
+                        bool_to_f64(material.textures.contains(Textures::METALLIC_ROUGHNESS)),
                     );
                     constants.insert(
                         "has_normal_texture".to_string(),
-                        bool_to_f64(material.has_normal_texture),
+                        bool_to_f64(material.textures.contains(Textures::NORMAL)),
                     );
                     constants.insert(
                         "has_occlusion_texture".to_string(),
-                        bool_to_f64(material.has_occlusion_texture),
+                        bool_to_f64(material.textures.contains(Textures::OCCLUSION)),
+                    );
+                    constants.insert(
+                        "has_emissive_texture".to_string(),
+                        bool_to_f64(material.textures.contains(Textures::EMISSIVE)),
                     );
                     constants.insert(
                         "max_prefilter_map_mip".to_string(),
@@ -138,7 +143,10 @@ impl<'r> MeshBuilder<'r> {
                                     constants,
                                     ..Default::default()
                                 },
-                                targets: &[Some(self.resources.render_texture_format.into())],
+                                targets: &[
+                                    Some(wgpu::TextureFormat::Rgba16Float.into()),
+                                    Some(wgpu::TextureFormat::Rgba16Float.into()),
+                                ],
                             }),
                             multiview: None,
                             cache: None,
@@ -170,10 +178,17 @@ impl<'r> MeshBuilder<'r> {
 pub struct Material {
     id: Id<Self>,
     bind_group: wgpu::BindGroup,
-    has_base_color_texture: bool,
-    has_metallic_roughness_texture: bool,
-    has_normal_texture: bool,
-    has_occlusion_texture: bool,
+    textures: Textures,
+}
+
+bitflags! {
+    struct Textures: u32 {
+        const BASE_COLOR = 1 << 0;
+        const METALLIC_ROUGHNESS = 1 << 1;
+        const NORMAL = 1 << 2;
+        const OCCLUSION = 1 << 3;
+        const EMISSIVE = 1 << 4;
+    }
 }
 
 impl DenseEntry for Material {
@@ -195,7 +210,10 @@ pub struct MaterialBuilder<'a, 'r> {
     normal_sampler: Option<&'a wgpu::Sampler>,
     occlusion_texture: Option<&'a wgpu::TextureView>,
     occlusion_sampler: Option<&'a wgpu::Sampler>,
+    emissive_texture: Option<&'a wgpu::TextureView>,
+    emissive_sampler: Option<&'a wgpu::Sampler>,
     uniform: MaterialUniform,
+    textures: Textures,
 }
 
 impl<'a, 'r> MaterialBuilder<'a, 'r> {
@@ -210,6 +228,8 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             normal_tex_coord: 0,
             occlusion_strength: 1.0,
             occlusion_tex_coord: 0,
+            emissive_factor: [0.0; 3],
+            emissive_tex_coord: 0,
         };
 
         Self {
@@ -222,7 +242,10 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             normal_sampler: None,
             occlusion_texture: None,
             occlusion_sampler: None,
+            emissive_texture: None,
+            emissive_sampler: None,
             uniform,
+            textures: Textures::empty(),
         }
     }
 
@@ -238,6 +261,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
 
     pub fn base_color_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
         self.base_color_texture = Some(texture);
+        self.textures.insert(Textures::BASE_COLOR);
         self
     }
 
@@ -258,6 +282,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
 
     pub fn metallic_roughness_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
         self.metallic_roughness_texture = Some(texture);
+        self.textures.insert(Textures::METALLIC_ROUGHNESS);
         self
     }
 
@@ -278,6 +303,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
 
     pub fn normal_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
         self.normal_texture = Some(texture);
+        self.textures.insert(Textures::NORMAL);
         self
     }
 
@@ -298,6 +324,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
 
     pub fn occlusion_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
         self.occlusion_texture = Some(texture);
+        self.textures.insert(Textures::OCCLUSION);
         self
     }
 
@@ -311,12 +338,29 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self
     }
 
+    pub fn emissive_factor(mut self, factor: [f32; 3]) -> Self {
+        self.uniform.emissive_factor = factor;
+        self
+    }
+
+    pub fn emissive_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
+        self.emissive_texture = Some(texture);
+        self.textures.insert(Textures::EMISSIVE);
+        self
+    }
+
+    pub fn emissive_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
+        self.emissive_sampler = Some(sampler);
+        self
+    }
+
+    pub fn emissive_tex_coord(mut self, tex_coord: u32) -> Self {
+        self.uniform.emissive_tex_coord = tex_coord;
+        self
+    }
+
     pub fn build(self) -> &'r mut Material {
         let data = &self.resources.mesh_builder_data;
-        let has_base_color_texture = self.base_color_texture.is_some();
-        let has_metallic_roughness_texture = self.metallic_roughness_texture.is_some();
-        let has_normal_texture = self.normal_texture.is_some();
-        let has_occlusion_texture = self.occlusion_texture.is_some();
         let base_color_texture = self.base_color_texture.unwrap_or(&data.default_texture);
         let base_color_sampler = self.base_color_sampler.unwrap_or(&data.default_sampler);
         let metallic_roughness_texture = self
@@ -329,6 +373,8 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         let normal_sampler = self.normal_sampler.unwrap_or(&data.default_sampler);
         let occlusion_texture = self.occlusion_texture.unwrap_or(&data.default_texture);
         let occlusion_sampler = self.occlusion_sampler.unwrap_or(&data.default_sampler);
+        let emissive_texture = self.emissive_texture.unwrap_or(&data.default_texture);
+        let emissive_sampler = self.emissive_sampler.unwrap_or(&data.default_sampler);
 
         let uniform_buffer =
             self.resources
@@ -381,9 +427,18 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
                         binding: 7,
                         resource: wgpu::BindingResource::Sampler(occlusion_sampler),
                     },
-                    // Material uniform
+                    // emissive texture
                     wgpu::BindGroupEntry {
                         binding: 8,
+                        resource: wgpu::BindingResource::TextureView(emissive_texture),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Sampler(emissive_sampler),
+                    },
+                    // Material uniform
+                    wgpu::BindGroupEntry {
+                        binding: 10,
                         resource: uniform_buffer.as_entire_binding(),
                     },
                 ],
@@ -392,10 +447,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self.resources.materials.insert(Material {
             id,
             bind_group,
-            has_base_color_texture,
-            has_metallic_roughness_texture,
-            has_normal_texture,
-            has_occlusion_texture,
+            textures: self.textures,
         })
     }
 }
@@ -412,6 +464,8 @@ struct MaterialUniform {
     normal_tex_coord: u32,
     occlusion_strength: f32,
     occlusion_tex_coord: u32,
+    emissive_factor: [f32; 3],
+    emissive_tex_coord: u32,
 }
 
 #[derive(Clone)]
@@ -505,9 +559,26 @@ impl MeshBuilderData {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
-                    // Material Uniform
+                    // emissive texture
                     wgpu::BindGroupLayoutEntry {
                         binding: 8,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // Material Uniform
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 10,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,

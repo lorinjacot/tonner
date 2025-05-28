@@ -2,6 +2,7 @@ override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 override has_normal_texture: bool;
 override has_occlusion_texture: bool;
+override has_emissive_texture: bool;
 
 override max_prefilter_map_mip: f32;
 
@@ -68,6 +69,8 @@ struct MaterialUniform {
     normal_tex_coord: u32,
     occlusion_strength: f32,
     occlusion_tex_coord: u32,
+    emissive_factor: vec3<f32>,
+    emissive_tex_coord: u32,
 }
 
 @vertex
@@ -99,10 +102,17 @@ fn vs_main(
 @group(1) @binding(5) var normal_sampler: sampler;
 @group(1) @binding(6) var occlusion_texture: texture_2d<f32>;
 @group(1) @binding(7) var occlusion_sampler: sampler;
-@group(1) @binding(8) var<uniform> material: MaterialUniform;
+@group(1) @binding(8) var emissive_texture: texture_2d<f32>;
+@group(1) @binding(9) var emissive_sampler: sampler;
+@group(1) @binding(10) var<uniform> material: MaterialUniform;
+
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+    @location(1) bright_color: vec4<f32>,
+}
 
 @fragment
-fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(vertex: VertexOutput) -> FragmentOutput {
     var tex_coords = array(
         vertex.tex_coord_0,
         vertex.tex_coord_1,
@@ -139,6 +149,15 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             tex_coords[material.occlusion_tex_coord],
         ).r;
         ambiance_occlusion = 1.0 + material.occlusion_strength * (ambiance_occlusion - 1.0);
+    }
+
+    var emissive = material.emissive_factor;
+    if has_emissive_texture {
+        emissive *= textureSample(
+            emissive_texture,
+            emissive_sampler,
+            tex_coords[material.emissive_tex_coord],
+        ).rgb;
     }
 
     var normal = normalize(vertex.world_normal);
@@ -212,13 +231,17 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
 
     let ambient = (kd * diffuse + specular) * ambiance_occlusion;
-    // let ambient = (kd * diffuse) * ambiance_occlusion;
-    // let ambient = vec3(0.03) * albedo * ambiance_occlusion;
-    var color = ambient + lo;
+    let color = vec4(ambient + lo + emissive, base_color.a);
+    let brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
 
-    color = color / (color + vec3(1.0));
-
-    return vec4(color, 1.0);
+    var result: FragmentOutput;
+    result.color = color;
+    if brightness > 1.0 {
+        result.bright_color = color;
+    } else {
+        result.bright_color = vec4(0.0, 0.0, 0.0, color.a);
+    }
+    return result;
 }
 
 fn distributionGGX(normal: vec3<f32>, halfway: vec3<f32>, roughness: f32) -> f32 {

@@ -1,4 +1,5 @@
 use std::{
+    iter::repeat_with,
     ops::{Index, IndexMut},
     time::Duration,
 };
@@ -44,6 +45,15 @@ pub struct Scene {
     render_bind_group: Option<wgpu::BindGroup>,
     skybox_bind_group: Option<wgpu::BindGroup>,
     skybox_pipeline: wgpu::RenderPipeline,
+    render_width: u32,
+    render_height: u32,
+    depth_texture: wgpu::TextureView,
+    hdr_texture: wgpu::TextureView,
+    bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
+    gaussian_blur_pipeline: wgpu::RenderPipeline,
+    tone_mapping_pipeline: wgpu::RenderPipeline,
+    tone_mapping_bind_group: wgpu::BindGroup,
+    bloom_amount: usize,
 }
 
 impl Scene {
@@ -51,6 +61,8 @@ impl Scene {
         name: String,
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
+        render_width: u32,
+        render_height: u32,
     ) -> Self {
         let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
@@ -70,10 +82,21 @@ impl Scene {
                 id
             }
         };
-        let environment = &resources.environments[environment];
 
         let animations = SparseSet::new();
         let playing_animations = SparseMap::new();
+
+        let bloom_amount = 10;
+        let (depth_texture, hdr_texture, bloom_textures, tone_mapping_bind_group) =
+            create_render_texture(
+                render_width,
+                render_height,
+                bloom_amount,
+                resources,
+                encoder,
+            );
+
+        let environment = &resources.environments[environment];
 
         Self {
             name,
@@ -100,6 +123,15 @@ impl Scene {
             render_bind_group: None,
             skybox_bind_group: None,
             skybox_pipeline: resources.skybox_pipeline.clone(),
+            render_width,
+            render_height,
+            depth_texture,
+            hdr_texture,
+            bloom_textures,
+            bloom_amount,
+            gaussian_blur_pipeline: resources.gaussian_blur_pipeline.clone(),
+            tone_mapping_pipeline: resources.tone_mapping_pipeline.clone(),
+            tone_mapping_bind_group,
         }
     }
 
@@ -139,6 +171,39 @@ impl Scene {
             )
         }
         self.active_camera = camera;
+    }
+
+    pub fn set_render_dimension(
+        &mut self,
+        width: u32,
+        height: u32,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        if self.render_width != width || self.render_height != height {
+            self.render_width = width;
+            self.render_height = height;
+            (
+                self.depth_texture,
+                self.hdr_texture,
+                self.bloom_textures,
+                self.tone_mapping_bind_group,
+            ) = create_render_texture(width, height, self.bloom_amount, resources, encoder)
+        }
+    }
+
+    pub fn bloom_amout(&self) -> usize {
+        self.bloom_amount
+    }
+
+    pub fn set_bloom_amount(&mut self, bloom_amount: usize, resources: &mut Resources) {
+        self.bloom_amount = bloom_amount;
+        self.tone_mapping_bind_group = create_tone_mapping_bind_group(
+            resources,
+            &self.hdr_texture,
+            &self.bloom_textures,
+            bloom_amount,
+        );
     }
 
     pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
@@ -372,39 +437,122 @@ impl Scene {
         }
     }
 
-    pub fn render(&self, render_pass: &mut wgpu::RenderPass) {
+    pub fn render(&self, render_texture: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         if let Some(render_bind_group) = self.render_bind_group.as_ref() {
-            render_pass.set_bind_group(0, render_bind_group, &[]);
-            for mesh_instances in self.meshes.iter() {
-                let instances_count = mesh_instances.nodes.len() as u32;
-                render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
-                for primitive in mesh_instances.primitives.iter() {
-                    render_pass.set_pipeline(&primitive.pipeline);
-                    render_pass.set_bind_group(1, &primitive.material, &[]);
-                    for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
-                        render_pass.set_vertex_buffer(slot as u32 + 1, vertex_buffer.slice(..));
-                    }
-                    match &primitive.index_buffer {
-                        Some(index_buffer) => {
-                            render_pass.set_index_buffer(
-                                index_buffer.buffer.slice(..),
-                                index_buffer.format,
-                            );
-                            render_pass.draw_indexed(
-                                0..primitive.vertex_count,
-                                0,
-                                0..instances_count,
-                            );
+            {
+                let mut hdr_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Scene hdr render pass"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.hdr_texture,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.bloom_textures[0].0,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_texture,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                hdr_render_pass.set_bind_group(0, render_bind_group, &[]);
+                for mesh_instances in self.meshes.iter() {
+                    let instances_count = mesh_instances.nodes.len() as u32;
+                    hdr_render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
+                    for primitive in mesh_instances.primitives.iter() {
+                        hdr_render_pass.set_pipeline(&primitive.pipeline);
+                        hdr_render_pass.set_bind_group(1, &primitive.material, &[]);
+                        for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
+                            hdr_render_pass
+                                .set_vertex_buffer(slot as u32 + 1, vertex_buffer.slice(..));
                         }
-                        None => render_pass.draw(0..primitive.vertex_count, 0..instances_count),
+                        match &primitive.index_buffer {
+                            Some(index_buffer) => {
+                                hdr_render_pass.set_index_buffer(
+                                    index_buffer.buffer.slice(..),
+                                    index_buffer.format,
+                                );
+                                hdr_render_pass.draw_indexed(
+                                    0..primitive.vertex_count,
+                                    0,
+                                    0..instances_count,
+                                );
+                            }
+                            None => {
+                                hdr_render_pass.draw(0..primitive.vertex_count, 0..instances_count)
+                            }
+                        }
                     }
+                }
+
+                if let Some(skybox_bind_group) = self.skybox_bind_group.as_ref() {
+                    hdr_render_pass.set_pipeline(&self.skybox_pipeline);
+                    hdr_render_pass.set_bind_group(1, skybox_bind_group, &[]);
+                    hdr_render_pass.draw(0..3, 0..1);
                 }
             }
 
-            if let Some(skybox_bind_group) = self.skybox_bind_group.as_ref() {
-                render_pass.set_pipeline(&self.skybox_pipeline);
-                render_pass.set_bind_group(1, skybox_bind_group, &[]);
+            let mut horizontal = false;
+            for _ in 0..self.bloom_amount {
+                let source = &self.bloom_textures[horizontal as usize].1;
+                horizontal = !horizontal;
+                let target = &self.bloom_textures[horizontal as usize].0;
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Gaussian blur render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                render_pass.set_pipeline(&self.gaussian_blur_pipeline);
+                render_pass.set_bind_group(0, source, &[]);
                 render_pass.draw(0..3, 0..1);
+            }
+
+            {
+                let mut tone_mapping_render_pass =
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Tone mapping render pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &render_texture,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                tone_mapping_render_pass.set_pipeline(&self.tone_mapping_pipeline);
+                tone_mapping_render_pass.set_bind_group(0, &self.tone_mapping_bind_group, &[]);
+                tone_mapping_render_pass.draw(0..3, 0..1);
             }
         }
     }
@@ -422,6 +570,140 @@ impl IndexMut<Id<Node>> for Scene {
     fn index_mut(&mut self, index: Id<Node>) -> &mut Self::Output {
         &mut self.nodes[index]
     }
+}
+
+fn create_render_texture(
+    width: u32,
+    height: u32,
+    bloom_amount: usize,
+    resources: &mut Resources,
+    encoder: &mut wgpu::CommandEncoder,
+) -> (
+    wgpu::TextureView,
+    wgpu::TextureView,
+    [(wgpu::TextureView, wgpu::BindGroup); 2],
+    wgpu::BindGroup,
+) {
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let depth_texture = resources
+        .texture_builder()
+        .name("Depth texture")
+        .empty(size, wgpu::TextureFormat::Depth24Plus)
+        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        .build(encoder)
+        .create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Depth texture view"),
+            ..Default::default()
+        });
+    let hdr_texture = resources
+        .texture_builder()
+        .name("HDR render texture")
+        .empty(size, wgpu::TextureFormat::Rgba16Float)
+        .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
+        .build(encoder)
+        .create_view(&wgpu::TextureViewDescriptor {
+            label: Some("HDR render texture view"),
+            ..Default::default()
+        });
+
+    let mut horizontal = true;
+    let bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2] = repeat_with(|| {
+        let texture = resources
+            .texture_builder()
+            .name("Bloom texture")
+            .empty(size, wgpu::TextureFormat::Rgba16Float)
+            .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
+            .build(encoder)
+            .create_view(&wgpu::TextureViewDescriptor {
+                label: Some("Bloom texture view"),
+                ..Default::default()
+            });
+        let horizontal_buffer =
+            resources
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Gaussian blur horizontal buffer"),
+                    contents: bytes_of(&(horizontal as u32)),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+        horizontal = !horizontal;
+        let bloom_bind_group = resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Bloom bind group"),
+                layout: &resources.gaussian_blur_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&resources.bloom_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: horizontal_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        (texture, bloom_bind_group)
+    })
+    .take(2)
+    .collect::<Vec<_>>()
+    .try_into()
+    .unwrap();
+
+    let tone_mapping_bind_group =
+        create_tone_mapping_bind_group(resources, &hdr_texture, &bloom_textures, bloom_amount);
+
+    (
+        depth_texture,
+        hdr_texture,
+        bloom_textures,
+        tone_mapping_bind_group,
+    )
+}
+
+fn create_tone_mapping_bind_group(
+    resources: &mut Resources,
+    hdr_texture: &wgpu::TextureView,
+    bloom_textures: &[(wgpu::TextureView, wgpu::BindGroup); 2],
+    bloom_amount: usize,
+) -> wgpu::BindGroup {
+    let final_bloom_texture = (bloom_amount % 2) as usize;
+
+    resources
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Tone mapping bind group"),
+            layout: &resources.tone_mapping_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(hdr_texture),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&resources.bloom_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(
+                        &bloom_textures[final_bloom_texture].0,
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&resources.bloom_sampler),
+                },
+            ],
+        })
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

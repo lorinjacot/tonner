@@ -40,7 +40,22 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 @group(1) @binding(0) var skybox_texture: texture_cube<f32>;
 @group(1) @binding(1) var skybox_sampler: sampler;
 
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+    @location(1) bright_color: vec4<f32>,
+}
+
 @fragment
-fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(skybox_texture, skybox_sampler, vertex.uv);
+fn fs_main(vertex: VertexOutput) -> FragmentOutput {
+    let color = textureSample(skybox_texture, skybox_sampler, vertex.uv);
+    let brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+    
+    var result: FragmentOutput;
+    result.color = color;
+    if brightness > 1.0 {
+        result.bright_color = color;
+    } else {
+        result.bright_color = vec4(0.0, 0.0, 0.0, color.a);
+    }
+    return result;
 }

@@ -17,8 +17,6 @@ use winit::window::Window;
 mod controls;
 mod explorer;
 
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
-
 pub fn run(load_asset: Option<PathBuf>) {
     let wgpu_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
@@ -120,7 +118,6 @@ struct Engine {
     render_texture: wgpu::Texture,
     render_texture_view: wgpu::TextureView,
     render_texture_id: egui::TextureId,
-    depth_texture_view: wgpu::TextureView,
 }
 
 struct EngineData {
@@ -234,7 +231,9 @@ impl Engine {
 
             let (mut scenes, active_scene) = load_asset.map_or_else(
                 || (Vec::new(), None),
-                |path| open_gltf(path, &mut resources, &mut encoder).unwrap(),
+                |path| {
+                    open_gltf(path, &mut resources, &mut encoder, size.width, size.height).unwrap()
+                },
             );
 
             let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
@@ -297,8 +296,6 @@ impl Engine {
         let (render_texture, render_texture_view, render_texture_id) =
             create_render_texture(size.width, size.height, &mut egui_renderer, &device);
 
-        let depth_texture_view = create_depth_texture_view(size.width, size.height, &device);
-
         Self {
             device,
             queue,
@@ -313,11 +310,16 @@ impl Engine {
             render_texture,
             render_texture_view,
             render_texture_id,
-            depth_texture_view,
         }
     }
 
     fn draw(&mut self) {
+        let mut command_encoder =
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Engine::draw command encoder"),
+                });
+
         let scenes = &mut *self.data.scenes.lock().unwrap();
         let mut controls = self.data.controls.lock().unwrap();
 
@@ -327,11 +329,11 @@ impl Engine {
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| {
-                self.explorer.ui(ui, &mut scenes.all, &mut scenes.active)
+                self.explorer.ui(ui, &mut scenes.all, &mut scenes.active, &self.data.resources)
             });
             if let Some(scene_index) = scenes.active {
-                let scene = &scenes.all[scene_index];
                 egui::CentralPanel::default().show(&ctx, |ui| {
+                    let scene = &mut scenes.all[scene_index];
                     let size = match scene.aspect_ratio() {
                         Some(aspect_ratio) => {
                             let width = ui.available_width();
@@ -358,8 +360,12 @@ impl Engine {
                             &mut self.egui_renderer,
                             &self.device,
                         );
-                        self.depth_texture_view =
-                            create_depth_texture_view(width, height, &self.device);
+                        scene.set_render_dimension(
+                            width,
+                            height,
+                            &mut self.data.resources.lock().unwrap(),
+                            &mut command_encoder,
+                        );
                     }
 
                     ui.horizontal_centered(|ui| {
@@ -391,12 +397,6 @@ impl Engine {
             .egui_state
             .egui_ctx()
             .tessellate(full_output.shapes, full_output.pixels_per_point);
-
-        let mut command_encoder =
-            self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Engine::draw command encoder"),
-                });
 
         if let Some(scene_index) = scenes.active {
             let scene = &mut scenes.all[scene_index];
@@ -431,30 +431,7 @@ impl Engine {
 
         if let Some(scene_index) = scenes.active {
             let scene = &scenes.all[scene_index];
-            let mut storm_render_pass =
-                command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("storm render pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.render_texture_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_texture_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-
-            scene.render(&mut storm_render_pass);
+            scene.render(&self.render_texture_view, &mut command_encoder);
         }
 
         let frame = self
@@ -527,26 +504,4 @@ fn create_render_texture(
     );
 
     (render_texture, render_texture_view, render_texture_id)
-}
-
-fn create_depth_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {
-    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("depth texture"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-
-    depth_texture.create_view(&wgpu::TextureViewDescriptor {
-        label: Some("Depth texture view"),
-        ..Default::default()
-    })
 }

@@ -17,6 +17,8 @@ pub fn open_gltf<'r>(
     path: impl AsRef<std::path::Path>,
     resources: &'r mut Resources,
     encoder: &mut wgpu::CommandEncoder,
+    render_width: u32,
+    render_height: u32,
 ) -> Result<(Vec<Scene>, Option<usize>), gltf::Error> {
     let (document, buffers, images_data) = gltf::import(path)?;
 
@@ -153,6 +155,8 @@ pub fn open_gltf<'r>(
                     .map_or_else(|| gltf_scene.index().to_string(), |name| name.to_string()),
                 resources,
                 encoder,
+                render_width,
+                render_height,
             );
             let mut node_mapping = vec![None; document.nodes().len()];
             for node in gltf_scene.nodes() {
@@ -304,11 +308,27 @@ fn create_material(
             )
         });
     }
+    if let Some(info) = material.emissive_texture() {
+        let texture = info.texture();
+        textures[texture.index()].get_or_insert_with(|| {
+            create_texture(
+                texture,
+                images_data,
+                true,
+                resources,
+                images,
+                samplers,
+                default_sampler,
+                encoder,
+            )
+        });
+    }
     let mut builder = resources
         .material_builder()
         .base_color_factor(pbr_metallic_roughness.base_color_factor())
         .metallic_factor(pbr_metallic_roughness.metallic_factor())
-        .roughness_factor(pbr_metallic_roughness.roughness_factor());
+        .roughness_factor(pbr_metallic_roughness.roughness_factor())
+        .emissive_factor(material.emissive_factor());
     if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
         let (texture, sampler) = textures[base_color_texture.texture().index()]
             .as_ref()
@@ -344,6 +364,15 @@ fn create_material(
             .occlusion_tex_coord(occlusion_texture.tex_coord())
             .occlusion_texture(texture)
             .occlusion_sampler(sampler);
+    }
+    if let Some(emissive_texture) = material.emissive_texture() {
+        let (texture, sampler) = textures[emissive_texture.texture().index()]
+            .as_ref()
+            .unwrap();
+        builder = builder
+            .emissive_tex_coord(emissive_texture.tex_coord())
+            .emissive_texture(texture)
+            .emissive_sampler(sampler);
     }
     builder.build().id()
 }

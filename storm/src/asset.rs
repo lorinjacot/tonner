@@ -6,7 +6,7 @@ use wgpu::AddressMode;
 
 use crate::{
     Id, Resources,
-    mesh::{MaterialBuilder, Mesh},
+    mesh::{Material, Mesh},
     scene::{Node, Scene, animation},
     storage::{DenseEntry, SparseSet},
 };
@@ -18,7 +18,7 @@ pub fn open_gltf<'r>(
     resources: &'r mut Resources,
     encoder: &mut wgpu::CommandEncoder,
 ) -> Result<(Vec<Scene>, Option<usize>), gltf::Error> {
-    let (document, buffers, images) = gltf::import(path)?;
+    let (document, buffers, images_data) = gltf::import(path)?;
 
     for extension in document.extensions_required() {
         if !SUPPORTED_EXTENSIONS.contains(&extension) {
@@ -26,91 +26,24 @@ pub fn open_gltf<'r>(
         }
     }
 
-    let images: Vec<_> = document
-        .images()
-        .map(|image| {
-            let data = &images[image.index()];
-            let (bytes, format) = match data.format {
-                gltf::image::Format::R8 => (&data.pixels, wgpu::TextureFormat::R8Unorm),
-                gltf::image::Format::R8G8 => (&data.pixels, wgpu::TextureFormat::Rg8Unorm),
-                gltf::image::Format::R8G8B8 => (
-                    &rgb_to_rgba(&data.pixels, 1),
-                    wgpu::TextureFormat::Rgba8Unorm,
-                ),
-                gltf::image::Format::R8G8B8A8 => (&data.pixels, wgpu::TextureFormat::Rgba8Unorm),
-                gltf::image::Format::R16 => (&data.pixels, wgpu::TextureFormat::R16Unorm),
-                gltf::image::Format::R16G16 => (&data.pixels, wgpu::TextureFormat::Rg16Unorm),
-                gltf::image::Format::R16G16B16 => (
-                    &rgb_to_rgba(&data.pixels, 2),
-                    wgpu::TextureFormat::Rgba16Unorm,
-                ),
-                gltf::image::Format::R16G16B16A16 => {
-                    (&data.pixels, wgpu::TextureFormat::Rgba16Unorm)
-                }
-                gltf::image::Format::R32G32B32FLOAT => (
-                    &rgb_to_rgba(&data.pixels, 4),
-                    wgpu::TextureFormat::Rgba32Float,
-                ),
-                gltf::image::Format::R32G32B32A32FLOAT => {
-                    (&data.pixels, wgpu::TextureFormat::Rgba32Float)
-                }
-            };
-            let name = format!(
-                "Gltf image {} {}",
-                image.index(),
-                image.name().unwrap_or("")
-            );
-            resources
-                .texture_builder()
-                .name(&name)
-                .bytes(
-                    wgpu::Extent3d {
-                        width: data.width,
-                        height: data.height,
-                        depth_or_array_layers: 1,
-                    },
-                    format,
-                    &bytes,
-                )
-                .build(encoder)
-                .create_view(&wgpu::TextureViewDescriptor {
-                    label: Some(&name),
-                    ..Default::default()
-                })
-        })
-        .collect();
-
-    let samplers: Vec<_> = document
-        .samplers()
-        .map(|sampler| from_gltf_sampler(sampler, resources))
-        .collect();
-    let default_sampler = document.textures().find_map(|texture| {
-        let sampler = texture.sampler();
-        match sampler.index() {
-            Some(_) => None,
-            None => Some(from_gltf_sampler(sampler, resources)),
-        }
-    });
-
-    let textures: Vec<_> = document
-        .textures()
-        .map(|texture| {
-            let sampler = match texture.sampler().index() {
-                Some(index) => &samplers[index],
-                None => default_sampler.as_ref().unwrap(),
-            };
-            (&images[texture.source().index()], sampler)
-        })
-        .collect();
+    let mut images = vec![None; document.images().len()];
+    let mut samplers = vec![None; document.samplers().len()];
+    let mut default_sampler = None;
+    let mut textures = vec![None; document.textures().len()];
 
     let materials: Vec<_> = document
         .materials()
         .map(|material| {
-            resources
-                .material_builder()
-                .from_gltf(material, &textures)
-                .build()
-                .id()
+            create_material(
+                material,
+                &images_data,
+                resources,
+                &mut images,
+                &mut samplers,
+                &mut default_sampler,
+                &mut textures,
+                encoder,
+            )
         })
         .collect();
     let mut default_material = None;
@@ -177,11 +110,16 @@ pub fn open_gltf<'r>(
                     let material = match primitive.material().index() {
                         Some(index) => materials[index],
                         None => *default_material.get_or_insert_with(|| {
-                            resources
-                                .material_builder()
-                                .from_gltf(primitive.material(), &textures)
-                                .build()
-                                .id()
+                            create_material(
+                                primitive.material(),
+                                &images_data,
+                                resources,
+                                &mut images,
+                                &mut samplers,
+                                &mut default_sampler,
+                                &mut textures,
+                                encoder,
+                            )
                         }),
                     };
                     primitives.push((geometry, material));
@@ -289,33 +227,71 @@ pub fn open_gltf<'r>(
     Ok((scenes, default_scene))
 }
 
-impl<'a, 'r> MaterialBuilder<'a, 'r> {
-    fn from_gltf(
-        mut self,
-        material: gltf::Material,
-        textures: &'a [(&wgpu::TextureView, &wgpu::Sampler)],
-    ) -> Self {
-        let pbr_metallic_roughness = material.pbr_metallic_roughness();
-        if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
-            let (texture, sampler) = textures[base_color_texture.texture().index()];
-            self = self
-                .base_color_tex_coord(base_color_texture.tex_coord())
-                .base_color_texture(texture)
-                .base_color_sampler(sampler);
-        }
-        if let Some(metallic_roughness_texture) =
-            pbr_metallic_roughness.metallic_roughness_texture()
-        {
-            let (texture, sampler) = textures[metallic_roughness_texture.texture().index()];
-            self = self
-                .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
-                .metallic_roughness_texture(texture)
-                .metallic_roughness_sampler(sampler);
-        }
-        self.base_color_factor(pbr_metallic_roughness.base_color_factor())
-            .metallic_factor(pbr_metallic_roughness.metallic_factor())
-            .roughness_factor(pbr_metallic_roughness.roughness_factor())
+fn create_material(
+    material: gltf::Material,
+    images_data: &[gltf::image::Data],
+    resources: &mut Resources,
+    images: &mut [Option<wgpu::TextureView>],
+    samplers: &mut [Option<wgpu::Sampler>],
+    default_sampler: &mut Option<wgpu::Sampler>,
+    textures: &mut [Option<(wgpu::TextureView, wgpu::Sampler)>],
+    encoder: &mut wgpu::CommandEncoder,
+) -> Id<Material> {
+    let pbr_metallic_roughness = material.pbr_metallic_roughness();
+    if let Some(info) = pbr_metallic_roughness.base_color_texture() {
+        let texture = info.texture();
+        textures[texture.index()].get_or_insert_with(|| {
+            create_texture(
+                texture,
+                images_data,
+                true,
+                resources,
+                images,
+                samplers,
+                default_sampler,
+                encoder,
+            )
+        });
     }
+    if let Some(info) = pbr_metallic_roughness.metallic_roughness_texture() {
+        let texture = info.texture();
+        textures[texture.index()].get_or_insert_with(|| {
+            create_texture(
+                texture,
+                images_data,
+                false,
+                resources,
+                images,
+                samplers,
+                default_sampler,
+                encoder,
+            )
+        });
+    }
+    let mut builder = resources
+        .material_builder()
+        .base_color_factor(pbr_metallic_roughness.base_color_factor())
+        .metallic_factor(pbr_metallic_roughness.metallic_factor())
+        .roughness_factor(pbr_metallic_roughness.roughness_factor());
+    if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
+        let (texture, sampler) = textures[base_color_texture.texture().index()]
+            .as_ref()
+            .unwrap();
+        builder = builder
+            .base_color_tex_coord(base_color_texture.tex_coord())
+            .base_color_texture(texture)
+            .base_color_sampler(sampler);
+    }
+    if let Some(metallic_roughness_texture) = pbr_metallic_roughness.metallic_roughness_texture() {
+        let (texture, sampler) = textures[metallic_roughness_texture.texture().index()]
+            .as_ref()
+            .unwrap();
+        builder = builder
+            .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
+            .metallic_roughness_texture(texture)
+            .metallic_roughness_sampler(sampler);
+    }
+    builder.build().id()
 }
 
 impl Scene {
@@ -361,6 +337,93 @@ impl Scene {
     }
 }
 
+fn create_texture(
+    texture: gltf::Texture,
+    images_data: &[gltf::image::Data],
+    srgb: bool,
+    resources: &mut Resources,
+    images: &mut [Option<wgpu::TextureView>],
+    samplers: &mut [Option<wgpu::Sampler>],
+    default_sampler: &mut Option<wgpu::Sampler>,
+    encoder: &mut wgpu::CommandEncoder,
+) -> (wgpu::TextureView, wgpu::Sampler) {
+    let image = texture.source();
+    let image = images[image.index()]
+        .get_or_insert_with(|| create_image(image, srgb, images_data, resources, encoder))
+        .clone();
+    let sampler = texture.sampler();
+    let sampler = match sampler.index() {
+        Some(index) => &mut samplers[index],
+        None => default_sampler,
+    }
+    .get_or_insert_with(|| create_sampler(sampler, resources))
+    .clone();
+    (image, sampler)
+}
+
+fn create_image(
+    image: gltf::Image,
+    srgb: bool,
+    images_data: &[gltf::image::Data],
+    resources: &mut Resources,
+    encoder: &mut wgpu::CommandEncoder,
+) -> wgpu::TextureView {
+    let data = &images_data[image.index()];
+    let (bytes, format) = match data.format {
+        gltf::image::Format::R8 => (&data.pixels, wgpu::TextureFormat::R8Unorm),
+        gltf::image::Format::R8G8 => (&data.pixels, wgpu::TextureFormat::Rg8Unorm),
+        gltf::image::Format::R8G8B8 => (
+            &rgb_to_rgba(&data.pixels, 1),
+            if srgb {
+                wgpu::TextureFormat::Rgba8UnormSrgb
+            } else {
+                wgpu::TextureFormat::Rgba8Unorm
+            },
+        ),
+        gltf::image::Format::R8G8B8A8 => (
+            &data.pixels,
+            if srgb {
+                wgpu::TextureFormat::Rgba8UnormSrgb
+            } else {
+                wgpu::TextureFormat::Rgba8Unorm
+            },
+        ),
+        gltf::image::Format::R16 => (&data.pixels, wgpu::TextureFormat::R16Unorm),
+        gltf::image::Format::R16G16 => (&data.pixels, wgpu::TextureFormat::Rg16Unorm),
+        gltf::image::Format::R16G16B16 => (
+            &rgb_to_rgba(&data.pixels, 2),
+            wgpu::TextureFormat::Rgba16Unorm,
+        ),
+        gltf::image::Format::R16G16B16A16 => (&data.pixels, wgpu::TextureFormat::Rgba16Unorm),
+        gltf::image::Format::R32G32B32FLOAT => (
+            &rgb_to_rgba(&data.pixels, 4),
+            wgpu::TextureFormat::Rgba32Float,
+        ),
+        gltf::image::Format::R32G32B32A32FLOAT => (&data.pixels, wgpu::TextureFormat::Rgba32Float),
+    };
+    let name = image
+        .name()
+        .map_or_else(|| format!("Image {}", image.index()), str::to_string);
+    resources
+        .texture_builder()
+        .name(&name)
+        .bytes(
+            wgpu::Extent3d {
+                width: data.width,
+                height: data.height,
+                depth_or_array_layers: 1,
+            },
+            format,
+            &bytes,
+        )
+        .generate_mips()
+        .build(encoder)
+        .create_view(&wgpu::TextureViewDescriptor {
+            label: Some(&name),
+            ..Default::default()
+        })
+}
+
 fn rgb_to_rgba(bytes: &Vec<u8>, bytes_per_channel: usize) -> Vec<u8> {
     bytes
         .chunks_exact(3 * bytes_per_channel)
@@ -383,7 +446,7 @@ fn wrapping_mode_to_address_mode(wrapping_mode: WrappingMode) -> AddressMode {
     }
 }
 
-fn from_gltf_sampler(sampler: gltf::texture::Sampler, resources: &mut Resources) -> wgpu::Sampler {
+fn create_sampler(sampler: gltf::texture::Sampler, resources: &mut Resources) -> wgpu::Sampler {
     let name = format!(
         "Gltf sampler {:?} {}",
         sampler.index(),

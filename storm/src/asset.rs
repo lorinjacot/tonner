@@ -64,6 +64,12 @@ pub fn open_gltf<'r>(
                     if let Some(normals) = reader.read_normals() {
                         geometry_builder = geometry_builder.normals(normals.collect());
                     }
+                    if let Some(tangents) = reader.read_tangents() {
+                        geometry_builder = geometry_builder.tangents(tangents.collect());
+                    } else if let Some(normal_texture) = primitive.material().normal_texture() {
+                        geometry_builder =
+                            geometry_builder.generate_tangents(normal_texture.tex_coord());
+                    }
                     for set in 0.. {
                         match reader.read_tex_coords(set) {
                             Some(tex_coords) => {
@@ -268,6 +274,21 @@ fn create_material(
             )
         });
     }
+    if let Some(info) = material.normal_texture() {
+        let texture = info.texture();
+        textures[texture.index()].get_or_insert_with(|| {
+            create_texture(
+                texture,
+                images_data,
+                false,
+                resources,
+                images,
+                samplers,
+                default_sampler,
+                encoder,
+            )
+        });
+    }
     let mut builder = resources
         .material_builder()
         .base_color_factor(pbr_metallic_roughness.base_color_factor())
@@ -290,6 +311,14 @@ fn create_material(
             .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
             .metallic_roughness_texture(texture)
             .metallic_roughness_sampler(sampler);
+    }
+    if let Some(normal_texture) = material.normal_texture() {
+        let (texture, sampler) = textures[normal_texture.texture().index()].as_ref().unwrap();
+        builder = builder
+            .normal_scale(normal_texture.scale())
+            .normal_tex_coord(normal_texture.tex_coord())
+            .normal_texture(texture)
+            .normal_sampler(sampler);
     }
     builder.build().id()
 }

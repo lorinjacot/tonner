@@ -1,5 +1,6 @@
 override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
+override has_normal_texture: bool;
 
 override max_prefilter_map_mip: f32;
 
@@ -8,6 +9,7 @@ const pi = 3.14159265359;
 struct Attributes {
     @location(1) position: vec3<f32>,
     @location(2) normal: vec3<f32>,
+    @location(3) tangent: vec4<f32>,
     @location(4) tex_coord_0: vec2<f32>,
     @location(5) tex_coord_1: vec2<f32>,
     @location(6) color_0: vec4<f32>,
@@ -17,6 +19,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(1) world_position: vec3<f32>,
     @location(2) world_normal: vec3<f32>,
+    @location(3) world_tangent: vec4<f32>,
     @location(4) tex_coord_0: vec2<f32>,
     @location(5) tex_coord_1: vec2<f32>,
     @location(6) color_0: vec4<f32>,
@@ -59,7 +62,9 @@ struct MaterialUniform {
     base_color_tex_coord: u32,
     metallic_factor: f32,
     roughness_factor: f32,
-    metallic_roughness_tex_coord: u32
+    metallic_roughness_tex_coord: u32,
+    normal_scale: f32,
+    normal_tex_coord: u32,
 }
 
 @vertex
@@ -74,6 +79,9 @@ fn vs_main(
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
     result.world_normal = node.normal_matrix * attributes.normal;
+    if has_normal_texture {
+        result.world_tangent = vec4(node.normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
+    }
     result.tex_coord_0 = attributes.tex_coord_0;
     result.tex_coord_1 = attributes.tex_coord_1;
     result.color_0 = attributes.color_0;
@@ -84,7 +92,9 @@ fn vs_main(
 @group(1) @binding(1) var base_color_sampler: sampler;
 @group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
 @group(1) @binding(3) var metallic_roughness_sampler: sampler;
-@group(1) @binding(4) var<uniform> material: MaterialUniform;
+@group(1) @binding(4) var normal_texture: texture_2d<f32>;
+@group(1) @binding(5) var normal_sampler: sampler;
+@group(1) @binding(6) var<uniform> material: MaterialUniform;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
@@ -118,7 +128,19 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
     let ambiance_occlusion = 1.0;
 
-    let normal = normalize(vertex.world_normal);
+    var normal = normalize(vertex.world_normal);
+    if has_normal_texture {
+        let tangent = normalize(vertex.world_tangent.xyz);
+        let bitangent = cross(normal, tangent) * vertex.world_tangent.w;
+        let tbn = mat3x3(tangent, bitangent, normal);
+        normal = textureSample(
+            normal_texture,
+            normal_sampler,
+            tex_coords[material.normal_tex_coord],
+        ).rgb;
+        normal = normal * 2.0 - 1.0;
+        normal = normalize(tbn * normal);
+    }
     let view = normalize(camera.position - vertex.world_position);
     let reflected = reflect(-view, normal);
 

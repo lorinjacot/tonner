@@ -3,6 +3,7 @@ use std::{borrow::Cow, f32::consts::PI, iter::repeat_n};
 use bitflags::bitflags;
 use bytemuck::cast_slice;
 use glam::{Vec3, vec3};
+use mikktspace_sys::{MikkTSpaceInterface, gen_tang_space_default};
 use wgpu::util::DeviceExt;
 
 use crate::{DenseEntry, Id, Resources};
@@ -13,6 +14,7 @@ pub struct Geometry {
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_buffer_layouts: Vec<VertexBufferLayout>,
     vertex_count: u32,
+    has_tangents: bool,
 }
 
 impl Geometry {
@@ -39,6 +41,10 @@ impl Geometry {
     pub fn vertex_count(&self) -> u32 {
         self.vertex_count
     }
+
+    pub fn has_tangents(&self) -> bool {
+        self.has_tangents
+    }
 }
 
 impl DenseEntry for Geometry {
@@ -61,6 +67,8 @@ pub struct GeometryBuilder<'a, 'r> {
     indices: Indices<'a>,
     positions: Option<Cow<'a, [[f32; 3]]>>,
     normals: Option<Cow<'a, [[f32; 3]]>>,
+    tangents: Option<Cow<'a, [[f32; 4]]>>,
+    normal_tex_coords: Option<Attribute>,
     tex_coords: Vec<(Attribute, TexCoords<'a>)>,
     colors: Vec<(Attribute, Colors<'a>)>,
     attributes: Attributes,
@@ -73,6 +81,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             indices: Indices::None,
             positions: None,
             normals: None,
+            tangents: None,
+            normal_tex_coords: None,
             tex_coords: Vec::new(),
             colors: Vec::new(),
             attributes: Attributes::empty(),
@@ -98,6 +108,21 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     pub fn normals(mut self, normals: Cow<'a, [[f32; 3]]>) -> Self {
         self.normals = Some(normals);
         self.attributes.insert(Attributes::NORMAL);
+        self
+    }
+
+    pub fn tangents(mut self, tangents: Cow<'a, [[f32; 4]]>) -> Self {
+        self.tangents = Some(tangents);
+        self.attributes.insert(Attributes::TANGENT);
+        self
+    }
+
+    pub fn generate_tangents(mut self, normal_tex_coords: u32) -> Self {
+        self.normal_tex_coords = Some(match normal_tex_coords {
+            0 => Attribute::TexCoord0,
+            1 => Attribute::TexCoord1,
+            _ => panic!("unsupported vertex texure coordinate set"),
+        });
         self
     }
 
@@ -262,7 +287,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let mut positions = self.positions.expect("positions attribute should be set");
         let mut vertex_count = positions.len();
 
-        let normals = match self.normals {
+        let mut normals = match self.normals {
             Some(normals) => normals,
             None => {
                 let indices: Option<Vec<usize>> = match self.indices {
@@ -286,9 +311,72 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                     }
                 }
                 let normals = compute_normals(&positions);
+                self.tangents = None;
+                self.attributes.remove(Attributes::TANGENT);
                 Cow::Owned(normals)
             }
         };
+
+        if let Some(normal_tex_coords) = self.normal_tex_coords {
+            let indices: Option<Vec<usize>> = match self.indices {
+                Indices::None => None,
+                Indices::U16(slice) => Some(slice.iter().map(|index| *index as usize).collect()),
+                Indices::U32(slice) => Some(slice.iter().map(|index| *index as usize).collect()),
+            };
+            self.indices = Indices::None;
+            if let Some(indices) = indices {
+                vertex_count = indices.len();
+                positions = indices.iter().map(|index| positions[*index]).collect();
+                normals = indices.iter().map(|index| normals[*index]).collect();
+                for (_, tex_coords) in self.tex_coords.iter_mut() {
+                    *tex_coords = tex_coords.to_unindexed(&indices);
+                }
+                for (_, colors) in self.colors.iter_mut() {
+                    *colors = colors.to_unindexed(&indices);
+                }
+            }
+            let tex_coords = self
+                .tex_coords
+                .iter()
+                .find_map(|(attribute, tex_coords)| {
+                    if *attribute == normal_tex_coords {
+                        Option::<Cow<'_, [[f32; 2]]>>::Some(match tex_coords {
+                            TexCoords::U8(slice) => slice
+                                .iter()
+                                .map(|coord| {
+                                    [
+                                        coord[0] as f32 / u8::MAX as f32,
+                                        coord[1] as f32 / u8::MAX as f32,
+                                    ]
+                                })
+                                .collect(),
+                            TexCoords::U16(slice) => slice
+                                .iter()
+                                .map(|coord| {
+                                    [
+                                        coord[0] as f32 / u16::MAX as f32,
+                                        coord[1] as f32 / u16::MAX as f32,
+                                    ]
+                                })
+                                .collect(),
+                            TexCoords::F32(slice) => Cow::Borrowed(&slice),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .expect("Normal texture coordinate set not found");
+            let mut tangents = vec![[0.0; 4]; positions.len()];
+            let mut mikk_t_space = MikkTSpace {
+                positions: &positions,
+                normals: &normals,
+                tex_coord: &tex_coords,
+                tangents: &mut tangents,
+            };
+            gen_tang_space_default(&mut mikk_t_space);
+            self.tangents = Some(Cow::Owned(tangents));
+            self.attributes.insert(Attributes::TANGENT);
+        }
 
         create_vertex_buffer(
             "Positions buffer",
@@ -304,6 +392,16 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             wgpu::VertexFormat::Float32x3,
             Attribute::Normal,
         );
+
+        if let Some(tangents) = &self.tangents {
+            create_vertex_buffer(
+                "Tangents vertex buffer",
+                cast_slice(tangents),
+                4 * 4,
+                wgpu::VertexFormat::Float32x4,
+                Attribute::Tangent,
+            );
+        }
 
         for (attribute, tex_coords) in &self.tex_coords {
             let (contents, array_stride, format) = match tex_coords {
@@ -351,6 +449,11 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             };
 
         check_attribute(
+            Attribute::Tangent,
+            Attributes::TANGENT,
+            &self.resources.geometry_builder_data.dummy_tangents,
+        );
+        check_attribute(
             Attribute::TexCoord0,
             Attributes::TEX_COORD_0,
             &self.resources.geometry_builder_data.dummy_tex_coords,
@@ -395,18 +498,30 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             vertex_buffers,
             vertex_buffer_layouts,
             vertex_count: vertex_count as u32,
+            has_tangents: self.attributes.contains(Attributes::TANGENT),
         };
         self.resources.geometries.insert(geometry)
     }
 }
 
 pub(super) struct GeometryBuilderData {
+    dummy_tangents: DummyVertexBuffer,
     dummy_tex_coords: DummyVertexBuffer,
     dummy_colors: DummyVertexBuffer,
 }
 
 impl GeometryBuilderData {
     pub fn new(device: &wgpu::Device) -> Self {
+        let dummy_tangents = DummyVertexBuffer {
+            buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Dummy vertex tangent buffer"),
+                size: 4 * 4,
+                usage: wgpu::BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            }),
+            format: wgpu::VertexFormat::Float32x4,
+        };
+
         let dummy_tex_coords = DummyVertexBuffer {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Dummy vertex texture coordinate buffer"),
@@ -426,6 +541,7 @@ impl GeometryBuilderData {
         };
 
         Self {
+            dummy_tangents,
             dummy_colors,
             dummy_tex_coords,
         }
@@ -525,6 +641,7 @@ impl<'a> Colors<'a> {
 enum Attribute {
     Position = 1,
     Normal = 2,
+    Tangent = 3,
     TexCoord0 = 4,
     TexCoord1 = 5,
     Color0 = 6,
@@ -534,9 +651,10 @@ bitflags! {
     struct Attributes: u8 {
         const POSITION = 1 << 0;
         const NORMAL = 1 << 1;
-        const TEX_COORD_0 = 1 << 2;
-        const TEX_COORD_1 = 1 << 3;
-        const COLOR_0 = 1 << 4;
+        const TANGENT = 1 << 2;
+        const TEX_COORD_0 = 1 << 3;
+        const TEX_COORD_1 = 1 << 4;
+        const COLOR_0 = 1 << 5;
     }
 }
 
@@ -563,4 +681,37 @@ fn next_triangle(mut positions: impl Iterator<Item = [f32; 3]>) -> Option<(Vec3,
         Vec3::from_array(positions.next()?),
         Vec3::from_array(positions.next()?),
     ))
+}
+
+struct MikkTSpace<'a> {
+    positions: &'a Cow<'a, [[f32; 3]]>,
+    normals: &'a Cow<'a, [[f32; 3]]>,
+    tex_coord: &'a Cow<'a, [[f32; 2]]>,
+    tangents: &'a mut [[f32; 4]],
+}
+
+impl<'a> MikkTSpaceInterface for MikkTSpace<'a> {
+    fn get_num_faces(&self) -> usize {
+        self.positions.len() / 3
+    }
+
+    fn get_num_vertices_of_face(&self, _face: usize) -> usize {
+        3
+    }
+
+    fn get_position(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.positions[face * 3 + vert]
+    }
+
+    fn get_normal(&self, face: usize, vert: usize) -> [f32; 3] {
+        self.normals[face * 3 + vert]
+    }
+
+    fn get_tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+        self.tex_coord[face * 3 + vert]
+    }
+
+    fn set_tspace_basic(&mut self, tangent: [f32; 3], sign: f32, face: usize, vert: usize) {
+        self.tangents[face * 3 + vert] = [tangent[0], tangent[1], tangent[2], -sign];
+    }
 }

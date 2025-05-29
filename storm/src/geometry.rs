@@ -11,10 +11,18 @@ use crate::{DenseEntry, Id, Resources};
 pub struct Geometry {
     id: Id<Self>,
     indices: Option<IndexBuffer>,
+    positions: wgpu::Buffer,
+    normals: wgpu::Buffer,
+    tangents: Option<wgpu::Buffer>,
+    targents: Vec<MorphTarget>,
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_buffer_layouts: Vec<VertexBufferLayout>,
     vertex_count: u32,
     has_tangents: bool,
+}
+
+struct MorphTarget {
+    
 }
 
 impl Geometry {

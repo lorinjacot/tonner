@@ -20,6 +20,8 @@ pub mod animation;
 pub mod camera;
 mod node;
 
+const MAX_WEIGHT_COUNT: usize = 8;
+
 pub struct Scene {
     pub name: String,
     device: wgpu::Device,
@@ -251,6 +253,7 @@ impl Scene {
                             normal_matrix.y_axis.extend(0.0),
                             normal_matrix.z_axis.extend(0.0),
                         ],
+                        weights: [0.0; MAX_WEIGHT_COUNT],
                     }
                 })
                 .collect();
@@ -478,11 +481,8 @@ impl Scene {
                     hdr_render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
                     for primitive in mesh_instances.primitives.iter() {
                         hdr_render_pass.set_pipeline(&primitive.pipeline);
-                        hdr_render_pass.set_bind_group(1, &primitive.material, &[]);
-                        for (slot, vertex_buffer) in primitive.vertex_buffers.iter().enumerate() {
-                            hdr_render_pass
-                                .set_vertex_buffer(slot as u32 + 1, vertex_buffer.slice(..));
-                        }
+                        hdr_render_pass.set_bind_group(1, &primitive.geometry, &[]);
+                        hdr_render_pass.set_bind_group(2, &primitive.material, &[]);
                         match &primitive.index_buffer {
                             Some(index_buffer) => {
                                 hdr_render_pass.set_index_buffer(
@@ -490,7 +490,7 @@ impl Scene {
                                     index_buffer.format,
                                 );
                                 hdr_render_pass.draw_indexed(
-                                    0..primitive.vertex_count,
+                                    0..index_buffer.index_count,
                                     0,
                                     0..instances_count,
                                 );
@@ -711,6 +711,7 @@ fn create_tone_mapping_bind_group(
 struct NodeUniform {
     matrix: Mat4,
     normal_matrix: [Vec4; 3],
+    weights: [f32; MAX_WEIGHT_COUNT],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

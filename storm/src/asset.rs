@@ -57,17 +57,18 @@ pub fn open_gltf<'r>(
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 if let Some(positions) = reader.read_positions() {
-                    let mut geometry_builder =
-                        resources.geometry_builder().positions(positions.collect());
+                    let mut geometry_builder = resources
+                        .geometry_builder(positions.len(), 0)
+                        .positions(positions);
                     if let Some(indices) = reader.read_indices() {
                         geometry_builder =
                             geometry_builder.indices_u32(indices.into_u32().collect());
                     }
                     if let Some(normals) = reader.read_normals() {
-                        geometry_builder = geometry_builder.normals(normals.collect());
+                        geometry_builder = geometry_builder.normals(normals);
                     }
                     if let Some(tangents) = reader.read_tangents() {
-                        geometry_builder = geometry_builder.tangents(tangents.collect());
+                        geometry_builder = geometry_builder.tangents(tangents);
                     } else if let Some(normal_texture) = primitive.material().normal_texture() {
                         geometry_builder =
                             geometry_builder.generate_tangents(normal_texture.tex_coord());
@@ -75,17 +76,8 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_tex_coords(set) {
                             Some(tex_coords) => {
-                                geometry_builder = match tex_coords {
-                                    gltf::mesh::util::ReadTexCoords::U8(iter) => {
-                                        geometry_builder.tex_coords_u8(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadTexCoords::U16(iter) => {
-                                        geometry_builder.tex_coords_u16(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadTexCoords::F32(iter) => {
-                                        geometry_builder.tex_coords_f32(set, iter.collect())
-                                    }
-                                };
+                                geometry_builder =
+                                    geometry_builder.tex_coords(tex_coords.into_f32());
                             }
                             None => break,
                         }
@@ -93,23 +85,7 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_colors(set) {
                             Some(colors) => {
-                                geometry_builder = match colors {
-                                    gltf::mesh::util::ReadColors::RgbU8(_) => geometry_builder
-                                        .colors_u8(set, colors.into_rgba_u8().collect()),
-                                    gltf::mesh::util::ReadColors::RgbaU8(iter) => {
-                                        geometry_builder.colors_u8(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadColors::RgbU16(_) => geometry_builder
-                                        .colors_u16(set, colors.into_rgba_u16().collect()),
-                                    gltf::mesh::util::ReadColors::RgbaU16(iter) => {
-                                        geometry_builder.colors_u16(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadColors::RgbF32(_) => geometry_builder
-                                        .colors_f32(set, colors.into_rgba_f32().collect()),
-                                    gltf::mesh::util::ReadColors::RgbaF32(iter) => {
-                                        geometry_builder.colors_f32(set, iter.collect())
-                                    }
-                                };
+                                geometry_builder = geometry_builder.colors(colors.into_rgba_f32());
                             }
                             None => break,
                         }

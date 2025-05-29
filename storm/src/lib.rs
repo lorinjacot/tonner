@@ -165,7 +165,11 @@ impl Resources {
 
         let materials = SparseSet::new();
         let meshes = SparseSet::new();
-        let mesh_builder_data = mesh::MeshBuilderData::new(&device, &render_bind_group_layout);
+        let mesh_builder_data = mesh::MeshBuilderData::new(
+            &device,
+            &render_bind_group_layout,
+            geometry_builder_data.bind_group_layout(),
+        );
 
         let environments = SparseSet::new();
         let environment_builder_data =
@@ -413,8 +417,12 @@ impl Resources {
         }
     }
 
-    pub fn geometry_builder(&mut self) -> geometry::GeometryBuilder {
-        geometry::GeometryBuilder::new(self)
+    pub fn geometry_builder(
+        &mut self,
+        vertex_count: usize,
+        morph_target_count: usize,
+    ) -> geometry::GeometryBuilder {
+        geometry::GeometryBuilder::new(self, vertex_count, morph_target_count)
     }
 
     pub fn material_builder(&mut self) -> mesh::MaterialBuilder {

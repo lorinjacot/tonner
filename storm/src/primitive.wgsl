@@ -15,20 +15,6 @@ struct NodeUniform {
     weights: array<f32, max_weight_count>,
 }
 
-struct GeometryStorage {
-    target_count: u32,
-    targets: array<MorphTarget>,
-}
-
-struct MorphTarget {
-    position: u32,
-    normal: u32,
-    tangent: u32,
-    tex_coord_0: u32,
-    tex_coord_1: u32,
-    color_0: u32,
-}
-
 struct CameraUniform {
     view_projection: mat4x4<f32>,
     view: mat4x4<f32>,
@@ -66,13 +52,22 @@ struct VertexOutput {
 @group(0) @binding(7) var brdf_lut_texture: texture_2d<f32>;
 @group(0) @binding(8) var brdf_lut_sampler: sampler;
 
-@group(1) @binding(0) var<storage, read> positions: array<vec3<f32>>;
-@group(1) @binding(1) var<storage, read> normals: array<vec3<f32>>;
-@group(1) @binding(2) var<storage, read> tangents: array<vec4<f32>>;
-@group(1) @binding(3) var<storage, read> tex_coords_0: array<vec2<f32>>;
-@group(1) @binding(4) var<storage, read> tex_coords_1: array<vec2<f32>>;
-@group(1) @binding(5) var<storage, read> colors_0: array<vec4<f32>>;
-@group(1) @binding(6) var<storage> geometry: GeometryStorage;
+struct Attribute {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    tangent: vec4<f32>,
+    tex_coord_0: vec2<f32>,
+    tex_coord_1: vec2<f32>,
+    color_0: vec4<f32>,
+}
+
+struct GeometryStorage {
+    vertex_count: u32,
+    target_count: u32,
+    attributes: array<Attribute>,
+}
+
+@group(1) @binding(0) var<storage, read> geometry: GeometryStorage;
 
 @vertex
 fn vs_main(
@@ -81,41 +76,38 @@ fn vs_main(
 ) -> VertexOutput {
     let node = nodes[node_index];
 
-    var position = positions[vertex_index];
-    var normal = normals[vertex_index];
-    var tangent: vec4<f32>;
-    if has_normal_texture {
-        tangent = tangents[vertex_index];
-    }
-    var tex_coord_0 = tex_coords_0[vertex_index];
-    var tex_coord_1 = tex_coords_1[vertex_index];
-    var color_0 = colors_0[vertex_index];
-
+    var attributes = geometry.attributes[vertex_index];
     for (var i = 0u; i < geometry.target_count; i++) {
         let weight = node.weights[i];
-        let morph_target = geometry.targets[i];
-        position += weight * positions[morph_target.position + vertex_index];
-        normal += weight * normals[morph_target.normal + vertex_index];
+        let morph_attributes = geometry.attributes[(i + 1) * geometry.vertex_count + vertex_index];
+        attributes.position += weight * morph_attributes.position;
+        attributes.normal += weight * morph_attributes.normal;
         if has_normal_texture {
-            tangent += weight * tangents[morph_target.tangent + vertex_index];
+            attributes.tangent += weight * morph_attributes.tangent;
         }
-        tex_coord_0 += weight * tex_coords_0[morph_target.tex_coord_0 + vertex_index];
-        tex_coord_1 += weight * tex_coords_1[morph_target.tex_coord_1 + vertex_index];
-        color_0 += weight * colors_0[morph_target.color_0 + vertex_index];
+        attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
+        attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
+        attributes.color_0 += weight * morph_attributes.color_0;
     }
 
-    let world_position = node.matrix * vec4(position, 1.0);
+    let world_position = node.matrix * vec4(attributes.position, 1.0);
 
     var result: VertexOutput;
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
-    result.world_normal = node.normal_matrix * normal;
+    result.world_normal = node.normal_matrix * attributes.normal;
     if has_normal_texture {
-        result.world_tangent = vec4(node.normal_matrix * tangent.xyz, tangent.w);
+        result.world_tangent = vec4(node.normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
     }
-    result.tex_coord_0 = tex_coord_0;
-    result.tex_coord_1 = tex_coord_1;
+    result.tex_coord_0 = attributes.tex_coord_0;
+    result.tex_coord_1 = attributes.tex_coord_1;
+    result.color_0 = attributes.color_0;
     return result;
+}
+
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+    @location(1) bright_color: vec4<f32>,
 }
 
 struct MaterialUniform {
@@ -130,11 +122,6 @@ struct MaterialUniform {
     occlusion_tex_coord: u32,
     emissive_factor: vec3<f32>,
     emissive_tex_coord: u32,
-}
-
-struct FragmentOutput {
-    @location(0) color: vec4<f32>,
-    @location(1) bright_color: vec4<f32>,
 }
 
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;

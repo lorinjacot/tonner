@@ -83,12 +83,13 @@ fn vs_main(
         attributes.position += weight * morph_attributes.position;
         attributes.normal += weight * morph_attributes.normal;
         if has_normal_texture {
-            attributes.tangent += weight * morph_attributes.tangent;
+            attributes.tangent.xyz += weight * morph_attributes.tangent.xyz;
         }
         attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
         attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
         attributes.color_0 += weight * morph_attributes.color_0;
     }
+    attributes.color_0 = clamp(attributes.color_0, vec4(0.0), vec4(1.0));
 
     let world_position = node.matrix * vec4(attributes.position, 1.0);
 

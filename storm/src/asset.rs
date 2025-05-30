@@ -6,6 +6,7 @@ use wgpu::AddressMode;
 
 use crate::{
     Id, Resources,
+    geometry::MorphTargetBuilder,
     mesh::{Material, Mesh},
     scene::{Node, Scene, animation},
     storage::{DenseEntry, SparseSet},
@@ -57,9 +58,7 @@ pub fn open_gltf<'r>(
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 if let Some(positions) = reader.read_positions() {
-                    let mut geometry_builder = resources
-                        .geometry_builder(positions.len(), 0)
-                        .positions(positions);
+                    let mut geometry_builder = resources.geometry_builder().positions(positions);
                     if let Some(indices) = reader.read_indices() {
                         geometry_builder =
                             geometry_builder.indices_u32(indices.into_u32().collect());
@@ -89,6 +88,19 @@ pub fn open_gltf<'r>(
                             }
                             None => break,
                         }
+                    }
+                    for (positions, normals, tangents) in reader.read_morph_targets() {
+                        let mut builder = MorphTargetBuilder::new();
+                        if let Some(positions) = positions {
+                            builder = builder.positions(positions);
+                        }
+                        if let Some(normals) = normals {
+                            builder = builder.normals(normals);
+                        }
+                        if let Some(tangents) = tangents {
+                            builder = builder.tangents(tangents);
+                        }
+                        geometry_builder = geometry_builder.morph_target(builder);
                     }
                     let geometry = geometry_builder.build(encoder).id();
                     let material = match primitive.material().index() {

@@ -417,12 +417,8 @@ impl Resources {
         }
     }
 
-    pub fn geometry_builder(
-        &mut self,
-        vertex_count: usize,
-        morph_target_count: usize,
-    ) -> geometry::GeometryBuilder {
-        geometry::GeometryBuilder::new(self, vertex_count, morph_target_count)
+    pub fn geometry_builder(&mut self) -> geometry::GeometryBuilder {
+        geometry::GeometryBuilder::new(self)
     }
 
     pub fn material_builder(&mut self) -> mesh::MaterialBuilder {

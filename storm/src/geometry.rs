@@ -61,35 +61,26 @@ pub(super) struct IndexBuffer {
 pub struct GeometryBuilder<'a, 'r> {
     resources: &'r mut Resources,
     indices: Indices<'a>,
-    positions: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
-    normals: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
-    tangents: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+    attributes: MorphTargetBuilder<'a>,
     generate_tangents: Option<u32>,
-    tex_coords_0: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
-    tex_coords_1: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
-    colors_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
-    vertex_count: usize,
-    morph_target_count: usize,
+    targets: Vec<MorphTargetBuilder<'a>>,
 }
 
 impl<'a, 'r> GeometryBuilder<'a, 'r> {
-    pub fn new(
-        resources: &'r mut Resources,
-        vertex_count: usize,
-        morph_target_count: usize,
-    ) -> Self {
+    pub fn new(resources: &'r mut Resources) -> Self {
         Self {
             resources,
             indices: Indices::None,
-            positions: None,
-            normals: None,
-            tangents: None,
+            attributes: MorphTargetBuilder {
+                positions: None,
+                normals: None,
+                tangents: None,
+                tex_coords_0: None,
+                tex_coords_1: None,
+                colors_0: None,
+            },
             generate_tangents: None,
-            tex_coords_0: None,
-            tex_coords_1: None,
-            colors_0: None,
-            vertex_count,
-            morph_target_count,
+            targets: Vec::new(),
         }
     }
 
@@ -104,17 +95,17 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     }
 
     pub fn positions(mut self, positions: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
-        self.positions = Some(Box::new(positions.into_iter()));
+        self.attributes = self.attributes.positions(positions);
         self
     }
 
     pub fn normals(mut self, normals: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
-        self.normals = Some(Box::new(normals.into_iter()));
+        self.attributes = self.attributes.normals(normals);
         self
     }
 
     pub fn tangents(mut self, tangents: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
-        self.tangents = Some(Box::new(tangents.into_iter()));
+        self.attributes.tangents = Some(Box::new(tangents.into_iter()));
         self
     }
 
@@ -124,22 +115,17 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     }
 
     pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = [f32; 2]> + 'a) -> Self {
-        if self.tex_coords_0.is_none() {
-            self.tex_coords_0 = Some(Box::new(tex_coords.into_iter()));
-        } else if self.tex_coords_1.is_none() {
-            self.tex_coords_1 = Some(Box::new(tex_coords.into_iter()));
-        } else {
-            panic!("to many geometry texture coordinates set");
-        }
+        self.attributes = self.attributes.tex_coords(tex_coords);
         self
     }
 
     pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
-        if self.colors_0.is_none() {
-            self.colors_0 = Some(Box::new(colors.into_iter()));
-        } else {
-            panic!("to many geometry colors set");
-        }
+        self.attributes = self.attributes.colors(colors);
+        self
+    }
+
+    pub fn morph_target(mut self, morph_target: MorphTargetBuilder<'a>) -> Self {
+        self.targets.push(morph_target);
         self
     }
 
@@ -234,23 +220,42 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     }
 
     pub fn build(mut self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
-        let generate_normals = self.normals.is_none();
+        let generate_normals = self.attributes.normals.is_none();
         if generate_normals {
-            self.tangents = None;
+            self.attributes.tangents = None;
         }
-        let has_tangents = self.tangents.is_some() || self.generate_tangents.is_some();
+        let has_tangents = self.attributes.tangents.is_some() || self.generate_tangents.is_some();
 
         let mut positions = self
+            .attributes
             .positions
-            .expect("positions attribute should be set")
-            .take(self.vertex_count as usize);
-        let mut normals = self.normals.unwrap_or(Box::new(repeat([0.0; 3])));
-        let mut tangents = self.tangents.unwrap_or(Box::new(repeat([0.0; 4])));
-        let mut tex_coords_0 = self.tex_coords_0.unwrap_or(Box::new(repeat([0.0; 2])));
-        let mut tex_coords_1 = self.tex_coords_1.unwrap_or(Box::new(repeat([0.0; 2])));
-        let mut colors_0 = self.colors_0.unwrap_or(Box::new(repeat([1.0; 4])));
+            .expect("positions attribute should be set");
+        let mut normals = self
+            .attributes
+            .normals
+            .unwrap_or(Box::new(repeat([0.0; 3])));
+        let mut tangents = self
+            .attributes
+            .tangents
+            .unwrap_or(Box::new(repeat([0.0; 4])));
+        let mut tex_coords_0 = self
+            .attributes
+            .tex_coords_0
+            .unwrap_or(Box::new(repeat([0.0; 2])));
+        let mut tex_coords_1 = self
+            .attributes
+            .tex_coords_1
+            .unwrap_or(Box::new(repeat([0.0; 2])));
+        let mut colors_0 = self
+            .attributes
+            .colors_0
+            .unwrap_or(Box::new(repeat([1.0; 4])));
 
-        let mut attributes = Vec::from_iter(from_fn(|| {
+        let mut vertex_count = positions.size_hint().0;
+        let morph_target_count = self.targets.len();
+        let mut attributes = Vec::with_capacity(vertex_count * (1 + morph_target_count));
+
+        attributes.extend(from_fn(|| {
             Some(Attribute {
                 position: positions.next()?,
                 _pad0: 0,
@@ -262,23 +267,59 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                 color_0: colors_0.next()?,
             })
         }));
+        vertex_count = attributes.len();
+        for target in self.targets {
+            let mut positions = target.positions.unwrap_or(Box::new(repeat([0.0; 3])));
+            let mut normals = target.normals.unwrap_or(Box::new(repeat([0.0; 3])));
+            let mut tangents = target.tangents.unwrap_or(Box::new(repeat([0.0; 4])));
+            let mut tex_coords_0 = target.tex_coords_0.unwrap_or(Box::new(repeat([0.0; 2])));
+            let mut tex_coords_1 = target.tex_coords_1.unwrap_or(Box::new(repeat([0.0; 2])));
+            let mut colors_0 = target.colors_0.unwrap_or(Box::new(repeat([0.0; 4])));
+
+            attributes.extend(from_fn(|| {
+                Some(Attribute {
+                    position: positions.next()?,
+                    _pad0: 0,
+                    normal: normals.next()?,
+                    _pad1: 0,
+                    tangent: tangents.next()?,
+                    tex_coord_0: tex_coords_0.next()?,
+                    tex_coord_1: tex_coords_1.next()?,
+                    color_0: colors_0.next()?,
+                })
+            }));
+        }
 
         if generate_normals || self.generate_tangents.is_some() {
             match self.indices {
                 Indices::None => (),
                 Indices::U16(slice) => {
-                    self.vertex_count = slice.len();
-                    attributes = slice
-                        .iter()
-                        .map(|index| attributes[*index as usize])
-                        .collect();
+                    vertex_count = slice.len();
+                    let mut new_attributes =
+                        Vec::with_capacity((1 + morph_target_count) * vertex_count);
+                    for i in 0..=morph_target_count {
+                        let offset = i * vertex_count;
+                        new_attributes.extend(
+                            slice
+                                .iter()
+                                .map(|index| attributes[offset + *index as usize]),
+                        );
+                    }
+                    attributes = new_attributes;
                 }
                 Indices::U32(slice) => {
-                    self.vertex_count = slice.len();
-                    attributes = slice
-                        .iter()
-                        .map(|index| attributes[*index as usize])
-                        .collect();
+                    vertex_count = slice.len();
+                    let mut new_attributes =
+                        Vec::with_capacity((1 + morph_target_count) * vertex_count);
+                    for i in 0..=morph_target_count {
+                        let offset = i * vertex_count;
+                        new_attributes.extend(
+                            slice
+                                .iter()
+                                .map(|index| attributes[offset + *index as usize]),
+                        );
+                    }
+                    attributes = new_attributes;
                 }
             };
             self.indices = Indices::None;
@@ -297,14 +338,13 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         }
 
         let header = AttributeStorageHeader {
-            vertex_count: self.vertex_count as u32,
-            target_count: 0,
+            vertex_count: vertex_count as u32,
+            target_count: morph_target_count as u32,
             _pad: [0; 2],
         };
         let header_size = size_of::<AttributeStorageHeader>() as wgpu::BufferAddress;
-        let attributes_size = (self.vertex_count
-            * (1 + self.morph_target_count)
-            * size_of::<Attribute>()) as wgpu::BufferAddress;
+        let attributes_size = (vertex_count * (1 + morph_target_count) * size_of::<Attribute>())
+            as wgpu::BufferAddress;
 
         let attributes_buffer = self
             .resources
@@ -325,7 +365,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             .slice(header_size..)
             .get_mapped_range_mut()
             .copy_from_slice(cast_slice(&attributes));
-        
+
         attributes_buffer.unmap();
 
         let indices = match &self.indices {
@@ -374,6 +414,66 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             vertex_count: header.vertex_count,
             has_tangents,
         })
+    }
+}
+
+#[must_use]
+pub struct MorphTargetBuilder<'a> {
+    positions: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
+    normals: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
+    tangents: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+    tex_coords_0: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
+    tex_coords_1: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
+    colors_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+}
+
+impl<'a> MorphTargetBuilder<'a> {
+    pub fn new() -> Self {
+        Self {
+            positions: None,
+            normals: None,
+            tangents: None,
+            tex_coords_0: None,
+            tex_coords_1: None,
+            colors_0: None,
+        }
+    }
+
+    pub fn positions(mut self, positions: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.positions = Some(Box::new(positions.into_iter()));
+        self
+    }
+
+    pub fn normals(mut self, normals: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.normals = Some(Box::new(normals.into_iter()));
+        self
+    }
+
+    pub fn tangents(mut self, tangents: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.tangents = Some(Box::new(
+            tangents.into_iter().map(|[a, b, c]| [a, b, c, 0.0]),
+        ));
+        self
+    }
+
+    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = [f32; 2]> + 'a) -> Self {
+        if self.tex_coords_0.is_none() {
+            self.tex_coords_0 = Some(Box::new(tex_coords.into_iter()));
+        } else if self.tex_coords_1.is_none() {
+            self.tex_coords_1 = Some(Box::new(tex_coords.into_iter()));
+        } else {
+            panic!("to many geometry texture coordinates set");
+        }
+        self
+    }
+
+    pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+        if self.colors_0.is_none() {
+            self.colors_0 = Some(Box::new(colors.into_iter()));
+        } else {
+            panic!("to many geometry colors set");
+        }
+        self
     }
 }
 
@@ -549,14 +649,3 @@ impl Default for Attribute {
         }
     }
 }
-
-// #[derive(Clone, Copy, Pod, Zeroable)]
-// #[repr(C)]
-// struct MorphTarget {
-//     position: u32,
-//     normal: u32,
-//     tangent: u32,
-//     tex_coord_0: u32,
-//     tex_coord_1: u32,
-//     color_0: u32,
-// }

@@ -229,20 +229,20 @@ fn interpolate_vec3(
     current_timestamp: f32,
     inputs: &[f32],
     interpolation: Interpolation,
-    ouputs: &[[f32; 3]],
+    outputs: &[[f32; 3]],
 ) -> Vec3 {
     interpolate(
         current_timestamp,
         inputs,
         interpolation,
-        ouputs,
+        outputs,
         |v_previous| Vec3::from_slice(v_previous),
         |t, v_previous, v_next| {
             let v_previous = Vec3::from_slice(v_previous);
             let v_next = Vec3::from_slice(v_next);
             (1.0 - t) * v_previous + t * v_next
         },
-        |t, t_d, a_next, v_prev, v_next, b_prev| {
+        |t, t_d, v_prev, b_prev, a_next, v_next| {
             let a_next = Vec3::from_slice(a_next);
             let v_prev = Vec3::from_slice(v_prev);
             let v_next = Vec3::from_slice(v_next);
@@ -263,13 +263,13 @@ fn interpolate_quat(
     current_timestamp: f32,
     inputs: &[f32],
     interpolation: Interpolation,
-    ouputs: &[[f32; 4]],
+    outputs: &[[f32; 4]],
 ) -> Quat {
     interpolate(
         current_timestamp,
         inputs,
         interpolation,
-        ouputs,
+        outputs,
         |v_previous| Quat::from_slice(v_previous),
         |t, v_previous, v_next| {
             let v_previous = Vec4::from_slice(v_previous);
@@ -283,7 +283,7 @@ fn interpolate_quat(
                 (a * (1.0 - t)).sin() / a_sin * v_previous + s * (a * t).sin() / a_sin * v_next;
             Quat::from_vec4(v_t)
         },
-        |t, t_d, a_next, v_prev, v_next, b_prev| {
+        |t, t_d, v_prev, b_prev, a_next, v_next| {
             let a_next = Vec4::from_slice(a_next);
             let v_prev = Vec4::from_slice(v_prev);
             let v_next = Vec4::from_slice(v_next);
@@ -305,7 +305,7 @@ fn interpolate<const N: usize, T>(
     current_timestamp: f32,
     inputs: &[f32],
     interpolation: Interpolation,
-    ouputs: &[[f32; N]],
+    outputs: &[[f32; N]],
     step_callback: impl FnOnce(&[f32; N]) -> T,
     linear_callback: impl FnOnce(f32, &[f32; N], &[f32; N]) -> T,
     cubic_spline_callback: impl FnOnce(f32, f32, &[f32; N], &[f32; N], &[f32; N], &[f32; N]) -> T,
@@ -315,51 +315,48 @@ fn interpolate<const N: usize, T>(
     while let Some((k, t_k)) = iter.next() {
         if t_c == *t_k {
             return match interpolation {
-                Interpolation::CubicSpline => step_callback(&ouputs[3 * k + 1]),
-                _ => step_callback(&ouputs[k]),
+                Interpolation::CubicSpline => step_callback(&outputs[3 * k + 1]),
+                _ => step_callback(&outputs[k]),
             };
         } else if t_c < *t_k {
             if k == 0 {
                 return match interpolation {
-                    Interpolation::CubicSpline => step_callback(&ouputs[1]),
-                    _ => step_callback(ouputs.first().unwrap()),
+                    Interpolation::CubicSpline => step_callback(&outputs[1]),
+                    _ => step_callback(&outputs[0]),
                 };
             } else {
                 return match interpolation {
-                    Interpolation::Step => step_callback(&ouputs[k - 1]),
+                    Interpolation::Step => step_callback(&outputs[k - 1]),
                     Interpolation::Linear => {
                         let t_previous = inputs[k - 1];
-                        let v_previous = &ouputs[k - 1];
+                        let v_previous = &outputs[k - 1];
                         let t_next = *t_k;
-                        let v_next = &ouputs[k];
+                        let v_next = &outputs[k];
                         let t_d = t_next - t_previous;
                         let t = (t_c - t_previous) / t_d;
                         linear_callback(t, v_previous, v_next)
                     }
                     Interpolation::CubicSpline => {
-                        let mut k_prev = k - 1;
-                        let mut k_next = k;
-                        let t_previous = inputs[k_prev];
+                        let t_previous = inputs[k - 1];
                         let t_next = *t_k;
                         let t_d = t_next - t_previous;
                         let t = (t_c - t_previous) / t_d;
 
-                        k_prev *= 3;
-                        k_next *= 3;
-                        let b_prev = &ouputs[k_prev + 2];
-                        let v_prev = &ouputs[k_prev + 1];
-                        let v_next = &ouputs[k_next + 1];
-                        let a_next = &ouputs[k_next + 0];
+                        let start = (k - 1) * 3 + 1;
+                        let v_prev = &outputs[start + 0];
+                        let b_prev = &outputs[start + 1];
+                        let a_next = &outputs[start + 2];
+                        let v_next = &outputs[start + 3];
 
-                        cubic_spline_callback(t, t_d, a_next, v_prev, v_next, b_prev)
+                        cubic_spline_callback(t, t_d, v_prev, b_prev, a_next, v_next)
                     }
                 };
             }
         }
     }
     match interpolation {
-        Interpolation::CubicSpline => step_callback(&ouputs[3 * inputs.len() - 2]),
-        _ => step_callback(ouputs.last().unwrap()),
+        Interpolation::CubicSpline => step_callback(&outputs[3 * inputs.len() - 2]),
+        _ => step_callback(outputs.last().unwrap()),
     }
 }
 
@@ -398,11 +395,11 @@ fn interpolate_weights(
                     }
                     Interpolation::Linear => {
                         let t_previous = inputs[k - 1];
-                        let start = (k - 1) * count;
+                        let mut start = (k - 1) * count;
                         let v_previous = &outputs[start..start + count];
 
                         let t_next = *t_k;
-                        let start = k * count;
+                        start += count;
                         let v_next = &outputs[start..start + count];
 
                         let t_d = t_next - t_previous;

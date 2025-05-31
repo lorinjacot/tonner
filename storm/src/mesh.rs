@@ -55,26 +55,31 @@ impl<'r> MeshBuilder<'r> {
 
     pub fn build(self) -> &'r mut Mesh {
         let id = self.resources.meshes.next_id();
+        let mut morph_target_count = None;
         let primitives =
             self.primitives
                 .into_iter()
                 .map(|(geometry, material)| {
                     let geometry = &self.resources.geometries[geometry];
                     let material = &self.resources.materials[material];
+                    match morph_target_count {
+                        Some(count) => assert_eq!(
+                            count,
+                            geometry.morph_target_count(),
+                            "all primitives should have the same number of morph targets"
+                        ),
+                        None => morph_target_count = Some(geometry.morph_target_count()),
+                    }
 
                     if material.textures.contains(Textures::NORMAL) {
                         assert!(geometry.has_tangents());
                     }
 
-                    let geometry_layouts = geometry.vertex_buffer_layouts();
-
-                    let mut vertex_buffer_layouts = Vec::with_capacity(1 + geometry_layouts.len());
-                    vertex_buffer_layouts.push(wgpu::VertexBufferLayout {
+                    let vertex_buffer_layouts = vec![wgpu::VertexBufferLayout {
                         array_stride: 4,
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &wgpu::vertex_attr_array![0 => Uint32],
-                    });
-                    vertex_buffer_layouts.extend(geometry_layouts);
+                    }];
 
                     let constants = &mut HashMap::with_capacity(3);
                     constants.insert(
@@ -153,15 +158,11 @@ impl<'r> MeshBuilder<'r> {
                         },
                     );
 
-                    let index_buffer = geometry.indices().clone();
-                    let vertex_buffers = geometry.vertex_buffer().into();
-                    let vertex_count = geometry.vertex_count();
-
                     Primitive {
                         pipeline,
-                        index_buffer,
-                        vertex_buffers,
-                        vertex_count,
+                        index_buffer: geometry.indices().clone(),
+                        vertex_count: geometry.vertex_count() as u32,
+                        geometry: geometry.bind_group().clone(),
                         material: material.bind_group.clone(),
                     }
                 })
@@ -472,8 +473,8 @@ struct MaterialUniform {
 pub struct Primitive {
     pub(super) pipeline: wgpu::RenderPipeline,
     pub(super) index_buffer: Option<IndexBuffer>,
-    pub(super) vertex_buffers: Vec<wgpu::Buffer>,
     pub(super) vertex_count: u32,
+    pub(super) geometry: wgpu::BindGroup,
     pub(super) material: wgpu::BindGroup,
 }
 
@@ -486,7 +487,11 @@ pub(super) struct MeshBuilderData {
 }
 
 impl MeshBuilderData {
-    pub fn new(device: &wgpu::Device, render_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        render_bind_group_layout: &wgpu::BindGroupLayout,
+        geometry_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Material bind group layout"),
@@ -593,7 +598,11 @@ impl MeshBuilderData {
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&format!("Primitive pipeline layout")),
-                bind_group_layouts: &[render_bind_group_layout, &material_bind_group_layout],
+                bind_group_layouts: &[
+                    render_bind_group_layout,
+                    geometry_bind_group_layout,
+                    &material_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 

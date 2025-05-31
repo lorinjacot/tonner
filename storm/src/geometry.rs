@@ -1,7 +1,10 @@
-use std::{borrow::Cow, f32::consts::PI, iter::repeat_n};
+use std::{
+    borrow::Cow,
+    f32::consts::PI,
+    iter::{from_fn, repeat},
+};
 
-use bitflags::bitflags;
-use bytemuck::cast_slice;
+use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::{Vec3, vec3};
 use mikktspace_sys::{MikkTSpaceInterface, gen_tang_space_default};
 use wgpu::util::DeviceExt;
@@ -11,39 +14,36 @@ use crate::{DenseEntry, Id, Resources};
 pub struct Geometry {
     id: Id<Self>,
     indices: Option<IndexBuffer>,
-    vertex_buffers: Vec<wgpu::Buffer>,
-    vertex_buffer_layouts: Vec<VertexBufferLayout>,
-    vertex_count: u32,
+    attributes_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    vertex_count: usize,
+    morph_target_count: usize,
     has_tangents: bool,
 }
 
 impl Geometry {
-    pub fn vertex_buffer_layouts(
-        &self,
-    ) -> impl Iterator<Item = wgpu::VertexBufferLayout> + ExactSizeIterator {
-        self.vertex_buffer_layouts
-            .iter()
-            .map(|layout| wgpu::VertexBufferLayout {
-                array_stride: layout.array_stride,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &layout.attributes,
-            })
-    }
-
     pub(super) fn indices(&self) -> &Option<IndexBuffer> {
         &self.indices
     }
 
-    pub fn vertex_buffer(&self) -> &[wgpu::Buffer] {
-        &self.vertex_buffers
+    pub fn vertex_count(&self) -> usize {
+        self.vertex_count
     }
 
-    pub fn vertex_count(&self) -> u32 {
-        self.vertex_count
+    pub fn morph_target_count(&self) -> usize {
+        self.morph_target_count
     }
 
     pub fn has_tangents(&self) -> bool {
         self.has_tangents
+    }
+
+    pub fn attributes_buffer(&self) -> &wgpu::Buffer {
+        &self.attributes_buffer
+    }
+
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
     }
 }
 
@@ -59,19 +59,16 @@ impl DenseEntry for Geometry {
 pub(super) struct IndexBuffer {
     pub(super) buffer: wgpu::Buffer,
     pub(super) format: wgpu::IndexFormat,
+    pub(super) index_count: u32,
 }
 
 #[must_use]
 pub struct GeometryBuilder<'a, 'r> {
     resources: &'r mut Resources,
     indices: Indices<'a>,
-    positions: Option<Cow<'a, [[f32; 3]]>>,
-    normals: Option<Cow<'a, [[f32; 3]]>>,
-    tangents: Option<Cow<'a, [[f32; 4]]>>,
-    normal_tex_coords: Option<Attribute>,
-    tex_coords: Vec<(Attribute, TexCoords<'a>)>,
-    colors: Vec<(Attribute, Colors<'a>)>,
-    attributes: Attributes,
+    attributes: MorphTargetBuilder<'a>,
+    generate_tangents: Option<u32>,
+    targets: Vec<MorphTargetBuilder<'a>>,
 }
 
 impl<'a, 'r> GeometryBuilder<'a, 'r> {
@@ -79,13 +76,16 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         Self {
             resources,
             indices: Indices::None,
-            positions: None,
-            normals: None,
-            tangents: None,
-            normal_tex_coords: None,
-            tex_coords: Vec::new(),
-            colors: Vec::new(),
-            attributes: Attributes::empty(),
+            attributes: MorphTargetBuilder {
+                positions: None,
+                normals: None,
+                tangents: None,
+                tex_coords_0: None,
+                tex_coords_1: None,
+                colors_0: None,
+            },
+            generate_tangents: None,
+            targets: Vec::new(),
         }
     }
 
@@ -99,76 +99,39 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn positions(mut self, positions: Cow<'a, [[f32; 3]]>) -> Self {
-        self.positions = Some(positions);
-        self.attributes.insert(Attributes::POSITION);
+    pub fn positions(mut self, positions: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.attributes = self.attributes.positions(positions);
         self
     }
 
-    pub fn normals(mut self, normals: Cow<'a, [[f32; 3]]>) -> Self {
-        self.normals = Some(normals);
-        self.attributes.insert(Attributes::NORMAL);
+    pub fn normals(mut self, normals: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.attributes = self.attributes.normals(normals);
         self
     }
 
-    pub fn tangents(mut self, tangents: Cow<'a, [[f32; 4]]>) -> Self {
-        self.tangents = Some(tangents);
-        self.attributes.insert(Attributes::TANGENT);
+    pub fn tangents(mut self, tangents: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+        self.attributes.tangents = Some(Box::new(tangents.into_iter()));
         self
     }
 
-    pub fn generate_tangents(mut self, normal_tex_coords: u32) -> Self {
-        self.normal_tex_coords = Some(match normal_tex_coords {
-            0 => Attribute::TexCoord0,
-            1 => Attribute::TexCoord1,
-            _ => panic!("unsupported vertex texure coordinate set"),
-        });
+    pub fn generate_tangents(mut self, normal_tex_coord: u32) -> Self {
+        self.generate_tangents = Some(normal_tex_coord);
         self
     }
 
-    fn tex_coords(mut self, set: u32, tex_coords: TexCoords<'a>) -> Self {
-        let (attribute, flag) = match set {
-            0 => (Attribute::TexCoord0, Attributes::TEX_COORD_0),
-            1 => (Attribute::TexCoord1, Attributes::TEX_COORD_1),
-            _ => panic!("unsupported vertex texure coordinate set"),
-        };
-        self.tex_coords.push((attribute, tex_coords));
-        self.attributes.insert(flag);
+    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = [f32; 2]> + 'a) -> Self {
+        self.attributes = self.attributes.tex_coords(tex_coords);
         self
     }
 
-    pub fn tex_coords_u8(self, set: u32, tex_coords: Cow<'a, [[u8; 2]]>) -> Self {
-        self.tex_coords(set, TexCoords::U8(tex_coords))
-    }
-
-    pub fn tex_coords_u16(self, set: u32, tex_coords: Cow<'a, [[u16; 2]]>) -> Self {
-        self.tex_coords(set, TexCoords::U16(tex_coords))
-    }
-
-    pub fn tex_coords_f32(self, set: u32, tex_coords: Cow<'a, [[f32; 2]]>) -> Self {
-        self.tex_coords(set, TexCoords::F32(tex_coords))
-    }
-
-    fn colors(mut self, set: u32, colors: Colors<'a>) -> Self {
-        let (attribute, flag) = match set {
-            0 => (Attribute::Color0, Attributes::COLOR_0),
-            _ => panic!("unsupported vertex color set"),
-        };
-        self.colors.push((attribute, colors));
-        self.attributes.insert(flag);
+    pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+        self.attributes = self.attributes.colors(colors);
         self
     }
 
-    pub fn colors_u8(self, set: u32, colors: Cow<'a, [[u8; 4]]>) -> Self {
-        self.colors(set, Colors::RgbaU8(colors))
-    }
-
-    pub fn colors_u16(self, set: u32, colors: Cow<'a, [[u16; 4]]>) -> Self {
-        self.colors(set, Colors::RgbaU16(colors))
-    }
-
-    pub fn colors_f32(self, set: u32, colors: Cow<'a, [[f32; 4]]>) -> Self {
-        self.colors(set, Colors::RgbaF32(colors))
+    pub fn morph_target(mut self, morph_target: MorphTargetBuilder<'a>) -> Self {
+        self.targets.push(morph_target);
+        self
     }
 
     /// An helper for generating sphere geometries.
@@ -256,218 +219,159 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         }
 
         self.indices_u32(indices.into())
-            .positions(positions.into())
-            .normals(normals.into())
-            .tex_coords_f32(0, uvs.into())
+            .positions(positions)
+            .normals(normals)
+            .tex_coords(uvs)
     }
 
     pub fn build(mut self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
-        let mut vertex_buffers = Vec::new();
-        let mut vertex_buffer_layouts = Vec::new();
+        let generate_normals = self.attributes.normals.is_none();
+        if generate_normals {
+            self.attributes.tangents = None;
+        }
+        let has_tangents = self.attributes.tangents.is_some() || self.generate_tangents.is_some();
 
-        let mut create_vertex_buffer =
-            |name, contents, array_stride, format, attribute: Attribute| {
-                vertex_buffers.push(self.resources.device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some(name),
-                        contents,
-                        usage: wgpu::BufferUsages::VERTEX,
-                    },
-                ));
-                vertex_buffer_layouts.push(VertexBufferLayout {
-                    array_stride,
-                    attributes: vec![wgpu::VertexAttribute {
-                        format,
-                        offset: 0,
-                        shader_location: attribute as u32,
-                    }],
-                });
-            };
+        let mut positions = self
+            .attributes
+            .positions
+            .expect("positions attribute should be set");
+        let mut normals = self
+            .attributes
+            .normals
+            .unwrap_or(Box::new(repeat([0.0; 3])));
+        let mut tangents = self
+            .attributes
+            .tangents
+            .unwrap_or(Box::new(repeat([0.0; 4])));
+        let mut tex_coords_0 = self
+            .attributes
+            .tex_coords_0
+            .unwrap_or(Box::new(repeat([0.0; 2])));
+        let mut tex_coords_1 = self
+            .attributes
+            .tex_coords_1
+            .unwrap_or(Box::new(repeat([0.0; 2])));
+        let mut colors_0 = self
+            .attributes
+            .colors_0
+            .unwrap_or(Box::new(repeat([1.0; 4])));
 
-        let mut positions = self.positions.expect("positions attribute should be set");
-        let mut vertex_count = positions.len();
+        let mut vertex_count = positions.size_hint().0;
+        let morph_target_count = self.targets.len();
+        let mut attributes = Vec::with_capacity(vertex_count * (1 + morph_target_count));
 
-        let mut normals = match self.normals {
-            Some(normals) => normals,
-            None => {
-                let indices: Option<Vec<usize>> = match self.indices {
-                    Indices::None => None,
-                    Indices::U16(slice) => {
-                        Some(slice.iter().map(|index| *index as usize).collect())
+        attributes.extend(from_fn(|| {
+            Some(Attribute {
+                position: positions.next()?,
+                _pad0: 0,
+                normal: normals.next()?,
+                _pad1: 0,
+                tangent: tangents.next()?,
+                tex_coord_0: tex_coords_0.next()?,
+                tex_coord_1: tex_coords_1.next()?,
+                color_0: colors_0.next()?,
+            })
+        }));
+        vertex_count = attributes.len();
+        for target in self.targets {
+            let mut positions = target.positions.unwrap_or(Box::new(repeat([0.0; 3])));
+            let mut normals = target.normals.unwrap_or(Box::new(repeat([0.0; 3])));
+            let mut tangents = target.tangents.unwrap_or(Box::new(repeat([0.0; 4])));
+            let mut tex_coords_0 = target.tex_coords_0.unwrap_or(Box::new(repeat([0.0; 2])));
+            let mut tex_coords_1 = target.tex_coords_1.unwrap_or(Box::new(repeat([0.0; 2])));
+            let mut colors_0 = target.colors_0.unwrap_or(Box::new(repeat([0.0; 4])));
+
+            attributes.extend(from_fn(|| {
+                Some(Attribute {
+                    position: positions.next()?,
+                    _pad0: 0,
+                    normal: normals.next()?,
+                    _pad1: 0,
+                    tangent: tangents.next()?,
+                    tex_coord_0: tex_coords_0.next()?,
+                    tex_coord_1: tex_coords_1.next()?,
+                    color_0: colors_0.next()?,
+                })
+            }));
+        }
+
+        if generate_normals || self.generate_tangents.is_some() {
+            match self.indices {
+                Indices::None => (),
+                Indices::U16(slice) => {
+                    vertex_count = slice.len();
+                    let mut new_attributes =
+                        Vec::with_capacity((1 + morph_target_count) * vertex_count);
+                    for i in 0..=morph_target_count {
+                        let offset = i * vertex_count;
+                        new_attributes.extend(
+                            slice
+                                .iter()
+                                .map(|index| attributes[offset + *index as usize]),
+                        );
                     }
-                    Indices::U32(slice) => {
-                        Some(slice.iter().map(|index| *index as usize).collect())
-                    }
-                };
-                self.indices = Indices::None;
-                if let Some(indices) = indices {
-                    vertex_count = indices.len();
-                    positions = indices.iter().map(|index| positions[*index]).collect();
-                    for (_, tex_coords) in self.tex_coords.iter_mut() {
-                        *tex_coords = tex_coords.to_unindexed(&indices);
-                    }
-                    for (_, colors) in self.colors.iter_mut() {
-                        *colors = colors.to_unindexed(&indices);
-                    }
+                    attributes = new_attributes;
                 }
-                let normals = compute_normals(&positions);
-                self.tangents = None;
-                self.attributes.remove(Attributes::TANGENT);
-                Cow::Owned(normals)
-            }
-        };
-
-        if let Some(normal_tex_coords) = self.normal_tex_coords {
-            let indices: Option<Vec<usize>> = match self.indices {
-                Indices::None => None,
-                Indices::U16(slice) => Some(slice.iter().map(|index| *index as usize).collect()),
-                Indices::U32(slice) => Some(slice.iter().map(|index| *index as usize).collect()),
+                Indices::U32(slice) => {
+                    vertex_count = slice.len();
+                    let mut new_attributes =
+                        Vec::with_capacity((1 + morph_target_count) * vertex_count);
+                    for i in 0..=morph_target_count {
+                        let offset = i * vertex_count;
+                        new_attributes.extend(
+                            slice
+                                .iter()
+                                .map(|index| attributes[offset + *index as usize]),
+                        );
+                    }
+                    attributes = new_attributes;
+                }
             };
             self.indices = Indices::None;
-            if let Some(indices) = indices {
-                vertex_count = indices.len();
-                positions = indices.iter().map(|index| positions[*index]).collect();
-                normals = indices.iter().map(|index| normals[*index]).collect();
-                for (_, tex_coords) in self.tex_coords.iter_mut() {
-                    *tex_coords = tex_coords.to_unindexed(&indices);
-                }
-                for (_, colors) in self.colors.iter_mut() {
-                    *colors = colors.to_unindexed(&indices);
-                }
-            }
-            let tex_coords = self
-                .tex_coords
-                .iter()
-                .find_map(|(attribute, tex_coords)| {
-                    if *attribute == normal_tex_coords {
-                        Option::<Cow<'_, [[f32; 2]]>>::Some(match tex_coords {
-                            TexCoords::U8(slice) => slice
-                                .iter()
-                                .map(|coord| {
-                                    [
-                                        coord[0] as f32 / u8::MAX as f32,
-                                        coord[1] as f32 / u8::MAX as f32,
-                                    ]
-                                })
-                                .collect(),
-                            TexCoords::U16(slice) => slice
-                                .iter()
-                                .map(|coord| {
-                                    [
-                                        coord[0] as f32 / u16::MAX as f32,
-                                        coord[1] as f32 / u16::MAX as f32,
-                                    ]
-                                })
-                                .collect(),
-                            TexCoords::F32(slice) => Cow::Borrowed(&slice),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .expect("Normal texture coordinate set not found");
-            let mut tangents = vec![[0.0; 4]; positions.len()];
+        }
+
+        if generate_normals {
+            compute_normals(&mut attributes);
+        }
+
+        if let Some(normal_tex_coord) = self.generate_tangents {
             let mut mikk_t_space = MikkTSpace {
-                positions: &positions,
-                normals: &normals,
-                tex_coord: &tex_coords,
-                tangents: &mut tangents,
+                attributes: &mut attributes,
+                normal_tex_coord,
             };
             gen_tang_space_default(&mut mikk_t_space);
-            self.tangents = Some(Cow::Owned(tangents));
-            self.attributes.insert(Attributes::TANGENT);
         }
 
-        create_vertex_buffer(
-            "Positions buffer",
-            cast_slice(&positions),
-            3 * 4,
-            wgpu::VertexFormat::Float32x3,
-            Attribute::Position,
-        );
-        create_vertex_buffer(
-            "Normals buffer",
-            cast_slice(&normals),
-            3 * 4,
-            wgpu::VertexFormat::Float32x3,
-            Attribute::Normal,
-        );
+        let header = AttributeStorageHeader {
+            vertex_count: vertex_count as u32,
+            target_count: morph_target_count as u32,
+            _pad: [0; 2],
+        };
+        let header_size = size_of::<AttributeStorageHeader>() as wgpu::BufferAddress;
+        let attributes_size = (vertex_count * (1 + morph_target_count) * size_of::<Attribute>())
+            as wgpu::BufferAddress;
 
-        if let Some(tangents) = &self.tangents {
-            create_vertex_buffer(
-                "Tangents vertex buffer",
-                cast_slice(tangents),
-                4 * 4,
-                wgpu::VertexFormat::Float32x4,
-                Attribute::Tangent,
-            );
-        }
+        let attributes_buffer = self
+            .resources
+            .device
+            .create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Geometry storage buffer"),
+                size: header_size + attributes_size,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: true,
+            });
 
-        for (attribute, tex_coords) in &self.tex_coords {
-            let (contents, array_stride, format) = match tex_coords {
-                TexCoords::U8(slice) => (cast_slice(slice), 2 * 1, wgpu::VertexFormat::Unorm8x2),
-                TexCoords::U16(slice) => (cast_slice(slice), 2 * 2, wgpu::VertexFormat::Unorm16x2),
-                TexCoords::F32(slice) => (cast_slice(slice), 2 * 4, wgpu::VertexFormat::Float32x2),
-            };
-            create_vertex_buffer(
-                "Texture coordinate buffer",
-                contents,
-                array_stride,
-                format,
-                *attribute,
-            );
-        }
+        attributes_buffer
+            .slice(..header_size)
+            .get_mapped_range_mut()
+            .copy_from_slice(bytes_of(&header));
 
-        for (attribute, colors) in &self.colors {
-            let (contents, array_stride, format) = match colors {
-                Colors::RgbaU8(slice) => (cast_slice(slice), 4 * 1, wgpu::VertexFormat::Unorm8x4),
-                Colors::RgbaU16(slice) => (cast_slice(slice), 4 * 2, wgpu::VertexFormat::Unorm16x4),
-                Colors::RgbaF32(slice) => (cast_slice(slice), 4 * 4, wgpu::VertexFormat::Float32x4),
-            };
-            create_vertex_buffer(
-                "Texture coordinate buffer",
-                contents,
-                array_stride,
-                format,
-                *attribute,
-            );
-        }
+        attributes_buffer
+            .slice(header_size..)
+            .get_mapped_range_mut()
+            .copy_from_slice(cast_slice(&attributes));
 
-        let mut check_attribute =
-            |attribute: Attribute, flag: Attributes, dummy_buffer: &DummyVertexBuffer| {
-                if !self.attributes.contains(flag) {
-                    vertex_buffers.push(dummy_buffer.buffer.clone());
-                    vertex_buffer_layouts.push(VertexBufferLayout {
-                        array_stride: 0,
-                        attributes: vec![wgpu::VertexAttribute {
-                            format: dummy_buffer.format,
-                            offset: 0,
-                            shader_location: attribute as u32,
-                        }],
-                    });
-                }
-            };
-
-        check_attribute(
-            Attribute::Tangent,
-            Attributes::TANGENT,
-            &self.resources.geometry_builder_data.dummy_tangents,
-        );
-        check_attribute(
-            Attribute::TexCoord0,
-            Attributes::TEX_COORD_0,
-            &self.resources.geometry_builder_data.dummy_tex_coords,
-        );
-        check_attribute(
-            Attribute::TexCoord1,
-            Attributes::TEX_COORD_1,
-            &self.resources.geometry_builder_data.dummy_tex_coords,
-        );
-        check_attribute(
-            Attribute::Color0,
-            Attributes::COLOR_0,
-            &self.resources.geometry_builder_data.dummy_colors,
-        );
+        attributes_buffer.unmap();
 
         let indices = match &self.indices {
             Indices::None => None,
@@ -479,7 +383,6 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             }
         }
         .map(|(contents, format, index_count)| {
-            vertex_count = index_count;
             let buffer =
                 self.resources
                     .device
@@ -488,63 +391,123 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                         contents,
                         usage: wgpu::BufferUsages::INDEX,
                     });
-            IndexBuffer { buffer, format }
+            IndexBuffer {
+                buffer,
+                format,
+                index_count: index_count as u32,
+            }
         });
 
+        let bind_group = self
+            .resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Geometry bind group"),
+                layout: &self.resources.geometry_builder_data.bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: attributes_buffer.as_entire_binding(),
+                }],
+            });
+
         let id = self.resources.geometries.next_id();
-        let geometry = Geometry {
+        self.resources.geometries.insert(Geometry {
             id,
             indices,
-            vertex_buffers,
-            vertex_buffer_layouts,
-            vertex_count: vertex_count as u32,
-            has_tangents: self.attributes.contains(Attributes::TANGENT),
-        };
-        self.resources.geometries.insert(geometry)
+            attributes_buffer,
+            bind_group,
+            vertex_count,
+            morph_target_count,
+            has_tangents,
+        })
+    }
+}
+
+#[must_use]
+pub struct MorphTargetBuilder<'a> {
+    positions: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
+    normals: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
+    tangents: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+    tex_coords_0: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
+    tex_coords_1: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
+    colors_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+}
+
+impl<'a> MorphTargetBuilder<'a> {
+    pub fn new() -> Self {
+        Self {
+            positions: None,
+            normals: None,
+            tangents: None,
+            tex_coords_0: None,
+            tex_coords_1: None,
+            colors_0: None,
+        }
+    }
+
+    pub fn positions(mut self, positions: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.positions = Some(Box::new(positions.into_iter()));
+        self
+    }
+
+    pub fn normals(mut self, normals: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.normals = Some(Box::new(normals.into_iter()));
+        self
+    }
+
+    pub fn tangents(mut self, tangents: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+        self.tangents = Some(Box::new(
+            tangents.into_iter().map(|[a, b, c]| [a, b, c, 0.0]),
+        ));
+        self
+    }
+
+    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = [f32; 2]> + 'a) -> Self {
+        if self.tex_coords_0.is_none() {
+            self.tex_coords_0 = Some(Box::new(tex_coords.into_iter()));
+        } else if self.tex_coords_1.is_none() {
+            self.tex_coords_1 = Some(Box::new(tex_coords.into_iter()));
+        } else {
+            panic!("to many geometry texture coordinates set");
+        }
+        self
+    }
+
+    pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+        if self.colors_0.is_none() {
+            self.colors_0 = Some(Box::new(colors.into_iter()));
+        } else {
+            panic!("to many geometry colors set");
+        }
+        self
     }
 }
 
 pub(super) struct GeometryBuilderData {
-    dummy_tangents: DummyVertexBuffer,
-    dummy_tex_coords: DummyVertexBuffer,
-    dummy_colors: DummyVertexBuffer,
+    bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl GeometryBuilderData {
     pub fn new(device: &wgpu::Device) -> Self {
-        let dummy_tangents = DummyVertexBuffer {
-            buffer: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Dummy vertex tangent buffer"),
-                size: 4 * 4,
-                usage: wgpu::BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            }),
-            format: wgpu::VertexFormat::Float32x4,
-        };
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Geometry bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
 
-        let dummy_tex_coords = DummyVertexBuffer {
-            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Dummy vertex texture coordinate buffer"),
-                contents: &[0; 2],
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-            format: wgpu::VertexFormat::Unorm8x2,
-        };
+        Self { bind_group_layout }
+    }
 
-        let dummy_colors = DummyVertexBuffer {
-            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Dummy vertex color buffer"),
-                contents: &[u8::MAX; 4],
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-            format: wgpu::VertexFormat::Unorm8x4,
-        };
-
-        Self {
-            dummy_tangents,
-            dummy_colors,
-            dummy_tex_coords,
-        }
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
     }
 }
 
@@ -581,118 +544,48 @@ impl Default for SphereDescriptor {
     }
 }
 
-struct VertexBufferLayout {
-    array_stride: wgpu::BufferAddress,
-    attributes: Vec<wgpu::VertexAttribute>,
-}
-
 enum Indices<'a> {
     None,
     U16(Cow<'a, [u16]>),
     U32(Cow<'a, [u32]>),
 }
 
-enum TexCoords<'a> {
-    U8(Cow<'a, [[u8; 2]]>),
-    U16(Cow<'a, [[u16; 2]]>),
-    F32(Cow<'a, [[f32; 2]]>),
-}
-
-impl<'a> TexCoords<'a> {
-    fn to_unindexed(&self, indices: &[usize]) -> Self {
-        match self {
-            TexCoords::U8(slice) => {
-                TexCoords::U8(indices.iter().map(|index| slice[*index]).collect())
-            }
-            TexCoords::U16(slice) => {
-                TexCoords::U16(indices.iter().map(|index| slice[*index]).collect())
-            }
-            TexCoords::F32(slice) => {
-                TexCoords::F32(indices.iter().map(|index| slice[*index]).collect())
-            }
-        }
-    }
-}
-
-enum Colors<'a> {
-    RgbaU8(Cow<'a, [[u8; 4]]>),
-    RgbaU16(Cow<'a, [[u16; 4]]>),
-    RgbaF32(Cow<'a, [[f32; 4]]>),
-}
-
-impl<'a> Colors<'a> {
-    fn to_unindexed(&self, indices: &[usize]) -> Self {
-        match self {
-            Colors::RgbaU8(slice) => {
-                Colors::RgbaU8(indices.iter().map(|index| slice[*index]).collect())
-            }
-            Colors::RgbaU16(slice) => {
-                Colors::RgbaU16(indices.iter().map(|index| slice[*index]).collect())
-            }
-            Colors::RgbaF32(slice) => {
-                Colors::RgbaF32(indices.iter().map(|index| slice[*index]).collect())
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(usize)]
-enum Attribute {
-    Position = 1,
-    Normal = 2,
-    Tangent = 3,
-    TexCoord0 = 4,
-    TexCoord1 = 5,
-    Color0 = 6,
-}
-
-bitflags! {
-    struct Attributes: u8 {
-        const POSITION = 1 << 0;
-        const NORMAL = 1 << 1;
-        const TANGENT = 1 << 2;
-        const TEX_COORD_0 = 1 << 3;
-        const TEX_COORD_1 = 1 << 4;
-        const COLOR_0 = 1 << 5;
-    }
-}
-
-struct DummyVertexBuffer {
-    buffer: wgpu::Buffer,
-    format: wgpu::VertexFormat,
-}
-
-fn compute_normals(positions: &[[f32; 3]]) -> Vec<[f32; 3]> {
-    let mut normals = Vec::with_capacity(positions.len());
-    let mut iter = positions.iter().copied();
+fn compute_normals(attributes: &mut [Attribute]) {
+    let mut iter = attributes.iter_mut();
     while let Some((a, b, c)) = next_triangle(&mut iter) {
-        let ab = b - a;
-        let ac = c - a;
+        let ab = Vec3::from_array(b.position) - Vec3::from_array(a.position);
+        let ac = Vec3::from_array(c.position) - Vec3::from_array(a.position);
         let normal = ab.cross(ac).to_array();
-        normals.extend(repeat_n(normal, 3));
+        a.normal = normal;
+        b.normal = normal;
+        c.normal = normal;
     }
-    normals
 }
 
-fn next_triangle(mut positions: impl Iterator<Item = [f32; 3]>) -> Option<(Vec3, Vec3, Vec3)> {
-    Some((
-        Vec3::from_array(positions.next()?),
-        Vec3::from_array(positions.next()?),
-        Vec3::from_array(positions.next()?),
-    ))
+fn next_triangle<'a>(
+    mut attributes: impl Iterator<Item = &'a mut Attribute>,
+) -> Option<(&'a mut Attribute, &'a mut Attribute, &'a mut Attribute)> {
+    Some((attributes.next()?, attributes.next()?, attributes.next()?))
 }
 
 struct MikkTSpace<'a> {
-    positions: &'a Cow<'a, [[f32; 3]]>,
-    normals: &'a Cow<'a, [[f32; 3]]>,
-    tex_coord: &'a Cow<'a, [[f32; 2]]>,
-    tangents: &'a mut [[f32; 4]],
+    attributes: &'a mut [Attribute],
+    normal_tex_coord: u32,
+}
+
+impl<'a> MikkTSpace<'a> {
+    fn attribute(&self, face: usize, vert: usize) -> &Attribute {
+        &self.attributes[face * 3 + vert]
+    }
+
+    fn attribute_mut(&mut self, face: usize, vert: usize) -> &mut Attribute {
+        &mut self.attributes[face * 3 + vert]
+    }
 }
 
 impl<'a> MikkTSpaceInterface for MikkTSpace<'a> {
     fn get_num_faces(&self) -> usize {
-        self.positions.len() / 3
+        self.attributes.len() / 3
     }
 
     fn get_num_vertices_of_face(&self, _face: usize) -> usize {
@@ -700,18 +593,65 @@ impl<'a> MikkTSpaceInterface for MikkTSpace<'a> {
     }
 
     fn get_position(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.positions[face * 3 + vert]
+        self.attribute(face, vert).position
     }
 
     fn get_normal(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.normals[face * 3 + vert]
+        self.attribute(face, vert).normal
     }
 
     fn get_tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
-        self.tex_coord[face * 3 + vert]
+        match self.normal_tex_coord {
+            0 => self.attribute(face, vert).tex_coord_0,
+            1 => self.attribute(face, vert).tex_coord_1,
+            _ => unreachable!(),
+        }
     }
 
     fn set_tspace_basic(&mut self, tangent: [f32; 3], sign: f32, face: usize, vert: usize) {
-        self.tangents[face * 3 + vert] = [tangent[0], tangent[1], tangent[2], -sign];
+        self.attribute_mut(face, vert).tangent = [tangent[0], tangent[1], tangent[2], -sign];
+    }
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct AttributeStorageHeader {
+    vertex_count: u32,
+    target_count: u32,
+    _pad: [u32; 2],
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct Attribute {
+    position: [f32; 3],
+    _pad0: u32,
+    normal: [f32; 3],
+    _pad1: u32,
+    tangent: [f32; 4],
+    tex_coord_0: [f32; 2],
+    tex_coord_1: [f32; 2],
+    color_0: [f32; 4],
+}
+
+impl Attribute {
+    const ZERO: Self = Self {
+        position: [0.0; 3],
+        _pad0: 0,
+        normal: [0.0; 3],
+        _pad1: 0,
+        tangent: [0.0; 4],
+        tex_coord_0: [0.0; 2],
+        tex_coord_1: [0.0; 2],
+        color_0: [0.0; 4],
+    };
+}
+
+impl Default for Attribute {
+    fn default() -> Self {
+        Self {
+            color_0: [1.0; 4],
+            ..Self::ZERO
+        }
     }
 }

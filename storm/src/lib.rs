@@ -165,7 +165,11 @@ impl Resources {
 
         let materials = SparseSet::new();
         let meshes = SparseSet::new();
-        let mesh_builder_data = mesh::MeshBuilderData::new(&device, &render_bind_group_layout);
+        let mesh_builder_data = mesh::MeshBuilderData::new(
+            &device,
+            &render_bind_group_layout,
+            geometry_builder_data.bind_group_layout(),
+        );
 
         let environments = SparseSet::new();
         let environment_builder_data =

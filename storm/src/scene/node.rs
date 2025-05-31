@@ -14,6 +14,7 @@ pub struct Node {
     pub(super) local_transform: Transform,
     world_matrix: Mat4,
     mesh: Option<Id<Mesh>>,
+    pub(super) weights: Vec<f32>,
 }
 
 impl Node {
@@ -39,6 +40,10 @@ impl Node {
 
     pub fn world_position(&self) -> Vec3 {
         self.world_matrix.project_point3(Vec3::ZERO)
+    }
+
+    pub fn weights(&self) -> &[f32] {
+        &self.weights
     }
 }
 
@@ -131,6 +136,7 @@ pub struct NodeBuilder<'a, 's> {
     mesh: Option<&'a Mesh>,
     camera: Option<CameraDescriptor>,
     point_light: Option<Vec3>,
+    weights: Vec<f32>,
 }
 
 impl<'a, 's> NodeBuilder<'a, 's> {
@@ -144,6 +150,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
             mesh: None,
             camera: None,
             point_light: None,
+            weights: Vec::new(),
         }
     }
 
@@ -193,6 +200,11 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         self
     }
 
+    pub fn weights(mut self, weight: Vec<f32>) -> Self {
+        self.weights = weight;
+        self
+    }
+
     pub fn build(mut self) -> &'s mut Node {
         let id = self.scene.nodes.next_id();
         match self.parent {
@@ -216,6 +228,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
             local_transform: self.local_transform,
             world_matrix: self.world_matrix,
             mesh: self.mesh.map(|mesh| mesh.id()),
+            weights: self.weights,
         };
         let node = self.scene.nodes.insert(node);
 

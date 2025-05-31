@@ -7,29 +7,12 @@ override has_emissive_texture: bool;
 override max_prefilter_map_mip: f32;
 
 const pi = 3.14159265359;
-
-struct Attributes {
-    @location(1) position: vec3<f32>,
-    @location(2) normal: vec3<f32>,
-    @location(3) tangent: vec4<f32>,
-    @location(4) tex_coord_0: vec2<f32>,
-    @location(5) tex_coord_1: vec2<f32>,
-    @location(6) color_0: vec4<f32>,
-}
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(1) world_position: vec3<f32>,
-    @location(2) world_normal: vec3<f32>,
-    @location(3) world_tangent: vec4<f32>,
-    @location(4) tex_coord_0: vec2<f32>,
-    @location(5) tex_coord_1: vec2<f32>,
-    @location(6) color_0: vec4<f32>,
-}
+const max_weight_count = 8;
 
 struct NodeUniform {
     matrix: mat4x4<f32>,
     normal_matrix: mat3x3<f32>,
+    weights: array<f32, max_weight_count>,
 }
 
 struct CameraUniform {
@@ -49,6 +32,16 @@ struct PointLight {
     color: vec3<f32>,
 }
 
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) world_position: vec3<f32>,
+    @location(1) world_normal: vec3<f32>,
+    @location(2) world_tangent: vec4<f32>,
+    @location(3) tex_coord_0: vec2<f32>,
+    @location(4) tex_coord_1: vec2<f32>,
+    @location(5) color_0: vec4<f32>,
+}
+
 @group(0) @binding(0) var<storage, read> nodes: array<NodeUniform>;
 @group(0) @binding(1) var<uniform> camera: CameraUniform;
 @group(0) @binding(2) var<storage, read> lights: LightStorage;
@@ -59,26 +52,45 @@ struct PointLight {
 @group(0) @binding(7) var brdf_lut_texture: texture_2d<f32>;
 @group(0) @binding(8) var brdf_lut_sampler: sampler;
 
-struct MaterialUniform {
-    base_color_factor: vec4<f32>,
-    base_color_tex_coord: u32,
-    metallic_factor: f32,
-    roughness_factor: f32,
-    metallic_roughness_tex_coord: u32,
-    normal_scale: f32,
-    normal_tex_coord: u32,
-    occlusion_strength: f32,
-    occlusion_tex_coord: u32,
-    emissive_factor: vec3<f32>,
-    emissive_tex_coord: u32,
+struct Attribute {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    tangent: vec4<f32>,
+    tex_coord_0: vec2<f32>,
+    tex_coord_1: vec2<f32>,
+    color_0: vec4<f32>,
 }
+
+struct GeometryStorage {
+    vertex_count: u32,
+    target_count: u32,
+    attributes: array<Attribute>,
+}
+
+@group(1) @binding(0) var<storage, read> geometry: GeometryStorage;
 
 @vertex
 fn vs_main(
-    @location(0) index: u32,
-    attributes: Attributes,
+    @builtin(vertex_index) vertex_index: u32,
+    @location(0) node_index: u32,
 ) -> VertexOutput {
-    let node = nodes[index];
+    let node = nodes[node_index];
+
+    var attributes = geometry.attributes[vertex_index];
+    for (var i = 0u; i < geometry.target_count; i++) {
+        let weight = node.weights[i];
+        let morph_attributes = geometry.attributes[(i + 1) * geometry.vertex_count + vertex_index];
+        attributes.position += weight * morph_attributes.position;
+        attributes.normal += weight * morph_attributes.normal;
+        if has_normal_texture {
+            attributes.tangent += vec4(weight * morph_attributes.tangent.xyz, 0.0);
+        }
+        attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
+        attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
+        attributes.color_0 += weight * morph_attributes.color_0;
+    }
+    attributes.color_0 = clamp(attributes.color_0, vec4(0.0), vec4(1.0));
+
     let world_position = node.matrix * vec4(attributes.position, 1.0);
 
     var result: VertexOutput;
@@ -94,22 +106,36 @@ fn vs_main(
     return result;
 }
 
-@group(1) @binding(0) var base_color_texture: texture_2d<f32>;
-@group(1) @binding(1) var base_color_sampler: sampler;
-@group(1) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
-@group(1) @binding(3) var metallic_roughness_sampler: sampler;
-@group(1) @binding(4) var normal_texture: texture_2d<f32>;
-@group(1) @binding(5) var normal_sampler: sampler;
-@group(1) @binding(6) var occlusion_texture: texture_2d<f32>;
-@group(1) @binding(7) var occlusion_sampler: sampler;
-@group(1) @binding(8) var emissive_texture: texture_2d<f32>;
-@group(1) @binding(9) var emissive_sampler: sampler;
-@group(1) @binding(10) var<uniform> material: MaterialUniform;
-
 struct FragmentOutput {
     @location(0) color: vec4<f32>,
     @location(1) bright_color: vec4<f32>,
 }
+
+struct MaterialUniform {
+    base_color_factor: vec4<f32>,
+    base_color_tex_coord: u32,
+    metallic_factor: f32,
+    roughness_factor: f32,
+    metallic_roughness_tex_coord: u32,
+    normal_scale: f32,
+    normal_tex_coord: u32,
+    occlusion_strength: f32,
+    occlusion_tex_coord: u32,
+    emissive_factor: vec3<f32>,
+    emissive_tex_coord: u32,
+}
+
+@group(2) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(2) @binding(1) var base_color_sampler: sampler;
+@group(2) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
+@group(2) @binding(3) var metallic_roughness_sampler: sampler;
+@group(2) @binding(4) var normal_texture: texture_2d<f32>;
+@group(2) @binding(5) var normal_sampler: sampler;
+@group(2) @binding(6) var occlusion_texture: texture_2d<f32>;
+@group(2) @binding(7) var occlusion_sampler: sampler;
+@group(2) @binding(8) var emissive_texture: texture_2d<f32>;
+@group(2) @binding(9) var emissive_sampler: sampler;
+@group(2) @binding(10) var<uniform> material: MaterialUniform;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> FragmentOutput {

@@ -6,6 +6,7 @@ use wgpu::AddressMode;
 
 use crate::{
     Id, Resources,
+    geometry::MorphTargetBuilder,
     mesh::{Material, Mesh},
     scene::{Node, Scene, animation},
     storage::{DenseEntry, SparseSet},
@@ -57,17 +58,16 @@ pub fn open_gltf<'r>(
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 if let Some(positions) = reader.read_positions() {
-                    let mut geometry_builder =
-                        resources.geometry_builder().positions(positions.collect());
+                    let mut geometry_builder = resources.geometry_builder().positions(positions);
                     if let Some(indices) = reader.read_indices() {
                         geometry_builder =
                             geometry_builder.indices_u32(indices.into_u32().collect());
                     }
                     if let Some(normals) = reader.read_normals() {
-                        geometry_builder = geometry_builder.normals(normals.collect());
+                        geometry_builder = geometry_builder.normals(normals);
                     }
                     if let Some(tangents) = reader.read_tangents() {
-                        geometry_builder = geometry_builder.tangents(tangents.collect());
+                        geometry_builder = geometry_builder.tangents(tangents);
                     } else if let Some(normal_texture) = primitive.material().normal_texture() {
                         geometry_builder =
                             geometry_builder.generate_tangents(normal_texture.tex_coord());
@@ -75,17 +75,8 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_tex_coords(set) {
                             Some(tex_coords) => {
-                                geometry_builder = match tex_coords {
-                                    gltf::mesh::util::ReadTexCoords::U8(iter) => {
-                                        geometry_builder.tex_coords_u8(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadTexCoords::U16(iter) => {
-                                        geometry_builder.tex_coords_u16(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadTexCoords::F32(iter) => {
-                                        geometry_builder.tex_coords_f32(set, iter.collect())
-                                    }
-                                };
+                                geometry_builder =
+                                    geometry_builder.tex_coords(tex_coords.into_f32());
                             }
                             None => break,
                         }
@@ -93,26 +84,23 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_colors(set) {
                             Some(colors) => {
-                                geometry_builder = match colors {
-                                    gltf::mesh::util::ReadColors::RgbU8(_) => geometry_builder
-                                        .colors_u8(set, colors.into_rgba_u8().collect()),
-                                    gltf::mesh::util::ReadColors::RgbaU8(iter) => {
-                                        geometry_builder.colors_u8(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadColors::RgbU16(_) => geometry_builder
-                                        .colors_u16(set, colors.into_rgba_u16().collect()),
-                                    gltf::mesh::util::ReadColors::RgbaU16(iter) => {
-                                        geometry_builder.colors_u16(set, iter.collect())
-                                    }
-                                    gltf::mesh::util::ReadColors::RgbF32(_) => geometry_builder
-                                        .colors_f32(set, colors.into_rgba_f32().collect()),
-                                    gltf::mesh::util::ReadColors::RgbaF32(iter) => {
-                                        geometry_builder.colors_f32(set, iter.collect())
-                                    }
-                                };
+                                geometry_builder = geometry_builder.colors(colors.into_rgba_f32());
                             }
                             None => break,
                         }
+                    }
+                    for (positions, normals, tangents) in reader.read_morph_targets() {
+                        let mut builder = MorphTargetBuilder::new();
+                        if let Some(positions) = positions {
+                            builder = builder.positions(positions);
+                        }
+                        if let Some(normals) = normals {
+                            builder = builder.normals(normals);
+                        }
+                        if let Some(tangents) = tangents {
+                            builder = builder.tangents(tangents);
+                        }
+                        geometry_builder = geometry_builder.morph_target(builder);
                     }
                     let geometry = geometry_builder.build(encoder).id();
                     let material = match primitive.material().index() {
@@ -146,92 +134,104 @@ pub fn open_gltf<'r>(
         })
         .collect();
 
-    let scenes = document
-        .scenes()
-        .map(|gltf_scene| {
-            let mut scene = Scene::new(
-                gltf_scene
-                    .name()
-                    .map_or_else(|| gltf_scene.index().to_string(), |name| name.to_string()),
-                resources,
-                encoder,
-                render_width,
-                render_height,
-            );
-            let mut node_mapping = vec![None; document.nodes().len()];
-            for node in gltf_scene.nodes() {
-                scene.build_gltf_node(
-                    node,
-                    None,
-                    &mut resources.meshes,
-                    &mesh_mapping,
-                    &mut node_mapping,
+    let scenes =
+        document
+            .scenes()
+            .map(|gltf_scene| {
+                let mut scene = Scene::new(
+                    gltf_scene
+                        .name()
+                        .map_or_else(|| gltf_scene.index().to_string(), |name| name.to_string()),
+                    resources,
+                    encoder,
+                    render_width,
+                    render_height,
                 );
-            }
-            document.animations().for_each(|animation| {
-                let mut channels = Vec::new();
-                for channel in animation.channels() {
-                    match node_mapping[channel.target().node().index()] {
-                        Some(id) => {
-                            channels.push((id, channel));
-                        }
-                        None => {
-                            return;
+                let mut node_mapping = vec![None; document.nodes().len()];
+                for node in gltf_scene.nodes() {
+                    scene.build_gltf_node(
+                        node,
+                        None,
+                        &mut resources.meshes,
+                        &mesh_mapping,
+                        &mut node_mapping,
+                    );
+                }
+                document.animations().for_each(|animation| {
+                    let mut channels = Vec::new();
+                    for channel in animation.channels() {
+                        match node_mapping[channel.target().node().index()] {
+                            Some(id) => {
+                                let morph_targets_count = scene[id].weights().len();
+                                channels.push((id, morph_targets_count, channel));
+                            }
+                            None => {
+                                return;
+                            }
                         }
                     }
-                }
+                    scene
+                        .animation_builder()
+                        .name(format!(
+                            "Gltf animation {} {}",
+                            animation.index(),
+                            animation.name().unwrap_or("")
+                        ))
+                        .repeat()
+                        .channels(channels.into_iter().map(
+                            |(node, morph_targets_count, channel)| {
+                                let reader =
+                                    channel.reader(|buffer| Some(&buffers[buffer.index()].0));
+                                let inputs = reader
+                                    .read_inputs()
+                                    .expect("gltf animation sampler missing inputs")
+                                    .collect();
+                                let interpolation = match channel.sampler().interpolation() {
+                                    gltf::animation::Interpolation::Step => {
+                                        animation::Interpolation::Step
+                                    }
+                                    gltf::animation::Interpolation::Linear => {
+                                        animation::Interpolation::Linear
+                                    }
+                                    gltf::animation::Interpolation::CubicSpline => {
+                                        animation::Interpolation::CubicSpline
+                                    }
+                                };
+                                let outputs = match reader
+                                    .read_outputs()
+                                    .expect("gltf animation sampler missing outputs")
+                                {
+                                    gltf::animation::util::ReadOutputs::Translations(iter) => {
+                                        animation::Outputs::Translations(iter.collect())
+                                    }
+                                    gltf::animation::util::ReadOutputs::Rotations(rotations) => {
+                                        animation::Outputs::Rotations(
+                                            rotations.into_f32().collect(),
+                                        )
+                                    }
+                                    gltf::animation::util::ReadOutputs::Scales(iter) => {
+                                        animation::Outputs::Scales(iter.collect())
+                                    }
+                                    gltf::animation::util::ReadOutputs::MorphTargetWeights(
+                                        weights,
+                                    ) => animation::Outputs::Weights(
+                                        weights.into_f32().collect(),
+                                        morph_targets_count,
+                                    ),
+                                };
+                                animation::Channel {
+                                    node,
+                                    inputs,
+                                    interpolation,
+                                    outputs,
+                                }
+                            },
+                        ))
+                        .build();
+                });
                 scene
-                    .animation_builder()
-                    .name(format!(
-                        "Gltf animation {} {}",
-                        animation.index(),
-                        animation.name().unwrap_or("")
-                    ))
-                    .repeat()
-                    .channels(channels.into_iter().map(|(node, channel)| {
-                        let reader = channel.reader(|buffer| Some(&buffers[buffer.index()].0));
-                        let inputs = reader
-                            .read_inputs()
-                            .expect("gltf animation sampler missing inputs")
-                            .collect();
-                        let interpolation = match channel.sampler().interpolation() {
-                            gltf::animation::Interpolation::Step => animation::Interpolation::Step,
-                            gltf::animation::Interpolation::Linear => {
-                                animation::Interpolation::Linear
-                            }
-                            gltf::animation::Interpolation::CubicSpline => {
-                                animation::Interpolation::CubicSpline
-                            }
-                        };
-                        let outputs = match reader
-                            .read_outputs()
-                            .expect("gltf animation sampler missing outputs")
-                        {
-                            gltf::animation::util::ReadOutputs::Translations(iter) => {
-                                animation::Outputs::Translations(iter.collect())
-                            }
-                            gltf::animation::util::ReadOutputs::Rotations(rotations) => {
-                                animation::Outputs::Rotations(rotations.into_f32().collect())
-                            }
-                            gltf::animation::util::ReadOutputs::Scales(iter) => {
-                                animation::Outputs::Scales(iter.collect())
-                            }
-                            gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
-                                todo!("morph target weights animation")
-                            }
-                        };
-                        animation::Channel {
-                            node,
-                            inputs,
-                            interpolation,
-                            outputs,
-                        }
-                    }))
-                    .build();
-            });
-            scene
-        })
-        .collect();
+            })
+            .collect();
 
     let default_scene = document.default_scene().map(|scene| scene.index());
     Ok((scenes, default_scene))
@@ -394,8 +394,13 @@ impl Scene {
                 node.name().unwrap_or("")
             ))
             .parent(parent);
+        let mut default_weights = None;
         if let Some(mesh) = node.mesh() {
+            default_weights = mesh.weights();
             builder = builder.mesh(&meshes[mesh_mapping[mesh.index()]]);
+        }
+        if let Some(weights) = node.weights().or(default_weights) {
+            builder = builder.weights(weights.into());
         }
         builder = match node.transform() {
             gltf::scene::Transform::Decomposed {

@@ -1,3 +1,5 @@
+override vertex_skinning: bool;
+
 override has_base_color_texture: bool;
 override has_metallic_roughness_texture: bool;
 override has_normal_texture: bool;
@@ -51,6 +53,12 @@ struct VertexOutput {
 @group(0) @binding(7) var brdf_lut_texture: texture_2d<f32>;
 @group(0) @binding(8) var brdf_lut_sampler: sampler;
 
+struct GeometryStorage {
+    vertex_count: u32,
+    target_count: u32,
+    attributes: array<Attribute>,
+}
+
 struct Attribute {
     position: vec3<f32>,
     normal: vec3<f32>,
@@ -60,10 +68,9 @@ struct Attribute {
     color_0: vec4<f32>,
 }
 
-struct GeometryStorage {
-    vertex_count: u32,
-    target_count: u32,
-    attributes: array<Attribute>,
+struct SkinningAttribute {
+    joints: vec4<u32>,
+    weights: vec4<f32>,
 }
 
 @group(1) @binding(0) var<storage, read> geometry: GeometryStorage;

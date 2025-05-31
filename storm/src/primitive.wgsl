@@ -11,7 +11,6 @@ const max_weight_count = 8;
 
 struct NodeUniform {
     matrix: mat4x4<f32>,
-    normal_matrix: mat3x3<f32>,
     weights: array<f32, max_weight_count>,
 }
 
@@ -93,12 +92,21 @@ fn vs_main(
 
     let world_position = node.matrix * vec4(attributes.position, 1.0);
 
+    let mat_x = node.matrix[0].xyz;
+    let mat_y = node.matrix[1].xyz;
+    let mat_z = node.matrix[2].xyz;
+    let normal_matrix = mat3x3(
+        cross(mat_y, mat_z),
+        cross(mat_z, mat_x),
+        cross(mat_x, mat_y),
+    );
+
     var result: VertexOutput;
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
-    result.world_normal = node.normal_matrix * attributes.normal;
+    result.world_normal = normal_matrix * attributes.normal;
     if has_normal_texture {
-        result.world_tangent = vec4(node.normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
+        result.world_tangent = vec4(normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
     }
     result.tex_coord_0 = attributes.tex_coord_0;
     result.tex_coord_1 = attributes.tex_coord_1;

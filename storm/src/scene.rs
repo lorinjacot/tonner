@@ -7,7 +7,7 @@ use std::{
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
-use glam::{Mat3, Mat4, Vec3, Vec4, usize};
+use glam::{Mat4, Vec3, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
 use wgpu::util::DeviceExt;
 
@@ -246,16 +246,10 @@ impl Scene {
                 .iter()
                 .map(|node| {
                     let matrix = node.world_matrix();
-                    let normal_matrix = Mat3::from_mat4(matrix).inverse().transpose();
                     let mut weights_iter = node.weights().iter().copied();
                     let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
                     NodeUniform {
                         matrix,
-                        normal_matrix: [
-                            normal_matrix.x_axis.extend(0.0),
-                            normal_matrix.y_axis.extend(0.0),
-                            normal_matrix.z_axis.extend(0.0),
-                        ],
                         weights,
                     }
                 })
@@ -713,7 +707,6 @@ fn create_tone_mapping_bind_group(
 #[repr(C)]
 struct NodeUniform {
     matrix: Mat4,
-    normal_matrix: [Vec4; 3],
     weights: [f32; MAX_WEIGHT_COUNT],
 }
 

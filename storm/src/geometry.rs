@@ -16,7 +16,8 @@ pub struct Geometry {
     indices: Option<IndexBuffer>,
     attributes_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    vertex_count: u32,
+    vertex_count: usize,
+    morph_target_count: usize,
     has_tangents: bool,
 }
 
@@ -25,8 +26,12 @@ impl Geometry {
         &self.indices
     }
 
-    pub fn vertex_count(&self) -> u32 {
+    pub fn vertex_count(&self) -> usize {
         self.vertex_count
+    }
+
+    pub fn morph_target_count(&self) -> usize {
+        self.morph_target_count
     }
 
     pub fn has_tangents(&self) -> bool {
@@ -411,7 +416,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             indices,
             attributes_buffer,
             bind_group,
-            vertex_count: header.vertex_count,
+            vertex_count,
+            morph_target_count,
             has_tangents,
         })
     }

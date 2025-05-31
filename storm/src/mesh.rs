@@ -55,12 +55,21 @@ impl<'r> MeshBuilder<'r> {
 
     pub fn build(self) -> &'r mut Mesh {
         let id = self.resources.meshes.next_id();
+        let mut morph_target_count = None;
         let primitives =
             self.primitives
                 .into_iter()
                 .map(|(geometry, material)| {
                     let geometry = &self.resources.geometries[geometry];
                     let material = &self.resources.materials[material];
+                    match morph_target_count {
+                        Some(count) => assert_eq!(
+                            count,
+                            geometry.morph_target_count(),
+                            "all primitives should have the same number of morph targets"
+                        ),
+                        None => morph_target_count = Some(geometry.morph_target_count()),
+                    }
 
                     if material.textures.contains(Textures::NORMAL) {
                         assert!(geometry.has_tangents());
@@ -152,7 +161,7 @@ impl<'r> MeshBuilder<'r> {
                     Primitive {
                         pipeline,
                         index_buffer: geometry.indices().clone(),
-                        vertex_count: geometry.vertex_count(),
+                        vertex_count: geometry.vertex_count() as u32,
                         geometry: geometry.bind_group().clone(),
                         material: material.bind_group.clone(),
                     }

@@ -1,4 +1,5 @@
 use std::{
+    array::from_fn,
     iter::repeat_with,
     ops::{Index, IndexMut},
     time::Duration,
@@ -246,6 +247,8 @@ impl Scene {
                 .map(|node| {
                     let matrix = node.world_matrix();
                     let normal_matrix = Mat3::from_mat4(matrix).inverse().transpose();
+                    let mut weights_iter = node.weights().iter().copied();
+                    let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
                     NodeUniform {
                         matrix,
                         normal_matrix: [
@@ -253,7 +256,7 @@ impl Scene {
                             normal_matrix.y_axis.extend(0.0),
                             normal_matrix.z_axis.extend(0.0),
                         ],
-                        weights: [0.0; MAX_WEIGHT_COUNT],
+                        weights,
                     }
                 })
                 .collect();

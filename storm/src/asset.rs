@@ -134,92 +134,104 @@ pub fn open_gltf<'r>(
         })
         .collect();
 
-    let scenes = document
-        .scenes()
-        .map(|gltf_scene| {
-            let mut scene = Scene::new(
-                gltf_scene
-                    .name()
-                    .map_or_else(|| gltf_scene.index().to_string(), |name| name.to_string()),
-                resources,
-                encoder,
-                render_width,
-                render_height,
-            );
-            let mut node_mapping = vec![None; document.nodes().len()];
-            for node in gltf_scene.nodes() {
-                scene.build_gltf_node(
-                    node,
-                    None,
-                    &mut resources.meshes,
-                    &mesh_mapping,
-                    &mut node_mapping,
+    let scenes =
+        document
+            .scenes()
+            .map(|gltf_scene| {
+                let mut scene = Scene::new(
+                    gltf_scene
+                        .name()
+                        .map_or_else(|| gltf_scene.index().to_string(), |name| name.to_string()),
+                    resources,
+                    encoder,
+                    render_width,
+                    render_height,
                 );
-            }
-            document.animations().for_each(|animation| {
-                let mut channels = Vec::new();
-                for channel in animation.channels() {
-                    match node_mapping[channel.target().node().index()] {
-                        Some(id) => {
-                            channels.push((id, channel));
-                        }
-                        None => {
-                            return;
+                let mut node_mapping = vec![None; document.nodes().len()];
+                for node in gltf_scene.nodes() {
+                    scene.build_gltf_node(
+                        node,
+                        None,
+                        &mut resources.meshes,
+                        &mesh_mapping,
+                        &mut node_mapping,
+                    );
+                }
+                document.animations().for_each(|animation| {
+                    let mut channels = Vec::new();
+                    for channel in animation.channels() {
+                        match node_mapping[channel.target().node().index()] {
+                            Some(id) => {
+                                let morph_targets_count = scene[id].weights().len();
+                                channels.push((id, morph_targets_count, channel));
+                            }
+                            None => {
+                                return;
+                            }
                         }
                     }
-                }
+                    scene
+                        .animation_builder()
+                        .name(format!(
+                            "Gltf animation {} {}",
+                            animation.index(),
+                            animation.name().unwrap_or("")
+                        ))
+                        .repeat()
+                        .channels(channels.into_iter().map(
+                            |(node, morph_targets_count, channel)| {
+                                let reader =
+                                    channel.reader(|buffer| Some(&buffers[buffer.index()].0));
+                                let inputs = reader
+                                    .read_inputs()
+                                    .expect("gltf animation sampler missing inputs")
+                                    .collect();
+                                let interpolation = match channel.sampler().interpolation() {
+                                    gltf::animation::Interpolation::Step => {
+                                        animation::Interpolation::Step
+                                    }
+                                    gltf::animation::Interpolation::Linear => {
+                                        animation::Interpolation::Linear
+                                    }
+                                    gltf::animation::Interpolation::CubicSpline => {
+                                        animation::Interpolation::CubicSpline
+                                    }
+                                };
+                                let outputs = match reader
+                                    .read_outputs()
+                                    .expect("gltf animation sampler missing outputs")
+                                {
+                                    gltf::animation::util::ReadOutputs::Translations(iter) => {
+                                        animation::Outputs::Translations(iter.collect())
+                                    }
+                                    gltf::animation::util::ReadOutputs::Rotations(rotations) => {
+                                        animation::Outputs::Rotations(
+                                            rotations.into_f32().collect(),
+                                        )
+                                    }
+                                    gltf::animation::util::ReadOutputs::Scales(iter) => {
+                                        animation::Outputs::Scales(iter.collect())
+                                    }
+                                    gltf::animation::util::ReadOutputs::MorphTargetWeights(
+                                        weights,
+                                    ) => animation::Outputs::Weights(
+                                        weights.into_f32().collect(),
+                                        morph_targets_count,
+                                    ),
+                                };
+                                animation::Channel {
+                                    node,
+                                    inputs,
+                                    interpolation,
+                                    outputs,
+                                }
+                            },
+                        ))
+                        .build();
+                });
                 scene
-                    .animation_builder()
-                    .name(format!(
-                        "Gltf animation {} {}",
-                        animation.index(),
-                        animation.name().unwrap_or("")
-                    ))
-                    .repeat()
-                    .channels(channels.into_iter().map(|(node, channel)| {
-                        let reader = channel.reader(|buffer| Some(&buffers[buffer.index()].0));
-                        let inputs = reader
-                            .read_inputs()
-                            .expect("gltf animation sampler missing inputs")
-                            .collect();
-                        let interpolation = match channel.sampler().interpolation() {
-                            gltf::animation::Interpolation::Step => animation::Interpolation::Step,
-                            gltf::animation::Interpolation::Linear => {
-                                animation::Interpolation::Linear
-                            }
-                            gltf::animation::Interpolation::CubicSpline => {
-                                animation::Interpolation::CubicSpline
-                            }
-                        };
-                        let outputs = match reader
-                            .read_outputs()
-                            .expect("gltf animation sampler missing outputs")
-                        {
-                            gltf::animation::util::ReadOutputs::Translations(iter) => {
-                                animation::Outputs::Translations(iter.collect())
-                            }
-                            gltf::animation::util::ReadOutputs::Rotations(rotations) => {
-                                animation::Outputs::Rotations(rotations.into_f32().collect())
-                            }
-                            gltf::animation::util::ReadOutputs::Scales(iter) => {
-                                animation::Outputs::Scales(iter.collect())
-                            }
-                            gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
-                                todo!("morph target weights animation")
-                            }
-                        };
-                        animation::Channel {
-                            node,
-                            inputs,
-                            interpolation,
-                            outputs,
-                        }
-                    }))
-                    .build();
-            });
-            scene
-        })
-        .collect();
+            })
+            .collect();
 
     let default_scene = document.default_scene().map(|scene| scene.index());
     Ok((scenes, default_scene))
@@ -382,8 +394,13 @@ impl Scene {
                 node.name().unwrap_or("")
             ))
             .parent(parent);
+        let mut default_weights = None;
         if let Some(mesh) = node.mesh() {
+            default_weights = mesh.weights();
             builder = builder.mesh(&meshes[mesh_mapping[mesh.index()]]);
+        }
+        if let Some(weights) = node.weights().or(default_weights) {
+            builder = builder.weights(weights.into());
         }
         builder = match node.transform() {
             gltf::scene::Transform::Decomposed {

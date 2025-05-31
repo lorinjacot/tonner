@@ -83,7 +83,7 @@ fn vs_main(
         attributes.position += weight * morph_attributes.position;
         attributes.normal += weight * morph_attributes.normal;
         if has_normal_texture {
-            attributes.tangent.xyz += weight * morph_attributes.tangent.xyz;
+            attributes.tangent += vec4(weight * morph_attributes.tangent.xyz, 0.0);
         }
         attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
         attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;

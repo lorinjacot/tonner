@@ -60,6 +60,15 @@ impl Animation {
                     channel.interpolation,
                     &slice,
                 )),
+                Outputs::Weights(slice, count) => {
+                    node.weights = interpolate_weights(
+                        self.current_timestamp,
+                        &channel.inputs,
+                        channel.interpolation,
+                        &slice,
+                        *count,
+                    )
+                }
             }
         })
     }
@@ -213,6 +222,7 @@ pub enum Outputs {
     Translations(Vec<[f32; 3]>),
     Rotations(Vec<[f32; 4]>),
     Scales(Vec<[f32; 3]>),
+    Weights(Vec<f32>, usize),
 }
 
 fn interpolate_vec3(
@@ -305,7 +315,7 @@ fn interpolate<const N: usize, T>(
     while let Some((k, t_k)) = iter.next() {
         if t_c == *t_k {
             return match interpolation {
-                Interpolation::CubicSpline => step_callback(&ouputs[k + 1]),
+                Interpolation::CubicSpline => step_callback(&ouputs[3 * k + 1]),
                 _ => step_callback(&ouputs[k]),
             };
         } else if t_c < *t_k {
@@ -350,5 +360,102 @@ fn interpolate<const N: usize, T>(
     match interpolation {
         Interpolation::CubicSpline => step_callback(&ouputs[3 * inputs.len() - 2]),
         _ => step_callback(ouputs.last().unwrap()),
+    }
+}
+
+fn interpolate_weights(
+    current_timestamp: f32,
+    inputs: &[f32],
+    interpolation: Interpolation,
+    outputs: &[f32],
+    count: usize,
+) -> Vec<f32> {
+    let t_c = current_timestamp;
+    let mut iter = inputs.iter().enumerate();
+    while let Some((k, t_k)) = iter.next() {
+        if t_c == *t_k {
+            return match interpolation {
+                Interpolation::CubicSpline => {
+                    let start = k * 3 * count + count;
+                    outputs[start..start + count].to_vec()
+                }
+                _ => {
+                    let start = k * count;
+                    outputs[start..start + count].to_vec()
+                }
+            };
+        } else if t_c < *t_k {
+            if k == 0 {
+                return match interpolation {
+                    Interpolation::CubicSpline => outputs[count..count + count].to_vec(),
+                    _ => outputs[0..count].to_vec(),
+                };
+            } else {
+                return match interpolation {
+                    Interpolation::Step => {
+                        let start = (k - 1) * count;
+                        outputs[start..start + count].to_vec()
+                    }
+                    Interpolation::Linear => {
+                        let t_previous = inputs[k - 1];
+                        let start = (k - 1) * count;
+                        let v_previous = &outputs[start..start + count];
+
+                        let t_next = *t_k;
+                        let start = k * count;
+                        let v_next = &outputs[start..start + count];
+
+                        let t_d = t_next - t_previous;
+                        let t = (t_c - t_previous) / t_d;
+
+                        v_previous
+                            .iter()
+                            .zip(v_next)
+                            .map(|(v_prev, v_next)| (1.0 - t) * v_prev + t * v_next)
+                            .collect()
+                    }
+                    Interpolation::CubicSpline => {
+                        let t_previous = inputs[k - 1];
+                        let t_next = *t_k;
+                        let t_d = t_next - t_previous;
+                        let t = (t_c - t_previous) / t_d;
+
+                        let mut start = (k - 1) * 3 * count + count;
+                        let v_prev = &outputs[start..start + count];
+
+                        start += count;
+                        let b_prev = &outputs[start..start + count];
+
+                        start += count;
+                        let a_next = &outputs[start..start + count];
+
+                        start += count;
+                        let v_next = &outputs[start..start + count];
+
+                        v_prev
+                            .iter()
+                            .zip(b_prev)
+                            .zip(a_next)
+                            .zip(v_next)
+                            .map(|(((v_prev, b_prev), a_next), v_next)| {
+                                let t2 = t * t;
+                                let t3 = t2 * t;
+
+                                (2.0 * t3 - 3.0 * t2 + 1.0) * v_prev
+                                    + t_d * (t3 - 2.0 * t2 + t) * b_prev
+                                    + (-2.0 * t3 + 3.0 * t2) * v_next
+                                    + t_d * (t3 - t2) * a_next
+                            })
+                            .collect()
+                    }
+                };
+            }
+        }
+    }
+    match interpolation {
+        Interpolation::CubicSpline => {
+            outputs[inputs.len() * 3 * count - 2 * count..inputs.len() * 3 * count - count].to_vec()
+        }
+        _ => outputs[inputs.len() * count - count..inputs.len()].to_vec(),
     }
 }

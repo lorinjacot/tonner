@@ -1,4 +1,4 @@
-use std::{collections::HashMap, f32::consts::PI};
+use std::collections::HashMap;
 
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, cast_slice};
@@ -646,35 +646,4 @@ impl MeshBuilderData {
 
 fn bool_to_f64(value: bool) -> f64 {
     if value { 1.0 } else { 0.0 }
-}
-
-pub struct SphereDescriptor {
-    /// Sphere radius. Default is `1.0`.
-    pub radius: f32,
-    /// Number of horizontal segments. Minimum value is `3`, and the default is `32`.
-    pub width_segments: usize,
-    /// Number of vertical segments. Minimum value is `2`, and the default is `16`.
-    pub height_segments: usize,
-    /// Specify horizontal starting angle. Default is `0.0`.
-    pub phi_start: f32,
-    /// Specify horizontal sweep angle size. Default is `2.0 * PI`.
-    pub phi_length: f32,
-    /// Specify vertical starting angle. Default is `0.0`.
-    pub theta_start: f32,
-    /// Specify vertical sweep angle size. Default is `PI`.
-    pub theta_length: f32,
-}
-
-impl Default for SphereDescriptor {
-    fn default() -> Self {
-        Self {
-            radius: 1.0,
-            width_segments: 32,
-            height_segments: 16,
-            phi_start: 0.0,
-            phi_length: 2.0 * PI,
-            theta_start: 0.0,
-            theta_length: PI,
-        }
-    }
 }

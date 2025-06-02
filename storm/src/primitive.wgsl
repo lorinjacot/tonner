@@ -16,11 +16,11 @@ struct NodeUniform {
 }
 
 struct Skin {
-    first_joint: u32,
+    joint_offset: u32,
 }
 
 struct SkinStorage {
-    joint_matrix_count: u32,
+    joint_count: u32,
     joint_matrices: array<mat4x4<f32>>,
 }
 
@@ -52,7 +52,7 @@ struct VertexOutput {
 }
 
 @group(0) @binding(0) var<storage, read> nodes: array<NodeUniform>;
-@group(1) @binding(1) var<storage, read> skins: SkinStorage;
+@group(0) @binding(1) var<storage, read> skins: SkinStorage;
 @group(0) @binding(2) var<uniform> camera: CameraUniform;
 @group(0) @binding(3) var<storage, read> lights: LightStorage;
 @group(0) @binding(4) var irradiance_map_texture: texture_cube<f32>;
@@ -104,14 +104,14 @@ fn vs_main(
     attributes.color_0 = clamp(attributes.color_0, vec4(0.0), vec4(1.0));
 
     var model_matrix: mat4x4<f32>;
-    if node.skin.first_joint >= skins.joint_matrix_count {
+    if node.skin.joint_offset == 0 {
         model_matrix = node.matrix;
     } else {
         model_matrix = 
-            attributes.weights_0.x * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.x] +
-            attributes.weights_0.y * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.y] +
-            attributes.weights_0.z * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.z] +
-            attributes.weights_0.w * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.w];
+            attributes.weights_0.x * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.x] +
+            attributes.weights_0.y * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.y] +
+            attributes.weights_0.z * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.z] +
+            attributes.weights_0.w * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.w];
     }
 
     let mat_x = model_matrix[0].xyz;

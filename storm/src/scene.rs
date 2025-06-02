@@ -3,6 +3,7 @@ use std::{
     iter::repeat_with,
     ops::{Index, IndexMut},
     time::Duration,
+    u32,
 };
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
@@ -20,6 +21,7 @@ use crate::{
 pub mod animation;
 pub mod camera;
 mod node;
+pub mod skin;
 
 const MAX_WEIGHT_COUNT: usize = 8;
 
@@ -30,6 +32,7 @@ pub struct Scene {
     nodes: SparseSet<Node>,
     nodes_buffer: Option<wgpu::Buffer>,
     root_nodes: Vec<Id<Node>>,
+    skins_buffer: Option<wgpu::Buffer>,
     meshes: SparseMap<MeshInstances>,
     cameras: SparseMap<Camera>,
     active_camera: Option<Id<Node>>,
@@ -108,6 +111,7 @@ impl Scene {
             nodes: SparseSet::new(),
             nodes_buffer: None,
             root_nodes: Vec::new(),
+            skins_buffer: None,
             meshes: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
@@ -251,6 +255,8 @@ impl Scene {
                     NodeUniform {
                         matrix,
                         weights,
+                        skin: Skin { joint_offset: 0 },
+                        _pad: [0; 3],
                     }
                 })
                 .collect();
@@ -271,6 +277,40 @@ impl Scene {
                             });
                     self.nodes_buffer.insert(buffer)
                 }
+            }
+        };
+
+        let skins_buffer = match &self.skins_buffer {
+            Some(buffer) => buffer,
+            None => {
+                self.render_bind_group = None;
+                let mut joint_matrices = Vec::new();
+                let joint_count = joint_matrices.len() as u32;
+                let header = SkinStorageHeader {
+                    joint_count,
+                    _pad: [0; 3],
+                };
+
+                if joint_count == 0 {
+                    joint_matrices.push(Mat4::IDENTITY);
+                }
+
+                let header_size = size_of::<SkinStorageHeader>();
+                let size = (header_size + joint_matrices.len() * size_of::<Mat4>()) as u64;
+
+                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Skins buffer"),
+                    size,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: true,
+                });
+                {
+                    let mut view = buffer.slice(..).get_mapped_range_mut();
+                    view[..header_size].copy_from_slice(bytes_of(&header));
+                    view[header_size..].copy_from_slice(cast_slice(&joint_matrices));
+                }
+                buffer.unmap();
+                self.skins_buffer.insert(buffer)
             }
         };
 
@@ -384,49 +424,54 @@ impl Scene {
                                 binding: 0,
                                 resource: nodes_buffer.as_entire_binding(),
                             },
-                            // camera
+                            // skins
                             wgpu::BindGroupEntry {
                                 binding: 1,
+                                resource: skins_buffer.as_entire_binding(),
+                            },
+                            // camera
+                            wgpu::BindGroupEntry {
+                                binding: 2,
                                 resource: self.camera_buffer.as_entire_binding(),
                             },
                             // lights
                             wgpu::BindGroupEntry {
-                                binding: 2,
+                                binding: 3,
                                 resource: lights_buffer.as_entire_binding(),
                             },
                             // irradiance map
                             wgpu::BindGroupEntry {
-                                binding: 3,
+                                binding: 4,
                                 resource: wgpu::BindingResource::TextureView(
                                     &self.irradiance_map_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 4,
+                                binding: 5,
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.irradiance_map_sampler,
                                 ),
                             },
                             // prefilter map
                             wgpu::BindGroupEntry {
-                                binding: 5,
+                                binding: 6,
                                 resource: wgpu::BindingResource::TextureView(
                                     &self.prefilter_map_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 6,
+                                binding: 7,
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.prefilter_map_sampler,
                                 ),
                             },
                             // BRDF LUT
                             wgpu::BindGroupEntry {
-                                binding: 7,
+                                binding: 8,
                                 resource: wgpu::BindingResource::TextureView(&self.brdf_lut_view),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 8,
+                                binding: 9,
                                 resource: wgpu::BindingResource::Sampler(&self.brdf_lut_sampler),
                             },
                         ],
@@ -708,6 +753,21 @@ fn create_tone_mapping_bind_group(
 struct NodeUniform {
     matrix: Mat4,
     weights: [f32; MAX_WEIGHT_COUNT],
+    skin: Skin,
+    _pad: [u32; 3],
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct Skin {
+    joint_offset: u32,
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct SkinStorageHeader {
+    joint_count: u32,
+    _pad: [u32; 3],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

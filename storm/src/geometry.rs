@@ -634,66 +634,24 @@ struct Attribute {
     color_0: [f32; 4],
 }
 
-struct GeometryFormat {
-    tangent: bool,
-    tex_coords: Vec<TexCoordFormat>,
-    colors: Vec<ColorFormat>,
-    joints: Vec<JointsFormat>,
-    weights: Vec<WeightsFormat>,
-    targets: Vec<MorphTargetFormat>,
+impl Attribute {
+    const ZERO: Self = Self {
+        position: [0.0; 3],
+        _pad0: 0,
+        normal: [0.0; 3],
+        _pad1: 0,
+        tangent: [0.0; 4],
+        tex_coord_0: [0.0; 2],
+        tex_coord_1: [0.0; 2],
+        color_0: [0.0; 4],
+    };
 }
 
-enum TexCoordFormat {
-    Unorm8x2,
-    Unorm16x2,
-    Float32x2,
-}
-
-enum ColorFormat {
-    Unorm8x3,
-    Unorm16x3,
-    Float32x3,
-    Unorm8x4,
-    Unorm16x4,
-    Float32x4,
-}
-
-enum JointsFormat {
-    Uint8x4,
-    Uint16x4,
-}
-
-enum WeightsFormat {
-    Unorm8x4,
-    Unorm16x4,
-    Float32x4,
-}
-
-struct MorphTargetFormat {
-    position: bool,
-    normal: bool,
-    tangent: bool,
-    tex_coords: Vec<TexCoordMorphFormat>,
-    colors: Vec<ColorMorphFormat>,
-}
-
-enum TexCoordMorphFormat {
-    Snorm8x2,
-    Snorm16x2,
-    Unorm8x2,
-    Unorm16x2,
-    Float32x2,
-}
-
-enum ColorMorphFormat {
-    Snorm8x3,
-    Snorm16x3,
-    Unorm8x3,
-    Unorm16x3,
-    Float32x3,
-    Snorm8x4,
-    Snorm16x4,
-    Unorm8x4,
-    Unorm16x4,
-    Float32x4,
+impl Default for Attribute {
+    fn default() -> Self {
+        Self {
+            color_0: [1.0; 4],
+            ..Self::ZERO
+        }
+    }
 }

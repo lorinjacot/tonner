@@ -89,6 +89,31 @@ pub fn open_gltf<'r>(
                             None => break,
                         }
                     }
+                    for set in 0.. {
+                        match reader.read_joints(set) {
+                            Some(joints) => {
+                                geometry_builder = match joints {
+                                    gltf::mesh::util::ReadJoints::U8(iter) => geometry_builder
+                                        .joints(iter.map(|[a, b, c, d]| {
+                                            [a as u32, b as u32, c as u32, d as u32]
+                                        })),
+                                    gltf::mesh::util::ReadJoints::U16(iter) => geometry_builder
+                                        .joints(iter.map(|[a, b, c, d]| {
+                                            [a as u32, b as u32, c as u32, d as u32]
+                                        })),
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    for set in 0.. {
+                        match reader.read_weights(set) {
+                            Some(weights) => {
+                                geometry_builder = geometry_builder.weights(weights.into_f32());
+                            }
+                            None => break,
+                        }
+                    }
                     for (positions, normals, tangents) in reader.read_morph_targets() {
                         let mut builder = MorphTargetBuilder::new();
                         if let Some(positions) = positions {

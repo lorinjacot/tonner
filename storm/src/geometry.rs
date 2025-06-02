@@ -83,6 +83,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                 tex_coords_0: None,
                 tex_coords_1: None,
                 colors_0: None,
+                joints_0: None,
+                weights_0: None,
             },
             generate_tangents: None,
             targets: Vec::new(),
@@ -126,6 +128,16 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
 
     pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
         self.attributes = self.attributes.colors(colors);
+        self
+    }
+
+    pub fn joints(mut self, joints: impl IntoIterator<Item = [u32; 4]> + 'a) -> Self {
+        self.attributes = self.attributes.joints(joints);
+        self
+    }
+
+    pub fn weights(mut self, weights: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+        self.attributes = self.attributes.weights(weights);
         self
     }
 
@@ -238,23 +250,31 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let mut normals = self
             .attributes
             .normals
-            .unwrap_or(Box::new(repeat([0.0; 3])));
+            .unwrap_or_else(|| Box::new(repeat([0.0; 3])));
         let mut tangents = self
             .attributes
             .tangents
-            .unwrap_or(Box::new(repeat([0.0; 4])));
+            .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
         let mut tex_coords_0 = self
             .attributes
             .tex_coords_0
-            .unwrap_or(Box::new(repeat([0.0; 2])));
+            .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
         let mut tex_coords_1 = self
             .attributes
             .tex_coords_1
-            .unwrap_or(Box::new(repeat([0.0; 2])));
+            .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
         let mut colors_0 = self
             .attributes
             .colors_0
-            .unwrap_or(Box::new(repeat([1.0; 4])));
+            .unwrap_or_else(|| Box::new(repeat([1.0; 4])));
+        let mut joints_0 = self
+            .attributes
+            .joints_0
+            .unwrap_or_else(|| Box::new(repeat([0; 4])));
+        let mut weights_0 = self
+            .attributes
+            .weights_0
+            .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
 
         let mut vertex_count = positions.size_hint().0;
         let morph_target_count = self.targets.len();
@@ -270,16 +290,28 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                 tex_coord_0: tex_coords_0.next()?,
                 tex_coord_1: tex_coords_1.next()?,
                 color_0: colors_0.next()?,
+                joints_0: joints_0.next()?,
+                weights_0: weights_0.next()?,
             })
         }));
         vertex_count = attributes.len();
         for target in self.targets {
-            let mut positions = target.positions.unwrap_or(Box::new(repeat([0.0; 3])));
-            let mut normals = target.normals.unwrap_or(Box::new(repeat([0.0; 3])));
-            let mut tangents = target.tangents.unwrap_or(Box::new(repeat([0.0; 4])));
-            let mut tex_coords_0 = target.tex_coords_0.unwrap_or(Box::new(repeat([0.0; 2])));
-            let mut tex_coords_1 = target.tex_coords_1.unwrap_or(Box::new(repeat([0.0; 2])));
-            let mut colors_0 = target.colors_0.unwrap_or(Box::new(repeat([0.0; 4])));
+            let mut positions = target
+                .positions
+                .unwrap_or_else(|| Box::new(repeat([0.0; 3])));
+            let mut normals = target.normals.unwrap_or_else(|| Box::new(repeat([0.0; 3])));
+            let mut tangents = target
+                .tangents
+                .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
+            let mut tex_coords_0 = target
+                .tex_coords_0
+                .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
+            let mut tex_coords_1 = target
+                .tex_coords_1
+                .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
+            let mut colors_0 = target
+                .colors_0
+                .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
 
             attributes.extend(from_fn(|| {
                 Some(Attribute {
@@ -291,6 +323,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                     tex_coord_0: tex_coords_0.next()?,
                     tex_coord_1: tex_coords_1.next()?,
                     color_0: colors_0.next()?,
+                    joints_0: joints_0.next()?,
+                    weights_0: weights_0.next()?,
                 })
             }));
         }
@@ -431,6 +465,8 @@ pub struct MorphTargetBuilder<'a> {
     tex_coords_0: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
     tex_coords_1: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
     colors_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+    joints_0: Option<Box<dyn Iterator<Item = [u32; 4]> + 'a>>,
+    weights_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
 }
 
 impl<'a> MorphTargetBuilder<'a> {
@@ -442,6 +478,8 @@ impl<'a> MorphTargetBuilder<'a> {
             tex_coords_0: None,
             tex_coords_1: None,
             colors_0: None,
+            joints_0: None,
+            weights_0: None,
         }
     }
 
@@ -477,7 +515,25 @@ impl<'a> MorphTargetBuilder<'a> {
         if self.colors_0.is_none() {
             self.colors_0 = Some(Box::new(colors.into_iter()));
         } else {
-            panic!("to many geometry colors set");
+            panic!("too many geometry colors set");
+        }
+        self
+    }
+
+    pub fn joints(mut self, joints: impl IntoIterator<Item = [u32; 4]> + 'a) -> Self {
+        if self.joints_0.is_none() {
+            self.joints_0 = Some(Box::new(joints.into_iter()));
+        } else {
+            panic!("too many geometry joints set");
+        }
+        self
+    }
+
+    pub fn weights(mut self, weights: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+        if self.weights_0.is_none() {
+            self.weights_0 = Some(Box::new(weights.into_iter()));
+        } else {
+            panic!("too many geometry weights set");
         }
         self
     }
@@ -632,26 +688,6 @@ struct Attribute {
     tex_coord_0: [f32; 2],
     tex_coord_1: [f32; 2],
     color_0: [f32; 4],
-}
-
-impl Attribute {
-    const ZERO: Self = Self {
-        position: [0.0; 3],
-        _pad0: 0,
-        normal: [0.0; 3],
-        _pad1: 0,
-        tangent: [0.0; 4],
-        tex_coord_0: [0.0; 2],
-        tex_coord_1: [0.0; 2],
-        color_0: [0.0; 4],
-    };
-}
-
-impl Default for Attribute {
-    fn default() -> Self {
-        Self {
-            color_0: [1.0; 4],
-            ..Self::ZERO
-        }
-    }
+    joints_0: [u32; 4],
+    weights_0: [f32; 4],
 }

@@ -12,6 +12,16 @@ const max_weight_count = 8;
 struct NodeUniform {
     matrix: mat4x4<f32>,
     weights: array<f32, max_weight_count>,
+    skin: Skin,
+}
+
+struct Skin {
+    first_joint: u32,
+}
+
+struct SkinStorage {
+    joint_matrix_count: u32,
+    joint_matrices: array<mat4x4<f32>>,
 }
 
 struct CameraUniform {
@@ -42,14 +52,15 @@ struct VertexOutput {
 }
 
 @group(0) @binding(0) var<storage, read> nodes: array<NodeUniform>;
-@group(0) @binding(1) var<uniform> camera: CameraUniform;
-@group(0) @binding(2) var<storage, read> lights: LightStorage;
-@group(0) @binding(3) var irradiance_map_texture: texture_cube<f32>;
-@group(0) @binding(4) var irradiance_map_sampler: sampler;
-@group(0) @binding(5) var prefilter_map_texture: texture_cube<f32>;
-@group(0) @binding(6) var prefilter_map_sampler: sampler;
-@group(0) @binding(7) var brdf_lut_texture: texture_2d<f32>;
-@group(0) @binding(8) var brdf_lut_sampler: sampler;
+@group(1) @binding(1) var<storage, read> skins: SkinStorage;
+@group(0) @binding(2) var<uniform> camera: CameraUniform;
+@group(0) @binding(3) var<storage, read> lights: LightStorage;
+@group(0) @binding(4) var irradiance_map_texture: texture_cube<f32>;
+@group(0) @binding(5) var irradiance_map_sampler: sampler;
+@group(0) @binding(6) var prefilter_map_texture: texture_cube<f32>;
+@group(0) @binding(7) var prefilter_map_sampler: sampler;
+@group(0) @binding(8) var brdf_lut_texture: texture_2d<f32>;
+@group(0) @binding(9) var brdf_lut_sampler: sampler;
 
 struct Attribute {
     position: vec3<f32>,
@@ -58,6 +69,8 @@ struct Attribute {
     tex_coord_0: vec2<f32>,
     tex_coord_1: vec2<f32>,
     color_0: vec4<f32>,
+    joints_0: vec4<u32>,
+    weights_0: vec4<f32>,
 }
 
 struct GeometryStorage {
@@ -90,16 +103,27 @@ fn vs_main(
     }
     attributes.color_0 = clamp(attributes.color_0, vec4(0.0), vec4(1.0));
 
-    let world_position = node.matrix * vec4(attributes.position, 1.0);
+    var model_matrix: mat4x4<f32>;
+    if node.skin.first_joint >= skins.joint_matrix_count {
+        model_matrix = node.matrix;
+    } else {
+        model_matrix = 
+            attributes.weights_0.x * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.x] +
+            attributes.weights_0.y * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.y] +
+            attributes.weights_0.z * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.z] +
+            attributes.weights_0.w * skins.joint_matrices[node.skin.first_joint + attributes.joints_0.w];
+    }
 
-    let mat_x = node.matrix[0].xyz;
-    let mat_y = node.matrix[1].xyz;
-    let mat_z = node.matrix[2].xyz;
+    let mat_x = model_matrix[0].xyz;
+    let mat_y = model_matrix[1].xyz;
+    let mat_z = model_matrix[2].xyz;
     let normal_matrix = mat3x3(
         cross(mat_y, mat_z),
         cross(mat_z, mat_x),
         cross(mat_x, mat_y),
     );
+
+    let world_position = model_matrix * vec4(attributes.position, 1.0);
 
     var result: VertexOutput;
     result.position = camera.view_projection * world_position;

@@ -32,6 +32,7 @@ pub struct Scene {
     nodes: SparseSet<Node>,
     nodes_buffer: Option<wgpu::Buffer>,
     root_nodes: Vec<Id<Node>>,
+    skins: SparseSet<skin::Skin>,
     skins_buffer: Option<wgpu::Buffer>,
     meshes: SparseMap<MeshInstances>,
     cameras: SparseMap<Camera>,
@@ -111,6 +112,7 @@ impl Scene {
             nodes: SparseSet::new(),
             nodes_buffer: None,
             root_nodes: Vec::new(),
+            skins: SparseSet::new(),
             skins_buffer: None,
             meshes: SparseMap::new(),
             cameras: SparseMap::new(),
@@ -156,6 +158,10 @@ impl Scene {
 
     pub fn root_nodes(&self) -> &[Id<Node>] {
         &self.root_nodes
+    }
+
+    pub fn skin_builder<'a, 's>(&'s mut self) -> skin::SkinBuilder<'a, 's> {
+        skin::SkinBuilder::new(self)
     }
 
     pub fn camera(&self, id: Id<Node>) -> Option<&Camera> {
@@ -244,75 +250,40 @@ impl Scene {
                 .update_world_matrices_parent(Mat4::IDENTITY);
         }
 
-        let nodes_buffer = {
-            let data: Vec<_> = self
-                .nodes
-                .iter()
-                .map(|node| {
-                    let matrix = node.world_matrix();
-                    let mut weights_iter = node.weights().iter().copied();
-                    let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
-                    NodeUniform {
-                        matrix,
-                        weights,
-                        skin: Skin { joint_offset: 0 },
-                        _pad: [0; 3],
-                    }
-                })
-                .collect();
+        let data: Vec<_> = self
+            .nodes
+            .iter()
+            .map(|node| {
+                let matrix = node.world_matrix();
+                let mut weights_iter = node.weights().iter().copied();
+                let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
+                NodeUniform {
+                    matrix,
+                    weights,
+                    skin: Skin { joint_offset: 0 },
+                    _pad: [0; 3],
+                }
+            })
+            .collect();
 
-            match &self.nodes_buffer {
-                Some(buffer) => {
-                    self.queue.write_buffer(buffer, 0, cast_slice(&data));
-                    buffer
-                }
-                None => {
-                    self.render_bind_group = None;
-                    let buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(&format!("{}'s nodes buffer", self.name)),
-                                contents: cast_slice(&data),
-                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                            });
-                    self.nodes_buffer.insert(buffer)
-                }
+        match &self.nodes_buffer {
+            Some(buffer) => {
+                self.queue.write_buffer(buffer, 0, cast_slice(&data));
             }
-        };
-
-        let skins_buffer = match &self.skins_buffer {
-            Some(buffer) => buffer,
             None => {
                 self.render_bind_group = None;
-                let mut joint_matrices = Vec::new();
-                let joint_count = joint_matrices.len() as u32;
-                let header = SkinStorageHeader {
-                    joint_count,
-                    _pad: [0; 3],
-                };
-
-                if joint_count == 0 {
-                    joint_matrices.push(Mat4::IDENTITY);
-                }
-
-                let header_size = size_of::<SkinStorageHeader>();
-                let size = (header_size + joint_matrices.len() * size_of::<Mat4>()) as u64;
-
-                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Skins buffer"),
-                    size,
-                    usage: wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: true,
-                });
-                {
-                    let mut view = buffer.slice(..).get_mapped_range_mut();
-                    view[..header_size].copy_from_slice(bytes_of(&header));
-                    view[header_size..].copy_from_slice(cast_slice(&joint_matrices));
-                }
-                buffer.unmap();
-                self.skins_buffer.insert(buffer)
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("{}'s nodes buffer", self.name)),
+                        contents: cast_slice(&data),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    });
+                self.nodes_buffer = Some(buffer);
             }
-        };
+        }
+
+        self.update_skins_buffer();
 
         let lights_buffer = {
             let mut point_lights: Vec<_> = self
@@ -422,12 +393,12 @@ impl Scene {
                             // nodes
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: nodes_buffer.as_entire_binding(),
+                                resource: self.nodes_buffer.as_ref().unwrap().as_entire_binding(),
                             },
                             // skins
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: skins_buffer.as_entire_binding(),
+                                resource: self.skins_buffer.as_ref().unwrap().as_entire_binding(),
                             },
                             // camera
                             wgpu::BindGroupEntry {
@@ -761,13 +732,6 @@ struct NodeUniform {
 #[repr(C)]
 struct Skin {
     joint_offset: u32,
-}
-
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct SkinStorageHeader {
-    joint_count: u32,
-    _pad: [u32; 3],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

@@ -1,8 +1,8 @@
 pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
-pub use scene::camera;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
+pub use scene::{camera, skin};
 use storage::SparseSet;
 pub use storage::{DenseEntry, Id};
 

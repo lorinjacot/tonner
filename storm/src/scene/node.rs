@@ -1,10 +1,12 @@
-use std::ops::Deref;
+use std::{array::from_fn, ops::Deref};
 
+use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Quat, Vec3};
+use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Transform, mesh::Mesh};
+use crate::{DenseEntry, Id, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
 
-use super::{Camera, PointLight, Scene, camera::CameraDescriptor};
+use super::{Camera, PointLight, Scene, camera::CameraDescriptor, skin::Skin};
 
 pub struct Node {
     id: Id<Node>,
@@ -14,6 +16,7 @@ pub struct Node {
     pub(super) local_transform: Transform,
     world_matrix: Mat4,
     mesh: Option<Id<Mesh>>,
+    skin: Option<Id<Skin>>,
     pub(super) weights: Vec<f32>,
 }
 
@@ -229,6 +232,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
             world_matrix: self.world_matrix,
             mesh: self.mesh.map(|mesh| mesh.id()),
             weights: self.weights,
+            skin: None,
         };
         let node = self.scene.nodes.insert(node);
 
@@ -259,4 +263,58 @@ impl DenseEntry for Node {
     fn id(&self) -> Id<Self::Key> {
         self.id
     }
+}
+
+impl Scene {
+    pub(super) fn update_nodes_buffer(&mut self) {
+        let data: Vec<_> = self
+            .nodes
+            .iter()
+            .map(|node| {
+                let matrix = node.world_matrix();
+                let mut weights_iter = node.weights().iter().copied();
+                let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
+                let joint_offset = match node.skin {
+                    Some(skin) => self.skins[skin].joint_offset(),
+                    None => 0,
+                };
+                NodeUniform {
+                    matrix,
+                    weights,
+                    joint_offset,
+                    _pad: [0; 3],
+                }
+            })
+            .collect();
+
+        match &self.nodes_buffer {
+            Some(buffer) => {
+                self.queue.write_buffer(buffer, 0, cast_slice(&data));
+            }
+            None => {
+                self.render_bind_group = None;
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("{}'s nodes buffer", self.name)),
+                        contents: cast_slice(&data),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    });
+                self.nodes_buffer = Some(buffer);
+            }
+        }
+    }
+
+    pub fn add_skin_to_node(&mut self, skin: Id<Skin>, node: Id<Node>) {
+        self.nodes[node].skin = Some(skin);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct NodeUniform {
+    matrix: Mat4,
+    weights: [f32; MAX_MORPH_TARGET_COUNT],
+    joint_offset: u32,
+    _pad: [u32; 3],
 }

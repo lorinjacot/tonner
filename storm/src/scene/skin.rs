@@ -10,6 +10,13 @@ use super::{Node, Scene};
 pub struct Skin {
     id: Id<Self>,
     joints: Vec<Joint>,
+    joint_offset: u32,
+}
+
+impl Skin {
+    pub(super) fn joint_offset(&self) -> u32 {
+        self.joint_offset
+    }
 }
 
 impl DenseEntry for Skin {
@@ -62,7 +69,11 @@ impl<'a, 's> SkinBuilder<'a, 's> {
             })
             .collect();
         let id = self.scene.skins.next_id();
-        self.scene.skins.insert(Skin { id, joints })
+        self.scene.skins.insert(Skin {
+            id,
+            joints,
+            joint_offset: 0,
+        })
     }
 }
 
@@ -72,7 +83,7 @@ struct Joint {
 }
 
 impl Scene {
-    pub fn joint_matrices(&self, skin: Id<Skin>) -> impl Iterator<Item = Mat4> {
+    fn skin_joint_matrices(&self, skin: Id<Skin>) -> impl Iterator<Item = Mat4> {
         self.skins[skin].joints.iter().map(
             |Joint {
                  node,
@@ -89,9 +100,15 @@ impl Scene {
             once(Mat4::IDENTITY).chain(
                 self.skins
                     .iter()
-                    .flat_map(|skin| self.joint_matrices(skin.id())),
+                    .flat_map(|skin| self.skin_joint_matrices(skin.id())),
             ),
         );
+
+        let mut offset = 1;
+        self.skins.iter_mut().for_each(|skin| {
+            skin.joint_offset = offset;
+            offset += skin.joints.len() as u32;
+        });
         let header = SkinStorageHeader {
             joint_count: joint_matrices.len() as u32,
             _pad: [0; 3],

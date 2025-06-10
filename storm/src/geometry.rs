@@ -11,6 +11,8 @@ use wgpu::util::DeviceExt;
 
 use crate::{DenseEntry, Id, Resources};
 
+pub const MAX_MORPH_TARGET_COUNT: usize = 8;
+
 pub struct Geometry {
     id: Id<Self>,
     indices: Option<IndexBuffer>,
@@ -295,6 +297,10 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             })
         }));
         vertex_count = attributes.len();
+        assert!(
+            self.targets.len() < MAX_MORPH_TARGET_COUNT,
+            "Too many morph target"
+        );
         for target in self.targets {
             let mut positions = target
                 .positions

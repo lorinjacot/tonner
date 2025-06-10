@@ -12,10 +12,6 @@ const max_weight_count = 8;
 struct NodeUniform {
     matrix: mat4x4<f32>,
     weights: array<f32, max_weight_count>,
-    skin: Skin,
-}
-
-struct Skin {
     joint_offset: u32,
 }
 
@@ -104,14 +100,14 @@ fn vs_main(
     attributes.color_0 = clamp(attributes.color_0, vec4(0.0), vec4(1.0));
 
     var model_matrix: mat4x4<f32>;
-    if node.skin.joint_offset == 0 {
+    if node.joint_offset == 0 {
         model_matrix = node.matrix;
     } else {
         model_matrix = 
-            attributes.weights_0.x * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.x] +
-            attributes.weights_0.y * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.y] +
-            attributes.weights_0.z * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.z] +
-            attributes.weights_0.w * skins.joint_matrices[node.skin.joint_offset + attributes.joints_0.w];
+            attributes.weights_0.x * skins.joint_matrices[node.joint_offset + attributes.joints_0.x] +
+            attributes.weights_0.y * skins.joint_matrices[node.joint_offset + attributes.joints_0.y] +
+            attributes.weights_0.z * skins.joint_matrices[node.joint_offset + attributes.joints_0.z] +
+            attributes.weights_0.w * skins.joint_matrices[node.joint_offset + attributes.joints_0.w];
     }
 
     let mat_x = model_matrix[0].xyz;

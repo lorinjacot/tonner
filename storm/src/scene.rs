@@ -1,5 +1,4 @@
 use std::{
-    array::from_fn,
     iter::repeat_with,
     ops::{Index, IndexMut},
     time::Duration,
@@ -22,8 +21,6 @@ pub mod animation;
 pub mod camera;
 mod node;
 pub mod skin;
-
-const MAX_WEIGHT_COUNT: usize = 8;
 
 pub struct Scene {
     pub name: String,
@@ -250,38 +247,7 @@ impl Scene {
                 .update_world_matrices_parent(Mat4::IDENTITY);
         }
 
-        let data: Vec<_> = self
-            .nodes
-            .iter()
-            .map(|node| {
-                let matrix = node.world_matrix();
-                let mut weights_iter = node.weights().iter().copied();
-                let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
-                NodeUniform {
-                    matrix,
-                    weights,
-                    skin: Skin { joint_offset: 0 },
-                    _pad: [0; 3],
-                }
-            })
-            .collect();
-
-        match &self.nodes_buffer {
-            Some(buffer) => {
-                self.queue.write_buffer(buffer, 0, cast_slice(&data));
-            }
-            None => {
-                self.render_bind_group = None;
-                let buffer = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("{}'s nodes buffer", self.name)),
-                        contents: cast_slice(&data),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    });
-                self.nodes_buffer = Some(buffer);
-            }
-        }
+        self.update_nodes_buffer();
 
         self.update_skins_buffer();
 
@@ -717,21 +683,6 @@ fn create_tone_mapping_bind_group(
                 },
             ],
         })
-}
-
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct NodeUniform {
-    matrix: Mat4,
-    weights: [f32; MAX_WEIGHT_COUNT],
-    skin: Skin,
-    _pad: [u32; 3],
-}
-
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct Skin {
-    joint_offset: u32,
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

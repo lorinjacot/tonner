@@ -278,14 +278,14 @@ fn interpolate_quat(
             let dot = v_previous.dot(v_next);
             let abs = dot.abs();
             let a = abs.acos();
-            let v_t = if abs_diff_eq!(a, 0.0) {
+            let v_t = if a.is_nan() || abs_diff_eq!(a, 0.0) {
                 (1.0 - t) * v_previous + t * v_next
             } else {
                 let s = dot / abs;
                 let a_sin = a.sin();
                 (a * (1.0 - t)).sin() / a_sin * v_previous + s * (a * t).sin() / a_sin * v_next
             };
-            Quat::from_vec4(v_t).normalize()
+            Quat::from_vec4(v_t)
         },
         |t, t_d, v_prev, b_prev, a_next, v_next| {
             let a_next = Vec4::from_slice(a_next);
@@ -304,7 +304,7 @@ fn interpolate_quat(
         },
     );
     if !v.is_normalized() {
-        dbg!(interpolation);
+        dbg!(interpolation, v);
     }
     v
 }

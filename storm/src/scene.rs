@@ -9,6 +9,7 @@ use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
 use glam::{Mat4, Vec3, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
+use skin::init_skins_buffer;
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -30,7 +31,7 @@ pub struct Scene {
     nodes_buffer: Option<wgpu::Buffer>,
     root_nodes: Vec<Id<Node>>,
     skins: SparseSet<skin::Skin>,
-    skins_buffer: Option<wgpu::Buffer>,
+    skins_buffer: wgpu::Buffer,
     meshes: SparseMap<MeshInstances>,
     cameras: SparseMap<Camera>,
     active_camera: Option<Id<Node>>,
@@ -68,6 +69,11 @@ impl Scene {
         render_width: u32,
         render_height: u32,
     ) -> Self {
+        let nodes = SparseSet::new();
+
+        let mut skins = SparseSet::new();
+        let skins_buffer = init_skins_buffer(&mut skins, &nodes, &resources.device);
+
         let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
             size: size_of::<CameraUniform>() as u64,
@@ -106,11 +112,11 @@ impl Scene {
             name,
             device: resources.device.clone(),
             queue: resources.queue.clone(),
-            nodes: SparseSet::new(),
+            nodes,
             nodes_buffer: None,
             root_nodes: Vec::new(),
-            skins: SparseSet::new(),
-            skins_buffer: None,
+            skins,
+            skins_buffer,
             meshes: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
@@ -364,7 +370,7 @@ impl Scene {
                             // skins
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: self.skins_buffer.as_ref().unwrap().as_entire_binding(),
+                                resource: self.skins_buffer.as_entire_binding(),
                             },
                             // camera
                             wgpu::BindGroupEntry {

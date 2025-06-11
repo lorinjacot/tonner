@@ -3,7 +3,7 @@ use std::iter::{once, repeat};
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::Mat4;
 
-use crate::{DenseEntry, Id};
+use crate::{DenseEntry, Id, storage::SparseSet};
 
 use super::{Node, Scene};
 
@@ -83,68 +83,97 @@ struct Joint {
 }
 
 impl Scene {
-    fn skin_joint_matrices(&self, skin: Id<Skin>) -> impl Iterator<Item = Mat4> {
-        self.skins[skin].joints.iter().map(
-            |Joint {
-                 node,
-                 inverse_bind_matrix,
-             }| {
-                let node = &self.nodes[*node];
-                node.world_matrix() * *inverse_bind_matrix
-            },
-        )
-    }
-
     pub(super) fn update_skins_buffer(&mut self) {
-        let joint_matrices = Vec::from_iter(
-            once(Mat4::IDENTITY).chain(
-                self.skins
-                    .iter()
-                    .flat_map(|skin| self.skin_joint_matrices(skin.id())),
-            ),
-        );
+        let (header, joint_matrices) = skins_buffer_data(&mut self.skins, &self.nodes);
+        let (header, header_size, joint_matrices, size) =
+            skins_buffer_bytes(&header, &joint_matrices);
 
-        let mut offset = 1;
-        self.skins.iter_mut().for_each(|skin| {
-            skin.joint_offset = offset;
-            offset += skin.joints.len() as u32;
-        });
-        let header = SkinStorageHeader {
-            joint_count: joint_matrices.len() as u32,
-            _pad: [0; 3],
-        };
+        if self.skins_buffer.size() >= size {
+            self.queue.write_buffer(&self.skins_buffer, 0, header);
+            self.queue
+                .write_buffer(&self.skins_buffer, header_size as u64, joint_matrices);
+        } else {
+            self.render_bind_group = None;
 
-        let header_size = size_of::<SkinStorageHeader>();
-        let size = (header_size + joint_matrices.len() * size_of::<Mat4>()) as u64;
-
-        let header = bytes_of(&header);
-        let joint_matrices = cast_slice(&joint_matrices);
-
-        match &self.skins_buffer {
-            Some(buffer) if buffer.size() >= size => {
-                self.queue.write_buffer(buffer, 0, header);
-                self.queue
-                    .write_buffer(buffer, header_size as u64, joint_matrices);
-            }
-            _ => {
-                self.render_bind_group = None;
-
-                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Skins buffer"),
-                    size,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: true,
-                });
-                {
-                    let mut view = buffer.slice(..).get_mapped_range_mut();
-                    view[..header_size].copy_from_slice(header);
-                    view[header_size..].copy_from_slice(joint_matrices);
-                }
-                buffer.unmap();
-                self.skins_buffer = Some(buffer);
-            }
+            self.skins_buffer =
+                create_skins_buffer(header, header_size, joint_matrices, size, &self.device);
         }
     }
+}
+
+fn skins_buffer_data(
+    skins: &mut SparseSet<Skin>,
+    nodes: &SparseSet<Node>,
+) -> (SkinStorageHeader, Vec<Mat4>) {
+    let joint_matrices =
+        Vec::from_iter(once(Mat4::IDENTITY).chain(skins.iter().flat_map(|skin| {
+            skin.joints.iter().map(
+                |Joint {
+                     node,
+                     inverse_bind_matrix,
+                 }| {
+                    let node = &nodes[*node];
+                    node.world_matrix() * *inverse_bind_matrix
+                },
+            )
+        })));
+
+    let mut offset = 1;
+    skins.iter_mut().for_each(|skin| {
+        skin.joint_offset = offset;
+        offset += skin.joints.len() as u32;
+    });
+    let header = SkinStorageHeader {
+        joint_count: joint_matrices.len() as u32,
+        _pad: [0; 3],
+    };
+
+    (header, joint_matrices)
+}
+
+fn skins_buffer_bytes<'a>(
+    header: &'a SkinStorageHeader,
+    joint_matrices: &'a [Mat4],
+) -> (&'a [u8], usize, &'a [u8], u64) {
+    let header_size = size_of::<SkinStorageHeader>();
+    let size = header_size + joint_matrices.len() * size_of::<Mat4>();
+
+    let header = bytes_of(header);
+    let joint_matrices = cast_slice(&joint_matrices);
+
+    (header, header_size, joint_matrices, size as u64)
+}
+
+fn create_skins_buffer(
+    header: &[u8],
+    header_size: usize,
+    joint_matrices: &[u8],
+    size: u64,
+    device: &wgpu::Device,
+) -> wgpu::Buffer {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Skins buffer"),
+        size: size as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: true,
+    });
+    {
+        let mut view = buffer.slice(..).get_mapped_range_mut();
+        view[..header_size].copy_from_slice(header);
+        view[header_size..].copy_from_slice(joint_matrices);
+    }
+    buffer.unmap();
+    buffer
+}
+
+pub(super) fn init_skins_buffer(
+    skins: &mut SparseSet<Skin>,
+    nodes: &SparseSet<Node>,
+    device: &wgpu::Device,
+) -> wgpu::Buffer {
+    let (header, joint_matrices) = skins_buffer_data(skins, nodes);
+    let (header, header_size, joint_matrices, size) = skins_buffer_bytes(&header, &joint_matrices);
+    create_skins_buffer(header, header_size, joint_matrices, size, device)
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

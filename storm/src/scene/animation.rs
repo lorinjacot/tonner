@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use approx::abs_diff_eq;
 use glam::{Quat, Vec3, Vec4};
 
 use crate::{DenseEntry, Id, storage::SparseSet};
@@ -265,7 +266,7 @@ fn interpolate_quat(
     interpolation: Interpolation,
     outputs: &[[f32; 4]],
 ) -> Quat {
-    interpolate(
+    let v = interpolate(
         current_timestamp,
         inputs,
         interpolation,
@@ -277,11 +278,14 @@ fn interpolate_quat(
             let dot = v_previous.dot(v_next);
             let abs = dot.abs();
             let a = abs.acos();
-            let s = dot / abs;
-            let a_sin = a.sin();
-            let v_t =
-                (a * (1.0 - t)).sin() / a_sin * v_previous + s * (a * t).sin() / a_sin * v_next;
-            Quat::from_vec4(v_t)
+            let v_t = if abs_diff_eq!(a, 0.0) {
+                (1.0 - t) * v_previous + t * v_next
+            } else {
+                let s = dot / abs;
+                let a_sin = a.sin();
+                (a * (1.0 - t)).sin() / a_sin * v_previous + s * (a * t).sin() / a_sin * v_next
+            };
+            Quat::from_vec4(v_t).normalize()
         },
         |t, t_d, v_prev, b_prev, a_next, v_next| {
             let a_next = Vec4::from_slice(a_next);
@@ -298,7 +302,11 @@ fn interpolate_quat(
                 + t_d * (t3 - t2) * a_next;
             Quat::from_vec4(v_t).normalize()
         },
-    )
+    );
+    if !v.is_normalized() {
+        dbg!(interpolation);
+    }
+    v
 }
 
 fn interpolate<const N: usize, T>(

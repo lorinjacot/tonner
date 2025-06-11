@@ -1,14 +1,15 @@
 use std::{
-    array::from_fn,
     iter::repeat_with,
     ops::{Index, IndexMut},
     time::Duration,
+    u32,
 };
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
-use glam::{Mat3, Mat4, Vec3, Vec4, usize};
+use glam::{Mat4, Vec3, usize};
 pub use node::{Node, NodeBuilder, NodeHandle};
+use skin::init_skins_buffer;
 use wgpu::util::DeviceExt;
 
 use crate::{
@@ -20,8 +21,7 @@ use crate::{
 pub mod animation;
 pub mod camera;
 mod node;
-
-const MAX_WEIGHT_COUNT: usize = 8;
+pub mod skin;
 
 pub struct Scene {
     pub name: String,
@@ -30,6 +30,8 @@ pub struct Scene {
     nodes: SparseSet<Node>,
     nodes_buffer: Option<wgpu::Buffer>,
     root_nodes: Vec<Id<Node>>,
+    skins: SparseSet<skin::Skin>,
+    skins_buffer: wgpu::Buffer,
     meshes: SparseMap<MeshInstances>,
     cameras: SparseMap<Camera>,
     active_camera: Option<Id<Node>>,
@@ -67,6 +69,11 @@ impl Scene {
         render_width: u32,
         render_height: u32,
     ) -> Self {
+        let nodes = SparseSet::new();
+
+        let mut skins = SparseSet::new();
+        let skins_buffer = init_skins_buffer(&mut skins, &nodes, &resources.device);
+
         let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
             size: size_of::<CameraUniform>() as u64,
@@ -105,9 +112,11 @@ impl Scene {
             name,
             device: resources.device.clone(),
             queue: resources.queue.clone(),
-            nodes: SparseSet::new(),
+            nodes,
             nodes_buffer: None,
             root_nodes: Vec::new(),
+            skins,
+            skins_buffer,
             meshes: SparseMap::new(),
             cameras: SparseMap::new(),
             active_camera: None,
@@ -152,6 +161,10 @@ impl Scene {
 
     pub fn root_nodes(&self) -> &[Id<Node>] {
         &self.root_nodes
+    }
+
+    pub fn skin_builder<'a, 's>(&'s mut self) -> skin::SkinBuilder<'a, 's> {
+        skin::SkinBuilder::new(self)
     }
 
     pub fn camera(&self, id: Id<Node>) -> Option<&Camera> {
@@ -240,45 +253,9 @@ impl Scene {
                 .update_world_matrices_parent(Mat4::IDENTITY);
         }
 
-        let nodes_buffer = {
-            let data: Vec<_> = self
-                .nodes
-                .iter()
-                .map(|node| {
-                    let matrix = node.world_matrix();
-                    let normal_matrix = Mat3::from_mat4(matrix).inverse().transpose();
-                    let mut weights_iter = node.weights().iter().copied();
-                    let weights = from_fn(|_| weights_iter.next().unwrap_or(0.0));
-                    NodeUniform {
-                        matrix,
-                        normal_matrix: [
-                            normal_matrix.x_axis.extend(0.0),
-                            normal_matrix.y_axis.extend(0.0),
-                            normal_matrix.z_axis.extend(0.0),
-                        ],
-                        weights,
-                    }
-                })
-                .collect();
+        self.update_nodes_buffer();
 
-            match &self.nodes_buffer {
-                Some(buffer) => {
-                    self.queue.write_buffer(buffer, 0, cast_slice(&data));
-                    buffer
-                }
-                None => {
-                    self.render_bind_group = None;
-                    let buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(&format!("{}'s nodes buffer", self.name)),
-                                contents: cast_slice(&data),
-                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                            });
-                    self.nodes_buffer.insert(buffer)
-                }
-            }
-        };
+        self.update_skins_buffer();
 
         let lights_buffer = {
             let mut point_lights: Vec<_> = self
@@ -388,51 +365,56 @@ impl Scene {
                             // nodes
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: nodes_buffer.as_entire_binding(),
+                                resource: self.nodes_buffer.as_ref().unwrap().as_entire_binding(),
+                            },
+                            // skins
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: self.skins_buffer.as_entire_binding(),
                             },
                             // camera
                             wgpu::BindGroupEntry {
-                                binding: 1,
+                                binding: 2,
                                 resource: self.camera_buffer.as_entire_binding(),
                             },
                             // lights
                             wgpu::BindGroupEntry {
-                                binding: 2,
+                                binding: 3,
                                 resource: lights_buffer.as_entire_binding(),
                             },
                             // irradiance map
                             wgpu::BindGroupEntry {
-                                binding: 3,
+                                binding: 4,
                                 resource: wgpu::BindingResource::TextureView(
                                     &self.irradiance_map_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 4,
+                                binding: 5,
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.irradiance_map_sampler,
                                 ),
                             },
                             // prefilter map
                             wgpu::BindGroupEntry {
-                                binding: 5,
+                                binding: 6,
                                 resource: wgpu::BindingResource::TextureView(
                                     &self.prefilter_map_view,
                                 ),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 6,
+                                binding: 7,
                                 resource: wgpu::BindingResource::Sampler(
                                     &self.prefilter_map_sampler,
                                 ),
                             },
                             // BRDF LUT
                             wgpu::BindGroupEntry {
-                                binding: 7,
+                                binding: 8,
                                 resource: wgpu::BindingResource::TextureView(&self.brdf_lut_view),
                             },
                             wgpu::BindGroupEntry {
-                                binding: 8,
+                                binding: 9,
                                 resource: wgpu::BindingResource::Sampler(&self.brdf_lut_sampler),
                             },
                         ],
@@ -707,14 +689,6 @@ fn create_tone_mapping_bind_group(
                 },
             ],
         })
-}
-
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct NodeUniform {
-    matrix: Mat4,
-    normal_matrix: [Vec4; 3],
-    weights: [f32; MAX_WEIGHT_COUNT],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

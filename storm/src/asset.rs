@@ -89,6 +89,31 @@ pub fn open_gltf<'r>(
                             None => break,
                         }
                     }
+                    for set in 0.. {
+                        match reader.read_joints(set) {
+                            Some(joints) => {
+                                geometry_builder = match joints {
+                                    gltf::mesh::util::ReadJoints::U8(iter) => geometry_builder
+                                        .joints(iter.map(|[a, b, c, d]| {
+                                            [a as u32, b as u32, c as u32, d as u32]
+                                        })),
+                                    gltf::mesh::util::ReadJoints::U16(iter) => geometry_builder
+                                        .joints(iter.map(|[a, b, c, d]| {
+                                            [a as u32, b as u32, c as u32, d as u32]
+                                        })),
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    for set in 0.. {
+                        match reader.read_weights(set) {
+                            Some(weights) => {
+                                geometry_builder = geometry_builder.weights(weights.into_f32());
+                            }
+                            None => break,
+                        }
+                    }
                     for (positions, normals, tangents) in reader.read_morph_targets() {
                         let mut builder = MorphTargetBuilder::new();
                         if let Some(positions) = positions {
@@ -148,6 +173,7 @@ pub fn open_gltf<'r>(
                     render_height,
                 );
                 let mut node_mapping = vec![None; document.nodes().len()];
+                let mut skins = vec![None; document.skins().len()];
                 for node in gltf_scene.nodes() {
                     scene.build_gltf_node(
                         node,
@@ -155,8 +181,35 @@ pub fn open_gltf<'r>(
                         &mut resources.meshes,
                         &mesh_mapping,
                         &mut node_mapping,
+                        &mut skins,
                     );
                 }
+
+                skins
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(skin, nodes)| {
+                        nodes.map(|nodes| (document.skins().nth(skin).unwrap(), nodes))
+                    })
+                    .for_each(|(skin, nodes)| {
+                        let mut builder = scene.skin_builder().nodes(skin.joints().map(|joint| {
+                            node_mapping[joint.index()]
+                                .expect("skin joints must belong to same scene as skinned node")
+                        }));
+                        if let Some(inverse_bind_matrices) = skin
+                            .reader(|buffer| Some(&buffers[buffer.index()].0))
+                            .read_inverse_bind_matrices()
+                        {
+                            builder = builder.inverse_bind_matrices(
+                                inverse_bind_matrices.map(|mat| Mat4::from_cols_array_2d(&mat)),
+                            )
+                        }
+                        let skin = builder.build().id();
+                        nodes.iter().for_each(|node| {
+                            scene.add_skin_to_node(skin, *node);
+                        });
+                    });
+
                 document.animations().for_each(|animation| {
                     let mut channels = Vec::new();
                     for channel in animation.channels() {
@@ -378,13 +431,14 @@ fn create_material(
 }
 
 impl Scene {
-    fn build_gltf_node(
+    fn build_gltf_node<'a>(
         &mut self,
-        node: gltf::Node,
+        node: gltf::Node<'a>,
         parent: Option<Id<Node>>,
         meshes: &mut SparseSet<Mesh>,
         mesh_mapping: &[Id<Mesh>],
         node_mapping: &mut [Option<Id<Node>>],
+        skins: &mut [Option<Vec<Id<Node>>>],
     ) -> Id<Node> {
         let mut builder = self
             .node_builder()
@@ -417,9 +471,14 @@ impl Scene {
             }
         };
         let id = builder.build().id();
+        if let Some(skin) = node.skin() {
+            skins[skin.index()]
+                .get_or_insert_with(|| Vec::new())
+                .push(id);
+        }
         node_mapping[node.index()] = Some(id);
         for child in node.children() {
-            self.build_gltf_node(child, Some(id), meshes, mesh_mapping, node_mapping);
+            self.build_gltf_node(child, Some(id), meshes, mesh_mapping, node_mapping, skins);
         }
         id
     }

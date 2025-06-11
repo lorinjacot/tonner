@@ -10,7 +10,7 @@ struct CameraUniform {
     position: vec3<f32>,
 }
 
-@group(0) @binding(1) var<uniform> camera: CameraUniform;
+@group(0) @binding(2) var<uniform> camera: CameraUniform;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {

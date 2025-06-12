@@ -10,6 +10,18 @@ use crate::{
     geometry::{Geometry, IndexBuffer},
 };
 
+const ACCUMULATION_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
+    src_factor: wgpu::BlendFactor::One,
+    dst_factor: wgpu::BlendFactor::One,
+    operation: wgpu::BlendOperation::Add,
+};
+
+const REVEALAGE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
+    src_factor: wgpu::BlendFactor::One,
+    dst_factor: wgpu::BlendFactor::OneMinusSrc,
+    operation: wgpu::BlendOperation::Add,
+};
+
 pub struct Mesh {
     id: Id<Mesh>,
     pub name: String,
@@ -81,6 +93,35 @@ impl<'r> MeshBuilder<'r> {
                         attributes: &wgpu::vertex_attr_array![0 => Uint32],
                     }];
 
+                    let (targets, depth_write_enabled) = match material.alpha_mode {
+                        AlphaMode::Opaque | AlphaMode::Mask => (
+                            &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
+                            true,
+                        ),
+                        AlphaMode::Blend => (
+                            &[
+                                None,
+                                Some(wgpu::ColorTargetState {
+                                    format: wgpu::TextureFormat::Rgba16Float,
+                                    blend: Some(wgpu::BlendState {
+                                        color: ACCUMULATION_BLEND,
+                                        alpha: ACCUMULATION_BLEND,
+                                    }),
+                                    write_mask: wgpu::ColorWrites::ALL,
+                                }),
+                                Some(wgpu::ColorTargetState {
+                                    format: wgpu::TextureFormat::R8Unorm,
+                                    blend: Some(wgpu::BlendState {
+                                        color: REVEALAGE_BLEND,
+                                        alpha: REVEALAGE_BLEND,
+                                    }),
+                                    write_mask: wgpu::ColorWrites::ALL,
+                                }),
+                            ],
+                            false,
+                        ),
+                    };
+
                     let constants = &mut HashMap::with_capacity(3);
                     constants.insert(
                         "has_base_color_texture".to_string(),
@@ -102,6 +143,7 @@ impl<'r> MeshBuilder<'r> {
                         "has_emissive_texture".to_string(),
                         bool_to_f64(material.textures.contains(Textures::EMISSIVE)),
                     );
+                    constants.insert("alpha_mode".to_string(), material.alpha_mode as u32 as f64);
                     constants.insert(
                         "max_prefilter_map_mip".to_string(),
                         (PREFILTER_MAP_MIP_COUNT - 1) as f64,
@@ -131,8 +173,8 @@ impl<'r> MeshBuilder<'r> {
                             },
                             depth_stencil: Some(wgpu::DepthStencilState {
                                 format: wgpu::TextureFormat::Depth24Plus,
-                                depth_write_enabled: true,
-                                depth_compare: wgpu::CompareFunction::LessEqual,
+                                depth_write_enabled,
+                                depth_compare: wgpu::CompareFunction::Less,
                                 stencil: wgpu::StencilState::default(),
                                 bias: wgpu::DepthBiasState::default(),
                             }),
@@ -148,10 +190,7 @@ impl<'r> MeshBuilder<'r> {
                                     constants,
                                     ..Default::default()
                                 },
-                                targets: &[
-                                    Some(wgpu::TextureFormat::Rgba16Float.into()),
-                                    Some(wgpu::TextureFormat::Rgba16Float.into()),
-                                ],
+                                targets,
                             }),
                             multiview: None,
                             cache: None,
@@ -180,6 +219,7 @@ pub struct Material {
     id: Id<Self>,
     bind_group: wgpu::BindGroup,
     textures: Textures,
+    alpha_mode: AlphaMode,
 }
 
 bitflags! {
@@ -214,6 +254,7 @@ pub struct MaterialBuilder<'a, 'r> {
     emissive_texture: Option<&'a wgpu::TextureView>,
     emissive_sampler: Option<&'a wgpu::Sampler>,
     uniform: MaterialUniform,
+    alpha_mode: AlphaMode,
     textures: Textures,
 }
 
@@ -231,6 +272,8 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             occlusion_tex_coord: 0,
             emissive_factor: [0.0; 3],
             emissive_tex_coord: 0,
+            alpha_cutoff: 0.5,
+            _pad: [0; 3],
         };
 
         Self {
@@ -246,6 +289,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             emissive_texture: None,
             emissive_sampler: None,
             uniform,
+            alpha_mode: AlphaMode::Opaque,
             textures: Textures::empty(),
         }
     }
@@ -360,6 +404,16 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self
     }
 
+    pub fn alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
+        self.alpha_mode = alpha_mode;
+        self
+    }
+
+    pub fn alpha_cutoff(mut self, alpha_cutoff: f32) -> Self {
+        self.uniform.alpha_cutoff = alpha_cutoff;
+        self
+    }
+
     pub fn build(self) -> &'r mut Material {
         let data = &self.resources.mesh_builder_data;
         let base_color_texture = self.base_color_texture.unwrap_or(&data.default_texture);
@@ -449,8 +503,21 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             id,
             bind_group,
             textures: self.textures,
+            alpha_mode: self.alpha_mode,
         })
     }
+}
+
+#[derive(Clone, Copy)]
+pub enum AlphaMode {
+    /// The rendered material is fully opaque and any `alpha` value is ignored.
+    Opaque = 0,
+    /// The rendered material is either fully opaque or fully transparent depending
+    /// on the alpha value and the specified `alpha_cutoff` value.
+    Mask = 1,
+    /// The rendered material is combined with the background using the specified
+    /// `alpha` value as transparency
+    Blend = 2,
 }
 
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -467,6 +534,8 @@ struct MaterialUniform {
     occlusion_tex_coord: u32,
     emissive_factor: [f32; 3],
     emissive_tex_coord: u32,
+    alpha_cutoff: f32,
+    _pad: [u32; 3],
 }
 
 #[derive(Clone)]

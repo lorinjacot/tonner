@@ -4,6 +4,8 @@ override has_normal_texture: bool;
 override has_occlusion_texture: bool;
 override has_emissive_texture: bool;
 
+override alpha_mode: u32;
+
 override max_prefilter_map_mip: f32;
 
 const pi = 3.14159265359;
@@ -135,8 +137,9 @@ fn vs_main(
 }
 
 struct FragmentOutput {
-    @location(0) color: vec4<f32>,
-    @location(1) bright_color: vec4<f32>,
+    @location(0) opaque: vec4<f32>,
+    @location(1) accumulation: vec4<f32>,
+    @location(2) revealage: f32,
 }
 
 struct MaterialUniform {
@@ -151,6 +154,7 @@ struct MaterialUniform {
     occlusion_tex_coord: u32,
     emissive_factor: vec3<f32>,
     emissive_tex_coord: u32,
+    alpha_cutoff: f32,
 }
 
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;
@@ -179,6 +183,22 @@ fn fs_main(vertex: VertexOutput) -> FragmentOutput {
             base_color_sampler,
             tex_coords[material.base_color_tex_coord],
         );
+    }
+
+    var alpha: f32;
+    if alpha_mode == 0 {
+        // OPAQUE
+        alpha = 1.0;
+    } else if alpha_mode == 1 {
+        // MASK
+        if base_color.a >= material.alpha_cutoff {
+            alpha = 1.0;
+        } else {
+            discard;
+        }
+    } else if alpha_mode == 2 {
+        // BLEND
+        alpha = base_color.a;
     }
 
     let albedo = base_color.rgb;
@@ -285,15 +305,18 @@ fn fs_main(vertex: VertexOutput) -> FragmentOutput {
     let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
 
     let ambient = (kd * diffuse + specular) * ambiance_occlusion;
-    let color = vec4(ambient + lo + emissive, base_color.a);
+    let color = vec4(ambient + lo + emissive, alpha);
     let brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
 
     var result: FragmentOutput;
-    result.color = color;
-    if brightness > 1.0 {
-        result.bright_color = color;
-    } else {
-        result.bright_color = vec4(0.0, 0.0, 0.0, color.a);
+    if alpha_mode == 0 || alpha_mode == 1 {
+        result.opaque = color;
+    } else if alpha_mode == 2 {
+        let weight = clamp(pow(min(1.0, color.a * 10.0) + 0.01, 3.0) * 1e8 * 
+                        pow(1.0 - vertex.position.z * 0.9, 3.0), 1e-2, 3e3);
+
+        result.accumulation = vec4(color.rgb * alpha, alpha) * weight;
+        result.revealage = alpha;
     }
     return result;
 }

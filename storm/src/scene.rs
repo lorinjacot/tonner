@@ -52,8 +52,14 @@ pub struct Scene {
     skybox_pipeline: wgpu::RenderPipeline,
     render_width: u32,
     render_height: u32,
-    depth_texture: wgpu::TextureView,
-    hdr_texture: wgpu::TextureView,
+    opaque_attachment: wgpu::TextureView,
+    accumulation_attachment: wgpu::TextureView,
+    revealage_attachment: wgpu::TextureView,
+    depth_attachment: wgpu::TextureView,
+    compose_bind_group: wgpu::BindGroup,
+    compose_pipeline: wgpu::RenderPipeline,
+    brightness_bind_group: wgpu::BindGroup,
+    brightness_pipeline: wgpu::RenderPipeline,
     bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     tone_mapping_pipeline: wgpu::RenderPipeline,
@@ -97,14 +103,26 @@ impl Scene {
         let playing_animations = SparseMap::new();
 
         let bloom_amount = 10;
-        let (depth_texture, hdr_texture, bloom_textures, tone_mapping_bind_group) =
-            create_render_texture(
-                render_width,
-                render_height,
-                bloom_amount,
-                resources,
-                encoder,
-            );
+        let (
+            [
+                opaque_attachment,
+                accumulation_attachment,
+                revealage_attachment,
+                depth_attachment,
+            ],
+            bloom_textures,
+            [
+                compose_bind_group,
+                brightness_bind_group,
+                tone_mapping_bind_group,
+            ],
+        ) = create_render_attachments(
+            render_width,
+            render_height,
+            bloom_amount,
+            resources,
+            encoder,
+        );
 
         let environment = &resources.environments[environment];
 
@@ -137,8 +155,14 @@ impl Scene {
             skybox_pipeline: resources.skybox_pipeline.clone(),
             render_width,
             render_height,
-            depth_texture,
-            hdr_texture,
+            opaque_attachment,
+            accumulation_attachment,
+            revealage_attachment,
+            depth_attachment,
+            compose_bind_group,
+            compose_pipeline: resources.compose_pipeline.clone(),
+            brightness_bind_group,
+            brightness_pipeline: resources.brightness_pipeline.clone(),
             bloom_textures,
             bloom_amount,
             gaussian_blur_pipeline: resources.gaussian_blur_pipeline.clone(),
@@ -199,12 +223,21 @@ impl Scene {
         if self.render_width != width || self.render_height != height {
             self.render_width = width;
             self.render_height = height;
+
             (
-                self.depth_texture,
-                self.hdr_texture,
+                [
+                    self.opaque_attachment,
+                    self.accumulation_attachment,
+                    self.revealage_attachment,
+                    self.depth_attachment,
+                ],
                 self.bloom_textures,
-                self.tone_mapping_bind_group,
-            ) = create_render_texture(width, height, self.bloom_amount, resources, encoder)
+                [
+                    self.compose_bind_group,
+                    self.brightness_bind_group,
+                    self.tone_mapping_bind_group,
+                ],
+            ) = create_render_attachments(width, height, self.bloom_amount, resources, encoder);
         }
     }
 
@@ -216,7 +249,7 @@ impl Scene {
         self.bloom_amount = bloom_amount;
         self.tone_mapping_bind_group = create_tone_mapping_bind_group(
             resources,
-            &self.hdr_texture,
+            &self.opaque_attachment,
             &self.bloom_textures,
             bloom_amount,
         );
@@ -428,70 +461,144 @@ impl Scene {
     pub fn render(&self, render_texture: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         if let Some(render_bind_group) = self.render_bind_group.as_ref() {
             {
-                let mut hdr_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Scene hdr render pass"),
-                    color_attachments: &[
-                        Some(wgpu::RenderPassColorAttachment {
-                            view: &self.hdr_texture,
+                let mut opaque_render_pass =
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Opaque render pass"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.opaque_attachment,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            }),
+                            None,
+                            None,
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_attachment,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                opaque_render_pass.set_bind_group(0, render_bind_group, &[]);
+                for mesh_instances in self.meshes.iter() {
+                    let instances_count = mesh_instances.nodes.len() as u32;
+                    opaque_render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
+                    for primitive in mesh_instances.primitives.iter() {
+                        opaque_render_pass.set_pipeline(&primitive.pipeline);
+                        opaque_render_pass.set_bind_group(1, &primitive.geometry, &[]);
+                        opaque_render_pass.set_bind_group(2, &primitive.material, &[]);
+                        match &primitive.index_buffer {
+                            Some(index_buffer) => {
+                                opaque_render_pass.set_index_buffer(
+                                    index_buffer.buffer.slice(..),
+                                    index_buffer.format,
+                                );
+                                opaque_render_pass.draw_indexed(
+                                    0..index_buffer.index_count,
+                                    0,
+                                    0..instances_count,
+                                );
+                            }
+                            None => opaque_render_pass
+                                .draw(0..primitive.vertex_count, 0..instances_count),
+                        }
+                    }
+                }
+
+                if let Some(skybox_bind_group) = self.skybox_bind_group.as_ref() {
+                    opaque_render_pass.set_pipeline(&self.skybox_pipeline);
+                    opaque_render_pass.set_bind_group(1, skybox_bind_group, &[]);
+                    opaque_render_pass.draw(0..3, 0..1);
+                }
+            }
+
+            {
+                let _transparent_render_pass =
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Transparent render pass"),
+                        color_attachments: &[
+                            None,
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.accumulation_attachment,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.revealage_attachment,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_attachment,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+            }
+
+            {
+                let mut compose_render_pass =
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Compose render pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.opaque_attachment,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                load: wgpu::LoadOp::Load,
                                 store: wgpu::StoreOp::Store,
                             },
-                        }),
-                        Some(wgpu::RenderPassColorAttachment {
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                compose_render_pass.set_pipeline(&self.compose_pipeline);
+                compose_render_pass.set_bind_group(0, &self.compose_bind_group, &[]);
+                compose_render_pass.draw(0..3, 0..1);
+            }
+
+            {
+                let mut brightness_render_pass =
+                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Brightness render pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &self.bloom_textures[0].0,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
                             },
-                        }),
-                    ],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_texture,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
 
-                hdr_render_pass.set_bind_group(0, render_bind_group, &[]);
-                for mesh_instances in self.meshes.iter() {
-                    let instances_count = mesh_instances.nodes.len() as u32;
-                    hdr_render_pass.set_vertex_buffer(0, mesh_instances.vertex_buffer.slice(..));
-                    for primitive in mesh_instances.primitives.iter() {
-                        hdr_render_pass.set_pipeline(&primitive.pipeline);
-                        hdr_render_pass.set_bind_group(1, &primitive.geometry, &[]);
-                        hdr_render_pass.set_bind_group(2, &primitive.material, &[]);
-                        match &primitive.index_buffer {
-                            Some(index_buffer) => {
-                                hdr_render_pass.set_index_buffer(
-                                    index_buffer.buffer.slice(..),
-                                    index_buffer.format,
-                                );
-                                hdr_render_pass.draw_indexed(
-                                    0..index_buffer.index_count,
-                                    0,
-                                    0..instances_count,
-                                );
-                            }
-                            None => {
-                                hdr_render_pass.draw(0..primitive.vertex_count, 0..instances_count)
-                            }
-                        }
-                    }
-                }
-
-                if let Some(skybox_bind_group) = self.skybox_bind_group.as_ref() {
-                    hdr_render_pass.set_pipeline(&self.skybox_pipeline);
-                    hdr_render_pass.set_bind_group(1, skybox_bind_group, &[]);
-                    hdr_render_pass.draw(0..3, 0..1);
-                }
+                brightness_render_pass.set_pipeline(&self.brightness_pipeline);
+                brightness_render_pass.set_bind_group(0, &self.brightness_bind_group, &[]);
+                brightness_render_pass.draw(0..3, 0..1);
             }
 
             let mut horizontal = false;
@@ -557,42 +664,93 @@ impl IndexMut<Id<Node>> for Scene {
     }
 }
 
-fn create_render_texture(
+fn create_render_attachments(
     width: u32,
     height: u32,
     bloom_amount: usize,
     resources: &mut Resources,
     encoder: &mut wgpu::CommandEncoder,
 ) -> (
-    wgpu::TextureView,
-    wgpu::TextureView,
+    [wgpu::TextureView; 4],
     [(wgpu::TextureView, wgpu::BindGroup); 2],
-    wgpu::BindGroup,
+    [wgpu::BindGroup; 3],
 ) {
     let size = wgpu::Extent3d {
         width,
         height,
         depth_or_array_layers: 1,
     };
-    let depth_texture = resources
+
+    let opaque_attachment = resources
         .texture_builder()
-        .name("Depth texture")
+        .name("Opaque render attachment")
+        .empty(size, wgpu::TextureFormat::Rgba16Float)
+        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+        .build(encoder)
+        .create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Opaque render attachment"),
+            ..Default::default()
+        });
+
+    let accumulation_attachment = resources
+        .texture_builder()
+        .name("Accumulation render attachment")
+        .empty(size, wgpu::TextureFormat::Rgba16Float)
+        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+        .build(encoder)
+        .create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Accumulation render attachment"),
+            ..Default::default()
+        });
+
+    let revealage_attachment = resources
+        .texture_builder()
+        .name("Revealage render attachment")
+        .empty(size, wgpu::TextureFormat::R8Unorm)
+        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
+        .build(encoder)
+        .create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Revealage render attachment"),
+            ..Default::default()
+        });
+
+    let depth_attachment = resources
+        .texture_builder()
+        .name("Depth render attachment")
         .empty(size, wgpu::TextureFormat::Depth24Plus)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
         .build(encoder)
         .create_view(&wgpu::TextureViewDescriptor {
-            label: Some("Depth texture view"),
+            label: Some("Depth render attachment"),
             ..Default::default()
         });
-    let hdr_texture = resources
-        .texture_builder()
-        .name("HDR render texture")
-        .empty(size, wgpu::TextureFormat::Rgba16Float)
-        .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
-        .build(encoder)
-        .create_view(&wgpu::TextureViewDescriptor {
-            label: Some("HDR render texture view"),
-            ..Default::default()
+
+    let compose_bind_group = resources
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compose bind group"),
+            layout: &resources.compose_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&accumulation_attachment),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&revealage_attachment),
+                },
+            ],
+        });
+
+    let brightness_bind_group = resources
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Brightness bind group"),
+            layout: &resources.brightness_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&opaque_attachment),
+            }],
         });
 
     let mut horizontal = true;
@@ -644,20 +802,32 @@ fn create_render_texture(
     .try_into()
     .unwrap();
 
-    let tone_mapping_bind_group =
-        create_tone_mapping_bind_group(resources, &hdr_texture, &bloom_textures, bloom_amount);
+    let tone_mapping_bind_group = create_tone_mapping_bind_group(
+        resources,
+        &opaque_attachment,
+        &bloom_textures,
+        bloom_amount,
+    );
 
     (
-        depth_texture,
-        hdr_texture,
+        [
+            opaque_attachment,
+            accumulation_attachment,
+            revealage_attachment,
+            depth_attachment,
+        ],
         bloom_textures,
-        tone_mapping_bind_group,
+        [
+            compose_bind_group,
+            brightness_bind_group,
+            tone_mapping_bind_group,
+        ],
     )
 }
 
 fn create_tone_mapping_bind_group(
     resources: &mut Resources,
-    hdr_texture: &wgpu::TextureView,
+    opaque_texture: &wgpu::TextureView,
     bloom_textures: &[(wgpu::TextureView, wgpu::BindGroup); 2],
     bloom_amount: usize,
 ) -> wgpu::BindGroup {
@@ -671,7 +841,7 @@ fn create_tone_mapping_bind_group(
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(hdr_texture),
+                    resource: wgpu::BindingResource::TextureView(opaque_texture),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,

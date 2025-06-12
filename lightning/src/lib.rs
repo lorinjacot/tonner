@@ -242,12 +242,12 @@ impl Engine {
                 let target = scene
                     .node_builder()
                     .name("Orbit camera target".to_string().into())
-                    .build()
+                    .build(&resources)
                     .id();
                 let cursor = scene
                     .node_builder()
                     .name("Orbit camera cursor".to_string().into())
-                    .build()
+                    .build(&resources)
                     .id();
                 let camera = scene
                     .node_builder()
@@ -265,7 +265,7 @@ impl Engine {
                         }
                         .into(),
                     )
-                    .build()
+                    .build(&resources)
                     .id();
                 scene.set_active_camera(camera.into());
 
@@ -329,7 +329,12 @@ impl Engine {
 
         let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
             egui::SidePanel::left("explorer").show(ctx, |ui| {
-                self.explorer.ui(ui, &mut scenes.all, &mut scenes.active, &self.data.resources)
+                self.explorer.ui(
+                    ui,
+                    &mut scenes.all,
+                    &mut scenes.active,
+                    &self.data.resources,
+                )
             });
             if let Some(scene_index) = scenes.active {
                 egui::CentralPanel::default().show(&ctx, |ui| {

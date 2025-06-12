@@ -1,6 +1,7 @@
 pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
+use mesh::PrimitivePipeline;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 pub use scene::{camera, skin};
 use storage::SparseSet;
@@ -22,6 +23,7 @@ pub struct Resources {
     geometries: SparseSet<geometry::Geometry>,
     texture_builder_data: texture::TextureBuilderData,
     materials: SparseSet<mesh::Material>,
+    primitive_pipelines: SparseSet<PrimitivePipeline>,
     meshes: SparseSet<mesh::Mesh>,
     mesh_builder_data: mesh::MeshBuilderData,
     environments: SparseSet<Environment>,
@@ -561,6 +563,7 @@ impl Resources {
             texture_builder_data,
             materials,
             meshes,
+            primitive_pipelines: SparseSet::new(),
             mesh_builder_data,
             environments,
             environment_builder_data,

@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
+use crate::{DenseEntry, Id, Resources, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
 
 use super::{Camera, PointLight, Scene, camera::CameraDescriptor, skin::Skin};
 
@@ -90,7 +90,7 @@ impl<'a> NodeHandle<'a> {
         self.update_world_matrices();
     }
 
-    pub fn set_mesh(&mut self, mesh: Option<&Mesh>) {
+    pub fn set_mesh(&mut self, mesh: Option<Id<Mesh>>, resources: &Resources) {
         let node = &mut self.scene[self.id];
         if node.mesh == mesh.map(|mesh| mesh.id()) {
             return;
@@ -105,8 +105,7 @@ impl<'a> NodeHandle<'a> {
 
         if let Some(mesh) = mesh {
             self.scene
-                .meshes
-                .instanciate_unchecked(mesh, self.id, &self.scene.device);
+                .add_mesh_to_node_unchecked(mesh, self.id, resources);
         }
     }
 
@@ -130,19 +129,19 @@ impl<'a> Deref for NodeHandle<'a> {
     }
 }
 
-pub struct NodeBuilder<'a, 's> {
+pub struct NodeBuilder<'s> {
     scene: &'s mut Scene,
     name: Option<String>,
     parent: Option<Id<Node>>,
     local_transform: Transform,
     world_matrix: Mat4,
-    mesh: Option<&'a Mesh>,
+    mesh: Option<Id<Mesh>>,
     camera: Option<CameraDescriptor>,
     point_light: Option<Vec3>,
     weights: Vec<f32>,
 }
 
-impl<'a, 's> NodeBuilder<'a, 's> {
+impl<'s> NodeBuilder<'s> {
     pub fn new(scene: &'s mut Scene) -> Self {
         Self {
             scene,
@@ -188,7 +187,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         self
     }
 
-    pub fn mesh(mut self, mesh: &'a Mesh) -> Self {
+    pub fn mesh(mut self, mesh: Id<Mesh>) -> Self {
         self.mesh = Some(mesh);
         self
     }
@@ -208,7 +207,7 @@ impl<'a, 's> NodeBuilder<'a, 's> {
         self
     }
 
-    pub fn build(mut self) -> &'s mut Node {
+    pub fn build(mut self, resources: &Resources) -> &'s mut Node {
         let id = self.scene.nodes.next_id();
         match self.parent {
             Some(parent) => {
@@ -234,26 +233,21 @@ impl<'a, 's> NodeBuilder<'a, 's> {
             weights: self.weights,
             skin: None,
         };
-        let node = self.scene.nodes.insert(node);
+        let node = self.scene.nodes.insert(node).id();
 
         if let Some(mesh) = self.mesh {
-            self.scene
-                .meshes
-                .instanciate_unchecked(mesh, node.id(), &self.scene.device);
+            self.scene.add_mesh_to_node_unchecked(mesh, node, resources);
         }
 
         if let Some(camera) = self.camera {
-            self.scene.cameras.insert(Camera::new(node.id(), camera));
+            self.scene.cameras.insert(Camera::new(node, camera));
         }
 
         if let Some(color) = self.point_light {
-            self.scene.point_lights.insert(PointLight {
-                node: node.id(),
-                color,
-            });
+            self.scene.point_lights.insert(PointLight { node, color });
         }
 
-        node
+        &mut self.scene.nodes[node]
     }
 }
 

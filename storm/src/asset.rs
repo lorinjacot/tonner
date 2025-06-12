@@ -7,9 +7,9 @@ use wgpu::AddressMode;
 use crate::{
     Id, Resources,
     geometry::MorphTargetBuilder,
-    mesh::{Material, Mesh},
+    mesh::{AlphaMode, Material, Mesh},
     scene::{Node, Scene, animation},
-    storage::{DenseEntry, SparseSet},
+    storage::DenseEntry,
 };
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[];
@@ -178,10 +178,10 @@ pub fn open_gltf<'r>(
                     scene.build_gltf_node(
                         node,
                         None,
-                        &mut resources.meshes,
                         &mesh_mapping,
                         &mut node_mapping,
                         &mut skins,
+                        resources,
                     );
                 }
 
@@ -381,7 +381,12 @@ fn create_material(
         .base_color_factor(pbr_metallic_roughness.base_color_factor())
         .metallic_factor(pbr_metallic_roughness.metallic_factor())
         .roughness_factor(pbr_metallic_roughness.roughness_factor())
-        .emissive_factor(material.emissive_factor());
+        .emissive_factor(material.emissive_factor())
+        .alpha_mode(match material.alpha_mode() {
+            gltf::material::AlphaMode::Blend => AlphaMode::Blend,
+            gltf::material::AlphaMode::Mask => AlphaMode::Mask,
+            gltf::material::AlphaMode::Opaque => AlphaMode::Opaque,
+        });
     if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
         let (texture, sampler) = textures[base_color_texture.texture().index()]
             .as_ref()
@@ -427,6 +432,9 @@ fn create_material(
             .emissive_texture(texture)
             .emissive_sampler(sampler);
     }
+    if let Some(alpha_cutoff) = material.alpha_cutoff() {
+        builder = builder.alpha_cutoff(alpha_cutoff);
+    }
     builder.build().id()
 }
 
@@ -435,10 +443,10 @@ impl Scene {
         &mut self,
         node: gltf::Node<'a>,
         parent: Option<Id<Node>>,
-        meshes: &mut SparseSet<Mesh>,
         mesh_mapping: &[Id<Mesh>],
         node_mapping: &mut [Option<Id<Node>>],
         skins: &mut [Option<Vec<Id<Node>>>],
+        resources: &Resources,
     ) -> Id<Node> {
         let mut builder = self
             .node_builder()
@@ -451,7 +459,7 @@ impl Scene {
         let mut default_weights = None;
         if let Some(mesh) = node.mesh() {
             default_weights = mesh.weights();
-            builder = builder.mesh(&meshes[mesh_mapping[mesh.index()]]);
+            builder = builder.mesh(mesh_mapping[mesh.index()]);
         }
         if let Some(weights) = node.weights().or(default_weights) {
             builder = builder.weights(weights.into());
@@ -470,7 +478,7 @@ impl Scene {
                 builder.local_matrix(Mat4::from_cols_array_2d(&matrix))
             }
         };
-        let id = builder.build().id();
+        let id = builder.build(resources).id();
         if let Some(skin) = node.skin() {
             skins[skin.index()]
                 .get_or_insert_with(|| Vec::new())
@@ -478,7 +486,14 @@ impl Scene {
         }
         node_mapping[node.index()] = Some(id);
         for child in node.children() {
-            self.build_gltf_node(child, Some(id), meshes, mesh_mapping, node_mapping, skins);
+            self.build_gltf_node(
+                child,
+                Some(id),
+                mesh_mapping,
+                node_mapping,
+                skins,
+                resources,
+            );
         }
         id
     }

@@ -4,11 +4,7 @@ use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, cast_slice};
 use wgpu::util::DeviceExt;
 
-use crate::{
-    DenseEntry, Id, Resources,
-    environment::PREFILTER_MAP_MIP_COUNT,
-    geometry::{Geometry, IndexBuffer},
-};
+use crate::{DenseEntry, Id, Resources, environment::PREFILTER_MAP_MIP_COUNT, geometry::Geometry};
 
 const ACCUMULATION_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
     src_factor: wgpu::BlendFactor::One,
@@ -25,7 +21,13 @@ const REVEALAGE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
 pub struct Mesh {
     id: Id<Mesh>,
     pub name: String,
-    pub(super) primitives: Vec<Primitive>,
+    primitives: Vec<(Id<PrimitivePipeline>, Id<Geometry>, Id<Material>)>,
+}
+
+impl Mesh {
+    pub fn primitives(&self) -> &[(Id<PrimitivePipeline>, Id<Geometry>, Id<Material>)] {
+        &self.primitives
+    }
 }
 
 impl DenseEntry for Mesh {
@@ -68,144 +70,159 @@ impl<'r> MeshBuilder<'r> {
     pub fn build(self) -> &'r mut Mesh {
         let id = self.resources.meshes.next_id();
         let mut morph_target_count = None;
-        let primitives =
-            self.primitives
-                .into_iter()
-                .map(|(geometry, material)| {
-                    let geometry = &self.resources.geometries[geometry];
-                    let material = &self.resources.materials[material];
-                    match morph_target_count {
-                        Some(count) => assert_eq!(
-                            count,
-                            geometry.morph_target_count(),
-                            "all primitives should have the same number of morph targets"
-                        ),
-                        None => morph_target_count = Some(geometry.morph_target_count()),
-                    }
+        let primitives = self
+            .primitives
+            .into_iter()
+            .map(|(geometry, material)| {
+                let geometry = &self.resources.geometries[geometry];
+                let material = &self.resources.materials[material];
+                match morph_target_count {
+                    Some(count) => assert_eq!(
+                        count,
+                        geometry.morph_target_count(),
+                        "all primitives should have the same number of morph targets"
+                    ),
+                    None => morph_target_count = Some(geometry.morph_target_count()),
+                }
 
-                    if material.textures.contains(Textures::NORMAL) {
-                        assert!(geometry.has_tangents());
-                    }
+                if material.textures.contains(Textures::NORMAL) {
+                    assert!(geometry.has_tangents());
+                }
 
-                    let vertex_buffer_layouts = vec![wgpu::VertexBufferLayout {
-                        array_stride: 4,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![0 => Uint32],
-                    }];
+                let vertex_buffer_layouts = vec![wgpu::VertexBufferLayout {
+                    array_stride: 4,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Uint32],
+                }];
 
-                    let (targets, depth_write_enabled) = match material.alpha_mode {
-                        AlphaMode::Opaque | AlphaMode::Mask => (
-                            &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
-                            true,
-                        ),
-                        AlphaMode::Blend => (
-                            &[
-                                None,
-                                Some(wgpu::ColorTargetState {
-                                    format: wgpu::TextureFormat::Rgba16Float,
-                                    blend: Some(wgpu::BlendState {
-                                        color: ACCUMULATION_BLEND,
-                                        alpha: ACCUMULATION_BLEND,
-                                    }),
-                                    write_mask: wgpu::ColorWrites::ALL,
+                let (targets, depth_write_enabled) = match material.alpha_mode {
+                    AlphaMode::Opaque | AlphaMode::Mask => (
+                        &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
+                        true,
+                    ),
+                    AlphaMode::Blend => (
+                        &[
+                            None,
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(wgpu::BlendState {
+                                    color: ACCUMULATION_BLEND,
+                                    alpha: ACCUMULATION_BLEND,
                                 }),
-                                Some(wgpu::ColorTargetState {
-                                    format: wgpu::TextureFormat::R8Unorm,
-                                    blend: Some(wgpu::BlendState {
-                                        color: REVEALAGE_BLEND,
-                                        alpha: REVEALAGE_BLEND,
-                                    }),
-                                    write_mask: wgpu::ColorWrites::ALL,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R8Unorm,
+                                blend: Some(wgpu::BlendState {
+                                    color: REVEALAGE_BLEND,
+                                    alpha: REVEALAGE_BLEND,
                                 }),
-                            ],
-                            false,
-                        ),
-                    };
-
-                    let constants = &mut HashMap::with_capacity(3);
-                    constants.insert(
-                        "has_base_color_texture".to_string(),
-                        bool_to_f64(material.textures.contains(Textures::BASE_COLOR)),
-                    );
-                    constants.insert(
-                        "has_metallic_roughness_texture".to_string(),
-                        bool_to_f64(material.textures.contains(Textures::METALLIC_ROUGHNESS)),
-                    );
-                    constants.insert(
-                        "has_normal_texture".to_string(),
-                        bool_to_f64(material.textures.contains(Textures::NORMAL)),
-                    );
-                    constants.insert(
-                        "has_occlusion_texture".to_string(),
-                        bool_to_f64(material.textures.contains(Textures::OCCLUSION)),
-                    );
-                    constants.insert(
-                        "has_emissive_texture".to_string(),
-                        bool_to_f64(material.textures.contains(Textures::EMISSIVE)),
-                    );
-                    constants.insert("alpha_mode".to_string(), material.alpha_mode as u32 as f64);
-                    constants.insert(
-                        "max_prefilter_map_mip".to_string(),
-                        (PREFILTER_MAP_MIP_COUNT - 1) as f64,
-                    );
-                    let data = &self.resources.mesh_builder_data;
-                    let pipeline = self.resources.device.create_render_pipeline(
-                        &wgpu::RenderPipelineDescriptor {
-                            label: Some(&format!("Primitive pipeline")),
-                            layout: Some(&data.primitive_pipeline_layout),
-                            vertex: wgpu::VertexState {
-                                module: &data.primitive_shader_module,
-                                entry_point: Some("vs_main"),
-                                compilation_options: wgpu::PipelineCompilationOptions {
-                                    constants,
-                                    ..Default::default()
-                                },
-                                buffers: &vertex_buffer_layouts,
-                            },
-                            primitive: wgpu::PrimitiveState {
-                                topology: wgpu::PrimitiveTopology::TriangleList,
-                                strip_index_format: None,
-                                front_face: wgpu::FrontFace::Ccw,
-                                cull_mode: None,
-                                unclipped_depth: false,
-                                polygon_mode: wgpu::PolygonMode::Fill,
-                                conservative: false,
-                            },
-                            depth_stencil: Some(wgpu::DepthStencilState {
-                                format: wgpu::TextureFormat::Depth24Plus,
-                                depth_write_enabled,
-                                depth_compare: wgpu::CompareFunction::Less,
-                                stencil: wgpu::StencilState::default(),
-                                bias: wgpu::DepthBiasState::default(),
+                                write_mask: wgpu::ColorWrites::ALL,
                             }),
-                            multisample: wgpu::MultisampleState {
-                                count: 1,
-                                mask: !0,
-                                alpha_to_coverage_enabled: false,
-                            },
-                            fragment: Some(wgpu::FragmentState {
-                                module: &data.primitive_shader_module,
-                                entry_point: Some("fs_main"),
-                                compilation_options: wgpu::PipelineCompilationOptions {
-                                    constants,
-                                    ..Default::default()
-                                },
-                                targets,
-                            }),
-                            multiview: None,
-                            cache: None,
-                        },
-                    );
+                        ],
+                        false,
+                    ),
+                };
 
-                    Primitive {
-                        pipeline,
-                        index_buffer: geometry.indices().clone(),
-                        vertex_count: geometry.vertex_count() as u32,
-                        geometry: geometry.bind_group().clone(),
-                        material: material.bind_group.clone(),
+                let mut constants = HashMap::with_capacity(3);
+                constants.insert(
+                    "has_base_color_texture".to_string(),
+                    bool_to_f64(material.textures.contains(Textures::BASE_COLOR)),
+                );
+                constants.insert(
+                    "has_metallic_roughness_texture".to_string(),
+                    bool_to_f64(material.textures.contains(Textures::METALLIC_ROUGHNESS)),
+                );
+                constants.insert(
+                    "has_normal_texture".to_string(),
+                    bool_to_f64(material.textures.contains(Textures::NORMAL)),
+                );
+                constants.insert(
+                    "has_occlusion_texture".to_string(),
+                    bool_to_f64(material.textures.contains(Textures::OCCLUSION)),
+                );
+                constants.insert(
+                    "has_emissive_texture".to_string(),
+                    bool_to_f64(material.textures.contains(Textures::EMISSIVE)),
+                );
+                constants.insert("alpha_mode".to_string(), material.alpha_mode as u32 as f64);
+                constants.insert(
+                    "max_prefilter_map_mip".to_string(),
+                    (PREFILTER_MAP_MIP_COUNT - 1) as f64,
+                );
+
+                let pipeline = match self
+                    .resources
+                    .primitive_pipelines
+                    .iter()
+                    .find(|pipeline| pipeline.constants == constants)
+                {
+                    Some(pipeline) => pipeline.id(),
+                    None => {
+                        let data = &self.resources.mesh_builder_data;
+                        let pipeline = self.resources.device.create_render_pipeline(
+                            &wgpu::RenderPipelineDescriptor {
+                                label: Some(&format!("Primitive pipeline")),
+                                layout: Some(&data.primitive_pipeline_layout),
+                                vertex: wgpu::VertexState {
+                                    module: &data.primitive_shader_module,
+                                    entry_point: Some("vs_main"),
+                                    compilation_options: wgpu::PipelineCompilationOptions {
+                                        constants: &constants,
+                                        ..Default::default()
+                                    },
+                                    buffers: &vertex_buffer_layouts,
+                                },
+                                primitive: wgpu::PrimitiveState {
+                                    topology: wgpu::PrimitiveTopology::TriangleList,
+                                    strip_index_format: None,
+                                    front_face: wgpu::FrontFace::Ccw,
+                                    cull_mode: None,
+                                    unclipped_depth: false,
+                                    polygon_mode: wgpu::PolygonMode::Fill,
+                                    conservative: false,
+                                },
+                                depth_stencil: Some(wgpu::DepthStencilState {
+                                    format: wgpu::TextureFormat::Depth24Plus,
+                                    depth_write_enabled,
+                                    depth_compare: wgpu::CompareFunction::Less,
+                                    stencil: wgpu::StencilState::default(),
+                                    bias: wgpu::DepthBiasState::default(),
+                                }),
+                                multisample: wgpu::MultisampleState {
+                                    count: 1,
+                                    mask: !0,
+                                    alpha_to_coverage_enabled: false,
+                                },
+                                fragment: Some(wgpu::FragmentState {
+                                    module: &data.primitive_shader_module,
+                                    entry_point: Some("fs_main"),
+                                    compilation_options: wgpu::PipelineCompilationOptions {
+                                        constants: &constants,
+                                        ..Default::default()
+                                    },
+                                    targets,
+                                }),
+                                multiview: None,
+                                cache: None,
+                            },
+                        );
+
+                        let id = self.resources.primitive_pipelines.next_id();
+                        self.resources
+                            .primitive_pipelines
+                            .insert(PrimitivePipeline {
+                                id,
+                                pipeline,
+                                constants,
+                            })
+                            .id()
                     }
-                })
-                .collect();
+                };
+
+                (pipeline, geometry.id(), material.id())
+            })
+            .collect();
         let mesh = Mesh {
             id,
             name: self.name.unwrap_or_else(|| format!("Mesh {id}")),
@@ -222,7 +239,14 @@ pub struct Material {
     alpha_mode: AlphaMode,
 }
 
+impl Material {
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+}
+
 bitflags! {
+    #[derive(Clone, PartialEq, Eq, Hash)]
     struct Textures: u32 {
         const BASE_COLOR = 1 << 0;
         const METALLIC_ROUGHNESS = 1 << 1;
@@ -508,7 +532,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlphaMode {
     /// The rendered material is fully opaque and any `alpha` value is ignored.
     Opaque = 0,
@@ -538,13 +562,33 @@ struct MaterialUniform {
     _pad: [u32; 3],
 }
 
-#[derive(Clone)]
-pub struct Primitive {
-    pub(super) pipeline: wgpu::RenderPipeline,
-    pub(super) index_buffer: Option<IndexBuffer>,
-    pub(super) vertex_count: u32,
-    pub(super) geometry: wgpu::BindGroup,
-    pub(super) material: wgpu::BindGroup,
+pub struct PrimitivePipeline {
+    id: Id<Self>,
+    pipeline: wgpu::RenderPipeline,
+    constants: HashMap<String, f64>,
+}
+
+impl PrimitivePipeline {
+    pub fn alpha_mode(&self) -> AlphaMode {
+        match self.constants["alpha_mode"] {
+            0.0 => AlphaMode::Opaque,
+            1.0 => AlphaMode::Mask,
+            2.0 => AlphaMode::Blend,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.pipeline
+    }
+}
+
+impl DenseEntry for PrimitivePipeline {
+    type Key = Self;
+
+    fn id(&self) -> Id<Self::Key> {
+        self.id
+    }
 }
 
 pub(super) struct MeshBuilderData {

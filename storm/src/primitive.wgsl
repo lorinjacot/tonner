@@ -170,7 +170,7 @@ struct MaterialUniform {
 @group(2) @binding(10) var<uniform> material: MaterialUniform;
 
 @fragment
-fn fs_main(vertex: VertexOutput) -> FragmentOutput {
+fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> FragmentOutput {
     var tex_coords = array(
         vertex.tex_coord_0,
         vertex.tex_coord_1,
@@ -247,6 +247,10 @@ fn fs_main(vertex: VertexOutput) -> FragmentOutput {
         normal = normal * 2.0 - 1.0;
         normal = normalize(tbn * normal);
     }
+    if !front_facing {
+        normal = -normal;
+    }
+    
     let view = normalize(camera.position - vertex.world_position);
     let reflected = reflect(-view, normal);
 

@@ -151,62 +151,66 @@ impl<'r> MeshBuilder<'r> {
                     (PREFILTER_MAP_MIP_COUNT - 1) as f64,
                 );
 
-                let pipeline = match self
-                    .resources
-                    .primitive_pipelines
-                    .iter()
-                    .find(|pipeline| pipeline.constants == constants)
-                {
+                let pipeline = match self.resources.primitive_pipelines.iter().find(|pipeline| {
+                    pipeline.constants == constants && pipeline.double_sided == material.double_sided
+                }) {
                     Some(pipeline) => pipeline.id(),
                     None => {
                         let data = &self.resources.mesh_builder_data;
-                        let pipeline = self.resources.device.create_render_pipeline(
-                            &wgpu::RenderPipelineDescriptor {
-                                label: Some(&format!("Primitive pipeline")),
-                                layout: Some(&data.primitive_pipeline_layout),
-                                vertex: wgpu::VertexState {
-                                    module: &data.primitive_shader_module,
-                                    entry_point: Some("vs_main"),
-                                    compilation_options: wgpu::PipelineCompilationOptions {
-                                        constants: &constants,
-                                        ..Default::default()
-                                    },
-                                    buffers: &vertex_buffer_layouts,
+                        let label = format!("Primitive pipeline");
+                        let cull_mode = if material.double_sided {
+                            None
+                        } else {
+                            Some(wgpu::Face::Back)
+                        };
+                        let mut desc = wgpu::RenderPipelineDescriptor {
+                            label: Some(&label),
+                            layout: Some(&data.primitive_pipeline_layout),
+                            vertex: wgpu::VertexState {
+                                module: &data.primitive_shader_module,
+                                entry_point: Some("vs_main"),
+                                compilation_options: wgpu::PipelineCompilationOptions {
+                                    constants: &constants,
+                                    ..Default::default()
                                 },
-                                primitive: wgpu::PrimitiveState {
-                                    topology: wgpu::PrimitiveTopology::TriangleList,
-                                    strip_index_format: None,
-                                    front_face: wgpu::FrontFace::Ccw,
-                                    cull_mode: None,
-                                    unclipped_depth: false,
-                                    polygon_mode: wgpu::PolygonMode::Fill,
-                                    conservative: false,
-                                },
-                                depth_stencil: Some(wgpu::DepthStencilState {
-                                    format: wgpu::TextureFormat::Depth24Plus,
-                                    depth_write_enabled,
-                                    depth_compare: wgpu::CompareFunction::Less,
-                                    stencil: wgpu::StencilState::default(),
-                                    bias: wgpu::DepthBiasState::default(),
-                                }),
-                                multisample: wgpu::MultisampleState {
-                                    count: 1,
-                                    mask: !0,
-                                    alpha_to_coverage_enabled: false,
-                                },
-                                fragment: Some(wgpu::FragmentState {
-                                    module: &data.primitive_shader_module,
-                                    entry_point: Some("fs_main"),
-                                    compilation_options: wgpu::PipelineCompilationOptions {
-                                        constants: &constants,
-                                        ..Default::default()
-                                    },
-                                    targets,
-                                }),
-                                multiview: None,
-                                cache: None,
+                                buffers: &vertex_buffer_layouts,
                             },
-                        );
+                            primitive: wgpu::PrimitiveState {
+                                topology: wgpu::PrimitiveTopology::TriangleList,
+                                strip_index_format: None,
+                                front_face: wgpu::FrontFace::Ccw,
+                                cull_mode,
+                                unclipped_depth: false,
+                                polygon_mode: wgpu::PolygonMode::Fill,
+                                conservative: false,
+                            },
+                            depth_stencil: Some(wgpu::DepthStencilState {
+                                format: wgpu::TextureFormat::Depth24Plus,
+                                depth_write_enabled,
+                                depth_compare: wgpu::CompareFunction::Less,
+                                stencil: wgpu::StencilState::default(),
+                                bias: wgpu::DepthBiasState::default(),
+                            }),
+                            multisample: wgpu::MultisampleState {
+                                count: 1,
+                                mask: !0,
+                                alpha_to_coverage_enabled: false,
+                            },
+                            fragment: Some(wgpu::FragmentState {
+                                module: &data.primitive_shader_module,
+                                entry_point: Some("fs_main"),
+                                compilation_options: wgpu::PipelineCompilationOptions {
+                                    constants: &constants,
+                                    ..Default::default()
+                                },
+                                targets,
+                            }),
+                            multiview: None,
+                            cache: None,
+                        };
+                        let pipeline = self.resources.device.create_render_pipeline(&desc);
+                        desc.primitive.front_face = wgpu::FrontFace::Cw;
+                        let mirror_pipeline = self.resources.device.create_render_pipeline(&desc);
 
                         let id = self.resources.primitive_pipelines.next_id();
                         self.resources
@@ -214,7 +218,9 @@ impl<'r> MeshBuilder<'r> {
                             .insert(PrimitivePipeline {
                                 id,
                                 pipeline,
+                                mirror_pipeline,
                                 constants,
+                                double_sided: material.double_sided,
                             })
                             .id()
                     }
@@ -237,6 +243,7 @@ pub struct Material {
     bind_group: wgpu::BindGroup,
     textures: Textures,
     alpha_mode: AlphaMode,
+    double_sided: bool,
 }
 
 impl Material {
@@ -279,6 +286,7 @@ pub struct MaterialBuilder<'a, 'r> {
     emissive_sampler: Option<&'a wgpu::Sampler>,
     uniform: MaterialUniform,
     alpha_mode: AlphaMode,
+    double_sided: bool,
     textures: Textures,
 }
 
@@ -314,6 +322,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             emissive_sampler: None,
             uniform,
             alpha_mode: AlphaMode::Opaque,
+            double_sided: false,
             textures: Textures::empty(),
         }
     }
@@ -438,6 +447,11 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
         self
     }
 
+    pub fn double_sided(mut self) -> Self {
+        self.double_sided = true;
+        self
+    }
+
     pub fn build(self) -> &'r mut Material {
         let data = &self.resources.mesh_builder_data;
         let base_color_texture = self.base_color_texture.unwrap_or(&data.default_texture);
@@ -528,6 +542,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             bind_group,
             textures: self.textures,
             alpha_mode: self.alpha_mode,
+            double_sided: self.double_sided,
         })
     }
 }
@@ -565,7 +580,9 @@ struct MaterialUniform {
 pub struct PrimitivePipeline {
     id: Id<Self>,
     pipeline: wgpu::RenderPipeline,
+    mirror_pipeline: wgpu::RenderPipeline,
     constants: HashMap<String, f64>,
+    double_sided: bool,
 }
 
 impl PrimitivePipeline {
@@ -580,6 +597,10 @@ impl PrimitivePipeline {
 
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
+    }
+
+    pub fn mirror_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.mirror_pipeline
     }
 }
 

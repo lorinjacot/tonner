@@ -26,7 +26,6 @@ pub struct Resources {
     primitive_pipelines: SparseSet<PrimitivePipeline>,
     meshes: SparseSet<mesh::Mesh>,
     mesh_builder_data: mesh::MeshBuilderData,
-    dummy_node_indices_buffer: wgpu::Buffer,
     environments: SparseSet<Environment>,
     environment_builder_data: environment::EnvironmentBuilderData,
     default_environmnent: Option<Id<Environment>>,
@@ -556,13 +555,6 @@ impl Resources {
                 cache: None,
             });
 
-        let dummy_node_indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Dummy node index buffer"),
-            size: size_of::<u32>() as u64,
-            usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        });
-
         Self {
             device,
             queue,
@@ -574,7 +566,6 @@ impl Resources {
             primitive_pipelines: SparseSet::new(),
             mesh_builder_data,
             environments,
-            dummy_node_indices_buffer,
             environment_builder_data,
             default_environmnent: None,
             render_bind_group_layout,

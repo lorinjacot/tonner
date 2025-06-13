@@ -435,6 +435,9 @@ fn create_material(
     if let Some(alpha_cutoff) = material.alpha_cutoff() {
         builder = builder.alpha_cutoff(alpha_cutoff);
     }
+    if material.double_sided() {
+        builder = builder.double_sided();
+    }
     builder.build().id()
 }
 

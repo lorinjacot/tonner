@@ -24,6 +24,8 @@ pub mod camera;
 mod node;
 pub mod skin;
 
+const NODE_INDEX_SIZE: usize = size_of::<u32>();
+
 pub struct Scene {
     pub name: String,
     device: wgpu::Device,
@@ -373,23 +375,28 @@ impl Scene {
                 .write_buffer(&self.camera_buffer, 0, cast_slice(&[camera_uniform]));
 
             for mesh_instances in self.meshes.iter_mut() {
-                let data: Vec<_> = mesh_instances
-                    .nodes
-                    .iter()
-                    .map(|id| self.nodes.dense_index(*id).unwrap() as u32)
-                    .collect();
-                match &mesh_instances.node_indices {
-                    Some(buffer) => self.queue.write_buffer(&buffer, 0, cast_slice(&data)),
-                    None => {
-                        let instance_count = mesh_instances.nodes.len() as u32;
-                        let buffer =
-                            self.device
-                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: Some("Mesh instances vertex buffer"),
-                                    contents: cast_slice(&data),
-                                    usage: wgpu::BufferUsages::VERTEX
-                                        | wgpu::BufferUsages::COPY_DST,
-                                });
+                let mut node_indices = Vec::with_capacity(mesh_instances.nodes.len());
+                let mut mirror_node_indices = Vec::with_capacity(mesh_instances.nodes.len());
+                for node in &mesh_instances.nodes {
+                    if self.nodes[*node]
+                        .world_matrix()
+                        .determinant()
+                        .is_sign_positive()
+                    {
+                        node_indices.push(self.nodes.dense_index(*node).unwrap() as u32);
+                    } else {
+                        mirror_node_indices.push(self.nodes.dense_index(*node).unwrap() as u32);
+                    }
+                }
+                let node_indices_size = node_indices.len() * NODE_INDEX_SIZE;
+                if mesh_instances.node_indices.size() >= node_indices_size as u64 {
+                    self.queue.write_buffer(
+                        &mesh_instances.node_indices,
+                        0,
+                        cast_slice(&node_indices),
+                    );
+                    if mesh_instances.node_count != node_indices.len() {
+                        mesh_instances.node_count = node_indices.len();
                         for (ids, pipeline_primitives) in [
                             (
                                 &mesh_instances.opaque_primitives,
@@ -403,9 +410,87 @@ impl Scene {
                             for (pipeline, primitive) in ids {
                                 let primitive =
                                     &mut pipeline_primitives[*pipeline].primitives[*primitive];
-                                primitive.node_indices = buffer.clone();
-                                primitive.instance_count = instance_count;
+                                primitive.instance_count = node_indices.len() as u32;
                             }
+                        }
+                    }
+                } else {
+                    mesh_instances.node_indices =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Mesh instances vertex buffer"),
+                                contents: cast_slice(&node_indices),
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            });
+                    for (ids, pipeline_primitives) in [
+                        (
+                            &mesh_instances.opaque_primitives,
+                            &mut self.opaque_pipeline_primitives,
+                        ),
+                        (
+                            &mesh_instances.transparent_primitives,
+                            &mut self.transparent_pipeline_primitives,
+                        ),
+                    ] {
+                        for (pipeline, primitive) in ids {
+                            let primitive =
+                                &mut pipeline_primitives[*pipeline].primitives[*primitive];
+                            primitive.node_indices = mesh_instances.node_indices.clone();
+                            primitive.instance_count = node_indices.len() as u32;
+                        }
+                    }
+                }
+
+                let mirror_node_indices_size = mirror_node_indices.len() * NODE_INDEX_SIZE;
+                if mesh_instances.mirror_node_indices.size() >= mirror_node_indices_size as u64 {
+                    self.queue.write_buffer(
+                        &mesh_instances.mirror_node_indices,
+                        0,
+                        cast_slice(&mirror_node_indices),
+                    );
+                    if mesh_instances.mirror_node_count != mirror_node_indices.len() {
+                        mesh_instances.mirror_node_count = mirror_node_indices.len();
+                        for (ids, pipeline_primitives) in [
+                            (
+                                &mesh_instances.opaque_primitives,
+                                &mut self.opaque_pipeline_primitives,
+                            ),
+                            (
+                                &mesh_instances.transparent_primitives,
+                                &mut self.transparent_pipeline_primitives,
+                            ),
+                        ] {
+                            for (pipeline, primitive) in ids {
+                                let primitive =
+                                    &mut pipeline_primitives[*pipeline].primitives[*primitive];
+                                primitive.mirror_instance_count = mirror_node_indices.len() as u32;
+                            }
+                        }
+                    }
+                } else {
+                    mesh_instances.mirror_node_indices =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Mesh instances vertex buffer"),
+                                contents: cast_slice(&mirror_node_indices),
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            });
+                    for (ids, pipeline_primitives) in [
+                        (
+                            &mesh_instances.opaque_primitives,
+                            &mut self.opaque_pipeline_primitives,
+                        ),
+                        (
+                            &mesh_instances.transparent_primitives,
+                            &mut self.transparent_pipeline_primitives,
+                        ),
+                    ] {
+                        for (pipeline, primitive) in ids {
+                            let primitive =
+                                &mut pipeline_primitives[*pipeline].primitives[*primitive];
+                            primitive.mirror_node_indices =
+                                mesh_instances.mirror_node_indices.clone();
+                            primitive.mirror_instance_count = mirror_node_indices.len() as u32;
                         }
                     }
                 }
@@ -514,6 +599,7 @@ impl Scene {
 
                 for PipelinePrimitives {
                     pipeline,
+                    mirror_pipeline,
                     primitives,
                     ..
                 } in &self.opaque_pipeline_primitives
@@ -539,6 +625,31 @@ impl Scene {
                             }
                             Indices::None { vertex_count } => opaque_render_pass
                                 .draw(0..*vertex_count, 0..primitive.instance_count),
+                        }
+                    }
+
+                    opaque_render_pass.set_pipeline(mirror_pipeline);
+
+                    for primitive in primitives {
+                        opaque_render_pass
+                            .set_vertex_buffer(0, primitive.mirror_node_indices.slice(..));
+                        opaque_render_pass.set_bind_group(1, &primitive.geometry, &[]);
+                        opaque_render_pass.set_bind_group(2, &primitive.material, &[]);
+                        match &primitive.vertex_indices {
+                            Indices::Some {
+                                buffer,
+                                format,
+                                index_count,
+                            } => {
+                                opaque_render_pass.set_index_buffer(buffer.slice(..), *format);
+                                opaque_render_pass.draw_indexed(
+                                    0..*index_count,
+                                    0,
+                                    0..primitive.mirror_instance_count,
+                                );
+                            }
+                            Indices::None { vertex_count } => opaque_render_pass
+                                .draw(0..*vertex_count, 0..primitive.mirror_instance_count),
                         }
                     }
                 }
@@ -589,6 +700,7 @@ impl Scene {
 
                 for PipelinePrimitives {
                     pipeline,
+                    mirror_pipeline,
                     primitives,
                     ..
                 } in &self.transparent_pipeline_primitives
@@ -615,6 +727,31 @@ impl Scene {
                             }
                             Indices::None { vertex_count } => transparent_render_pass
                                 .draw(0..*vertex_count, 0..primitive.instance_count),
+                        }
+                    }
+
+                    transparent_render_pass.set_pipeline(mirror_pipeline);
+
+                    for primitive in primitives {
+                        transparent_render_pass
+                            .set_vertex_buffer(0, primitive.mirror_node_indices.slice(..));
+                        transparent_render_pass.set_bind_group(1, &primitive.geometry, &[]);
+                        transparent_render_pass.set_bind_group(2, &primitive.material, &[]);
+                        match &primitive.vertex_indices {
+                            Indices::Some {
+                                buffer,
+                                format,
+                                index_count,
+                            } => {
+                                transparent_render_pass.set_index_buffer(buffer.slice(..), *format);
+                                transparent_render_pass.draw_indexed(
+                                    0..*index_count,
+                                    0,
+                                    0..primitive.mirror_instance_count,
+                                );
+                            }
+                            Indices::None { vertex_count } => transparent_render_pass
+                                .draw(0..*vertex_count, 0..primitive.mirror_instance_count),
                         }
                     }
                 }
@@ -722,6 +859,20 @@ impl Scene {
         let mesh_instance = self.meshes.entry(mesh).or_insert_with(|| {
             let mesh = &resources.meshes[mesh];
 
+            let node_indices = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Mesh instances vertex buffer"),
+                size: NODE_INDEX_SIZE as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let mirror_node_indices = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Mesh mirror instances vertex buffer"),
+                size: NODE_INDEX_SIZE as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
             let mut opaque_primitives = Vec::new();
             let mut transparent_primitives = Vec::new();
 
@@ -743,6 +894,7 @@ impl Scene {
                     .or_insert_with(|| PipelinePrimitives {
                         id: pipeline.id(),
                         pipeline: pipeline.pipeline().clone(),
+                        mirror_pipeline: pipeline.mirror_pipeline().clone(),
                         primitives: SparseSet::with_capacity(1),
                     })
                     .primitives;
@@ -756,8 +908,10 @@ impl Scene {
 
                 primitives.insert(Primitive {
                     id,
-                    node_indices: resources.dummy_node_indices_buffer.clone(),
+                    node_indices: node_indices.clone(),
                     instance_count: 0,
+                    mirror_node_indices: mirror_node_indices.clone(),
+                    mirror_instance_count: 0,
                     geometry,
                     vertex_indices,
                     material,
@@ -769,7 +923,10 @@ impl Scene {
                 opaque_primitives,
                 transparent_primitives,
                 nodes: Vec::with_capacity(1),
-                node_indices: None,
+                node_count: 0,
+                node_indices,
+                mirror_node_count: 0,
+                mirror_node_indices,
             }
         });
         mesh_instance.nodes.push(node);
@@ -1031,7 +1188,10 @@ struct MeshInstances {
     opaque_primitives: Vec<(Id<PrimitivePipeline>, Id<Primitive>)>,
     transparent_primitives: Vec<(Id<PrimitivePipeline>, Id<Primitive>)>,
     nodes: Vec<Id<Node>>,
-    node_indices: Option<wgpu::Buffer>,
+    node_count: usize,
+    node_indices: wgpu::Buffer,
+    mirror_node_count: usize,
+    mirror_node_indices: wgpu::Buffer,
 }
 
 impl DenseEntry for MeshInstances {
@@ -1045,6 +1205,7 @@ impl DenseEntry for MeshInstances {
 struct PipelinePrimitives {
     id: Id<PrimitivePipeline>,
     pipeline: wgpu::RenderPipeline,
+    mirror_pipeline: wgpu::RenderPipeline,
     primitives: SparseSet<Primitive>,
 }
 
@@ -1060,6 +1221,8 @@ struct Primitive {
     id: Id<Self>,
     node_indices: wgpu::Buffer,
     instance_count: u32,
+    mirror_node_indices: wgpu::Buffer,
+    mirror_instance_count: u32,
     geometry: wgpu::BindGroup,
     material: wgpu::BindGroup,
     vertex_indices: Indices,

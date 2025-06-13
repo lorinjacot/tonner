@@ -259,7 +259,7 @@ impl Engine {
                             projection: storm::camera::Projection::Perspective {
                                 aspect_ratio: None,
                                 y_fov: f32::to_radians(65.0),
-                                z_far: Some(100.0),
+                                z_far: None,
                                 z_near: 0.01,
                             },
                         }

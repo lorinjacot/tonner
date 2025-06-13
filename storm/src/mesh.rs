@@ -13,7 +13,7 @@ const ACCUMULATION_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
 };
 
 const REVEALAGE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
-    src_factor: wgpu::BlendFactor::One,
+    src_factor: wgpu::BlendFactor::Zero,
     dst_factor: wgpu::BlendFactor::OneMinusSrc,
     operation: wgpu::BlendOperation::Add,
 };
@@ -467,7 +467,7 @@ impl<'a, 'r> MaterialBuilder<'a, 'r> {
             .resources
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Material bind gorup"),
+                label: Some("Material bind group"),
                 layout: &self.resources.mesh_builder_data.material_bind_group_layout,
                 entries: &[
                     // Base color texture

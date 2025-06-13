@@ -373,37 +373,39 @@ impl Scene {
                 .write_buffer(&self.camera_buffer, 0, cast_slice(&[camera_uniform]));
 
             for mesh_instances in self.meshes.iter_mut() {
-                const INDEX_SIZE: usize = size_of::<u32>();
                 let data: Vec<_> = mesh_instances
                     .nodes
                     .iter()
                     .map(|id| self.nodes.dense_index(*id).unwrap() as u32)
                     .collect();
-                let buffer = &mut mesh_instances.node_indices;
-                if buffer.size() >= (mesh_instances.nodes.len() * INDEX_SIZE) as wgpu::BufferAddress
-                {
-                    self.queue.write_buffer(&buffer, 0, cast_slice(&data));
-                } else {
-                    *buffer = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Mesh instances vertex buffer"),
-                            contents: cast_slice(&data),
-                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        });
-                    for (ids, pipeline_primitives) in [
-                        (
-                            &mesh_instances.opaque_primitives,
-                            &mut self.opaque_pipeline_primitives,
-                        ),
-                        (
-                            &mesh_instances.transparent_primitives,
-                            &mut self.transparent_pipeline_primitives,
-                        ),
-                    ] {
-                        for (pipeline, primitive) in ids {
-                            pipeline_primitives[*pipeline].primitives[*primitive].node_indices =
-                                buffer.clone();
+                match &mesh_instances.node_indices {
+                    Some(buffer) => self.queue.write_buffer(&buffer, 0, cast_slice(&data)),
+                    None => {
+                        let instance_count = mesh_instances.nodes.len() as u32;
+                        let buffer =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("Mesh instances vertex buffer"),
+                                    contents: cast_slice(&data),
+                                    usage: wgpu::BufferUsages::VERTEX
+                                        | wgpu::BufferUsages::COPY_DST,
+                                });
+                        for (ids, pipeline_primitives) in [
+                            (
+                                &mesh_instances.opaque_primitives,
+                                &mut self.opaque_pipeline_primitives,
+                            ),
+                            (
+                                &mesh_instances.transparent_primitives,
+                                &mut self.transparent_pipeline_primitives,
+                            ),
+                        ] {
+                            for (pipeline, primitive) in ids {
+                                let primitive =
+                                    &mut pipeline_primitives[*pipeline].primitives[*primitive];
+                                primitive.node_indices = buffer.clone();
+                                primitive.instance_count = instance_count;
+                            }
                         }
                     }
                 }
@@ -574,7 +576,7 @@ impl Scene {
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &self.depth_attachment,
                             depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
+                                load: wgpu::LoadOp::Load,
                                 store: wgpu::StoreOp::Store,
                             }),
                             stencil_ops: None,
@@ -717,70 +719,60 @@ impl Scene {
         node: Id<Node>,
         resources: &Resources,
     ) {
-        self.meshes
-            .entry(mesh)
-            .or_insert_with(|| {
-                let mesh = &resources.meshes[mesh];
+        let mesh_instance = self.meshes.entry(mesh).or_insert_with(|| {
+            let mesh = &resources.meshes[mesh];
 
-                let mut opaque_primitives = Vec::new();
-                let mut transparent_primitives = Vec::new();
+            let mut opaque_primitives = Vec::new();
+            let mut transparent_primitives = Vec::new();
 
-                let node_indices = resources.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Mesh instance vertex buffer"),
-                    size: size_of::<u32>() as u64,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
+            for (pipeline, geometry, material) in mesh.primitives() {
+                let pipeline = &resources.primitive_pipelines[*pipeline];
+                let (pipeline_primitives, primitive_ids) = match pipeline.alpha_mode() {
+                    AlphaMode::Opaque | AlphaMode::Mask => {
+                        (&mut self.opaque_pipeline_primitives, &mut opaque_primitives)
+                    }
+
+                    AlphaMode::Blend => (
+                        &mut self.transparent_pipeline_primitives,
+                        &mut transparent_primitives,
+                    ),
+                };
+
+                let primitives = &mut pipeline_primitives
+                    .entry(pipeline.id())
+                    .or_insert_with(|| PipelinePrimitives {
+                        id: pipeline.id(),
+                        pipeline: pipeline.pipeline().clone(),
+                        primitives: SparseSet::with_capacity(1),
+                    })
+                    .primitives;
+                let id = primitives.next_id();
+                primitive_ids.push((pipeline.id(), id));
+
+                let geometry = &resources.geometries[*geometry];
+                let vertex_indices = geometry.indices().clone();
+                let geometry = geometry.bind_group().clone();
+                let material = resources.materials[*material].bind_group().clone();
+
+                primitives.insert(Primitive {
+                    id,
+                    node_indices: resources.dummy_node_indices_buffer.clone(),
+                    instance_count: 0,
+                    geometry,
+                    vertex_indices,
+                    material,
                 });
+            }
 
-                for (pipeline, geometry, material) in mesh.primitives() {
-                    let pipeline = &resources.primitive_pipelines[*pipeline];
-                    let (pipeline_primitives, primitive_ids) = match pipeline.alpha_mode() {
-                        AlphaMode::Opaque | AlphaMode::Mask => {
-                            (&mut self.opaque_pipeline_primitives, &mut opaque_primitives)
-                        }
-
-                        AlphaMode::Blend => (
-                            &mut self.transparent_pipeline_primitives,
-                            &mut transparent_primitives,
-                        ),
-                    };
-
-                    let primitives = &mut pipeline_primitives
-                        .entry(pipeline.id())
-                        .or_insert_with(|| PipelinePrimitives {
-                            id: pipeline.id(),
-                            pipeline: pipeline.pipeline().clone(),
-                            primitives: SparseSet::with_capacity(1),
-                        })
-                        .primitives;
-                    let id = primitives.next_id();
-                    primitive_ids.push((pipeline.id(), id));
-
-                    let geometry = &resources.geometries[*geometry];
-                    let vertex_indices = geometry.indices().clone();
-                    let geometry = geometry.bind_group().clone();
-                    let material = resources.materials[*material].bind_group().clone();
-
-                    primitives.insert(Primitive {
-                        id,
-                        node_indices: node_indices.clone(),
-                        instance_count: 0,
-                        geometry,
-                        vertex_indices,
-                        material,
-                    });
-                }
-
-                MeshInstances {
-                    mesh: mesh.id(),
-                    opaque_primitives,
-                    transparent_primitives,
-                    nodes: Vec::with_capacity(1),
-                    node_indices,
-                }
-            })
-            .nodes
-            .push(node);
+            MeshInstances {
+                mesh: mesh.id(),
+                opaque_primitives,
+                transparent_primitives,
+                nodes: Vec::with_capacity(1),
+                node_indices: None,
+            }
+        });
+        mesh_instance.nodes.push(node);
     }
 }
 
@@ -1039,7 +1031,7 @@ struct MeshInstances {
     opaque_primitives: Vec<(Id<PrimitivePipeline>, Id<Primitive>)>,
     transparent_primitives: Vec<(Id<PrimitivePipeline>, Id<Primitive>)>,
     nodes: Vec<Id<Node>>,
-    node_indices: wgpu::Buffer,
+    node_indices: Option<wgpu::Buffer>,
 }
 
 impl DenseEntry for MeshInstances {

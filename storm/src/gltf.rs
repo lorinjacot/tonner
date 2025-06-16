@@ -120,14 +120,15 @@ struct Accessor {
 
     /// The offset relative to the start of the buffer view in bytes. This **MUST**
     /// be a multiple of the size of the component datatype. This property **MUST NOT**
-    /// be defined when [buffer_view](Accessor::buffer_view) is `undefined`.
+    /// be defined when [bufferView](Accessor::buffer_view) is `undefined`.
     #[serde(rename = "byteOffset")]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_0")]
     byte_offset: usize,
 
     /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
-    /// type **MUST NOT** be used for any accessor that is not referenced by [mesh.primitive.indices].
+    /// type **MUST NOT** be used for any accessor that is not referenced by
+    /// [mesh.primitive.indices](MeshPrimitive::indices).
     #[serde(rename = "componentType")]
     component_type: AccessorComponentType,
 
@@ -147,12 +148,12 @@ struct Accessor {
     type_: AccessorType,
 
     /// Maximum value of each component in this accessor. Array elements
-    /// **MUST** be treated as having the same data type as [Accessor::component_type].
-    /// Both [Accessor::min] and [Accessor::max] arrays have the same length.
+    /// **MUST** be treated as having the same data type as [componentType](Accessor::component_type).
+    /// Both [min](Accessor::min) and [max](Accessor::max) arrays have the same length.
     /// The length is determined by the value of the type property;
     /// it can be 1, 2, 3, 4, 9, or 16.
     /// 
-    /// [Accessor::normalized] property has no effect on array values:
+    /// [normalized](Accessor::normalized) property has no effect on array values:
     /// they always correspond to the actual values stored in the buffer.
     /// When the accessor is sparse, this property **MUST** contain maximum
     /// values of accessor data with sparse substitution applied.
@@ -161,12 +162,12 @@ struct Accessor {
     max: Option<Vec<f32>>,
 
     /// Minimum value of each component in this accessor. Array elements
-    /// **MUST** be treated as having the same data type as [Accessor::component_type].
-    /// Both [Accessor::min] and [Accessor::max] arrays have the same length.
+    /// **MUST** be treated as having the same data type as [componentType](Accessor::component_type).
+    /// Both [min](Accessor::min) and [max](Accessor::max) arrays have the same length.
     /// The length is determined by the value of the type property;
     /// it can be 1, 2, 3, 4, 9, or 16.
     /// 
-    /// [Accessor::normalized] property has no effect on array values:
+    /// [normalized](Accessor::normalized) property has no effect on array values:
     /// they always correspond to the actual values stored in the buffer.
     /// When the accessor is sparse, this property **MUST** contain maximum
     /// values of accessor data with sparse substitution applied.
@@ -188,7 +189,8 @@ struct Accessor {
 }
 
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
-/// type **MUST NOT** be used for any accessor that is not referenced by [mesh.primitive.indices].
+/// type **MUST NOT** be used for any accessor that is not referenced by
+/// [mesh.primitive.indices](MeshPrimitive::indices).
 #[derive(Serialize, Deserialize)]
 enum AccessorComponentType {
     Byte = 5120,
@@ -232,9 +234,9 @@ struct SparseAccessor {
 #[derive(Serialize, Deserialize)]
 struct SparseAccessorIndices {
     /// The index of the buffer view with sparse indices. The referenced buffer view
-    /// **MUST NOT** have its [target] or [byte_stride] properties defined. The buffer
-    /// view and the optional [byte_offset] **MUST** be aligned to the
-    /// [component_type](SparseAccessorIndices::component_type) byte length.
+    /// **MUST NOT** have its [target](BufferView::target) or [byteStride](BufferView::byte_stride)
+    /// properties defined. The buffer view and the optional [byteOffset](BufferView::byte_offset)
+    /// **MUST** be aligned to the [componentType](SparseAccessorIndices::component_type) byte length.
     #[serde(rename = "bufferView")]
     buffer_view: usize,
 
@@ -265,7 +267,8 @@ enum SparseAccessorComponentType {
 #[derive(Serialize, Deserialize)]
 struct SparseAccessorValues {
     /// The index of the bufferView with sparse values. The referenced buffer
-    /// view **MUST NOT** have its [target] or [byte_stride] properties defined.
+    /// view **MUST NOT** have its [target](BufferView::target) or
+    /// [byteStride](BufferView::byte_stride) properties defined.
     #[serde(rename = "bufferView")]
     buffer_view: usize,
 
@@ -541,7 +544,7 @@ enum CameraType {
 struct Image {
     /// The URI (or IRI) of the image. Relative paths are relative to the current glTF asset.
     /// Instead of referencing an external file, this field **MAY** contain a `data:`-URI.
-    /// This field **MUST NOT** be defined when [buffer_view](Image::buffer_view) is defined.
+    /// This field **MUST NOT** be defined when [bufferView](Image::buffer_view) is defined.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     uri: Option<String>,
@@ -569,7 +572,7 @@ struct Image {
 }
 
 /// The image’s media type. This field **MUST** be defined when
-/// [buffer_view](Image::buffer_view) is defined.
+/// [bufferView](Image::buffer_view) is defined.
 #[derive(Default, Serialize, Deserialize)]
 enum ImageMimeType {
     #[default]
@@ -613,7 +616,7 @@ struct Material {
     #[serde(rename = "normalTexture")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    normal_texture: Option<MaterialNormalTexture>,
+    normal_texture: Option<NormalTextureInfo>,
 
     /// The occlusion texture. The occlusion values are linearly sampled from the R channel.
     /// Higher values indicate areas that receive full indirect lighting and lower values
@@ -622,7 +625,7 @@ struct Material {
     #[serde(rename = "occlusionTexture")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    occlusion_texture: Option<MaterialOcclusionTexture>,
+    occlusion_texture: Option<OcclusionTextureInfo>,
 
     /// The emissive texture. It controls the color and intensity of the light being emitted by the material. $
     /// This texture contains RGB components encoded with the sRGB transfer function. If a fourth component (A) is present,
@@ -630,7 +633,7 @@ struct Material {
     #[serde(rename = "emissiveTexture")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    emissive_texture: Option<MaterialTexture>,
+    emissive_texture: Option<TextureInfo>,
 
     /// The factors for the emissive color of the material. This value defines
     /// linear multipliers for the sampled texels of the emissive texture.
@@ -645,11 +648,11 @@ struct Material {
     #[serde(skip_serializing_if = "AlphaMode::is_default")]
     alpha_mode: AlphaMode,
 
-    /// Specifies the cutoff threshold when in [AlphaMode::MASK]. If the alpha value is
+    /// Specifies the cutoff threshold when in [MASK](AlphaMode::MASK). If the alpha value is
     /// greater than or equal to this value then it is rendered as fully opaque, otherwise,
     /// it is rendered as fully transparent. A value greater than 1.0 will render the entire
     /// material as fully transparent. This value **MUST** be ignored for other alpha modes.
-    /// When [Material::alpha_mode] is not defined, this value **MUST NOT** be defined.
+    /// When [alphaMode](Material::alpha_mode) is not defined, this value **MUST NOT** be defined.
     #[serde(rename = "alphaCutoff")]
     #[serde(default = "default_05")]
     #[serde(skip_serializing_if = "is_05")]
@@ -679,13 +682,13 @@ struct PbrMetallicRoughness {
     /// The base color texture. The first three components (RGB) **MUST** be encoded with the
     /// sRGB transfer function. They specify the base color of the material. If the fourth
     /// component (A) is present, it represents the linear alpha coverage of the material.
-    /// Otherwise, the alpha coverage is equal to 1.0. The [Material::alpha_mode] property
-    /// specifies how alpha is interpreted. The stored texels **MUST NOT** be premultiplied.
+    /// Otherwise, the alpha coverage is equal to 1.0. The [material.alphaMode](Material::alpha_mode)
+    /// property specifies how alpha is interpreted. The stored texels **MUST NOT** be premultiplied.
     /// When undefined, the texture **MUST** be sampled as having `1.0` in all components.
     #[serde(rename = "baseColorTexture")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    base_color_texture: Option<MaterialTexture>,
+    base_color_texture: Option<TextureInfo>,
 
     /// The factor for the metalness of the material. This value defines a linear multiplier
     /// or the sampled metalness values of the metallic-roughness texture.
@@ -709,7 +712,7 @@ struct PbrMetallicRoughness {
     #[serde(rename = "metallicRoughnessTexture")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    metallic_roughness_texture: Option<MaterialTexture>,
+    metallic_roughness_texture: Option<TextureInfo>,
 }
 
 impl PbrMetallicRoughness {
@@ -736,14 +739,15 @@ impl Default for PbrMetallicRoughness {
 
 /// Reference to a texture.
 #[derive(Serialize, Deserialize)]
-struct MaterialTexture {
+struct TextureInfo {
     /// The index of the texture.
     index: usize,
 
     /// This integer value is used to construct a string in the format `TEXCOORD_<set index>`
-    /// which is a reference to a key in [MeshPrimitive.attributes] (e.g. a value of `0` corresponds
-    /// to `TEXCOORD_0`). A mesh primitive **MUST** have the corresponding texture coordinate attributes
-    /// for the material to be applicable to it.
+    /// which is a reference to a key in [mesh.primitives.attributes](MeshPrimitive::attributes)
+    /// (e.g. a value of `0` corresponds to [TEXCOORD_0](PrimitiveAttributes::tex_coord_0)).
+    /// A mesh primitive **MUST** have the corresponding texture coordinate attributes for
+    /// the material to be applicable to it.
     #[serde(rename = "texCoord")]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_0")]
@@ -752,14 +756,15 @@ struct MaterialTexture {
 
 /// Reference to a texture.
 #[derive(Serialize, Deserialize)]
-struct MaterialNormalTexture {
+struct NormalTextureInfo {
     /// The index of the texture.
     index: usize,
 
     /// This integer value is used to construct a string in the format `TEXCOORD_<set index>`
-    /// which is a reference to a key in [MeshPrimitive.attributes] (e.g. a value of `0` corresponds
-    /// to `TEXCOORD_0`). A mesh primitive **MUST** have the corresponding texture coordinate attributes
-    /// for the material to be applicable to it.
+    /// which is a reference to a key in [mesh.primitives.attributes](MeshPrimitive::attributes)
+    /// (e.g. a value of `0` corresponds to [TEXCOORD_0](PrimitiveAttributes::tex_coord_0)).
+    /// A mesh primitive **MUST** have the corresponding texture coordinate attributes for
+    /// the material to be applicable to it.
     #[serde(rename = "texCoord")]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_0")]
@@ -775,14 +780,15 @@ struct MaterialNormalTexture {
 
 /// Reference to a texture.
 #[derive(Serialize, Deserialize)]
-struct MaterialOcclusionTexture {
+struct OcclusionTextureInfo {
     /// The index of the texture.
     index: usize,
 
     /// This integer value is used to construct a string in the format `TEXCOORD_<set index>`
-    /// which is a reference to a key in [MeshPrimitive.attributes] (e.g. a value of `0` corresponds
-    /// to `TEXCOORD_0`). A mesh primitive **MUST** have the corresponding texture coordinate attributes
-    /// for the material to be applicable to it.
+    /// which is a reference to a key in [mesh.primitives.attributes](MeshPrimitive::attributes)
+    /// (e.g. a value of `0` corresponds to [TEXCOORD_0](PrimitiveAttributes::tex_coord_0)).
+    /// A mesh primitive **MUST** have the corresponding texture coordinate attributes for
+    /// the material to be applicable to it.
     #[serde(rename = "texCoord")]
     #[serde(default)]
     #[serde(skip_serializing_if = "is_0")]
@@ -804,7 +810,7 @@ enum AlphaMode {
     OPAQUE,
 
     /// The rendered output is either fully opaque or fully transparent depending
-    /// on the alpha value and the specified [Material::alpha_cutoff] value;
+    /// on the alpha value and the specified [alphaCutoff](Material::alpha_cutoff) value;
     /// the exact appearance of the edges **MAY** be subject to implementation-specific
     /// techniques such as “Alpha-to-Coverage”.
     MASK,
@@ -828,7 +834,7 @@ impl AlphaMode {
 #[derive(Serialize, Deserialize)]
 struct Mesh {
     /// An array of primitives, each defining geometry to be rendered.
-    primitives: Vec<Primitive>,
+    primitives: Vec<MeshPrimitive>,
 
     /// Array of weights to be applied to the morph targets. The number of array
     /// elements **MUST** match the number of morph targets.
@@ -846,14 +852,14 @@ struct Mesh {
 
 /// Geometry to be rendered with the given material.
 #[derive(Serialize, Deserialize)]
-struct Primitive {
+struct MeshPrimitive {
     /// A plain JSON object, where each key corresponds to a mesh attribute semantic
     /// and each value is the index of the accessor containing attribute’s data.
     attributes: PrimitiveAttributes,
 
     /// The index of the accessor that contains the vertex indices. When this is undefined,
     /// the primitive defines non-indexed geometry. When defined, the accessor **MUST** have
-    /// [AccessorType::SCALAR] type and an unsigned integer component type.
+    /// [SCALAR](AccessorType::SCALAR) type and an unsigned integer component type.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     indices: Option<usize>,
@@ -988,14 +994,17 @@ impl PrimitiveMode {
     }
 }
 
-/// A node in the node hierarchy. When the node contains [Node::skin],
-/// all [Mesh::primitives] **MUST** contain `JOINTS_0` and `WEIGHTS_0` attributes.
-/// A node **MAY** have either a `matrix` or any combination of `translation/rotation/scale`
+/// A node in the node hierarchy. When the node contains [skin](Node::skin),
+/// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
+/// and [WEIGHTS_0](PrimitiveAttributes::weights_0) attributes.
+/// A node **MAY** have either a `matrix` or any combination of
+/// [translation](Node::translation)/[rotation](Node::rotation)/[scale](Node::scale)
 /// (TRS) properties. TRS properties are converted to matrices and postmultiplied in the
 /// `T * R * S` order to compose the transformation matrix; first the scale is applied to
 /// the vertices, then the rotation, and then the translation. If none are provided, the
 /// transform is the identity. When a node is targeted for animation (referenced by an
-/// [AnimationChannel::target]), `matrix` **MUST NOT** be present.
+/// [animation.channel.target](AnimationChannel::target)), [matrix](Node::matrix)
+/// **MUST NOT** be present.
 #[derive(Serialize, Deserialize)]
 struct Node {
     /// The index of the camera referenced by this node.
@@ -1011,7 +1020,7 @@ struct Node {
     /// The index of the skin referenced by this node.
     /// When a skin is referenced by a node within a scene,
     /// all joints used by the skin **MUST** belong to the same scene.
-    /// When defined, mesh **MUST** also be defined.
+    /// When defined, [mesh](Node::mesh) **MUST** also be defined.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     skin: Option<usize>,
@@ -1043,7 +1052,7 @@ struct Node {
 
     /// The weights of the instantiated morph target. The number of array elements
     /// **MUST** match the number of morph targets of the referenced mesh.
-    /// When defined, [Node::mesh] **MUST** also be defined.
+    /// When defined, [mesh](Node::mesh) **MUST** also be defined.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     weights: Option<Vec<f32>>,
@@ -1169,8 +1178,9 @@ struct Scene {
 #[derive(Serialize, Deserialize)]
 struct Skin {
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
-    /// Its [Accessor::count] property **MUST** be greater than or equal to the number of
-    /// elements of the joints array. When undefined, each matrix is a 4x4 identity matrix.
+    /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
+    /// the number of elements of the joints array. When undefined, each matrix is a 4x4
+    /// identity matrix.
     #[serde(rename = "inverseBindMatrices")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]

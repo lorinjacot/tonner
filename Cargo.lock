@@ -2321,6 +2321,7 @@ dependencies = [
  "image",
  "mikktspace-sys",
  "serde",
+ "serde_json",
  "wgpu",
 ]
 

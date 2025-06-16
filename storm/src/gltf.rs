@@ -3,8 +3,8 @@ use std::num::NonZeroUsize;
 use serde::{Deserialize, Serialize};
 
 /// The root object for a glTF asset.
-#[derive(Serialize, Deserialize)]
-struct Gltf {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Gltf {
     /// Names of glTF extensions used in this asset.
     #[serde(rename = "extensionsUsed")]
     #[serde(default)]
@@ -88,7 +88,7 @@ struct Gltf {
 }
 
 /// Metadata about the glTF asset.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Asset {
     /// A copyright message suitable for display to credit the content creator.
     copyright: Option<String>,
@@ -108,7 +108,7 @@ struct Asset {
 }
 
 /// A typed view into a buffer view that contains raw binary data.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Accessor {
     /// The index of the buffer view. When undefined, the accessor **MUST**
     /// be initialized with zeros; `sparse` property or extensions **MAY**
@@ -191,7 +191,8 @@ struct Accessor {
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
 /// type **MUST NOT** be used for any accessor that is not referenced by
 /// [mesh.primitive.indices](MeshPrimitive::indices).
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[repr(u32)]
 enum AccessorComponentType {
     Byte = 5120,
     UnsignedByte = 5121,
@@ -202,7 +203,7 @@ enum AccessorComponentType {
 }
 
 /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 enum AccessorType {
     #[serde(rename = "SCALAR")]
     Scalar,
@@ -227,7 +228,7 @@ enum AccessorType {
 }
 
 /// Sparse storage of accessor values that deviate from their initialization value.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct SparseAccessor {
     /// Number of deviating accessor values stored in the sparse array.
     count: usize,
@@ -244,7 +245,7 @@ struct SparseAccessor {
 /// An object pointing to a buffer view containing the indices of deviating accessor
 /// values. The number of indices is equal to [accessor.sparse.count](SparseAccessor::count).
 /// Indices **MUST** strictly increase.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct SparseAccessorIndices {
     /// The index of the buffer view with sparse indices. The referenced buffer view
     /// **MUST NOT** have its [target](BufferView::target) or [byteStride](BufferView::byte_stride)
@@ -265,7 +266,8 @@ struct SparseAccessorIndices {
 }
 
 /// The indices data type.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
+#[repr(u32)]
 enum SparseAccessorComponentType {
     UnsignedByte = 5121,
     UnsignedShort = 5123,
@@ -277,7 +279,7 @@ enum SparseAccessorComponentType {
 /// times number of components. The elements have the same component type as the base
 /// accessor. The elements are tightly packed. Data **MUST** be aligned following the
 /// same rules as the base accessor.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct SparseAccessorValues {
     /// The index of the bufferView with sparse values. The referenced buffer
     /// view **MUST NOT** have its [target](BufferView::target) or
@@ -294,7 +296,7 @@ struct SparseAccessorValues {
 }
 
 /// A keyframe animation.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Animation {
     /// An array of animation channels. An animation channel combines an
     /// animation sampler with a target property being animated. Different
@@ -314,7 +316,7 @@ struct Animation {
 }
 
 /// An animation channel combines an animation sampler with a target property being animated.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AnimationChannel {
     /// The index of a sampler in this animation used to compute the value for the target,
     /// e.g., a node’s translation, rotation, or scale (TRS).
@@ -325,7 +327,7 @@ struct AnimationChannel {
 }
 
 /// The descriptor of the animated property.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AnimationTarget {
     /// The index of the node to animate. When undefined, the animated object
     /// **MAY** be defined by an extension.
@@ -350,23 +352,23 @@ struct AnimationTarget {
 /// the values are a quaternion in the order (x, y, z, w), where w is the scalar.
 /// For the [Scale](AnimationTargetPath::Scale) property, the values are the scaling
 /// factors along the X, Y, and Z axes.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 enum AnimationTargetPath {
     #[serde(rename = "translation")]
     Translation,
-    
+
     #[serde(rename = "rotation")]
     Rotation,
-    
+
     #[serde(rename = "scale")]
     Scale,
-    
+
     #[serde(rename = "weights")]
     Weights,
 }
 
 /// An animation sampler combines timestamps with a sequence of output values and defines an interpolation algorithm.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AnimationSampler {
     /// The index of an accessor containing keyframe timestamps. The accessor **MUST** be of scalar type with
     /// floating-point components. The values represent time in seconds with `time[0] >= 0.0`, and strictly
@@ -383,7 +385,7 @@ struct AnimationSampler {
 }
 
 /// Interpolation algorithm.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 enum AnimationInterpolation {
     /// The animated values are linearly interpolated between keyframes.
     /// When targeting a rotation, spherical linear interpolation (slerp)
@@ -418,7 +420,7 @@ impl AnimationInterpolation {
 }
 
 /// A buffer points to binary geometry, animation, or skins.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Buffer {
     /// The URI (or IRI) of the buffer. Relative paths are relative to
     /// the current glTF asset. Instead of referencing an external file,
@@ -438,7 +440,7 @@ struct Buffer {
 }
 
 /// A view into a buffer generally representing a subset of the buffer.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct BufferView {
     /// The index of the buffer.
     buffer: usize,
@@ -474,7 +476,8 @@ struct BufferView {
     name: Option<String>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[repr(u32)]
 enum BufferViewTarget {
     #[default]
     None = 0,
@@ -492,7 +495,7 @@ impl BufferViewTarget {
 }
 
 ///A camera’s projection. A node **MAY** reference a camera to apply a transform to place the camera in the scene.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Camera {
     /// An orthographic camera containing properties to create an orthographic projection matrix.
     /// This property **MUST NOT** be defined when [perspective](Camera::perspective) is defined.
@@ -521,7 +524,7 @@ struct Camera {
 }
 
 /// An orthographic camera containing properties to create an orthographic projection matrix.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct OrthographicCamera {
     /// The floating-point horizontal magnification of the view. This value **MUST NOT**
     /// be equal to zero. This value **SHOULD NOT** be negative.
@@ -540,7 +543,7 @@ struct OrthographicCamera {
 }
 
 /// A perspective camera containing properties to create a perspective projection matrix.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PerspectiveCamera {
     /// The floating-point aspect ratio of the field of view. When undefined, the aspect
     /// ratio of the rendering viewport **MUST** be used.
@@ -566,7 +569,7 @@ struct PerspectiveCamera {
 /// Specifies if the camera uses a perspective or orthographic projection.
 /// Based on this, either the camera’s [perspective](Camera::perspective)
 /// or [orthographic](Camera::orthographic) property **MUST** be defined.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 enum CameraType {
     #[serde(rename = "perspective")]
     Perspective,
@@ -576,7 +579,7 @@ enum CameraType {
 }
 
 /// Image data used to create a texture. Image **MAY** be referenced by an URI (or IRI) or a buffer view index.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Image {
     /// The URI (or IRI) of the image. Relative paths are relative to the current glTF asset.
     /// Instead of referencing an external file, this field **MAY** contain a `data:`-URI.
@@ -609,14 +612,14 @@ struct Image {
 
 /// The image’s media type. This field **MUST** be defined when
 /// [bufferView](Image::buffer_view) is defined.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 enum ImageMimeType {
     #[default]
     None,
 
     #[serde(rename = "image/jpeg")]
     ImageJpeg,
-    
+
     #[serde(rename = "image/png")]
     ImagePng,
 }
@@ -631,7 +634,7 @@ impl ImageMimeType {
 }
 
 /// The material appearance of a primitive.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Material {
     /// The user-defined name of this object. This is not necessarily unique, e.g.,
     /// an accessor and a buffer could have the same name, or two accessors could
@@ -710,7 +713,7 @@ struct Material {
 
 /// A set of parameter values that are used to define the metallic-roughness material model
 /// from Physically-Based Rendering (PBR) methodology.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PbrMetallicRoughness {
     /// The factors for the base color of the material. This value defines linear multipliers
     /// for the sampled texels of the base color texture.
@@ -778,7 +781,7 @@ impl Default for PbrMetallicRoughness {
 }
 
 /// Reference to a texture.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TextureInfo {
     /// The index of the texture.
     index: usize,
@@ -795,7 +798,7 @@ struct TextureInfo {
 }
 
 /// Reference to a texture.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct NormalTextureInfo {
     /// The index of the texture.
     index: usize,
@@ -819,7 +822,7 @@ struct NormalTextureInfo {
 }
 
 /// Reference to a texture.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct OcclusionTextureInfo {
     /// The index of the texture.
     index: usize,
@@ -843,7 +846,7 @@ struct OcclusionTextureInfo {
 }
 
 /// The material’s alpha rendering mode enumeration specifying the interpretation of the alpha value of the base color.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 enum AlphaMode {
     /// The alpha value is ignored, and the rendered output is fully opaque.
     #[default]
@@ -874,7 +877,7 @@ impl AlphaMode {
 }
 
 /// A set of primitives to be rendered. Its global transform is defined by a node that references it.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Mesh {
     /// An array of primitives, each defining geometry to be rendered.
     primitives: Vec<MeshPrimitive>,
@@ -894,7 +897,7 @@ struct Mesh {
 }
 
 /// Geometry to be rendered with the given material.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MeshPrimitive {
     /// A plain JSON object, where each key corresponds to a mesh attribute semantic
     /// and each value is the index of the accessor containing attribute’s data.
@@ -923,7 +926,7 @@ struct MeshPrimitive {
     targets: Option<Vec<MorphTarget>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct PrimitiveAttributes {
     /// Unitless XYZ vertex positions
     #[serde(rename = "POSITION")]
@@ -976,7 +979,7 @@ struct PrimitiveAttributes {
     weights_0: Option<usize>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MorphTarget {
     /// XYZ vertex position displacements
     #[serde(rename = "POSITION")]
@@ -1016,7 +1019,8 @@ struct MorphTarget {
 }
 
 /// The topology type of primitives to render.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[repr(u8)]
 enum PrimitiveMode {
     Points = 0,
     Lines = 1,
@@ -1048,7 +1052,7 @@ impl PrimitiveMode {
 /// transform is the identity. When a node is targeted for animation (referenced by an
 /// [animation.channel.target](AnimationChannel::target)), [matrix](Node::matrix)
 /// **MUST NOT** be present.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Node {
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -1109,7 +1113,7 @@ struct Node {
 }
 
 /// Texture sampler properties for filtering and wrapping modes.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Sampler {
     /// Magnification filter.
     #[serde(rename = "magFilter")]
@@ -1144,7 +1148,8 @@ struct Sampler {
 }
 
 /// Magnification filter.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[repr(u32)]
 enum MagFilter {
     #[default]
     None = 0,
@@ -1162,7 +1167,8 @@ impl MagFilter {
 }
 
 /// Minification filter.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[repr(u32)]
 enum MinFilter {
     #[default]
     None = 0,
@@ -1183,7 +1189,8 @@ impl MinFilter {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[repr(u32)]
 enum WrappingMode {
     #[default]
     None = 0,
@@ -1202,7 +1209,7 @@ impl WrappingMode {
 }
 
 /// The root nodes of a scene.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Scene {
     /// The indices of each root node.
     #[serde(default)]
@@ -1218,7 +1225,7 @@ struct Scene {
 }
 
 // Joints and matrices defining a skin.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Skin {
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
@@ -1247,7 +1254,7 @@ struct Skin {
 }
 
 /// A texture and its sampler.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Texture {
     /// The index of the sampler used by this texture. When undefined, a sampler
     /// with repeat wrapping and auto filtering **SHOULD** be used.

@@ -9,6 +9,7 @@ pub use storage::{DenseEntry, Id};
 mod asset;
 mod environment;
 pub mod geometry;
+pub mod material;
 pub mod math;
 pub mod mesh;
 mod scene;
@@ -21,15 +22,18 @@ pub struct Resources {
     geometry_builder_data: geometry::GeometryBuilderData,
     geometries: SparseSet<geometry::Geometry>,
     texture_builder_data: texture::TextureBuilderData,
-    materials: SparseSet<mesh::Material>,
-    meshes: SparseSet<mesh::Mesh>,
-    mesh_builder_data: mesh::MeshBuilderData,
+    materials: material::MaterialManager,
+    meshes: mesh::MeshManager,
     environments: SparseSet<Environment>,
     environment_builder_data: environment::EnvironmentBuilderData,
     default_environmnent: Option<Id<Environment>>,
     render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,
+    compose_bind_group_layout: wgpu::BindGroupLayout,
+    compose_pipeline: wgpu::RenderPipeline,
+    brightness_bind_group_layout: wgpu::BindGroupLayout,
+    brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     bloom_sampler: wgpu::Sampler,
@@ -174,12 +178,12 @@ impl Resources {
 
         let texture_builder_data = texture::TextureBuilderData::new(&device);
 
-        let materials = SparseSet::new();
-        let meshes = SparseSet::new();
-        let mesh_builder_data = mesh::MeshBuilderData::new(
+        let materials = material::MaterialManager::new(&device);
+        let meshes = mesh::MeshManager::new(
             &device,
             &render_bind_group_layout,
             geometry_builder_data.bind_group_layout(),
+            materials.bind_group_layout(),
         );
 
         let environments = SparseSet::new();
@@ -213,7 +217,7 @@ impl Resources {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: true,
+                depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
@@ -227,10 +231,154 @@ impl Resources {
                 module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
-                    Some(wgpu::TextureFormat::Rgba16Float.into()),
-                    Some(wgpu::TextureFormat::Rgba16Float.into()),
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let composer_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("compose.wgsl"));
+
+        let compose_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Compose bind group layout"),
+                entries: &[
+                    // accumulation texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // revealage texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
                 ],
+            });
+
+        let compose_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compose pipeline layout"),
+                bind_group_layouts: &[&compose_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        const COMPOSE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let compose_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Compose pipeline"),
+            layout: Some(&compose_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &composer_shader_module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &composer_shader_module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: Some(wgpu::BlendState {
+                        color: COMPOSE_BLEND,
+                        alpha: COMPOSE_BLEND,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let brightness_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("brightness.wgsl"));
+
+        let brightness_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Brightness bind group layout"),
+                entries: &[
+                    // opaque texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let brightness_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Brightness pipeline layout"),
+                bind_group_layouts: &[&brightness_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let brightness_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Brightness pipeline"),
+            layout: Some(&brightness_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &brightness_shader_module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &brightness_shader_module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
             }),
             multiview: None,
             cache: None,
@@ -413,13 +561,16 @@ impl Resources {
             texture_builder_data,
             materials,
             meshes,
-            mesh_builder_data,
             environments,
             environment_builder_data,
             default_environmnent: None,
             render_bind_group_layout,
             skybox_bind_group_layout,
             skybox_pipeline,
+            compose_bind_group_layout,
+            compose_pipeline,
+            brightness_bind_group_layout,
+            brightness_pipeline,
             gaussian_blur_bind_group_layout,
             gaussian_blur_pipeline,
             bloom_sampler,
@@ -432,8 +583,8 @@ impl Resources {
         geometry::GeometryBuilder::new(self)
     }
 
-    pub fn material_builder(&mut self) -> mesh::MaterialBuilder {
-        mesh::MaterialBuilder::new(self)
+    pub fn material_builder(&mut self) -> material::MaterialBuilder {
+        material::MaterialBuilder::new(self)
     }
 
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {

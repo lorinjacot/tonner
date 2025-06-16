@@ -15,16 +15,18 @@ pub const MAX_MORPH_TARGET_COUNT: usize = 8;
 
 pub struct Geometry {
     id: Id<Self>,
-    indices: Option<IndexBuffer>,
+    indices: Indices,
     attributes_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     vertex_count: usize,
     morph_target_count: usize,
+    has_normal: bool,
     has_tangents: bool,
+    topology: wgpu::PrimitiveTopology,
 }
 
 impl Geometry {
-    pub(super) fn indices(&self) -> &Option<IndexBuffer> {
+    pub(super) fn indices(&self) -> &Indices {
         &self.indices
     }
 
@@ -36,8 +38,16 @@ impl Geometry {
         self.morph_target_count
     }
 
+    pub fn has_normal(&self) -> bool {
+        self.has_normal
+    }
+
     pub fn has_tangents(&self) -> bool {
         self.has_tangents
+    }
+
+    pub fn topology(&self) -> wgpu::PrimitiveTopology {
+        self.topology
     }
 
     pub fn attributes_buffer(&self) -> &wgpu::Buffer {
@@ -58,26 +68,32 @@ impl DenseEntry for Geometry {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct IndexBuffer {
-    pub(super) buffer: wgpu::Buffer,
-    pub(super) format: wgpu::IndexFormat,
-    pub(super) index_count: u32,
+pub(super) enum Indices {
+    Some {
+        buffer: wgpu::Buffer,
+        format: wgpu::IndexFormat,
+        index_count: u32,
+    },
+    None {
+        vertex_count: u32,
+    },
 }
 
 #[must_use]
 pub struct GeometryBuilder<'a, 'r> {
     resources: &'r mut Resources,
-    indices: Indices<'a>,
+    indices: IndicesSlices<'a>,
     attributes: MorphTargetBuilder<'a>,
-    generate_tangents: Option<u32>,
+    normal_tex_coord: Option<u32>,
     targets: Vec<MorphTargetBuilder<'a>>,
+    topology: wgpu::PrimitiveTopology,
 }
 
 impl<'a, 'r> GeometryBuilder<'a, 'r> {
     pub fn new(resources: &'r mut Resources) -> Self {
         Self {
             resources,
-            indices: Indices::None,
+            indices: IndicesSlices::None,
             attributes: MorphTargetBuilder {
                 positions: None,
                 normals: None,
@@ -88,18 +104,19 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                 joints_0: None,
                 weights_0: None,
             },
-            generate_tangents: None,
+            normal_tex_coord: None,
             targets: Vec::new(),
+            topology: wgpu::PrimitiveTopology::TriangleList,
         }
     }
 
     pub fn indices_u16(mut self, indices: Cow<'a, [u16]>) -> Self {
-        self.indices = Indices::U16(indices);
+        self.indices = IndicesSlices::U16(indices);
         self
     }
 
     pub fn indices_u32(mut self, indices: Cow<'a, [u32]>) -> Self {
-        self.indices = Indices::U32(indices);
+        self.indices = IndicesSlices::U32(indices);
         self
     }
 
@@ -118,8 +135,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn generate_tangents(mut self, normal_tex_coord: u32) -> Self {
-        self.generate_tangents = Some(normal_tex_coord);
+    pub fn normal_tex_coord(mut self, normal_tex_coord: u32) -> Self {
+        self.normal_tex_coord = Some(normal_tex_coord);
         self
     }
 
@@ -145,6 +162,11 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
 
     pub fn morph_target(mut self, morph_target: MorphTargetBuilder<'a>) -> Self {
         self.targets.push(morph_target);
+        self
+    }
+
+    pub fn topology(mut self, topology: wgpu::PrimitiveTopology) -> Self {
+        self.topology = topology;
         self
     }
 
@@ -239,11 +261,26 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     }
 
     pub fn build(mut self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
-        let generate_normals = self.attributes.normals.is_none();
+        let (has_normal, generate_normals) = match self.topology {
+            wgpu::PrimitiveTopology::PointList
+            | wgpu::PrimitiveTopology::LineList
+            | wgpu::PrimitiveTopology::LineStrip => {
+                self.normal_tex_coord = None;
+                (self.attributes.normals.is_some(), false)
+            }
+            _ => (true, self.attributes.normals.is_none()),
+        };
         if generate_normals {
+            // ignore provided tangents
             self.attributes.tangents = None;
         }
-        let has_tangents = self.attributes.tangents.is_some() || self.generate_tangents.is_some();
+        let has_tangents = if self.attributes.tangents.is_some() {
+            // use provided tangents
+            self.normal_tex_coord = None;
+            true
+        } else {
+            self.normal_tex_coord.is_some()
+        };
 
         let mut positions = self
             .attributes
@@ -335,10 +372,11 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             }));
         }
 
-        if generate_normals || self.generate_tangents.is_some() {
+        // we cannot generate normals and tangents with indexed geometries
+        if generate_normals || self.normal_tex_coord.is_some() {
             match self.indices {
-                Indices::None => (),
-                Indices::U16(slice) => {
+                IndicesSlices::None => (),
+                IndicesSlices::U16(slice) => {
                     vertex_count = slice.len();
                     let mut new_attributes =
                         Vec::with_capacity((1 + morph_target_count) * vertex_count);
@@ -352,7 +390,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                     }
                     attributes = new_attributes;
                 }
-                Indices::U32(slice) => {
+                IndicesSlices::U32(slice) => {
                     vertex_count = slice.len();
                     let mut new_attributes =
                         Vec::with_capacity((1 + morph_target_count) * vertex_count);
@@ -367,14 +405,14 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                     attributes = new_attributes;
                 }
             };
-            self.indices = Indices::None;
+            self.indices = IndicesSlices::None;
         }
 
         if generate_normals {
             compute_normals(&mut attributes);
         }
 
-        if let Some(normal_tex_coord) = self.generate_tangents {
+        if let Some(normal_tex_coord) = self.normal_tex_coord {
             let mut mikk_t_space = MikkTSpace {
                 attributes: &mut attributes,
                 normal_tex_coord,
@@ -414,29 +452,38 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         attributes_buffer.unmap();
 
         let indices = match &self.indices {
-            Indices::None => None,
-            Indices::U16(slice) => {
-                Some((cast_slice(slice), wgpu::IndexFormat::Uint16, slice.len()))
+            IndicesSlices::None => None,
+            IndicesSlices::U16(slice) => Some((
+                cast_slice(slice),
+                wgpu::IndexFormat::Uint16,
+                slice.len() as u32,
+            )),
+            IndicesSlices::U32(slice) => Some((
+                cast_slice(slice),
+                wgpu::IndexFormat::Uint32,
+                slice.len() as u32,
+            )),
+        };
+        let indices = match indices {
+            Some((contents, format, index_count)) => {
+                let buffer =
+                    self.resources
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Geometry index buffer"),
+                            contents,
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+                Indices::Some {
+                    buffer,
+                    format,
+                    index_count,
+                }
             }
-            Indices::U32(slice) => {
-                Some((cast_slice(slice), wgpu::IndexFormat::Uint32, slice.len()))
-            }
-        }
-        .map(|(contents, format, index_count)| {
-            let buffer =
-                self.resources
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Geometry index buffer"),
-                        contents,
-                        usage: wgpu::BufferUsages::INDEX,
-                    });
-            IndexBuffer {
-                buffer,
-                format,
-                index_count: index_count as u32,
-            }
-        });
+            None => Indices::None {
+                vertex_count: vertex_count as u32,
+            },
+        };
 
         let bind_group = self
             .resources
@@ -458,7 +505,9 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             bind_group,
             vertex_count,
             morph_target_count,
+            has_normal,
             has_tangents,
+            topology: self.topology,
         })
     }
 }
@@ -606,7 +655,7 @@ impl Default for SphereDescriptor {
     }
 }
 
-enum Indices<'a> {
+enum IndicesSlices<'a> {
     None,
     U16(Cow<'a, [u16]>),
     U32(Cow<'a, [u32]>),

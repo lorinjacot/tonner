@@ -4,6 +4,9 @@ override has_normal_texture: bool;
 override has_occlusion_texture: bool;
 override has_emissive_texture: bool;
 
+override has_normal: bool;
+override alpha_mode: u32;
+
 override max_prefilter_map_mip: f32;
 
 const pi = 3.14159265359;
@@ -89,10 +92,14 @@ fn vs_main(
         let weight = node.weights[i];
         let morph_attributes = geometry.attributes[(i + 1) * geometry.vertex_count + vertex_index];
         attributes.position += weight * morph_attributes.position;
-        attributes.normal += weight * morph_attributes.normal;
-        if has_normal_texture {
-            attributes.tangent += vec4(weight * morph_attributes.tangent.xyz, 0.0);
+
+        if has_normal {
+            attributes.normal += weight * morph_attributes.normal;
+            if has_normal_texture {
+                attributes.tangent += vec4(weight * morph_attributes.tangent.xyz, 0.0);
+            }
         }
+
         attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
         attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
         attributes.color_0 += weight * morph_attributes.color_0;
@@ -110,24 +117,28 @@ fn vs_main(
             attributes.weights_0.w * skins.joint_matrices[node.joint_offset + attributes.joints_0.w];
     }
 
-    let mat_x = model_matrix[0].xyz;
-    let mat_y = model_matrix[1].xyz;
-    let mat_z = model_matrix[2].xyz;
-    let normal_matrix = mat3x3(
-        cross(mat_y, mat_z),
-        cross(mat_z, mat_x),
-        cross(mat_x, mat_y),
-    );
-
     let world_position = model_matrix * vec4(attributes.position, 1.0);
 
     var result: VertexOutput;
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
-    result.world_normal = normal_matrix * attributes.normal;
-    if has_normal_texture {
-        result.world_tangent = vec4(normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
+
+    if has_normal {
+        let mat_x = model_matrix[0].xyz;
+        let mat_y = model_matrix[1].xyz;
+        let mat_z = model_matrix[2].xyz;
+        let normal_matrix = mat3x3(
+            cross(mat_y, mat_z),
+            cross(mat_z, mat_x),
+            cross(mat_x, mat_y),
+        );
+
+        result.world_normal = normal_matrix * attributes.normal;
+        if has_normal_texture {
+            result.world_tangent = vec4(normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
+        }
     }
+    
     result.tex_coord_0 = attributes.tex_coord_0;
     result.tex_coord_1 = attributes.tex_coord_1;
     result.color_0 = attributes.color_0;
@@ -135,8 +146,9 @@ fn vs_main(
 }
 
 struct FragmentOutput {
-    @location(0) color: vec4<f32>,
-    @location(1) bright_color: vec4<f32>,
+    @location(0) opaque: vec4<f32>,
+    @location(1) accumulation: vec4<f32>,
+    @location(2) revealage: f32,
 }
 
 struct MaterialUniform {
@@ -151,6 +163,7 @@ struct MaterialUniform {
     occlusion_tex_coord: u32,
     emissive_factor: vec3<f32>,
     emissive_tex_coord: u32,
+    alpha_cutoff: f32,
 }
 
 @group(2) @binding(0) var base_color_texture: texture_2d<f32>;
@@ -166,7 +179,7 @@ struct MaterialUniform {
 @group(2) @binding(10) var<uniform> material: MaterialUniform;
 
 @fragment
-fn fs_main(vertex: VertexOutput) -> FragmentOutput {
+fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> FragmentOutput {
     var tex_coords = array(
         vertex.tex_coord_0,
         vertex.tex_coord_1,
@@ -181,28 +194,20 @@ fn fs_main(vertex: VertexOutput) -> FragmentOutput {
         );
     }
 
-    let albedo = base_color.rgb;
-
-    var metallic = material.metallic_factor;
-    var roughness = material.roughness_factor;
-    if has_metallic_roughness_texture {
-        let metallic_roughness = textureSample(
-            metallic_roughness_texture,
-            metallic_roughness_sampler,
-            tex_coords[material.metallic_roughness_tex_coord],
-        );
-        roughness *= metallic_roughness.g;
-        metallic *= metallic_roughness.b;
-    }
-
-    var ambiance_occlusion = 1.0;
-    if has_occlusion_texture {
-        ambiance_occlusion = textureSample(
-            occlusion_texture,
-            occlusion_sampler,
-            tex_coords[material.occlusion_tex_coord],
-        ).r;
-        ambiance_occlusion = 1.0 + material.occlusion_strength * (ambiance_occlusion - 1.0);
+    var alpha: f32;
+    if alpha_mode == 0 {
+        // OPAQUE
+        alpha = 1.0;
+    } else if alpha_mode == 1 {
+        // MASK
+        if base_color.a >= material.alpha_cutoff {
+            alpha = 1.0;
+        } else {
+            discard;
+        }
+    } else if alpha_mode == 2 {
+        // BLEND
+        alpha = base_color.a;
     }
 
     var emissive = material.emissive_factor;
@@ -214,86 +219,123 @@ fn fs_main(vertex: VertexOutput) -> FragmentOutput {
         ).rgb;
     }
 
-    var normal = normalize(vertex.world_normal);
-    if has_normal_texture {
-        let tangent = normalize(vertex.world_tangent.xyz);
-        let bitangent = cross(normal, tangent) * vertex.world_tangent.w;
-        let tbn = mat3x3(tangent, bitangent, normal);
-        normal = textureSample(
-            normal_texture,
-            normal_sampler,
-            tex_coords[material.normal_tex_coord],
-        ).rgb;
-        normal = normal * 2.0 - 1.0;
-        normal = normalize(tbn * normal);
-    }
-    let view = normalize(camera.position - vertex.world_position);
-    let reflected = reflect(-view, normal);
+    var color: vec4<f32>;
+    if has_normal {
+        let albedo = base_color.rgb;
 
-    var f0 = vec3(0.04);
-    f0 = mix(f0, albedo, metallic);
+        var metallic = material.metallic_factor;
+        var roughness = material.roughness_factor;
+        if has_metallic_roughness_texture {
+            let metallic_roughness = textureSample(
+                metallic_roughness_texture,
+                metallic_roughness_sampler,
+                tex_coords[material.metallic_roughness_tex_coord],
+            );
+            roughness *= metallic_roughness.g;
+            metallic *= metallic_roughness.b;
+        }
 
-    // reflectance equation
-    var lo = vec3(0.0);
-    for (var i = 0u; i < lights.point_light_count; i++) {
-        // calculate per-light radiance
-        let point_light = lights.point_lights[i];
-        let light   = normalize(point_light.position - vertex.world_position);
-        let halfway = normalize(view + light);
-        let distance    = length(point_light.position - vertex.world_position);
-        let attenuation = 1.0 / (distance * distance);
-        let radiance    = point_light.color * attenuation;
+        var ambiance_occlusion = 1.0;
+        if has_occlusion_texture {
+            ambiance_occlusion = textureSample(
+                occlusion_texture,
+                occlusion_sampler,
+                tex_coords[material.occlusion_tex_coord],
+            ).r;
+            ambiance_occlusion = 1.0 + material.occlusion_strength * (ambiance_occlusion - 1.0);
+        }
 
-        // cook-torrance brdf
-        let ndf = distributionGGX(normal, halfway, roughness);
-        let g = geometrySmith(normal, view, light, roughness);
-        let f = fresnelSchlick(max(dot(halfway, view), 0.0), f0);
+        var normal = normalize(vertex.world_normal);
+        if has_normal_texture {
+            let tangent = normalize(vertex.world_tangent.xyz);
+            let bitangent = cross(normal, tangent) * vertex.world_tangent.w;
+            let tbn = mat3x3(tangent, bitangent, normal);
+            normal = textureSample(
+                normal_texture,
+                normal_sampler,
+                tex_coords[material.normal_tex_coord],
+            ).rgb;
+            normal = normal * 2.0 - 1.0;
+            normal = normalize(tbn * normal);
+        }
+        if !front_facing {
+            normal = -normal;
+        }
+
+        let view = normalize(camera.position - vertex.world_position);
+        let reflected = reflect(-view, normal);
+
+        var f0 = vec3(0.04);
+        f0 = mix(f0, albedo, metallic);
+
+        // reflectance equation
+        var lo = vec3(0.0);
+        for (var i = 0u; i < lights.point_light_count; i++) {
+            // calculate per-light radiance
+            let point_light = lights.point_lights[i];
+            let light   = normalize(point_light.position - vertex.world_position);
+            let halfway = normalize(view + light);
+            let distance    = length(point_light.position - vertex.world_position);
+            let attenuation = 1.0 / (distance * distance);
+            let radiance    = point_light.color * attenuation;
+
+            // cook-torrance brdf
+            let ndf = distributionGGX(normal, halfway, roughness);
+            let g = geometrySmith(normal, view, light, roughness);
+            let f = fresnelSchlick(max(dot(halfway, view), 0.0), f0);
+
+            let ks = f;
+            var kd = vec3(1.0) - ks;
+            kd *= 1.0 - metallic;
+
+            let numerator   = ndf * g * f;
+            let denominator = 4.0 * max(dot(normal, view), 0.0) * max(dot(normal, light), 0.0) + 0.0001;
+            let specular    = numerator / denominator;
+
+            // add to outgoing radiance Lo
+            let n_dot_l = max(dot(normal, light), 0.0);
+            lo += (kd * albedo / pi + specular) * radiance * n_dot_l;
+        }
+    
+        let f = fresnelSchlickRoughness(max(dot(normal, view), 0.0), f0, roughness);
 
         let ks = f;
-        var kd = vec3(1.0) - ks;
+        var kd = 1.0 - ks;
         kd *= 1.0 - metallic;
 
-        let numerator   = ndf * g * f;
-        let denominator = 4.0 * max(dot(normal, view), 0.0) * max(dot(normal, light), 0.0) + 0.0001;
-        let specular    = numerator / denominator;
+        let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
+        let diffuse = irradiance * albedo;
 
-        // add to outgoing radiance Lo
-        let n_dot_l = max(dot(normal, light), 0.0);
-        lo += (kd * albedo / pi + specular) * radiance * n_dot_l;
+        let prefiltered_color = textureSampleLevel(
+            prefilter_map_texture,
+            prefilter_map_sampler,
+            reflected,
+            roughness * max_prefilter_map_mip,
+        ).rgb;
+        let env_brdf = textureSample(
+            brdf_lut_texture,
+            brdf_lut_sampler,
+            vec2(max(dot(normal, view), 0.0), roughness),
+        ).rg;
+        let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
+
+        let ambient = (kd * diffuse + specular) * ambiance_occlusion;
+        color = vec4(ambient + lo + emissive, alpha);
+    } else {
+        color = base_color + vec4(emissive, 0.0);
     }
-  
-    let f = fresnelSchlickRoughness(max(dot(normal, view), 0.0), f0, roughness);
-
-    let ks = f;
-    var kd = 1.0 - ks;
-    kd *= 1.0 - metallic;
-
-    let irradiance = textureSample(irradiance_map_texture, irradiance_map_sampler, normal).rgb;
-    let diffuse = irradiance * albedo;
-
-    let prefiltered_color = textureSampleLevel(
-        prefilter_map_texture,
-        prefilter_map_sampler,
-        reflected,
-        roughness * max_prefilter_map_mip,
-    ).rgb;
-    let env_brdf = textureSample(
-        brdf_lut_texture,
-        brdf_lut_sampler,
-        vec2(max(dot(normal, view), 0.0), roughness),
-    ).rg;
-    let specular = prefiltered_color * (f * env_brdf.x + env_brdf.y);
-
-    let ambient = (kd * diffuse + specular) * ambiance_occlusion;
-    let color = vec4(ambient + lo + emissive, base_color.a);
+    
     let brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
 
     var result: FragmentOutput;
-    result.color = color;
-    if brightness > 1.0 {
-        result.bright_color = color;
-    } else {
-        result.bright_color = vec4(0.0, 0.0, 0.0, color.a);
+    if alpha_mode == 0 || alpha_mode == 1 {
+        result.opaque = color;
+    } else if alpha_mode == 2 {
+        let weight = clamp(pow(min(1.0, color.a * 10.0) + 0.01, 3.0) * 1e8 * 
+                        pow(1.0 - vertex.position.z * 0.9, 3.0), 1e-2, 3e3);
+
+        result.accumulation = vec4(color.rgb * alpha, alpha) * weight;
+        result.revealage = alpha;
     }
     return result;
 }

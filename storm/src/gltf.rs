@@ -814,8 +814,169 @@ impl AlphaMode {
     }
 }
 
+/// A set of primitives to be rendered. Its global transform is defined by a node that references it.
 #[derive(Serialize, Deserialize)]
-struct Mesh {}
+struct Mesh {
+    /// An array of primitives, each defining geometry to be rendered.
+    primitives: Vec<Primitive>,
+
+    /// Array of weights to be applied to the morph targets. The number of array
+    /// elements **MUST** match the number of morph targets.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    weights: Option<Vec<f32>>,
+
+    /// The user-defined name of this object. This is not necessarily unique,
+    /// e.g., an accessor and a buffer could have the same name, or two accessors
+    /// could even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// Geometry to be rendered with the given material.
+#[derive(Serialize, Deserialize)]
+struct Primitive {
+    /// A plain JSON object, where each key corresponds to a mesh attribute semantic
+    /// and each value is the index of the accessor containing attribute’s data.
+    attributes: PrimitiveAttributes,
+
+    /// The index of the accessor that contains the vertex indices. When this is undefined,
+    /// the primitive defines non-indexed geometry. When defined, the accessor **MUST** have
+    /// [AccessorType::SCALAR] type and an unsigned integer component type.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indices: Option<usize>,
+
+    /// The index of the material to apply to this primitive when rendering.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    material: Option<usize>,
+
+    /// The topology type of primitives to render.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "PrimitiveMode::is_default")]
+    mode: PrimitiveMode,
+
+    /// An array of morph targets.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    targets: Option<Vec<MorphTarget>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PrimitiveAttributes {
+    /// Unitless XYZ vertex positions
+    #[serde(rename = "POSITION")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position: Option<usize>,
+
+    /// Normalized XYZ vertex normals
+    #[serde(rename = "NORMAL")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normal: Option<usize>,
+
+    /// XYZW vertex tangents where the XYZ portion is normalized,
+    /// and the W component is a sign value (-1 or +1) indicating
+    /// handedness of the tangent basis
+    #[serde(rename = "TANGENT")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tangent: Option<usize>,
+
+    /// ST texture coordinates
+    #[serde(rename = "TEXCOORD_0")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tex_coord_0: Option<usize>,
+
+    /// ST texture coordinates
+    #[serde(rename = "TEXCOORD_1")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tex_coord_1: Option<usize>,
+
+    /// RGB or RGBA vertex color linear multiplier
+    #[serde(rename = "COLOR_n")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color_0: Option<usize>,
+
+    /// Ondices of the skin joints
+    #[serde(rename = "JOINTS_0")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    joints_0: Option<usize>,
+
+    /// How strongly the skin joint influences the vertex
+    #[serde(rename = "WEIGHTS_0")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    weights_0: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct MorphTarget {
+    /// XYZ vertex position displacements
+    #[serde(rename = "POSITION")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position: Option<usize>,
+
+    /// XYZ vertex normal displacements
+    #[serde(rename = "NORMAL")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normal: Option<usize>,
+
+    /// XYZ vertex tangent displacements
+    #[serde(rename = "TANGENT")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tangent: Option<usize>,
+
+    /// ST texture coordinate displacements
+    #[serde(rename = "TEXCOORD_0")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tex_coord_0: Option<usize>,
+
+    /// ST texture coordinate displacements
+    #[serde(rename = "TEXCOORD_1")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tex_coord_1: Option<usize>,
+
+    /// RGB or RGBA color deltas
+    #[serde(rename = "COLOR_n")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color_0: Option<usize>,
+}
+
+/// The topology type of primitives to render.
+#[derive(Default, Serialize, Deserialize)]
+enum PrimitiveMode {
+    Points = 0,
+    Lines = 1,
+    LineLoop = 2,
+    LineStrip = 3,
+    #[default]
+    Triangles = 4,
+    TriangleStrip = 5,
+    TriangleFan = 6,
+}
+
+impl PrimitiveMode {
+    fn is_default(&self) -> bool {
+        match self {
+            PrimitiveMode::Triangles => true,
+            _ => false,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct Node {}

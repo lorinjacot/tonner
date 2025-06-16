@@ -152,7 +152,7 @@ struct Accessor {
     /// Both [min](Accessor::min) and [max](Accessor::max) arrays have the same length.
     /// The length is determined by the value of the type property;
     /// it can be 1, 2, 3, 4, 9, or 16.
-    /// 
+    ///
     /// [normalized](Accessor::normalized) property has no effect on array values:
     /// they always correspond to the actual values stored in the buffer.
     /// When the accessor is sparse, this property **MUST** contain maximum
@@ -166,7 +166,7 @@ struct Accessor {
     /// Both [min](Accessor::min) and [max](Accessor::max) arrays have the same length.
     /// The length is determined by the value of the type property;
     /// it can be 1, 2, 3, 4, 9, or 16.
-    /// 
+    ///
     /// [normalized](Accessor::normalized) property has no effect on array values:
     /// they always correspond to the actual values stored in the buffer.
     /// When the accessor is sparse, this property **MUST** contain maximum
@@ -204,13 +204,26 @@ enum AccessorComponentType {
 /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
 #[derive(Serialize, Deserialize)]
 enum AccessorType {
-    SCALAR,
-    VEC2,
-    VEC3,
-    VEC4,
-    MAT2,
-    MAT3,
-    MAT4,
+    #[serde(rename = "SCALAR")]
+    Scalar,
+
+    #[serde(rename = "VEC2")]
+    Vec2,
+
+    #[serde(rename = "VEC3")]
+    Vec3,
+
+    #[serde(rename = "VEC4")]
+    Vec4,
+
+    #[serde(rename = "MAT2")]
+    Mat2,
+
+    #[serde(rename = "MAT3")]
+    Mat3,
+
+    #[serde(rename = "MAT4")]
+    Mat4,
 }
 
 /// Sparse storage of accessor values that deviate from their initialization value.
@@ -339,9 +352,16 @@ struct AnimationTarget {
 /// factors along the X, Y, and Z axes.
 #[derive(Serialize, Deserialize)]
 enum AnimationTargetPath {
+    #[serde(rename = "translation")]
     Translation,
+    
+    #[serde(rename = "rotation")]
     Rotation,
+    
+    #[serde(rename = "scale")]
     Scale,
+    
+    #[serde(rename = "weights")]
     Weights,
 }
 
@@ -355,6 +375,7 @@ struct AnimationSampler {
 
     /// Interpolation algorithm.
     #[serde(default)]
+    #[serde(skip_serializing_if = "AnimationInterpolation::is_default")]
     interpolation: AnimationInterpolation,
 
     /// The index of an accessor, containing keyframe output values.
@@ -369,19 +390,31 @@ enum AnimationInterpolation {
     /// **SHOULD** be used to interpolate quaternions. The number of
     /// output elements **MUST** equal the number of input elements.
     #[default]
-    LINEAR,
+    #[serde(rename = "LINEAR")]
+    Linear,
 
     /// The animated values remain constant to the output of the first keyframe,
     /// until the next keyframe. The number of output elements **MUST** equal the
     /// number of input elements.
-    STEP,
+    #[serde(rename = "STEP")]
+    Step,
 
     /// The animation’s interpolation is computed using a cubic spline with
     /// specified tangents. The number of output elements **MUST** equal three
     /// times the number of input elements. For each input element, the output
     /// stores three elements, an in-tangent, a spline vertex, and an out-tangent.
     /// There **MUST** be at least two keyframes when using this interpolation.
-    CUBICSPLINE,
+    #[serde(rename = "CUBICSPLINE")]
+    Cubicspline,
+}
+
+impl AnimationInterpolation {
+    fn is_default(&self) -> bool {
+        match self {
+            AnimationInterpolation::Linear => true,
+            _ => false,
+        }
+    }
 }
 
 /// A buffer points to binary geometry, animation, or skins.
@@ -535,7 +568,10 @@ struct PerspectiveCamera {
 /// or [orthographic](Camera::orthographic) property **MUST** be defined.
 #[derive(Serialize, Deserialize)]
 enum CameraType {
+    #[serde(rename = "perspective")]
     Perspective,
+
+    #[serde(rename = "orthographic")]
     Orthographic,
 }
 
@@ -577,7 +613,11 @@ struct Image {
 enum ImageMimeType {
     #[default]
     None,
+
+    #[serde(rename = "image/jpeg")]
     ImageJpeg,
+    
+    #[serde(rename = "image/png")]
     ImagePng,
 }
 
@@ -648,7 +688,7 @@ struct Material {
     #[serde(skip_serializing_if = "AlphaMode::is_default")]
     alpha_mode: AlphaMode,
 
-    /// Specifies the cutoff threshold when in [MASK](AlphaMode::MASK). If the alpha value is
+    /// Specifies the cutoff threshold when in [MASK](AlphaMode::Mask). If the alpha value is
     /// greater than or equal to this value then it is rendered as fully opaque, otherwise,
     /// it is rendered as fully transparent. A value greater than 1.0 will render the entire
     /// material as fully transparent. This value **MUST** be ignored for other alpha modes.
@@ -807,24 +847,27 @@ struct OcclusionTextureInfo {
 enum AlphaMode {
     /// The alpha value is ignored, and the rendered output is fully opaque.
     #[default]
-    OPAQUE,
+    #[serde(rename = "OPAQUE")]
+    Opaque,
 
     /// The rendered output is either fully opaque or fully transparent depending
     /// on the alpha value and the specified [alphaCutoff](Material::alpha_cutoff) value;
     /// the exact appearance of the edges **MAY** be subject to implementation-specific
     /// techniques such as “Alpha-to-Coverage”.
-    MASK,
+    #[serde(rename = "MASK")]
+    Mask,
 
     /// The alpha value is used to composite the source and destination areas.
     /// The rendered output is combined with the background using the normal painting operation
     /// (i.e. the Porter and Duff over operator).
-    BLEND,
+    #[serde(rename = "BLEND")]
+    Blend,
 }
 
 impl AlphaMode {
     fn is_default(&self) -> bool {
         match self {
-            AlphaMode::OPAQUE => true,
+            AlphaMode::Opaque => true,
             _ => false,
         }
     }
@@ -859,7 +902,7 @@ struct MeshPrimitive {
 
     /// The index of the accessor that contains the vertex indices. When this is undefined,
     /// the primitive defines non-indexed geometry. When defined, the accessor **MUST** have
-    /// [SCALAR](AccessorType::SCALAR) type and an unsigned integer component type.
+    /// [SCALAR](AccessorType::Scalar) type and an unsigned integer component type.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     indices: Option<usize>,
@@ -1105,8 +1148,8 @@ struct Sampler {
 enum MagFilter {
     #[default]
     None = 0,
-    NEAREST = 9728,
-    LINEAR = 9729,
+    Nearest = 9728,
+    Linear = 9729,
 }
 
 impl MagFilter {

@@ -250,7 +250,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
     if !front_facing {
         normal = -normal;
     }
-    
+
     let view = normalize(camera.position - vertex.world_position);
     let reflected = reflect(-view, normal);
 

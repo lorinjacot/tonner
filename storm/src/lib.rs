@@ -1,7 +1,6 @@
 pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
-use mesh::PrimitivePipeline;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 pub use scene::{camera, skin};
 use storage::SparseSet;
@@ -10,6 +9,7 @@ pub use storage::{DenseEntry, Id};
 mod asset;
 mod environment;
 pub mod geometry;
+pub mod material;
 pub mod math;
 pub mod mesh;
 mod scene;
@@ -22,10 +22,8 @@ pub struct Resources {
     geometry_builder_data: geometry::GeometryBuilderData,
     geometries: SparseSet<geometry::Geometry>,
     texture_builder_data: texture::TextureBuilderData,
-    materials: SparseSet<mesh::Material>,
-    primitive_pipelines: SparseSet<PrimitivePipeline>,
-    meshes: SparseSet<mesh::Mesh>,
-    mesh_builder_data: mesh::MeshBuilderData,
+    materials: material::MaterialManager,
+    meshes: mesh::MeshManager,
     environments: SparseSet<Environment>,
     environment_builder_data: environment::EnvironmentBuilderData,
     default_environmnent: Option<Id<Environment>>,
@@ -180,12 +178,12 @@ impl Resources {
 
         let texture_builder_data = texture::TextureBuilderData::new(&device);
 
-        let materials = SparseSet::new();
-        let meshes = SparseSet::new();
-        let mesh_builder_data = mesh::MeshBuilderData::new(
+        let materials = material::MaterialManager::new(&device);
+        let meshes = mesh::MeshManager::new(
             &device,
             &render_bind_group_layout,
             geometry_builder_data.bind_group_layout(),
+            materials.bind_group_layout(),
         );
 
         let environments = SparseSet::new();
@@ -563,8 +561,6 @@ impl Resources {
             texture_builder_data,
             materials,
             meshes,
-            primitive_pipelines: SparseSet::new(),
-            mesh_builder_data,
             environments,
             environment_builder_data,
             default_environmnent: None,
@@ -587,8 +583,8 @@ impl Resources {
         geometry::GeometryBuilder::new(self)
     }
 
-    pub fn material_builder(&mut self) -> mesh::MaterialBuilder {
-        mesh::MaterialBuilder::new(self)
+    pub fn material_builder(&mut self) -> material::MaterialBuilder {
+        material::MaterialBuilder::new(self)
     }
 
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {

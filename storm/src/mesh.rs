@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Index};
 
-use bitflags::bitflags;
-use bytemuck::{Pod, Zeroable, cast_slice};
-use wgpu::util::DeviceExt;
-
-use crate::{DenseEntry, Id, Resources, environment::PREFILTER_MAP_MIP_COUNT, geometry::Geometry};
+use crate::{
+    DenseEntry, Id, Resources,
+    environment::PREFILTER_MAP_MIP_COUNT,
+    geometry::Geometry,
+    material::{AlphaMode, Material},
+    storage::SparseSet,
+};
 
 const ACCUMULATION_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
     src_factor: wgpu::BlendFactor::One,
@@ -68,7 +70,8 @@ impl<'r> MeshBuilder<'r> {
     }
 
     pub fn build(self) -> &'r mut Mesh {
-        let id = self.resources.meshes.next_id();
+        let manager = &mut self.resources.meshes;
+        let id = manager.meshes.next_id();
         let mut morph_target_count = None;
         let primitives = self
             .primitives
@@ -85,7 +88,7 @@ impl<'r> MeshBuilder<'r> {
                     None => morph_target_count = Some(geometry.morph_target_count()),
                 }
 
-                if material.textures.contains(Textures::NORMAL) {
+                if material.has_normal_texture() {
                     assert!(geometry.has_tangents());
                 }
 
@@ -95,7 +98,7 @@ impl<'r> MeshBuilder<'r> {
                     attributes: &wgpu::vertex_attr_array![0 => Uint32],
                 }];
 
-                let (targets, depth_write_enabled) = match material.alpha_mode {
+                let (targets, depth_write_enabled) = match material.alpha_mode() {
                     AlphaMode::Opaque | AlphaMode::Mask => (
                         &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
                         true,
@@ -127,47 +130,50 @@ impl<'r> MeshBuilder<'r> {
                 let mut constants = HashMap::with_capacity(3);
                 constants.insert(
                     "has_base_color_texture".to_string(),
-                    bool_to_f64(material.textures.contains(Textures::BASE_COLOR)),
+                    bool_to_f64(material.has_base_color_texture()),
                 );
                 constants.insert(
                     "has_metallic_roughness_texture".to_string(),
-                    bool_to_f64(material.textures.contains(Textures::METALLIC_ROUGHNESS)),
+                    bool_to_f64(material.has_metallic_roughness_texture()),
                 );
                 constants.insert(
                     "has_normal_texture".to_string(),
-                    bool_to_f64(material.textures.contains(Textures::NORMAL)),
+                    bool_to_f64(material.has_normal_texture()),
                 );
                 constants.insert(
                     "has_occlusion_texture".to_string(),
-                    bool_to_f64(material.textures.contains(Textures::OCCLUSION)),
+                    bool_to_f64(material.has_occlusion_texture()),
                 );
                 constants.insert(
                     "has_emissive_texture".to_string(),
-                    bool_to_f64(material.textures.contains(Textures::EMISSIVE)),
+                    bool_to_f64(material.has_emissive_texture()),
                 );
-                constants.insert("alpha_mode".to_string(), material.alpha_mode as u32 as f64);
+                constants.insert(
+                    "alpha_mode".to_string(),
+                    material.alpha_mode() as u32 as f64,
+                );
                 constants.insert(
                     "max_prefilter_map_mip".to_string(),
                     (PREFILTER_MAP_MIP_COUNT - 1) as f64,
                 );
 
-                let pipeline = match self.resources.primitive_pipelines.iter().find(|pipeline| {
-                    pipeline.constants == constants && pipeline.double_sided == material.double_sided
+                let pipeline = match manager.primitive_pipelines.iter().find(|pipeline| {
+                    pipeline.constants == constants
+                        && pipeline.double_sided == material.double_sided()
                 }) {
                     Some(pipeline) => pipeline.id(),
                     None => {
-                        let data = &self.resources.mesh_builder_data;
                         let label = format!("Primitive pipeline");
-                        let cull_mode = if material.double_sided {
+                        let cull_mode = if material.double_sided() {
                             None
                         } else {
                             Some(wgpu::Face::Back)
                         };
                         let mut desc = wgpu::RenderPipelineDescriptor {
                             label: Some(&label),
-                            layout: Some(&data.primitive_pipeline_layout),
+                            layout: Some(&manager.primitive_pipeline_layout),
                             vertex: wgpu::VertexState {
-                                module: &data.primitive_shader_module,
+                                module: &manager.primitive_shader_module,
                                 entry_point: Some("vs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions {
                                     constants: &constants,
@@ -197,7 +203,7 @@ impl<'r> MeshBuilder<'r> {
                                 alpha_to_coverage_enabled: false,
                             },
                             fragment: Some(wgpu::FragmentState {
-                                module: &data.primitive_shader_module,
+                                module: &manager.primitive_shader_module,
                                 entry_point: Some("fs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions {
                                     constants: &constants,
@@ -212,15 +218,15 @@ impl<'r> MeshBuilder<'r> {
                         desc.primitive.front_face = wgpu::FrontFace::Cw;
                         let mirror_pipeline = self.resources.device.create_render_pipeline(&desc);
 
-                        let id = self.resources.primitive_pipelines.next_id();
-                        self.resources
+                        let id = manager.primitive_pipelines.next_id();
+                        manager
                             .primitive_pipelines
                             .insert(PrimitivePipeline {
                                 id,
                                 pipeline,
                                 mirror_pipeline,
                                 constants,
-                                double_sided: material.double_sided,
+                                double_sided: material.double_sided(),
                             })
                             .id()
                     }
@@ -234,347 +240,60 @@ impl<'r> MeshBuilder<'r> {
             name: self.name.unwrap_or_else(|| format!("Mesh {id}")),
             primitives,
         };
-        self.resources.meshes.insert(mesh)
+        manager.meshes.insert(mesh)
     }
 }
 
-pub struct Material {
-    id: Id<Self>,
-    bind_group: wgpu::BindGroup,
-    textures: Textures,
-    alpha_mode: AlphaMode,
-    double_sided: bool,
+pub struct MeshManager {
+    meshes: SparseSet<Mesh>,
+    primitive_pipeline_layout: wgpu::PipelineLayout,
+    primitive_shader_module: wgpu::ShaderModule,
+    primitive_pipelines: SparseSet<PrimitivePipeline>,
 }
 
-impl Material {
-    pub fn bind_group(&self) -> &wgpu::BindGroup {
-        &self.bind_group
-    }
-}
+impl MeshManager {
+    pub fn new(
+        device: &wgpu::Device,
+        scene_bind_group_layout: &wgpu::BindGroupLayout,
+        geometry_bind_group_layout: &wgpu::BindGroupLayout,
+        material_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let primitive_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Primitive pipeline layout"),
+                bind_group_layouts: &[
+                    scene_bind_group_layout,
+                    geometry_bind_group_layout,
+                    material_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
 
-bitflags! {
-    #[derive(Clone, PartialEq, Eq, Hash)]
-    struct Textures: u32 {
-        const BASE_COLOR = 1 << 0;
-        const METALLIC_ROUGHNESS = 1 << 1;
-        const NORMAL = 1 << 2;
-        const OCCLUSION = 1 << 3;
-        const EMISSIVE = 1 << 4;
-    }
-}
-
-impl DenseEntry for Material {
-    type Key = Self;
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
-    }
-}
-
-#[must_use]
-pub struct MaterialBuilder<'a, 'r> {
-    resources: &'r mut Resources,
-    base_color_texture: Option<&'a wgpu::TextureView>,
-    base_color_sampler: Option<&'a wgpu::Sampler>,
-    metallic_roughness_texture: Option<&'a wgpu::TextureView>,
-    metallic_roughness_sampler: Option<&'a wgpu::Sampler>,
-    normal_texture: Option<&'a wgpu::TextureView>,
-    normal_sampler: Option<&'a wgpu::Sampler>,
-    occlusion_texture: Option<&'a wgpu::TextureView>,
-    occlusion_sampler: Option<&'a wgpu::Sampler>,
-    emissive_texture: Option<&'a wgpu::TextureView>,
-    emissive_sampler: Option<&'a wgpu::Sampler>,
-    uniform: MaterialUniform,
-    alpha_mode: AlphaMode,
-    double_sided: bool,
-    textures: Textures,
-}
-
-impl<'a, 'r> MaterialBuilder<'a, 'r> {
-    pub fn new(resources: &'r mut Resources) -> Self {
-        let uniform = MaterialUniform {
-            base_color_factor: [1.0; 4],
-            base_color_tex_coord: 0,
-            metallic_factor: 1.0,
-            roughness_factor: 1.0,
-            metallic_roughness_tex_coord: 0,
-            normal_scale: 1.0,
-            normal_tex_coord: 0,
-            occlusion_strength: 1.0,
-            occlusion_tex_coord: 0,
-            emissive_factor: [0.0; 3],
-            emissive_tex_coord: 0,
-            alpha_cutoff: 0.5,
-            _pad: [0; 3],
-        };
+        let primitive_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
         Self {
-            resources,
-            base_color_texture: None,
-            base_color_sampler: None,
-            metallic_roughness_texture: None,
-            metallic_roughness_sampler: None,
-            normal_texture: None,
-            normal_sampler: None,
-            occlusion_texture: None,
-            occlusion_sampler: None,
-            emissive_texture: None,
-            emissive_sampler: None,
-            uniform,
-            alpha_mode: AlphaMode::Opaque,
-            double_sided: false,
-            textures: Textures::empty(),
+            meshes: SparseSet::new(),
+            primitive_pipeline_layout,
+            primitive_shader_module,
+            primitive_pipelines: SparseSet::new(),
         }
     }
 
-    pub fn base_color_factor(mut self, base_color_factor: [f32; 4]) -> Self {
-        self.uniform.base_color_factor = base_color_factor;
-        self
-    }
-
-    pub fn base_color_tex_coord(mut self, tex_coord: u32) -> Self {
-        self.uniform.base_color_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn base_color_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
-        self.base_color_texture = Some(texture);
-        self.textures.insert(Textures::BASE_COLOR);
-        self
-    }
-
-    pub fn base_color_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
-        self.base_color_sampler = Some(sampler);
-        self
-    }
-
-    pub fn metallic_factor(mut self, metallic_factor: f32) -> Self {
-        self.uniform.metallic_factor = metallic_factor;
-        self
-    }
-
-    pub fn roughness_factor(mut self, roughness_factor: f32) -> Self {
-        self.uniform.roughness_factor = roughness_factor;
-        self
-    }
-
-    pub fn metallic_roughness_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
-        self.metallic_roughness_texture = Some(texture);
-        self.textures.insert(Textures::METALLIC_ROUGHNESS);
-        self
-    }
-
-    pub fn metallic_roughness_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
-        self.metallic_roughness_sampler = Some(sampler);
-        self
-    }
-
-    pub fn metallic_roughness_tex_coord(mut self, tex_coord: u32) -> Self {
-        self.uniform.metallic_roughness_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn normal_scale(mut self, scale: f32) -> Self {
-        self.uniform.normal_scale = scale;
-        self
-    }
-
-    pub fn normal_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
-        self.normal_texture = Some(texture);
-        self.textures.insert(Textures::NORMAL);
-        self
-    }
-
-    pub fn normal_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
-        self.normal_sampler = Some(sampler);
-        self
-    }
-
-    pub fn normal_tex_coord(mut self, tex_coord: u32) -> Self {
-        self.uniform.normal_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn occlusion_strength(mut self, strength: f32) -> Self {
-        self.uniform.occlusion_strength = strength;
-        self
-    }
-
-    pub fn occlusion_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
-        self.occlusion_texture = Some(texture);
-        self.textures.insert(Textures::OCCLUSION);
-        self
-    }
-
-    pub fn occlusion_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
-        self.occlusion_sampler = Some(sampler);
-        self
-    }
-
-    pub fn occlusion_tex_coord(mut self, tex_coord: u32) -> Self {
-        self.uniform.occlusion_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn emissive_factor(mut self, factor: [f32; 3]) -> Self {
-        self.uniform.emissive_factor = factor;
-        self
-    }
-
-    pub fn emissive_texture(mut self, texture: &'a wgpu::TextureView) -> Self {
-        self.emissive_texture = Some(texture);
-        self.textures.insert(Textures::EMISSIVE);
-        self
-    }
-
-    pub fn emissive_sampler(mut self, sampler: &'a wgpu::Sampler) -> Self {
-        self.emissive_sampler = Some(sampler);
-        self
-    }
-
-    pub fn emissive_tex_coord(mut self, tex_coord: u32) -> Self {
-        self.uniform.emissive_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
-        self.alpha_mode = alpha_mode;
-        self
-    }
-
-    pub fn alpha_cutoff(mut self, alpha_cutoff: f32) -> Self {
-        self.uniform.alpha_cutoff = alpha_cutoff;
-        self
-    }
-
-    pub fn double_sided(mut self) -> Self {
-        self.double_sided = true;
-        self
-    }
-
-    pub fn build(self) -> &'r mut Material {
-        let data = &self.resources.mesh_builder_data;
-        let base_color_texture = self.base_color_texture.unwrap_or(&data.default_texture);
-        let base_color_sampler = self.base_color_sampler.unwrap_or(&data.default_sampler);
-        let metallic_roughness_texture = self
-            .metallic_roughness_texture
-            .unwrap_or(&data.default_texture);
-        let metallic_roughness_sampler = self
-            .metallic_roughness_sampler
-            .unwrap_or(&data.default_sampler);
-        let normal_texture = self.normal_texture.unwrap_or(&data.default_texture);
-        let normal_sampler = self.normal_sampler.unwrap_or(&data.default_sampler);
-        let occlusion_texture = self.occlusion_texture.unwrap_or(&data.default_texture);
-        let occlusion_sampler = self.occlusion_sampler.unwrap_or(&data.default_sampler);
-        let emissive_texture = self.emissive_texture.unwrap_or(&data.default_texture);
-        let emissive_sampler = self.emissive_sampler.unwrap_or(&data.default_sampler);
-
-        let uniform_buffer =
-            self.resources
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Material uniform buffer"),
-                    contents: cast_slice(&[self.uniform]),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-        let bind_group = self
-            .resources
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Material bind group"),
-                layout: &self.resources.mesh_builder_data.material_bind_group_layout,
-                entries: &[
-                    // Base color texture
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(base_color_texture),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(base_color_sampler),
-                    },
-                    // metallic roughness texture
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(metallic_roughness_texture),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(metallic_roughness_sampler),
-                    },
-                    // normal texture
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(normal_texture),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Sampler(normal_sampler),
-                    },
-                    // occlusion texture
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(occlusion_texture),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Sampler(occlusion_sampler),
-                    },
-                    // emissive texture
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: wgpu::BindingResource::TextureView(emissive_texture),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::Sampler(emissive_sampler),
-                    },
-                    // Material uniform
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: uniform_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        let id = self.resources.materials.next_id();
-        self.resources.materials.insert(Material {
-            id,
-            bind_group,
-            textures: self.textures,
-            alpha_mode: self.alpha_mode,
-            double_sided: self.double_sided,
-        })
+    pub fn primitive_pipeline(
+        &self,
+        pipeline: Id<PrimitivePipeline>,
+    ) -> Option<&PrimitivePipeline> {
+        self.primitive_pipelines.get(pipeline)
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AlphaMode {
-    /// The rendered material is fully opaque and any `alpha` value is ignored.
-    Opaque = 0,
-    /// The rendered material is either fully opaque or fully transparent depending
-    /// on the alpha value and the specified `alpha_cutoff` value.
-    Mask = 1,
-    /// The rendered material is combined with the background using the specified
-    /// `alpha` value as transparency
-    Blend = 2,
-}
+impl Index<Id<Mesh>> for MeshManager {
+    type Output = Mesh;
 
-#[derive(Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct MaterialUniform {
-    base_color_factor: [f32; 4],
-    base_color_tex_coord: u32,
-    metallic_factor: f32,
-    roughness_factor: f32,
-    metallic_roughness_tex_coord: u32,
-    normal_scale: f32,
-    normal_tex_coord: u32,
-    occlusion_strength: f32,
-    occlusion_tex_coord: u32,
-    emissive_factor: [f32; 3],
-    emissive_tex_coord: u32,
-    alpha_cutoff: f32,
-    _pad: [u32; 3],
+    fn index(&self, index: Id<Mesh>) -> &Self::Output {
+        &self.meshes[index]
+    }
 }
 
 pub struct PrimitivePipeline {
@@ -609,172 +328,6 @@ impl DenseEntry for PrimitivePipeline {
 
     fn id(&self) -> Id<Self::Key> {
         self.id
-    }
-}
-
-pub(super) struct MeshBuilderData {
-    material_bind_group_layout: wgpu::BindGroupLayout,
-    primitive_pipeline_layout: wgpu::PipelineLayout,
-    primitive_shader_module: wgpu::ShaderModule,
-    default_texture: wgpu::TextureView,
-    default_sampler: wgpu::Sampler,
-}
-
-impl MeshBuilderData {
-    pub fn new(
-        device: &wgpu::Device,
-        render_bind_group_layout: &wgpu::BindGroupLayout,
-        geometry_bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> Self {
-        let material_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Material bind group layout"),
-                entries: &[
-                    // Base color texture
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    // metallic roughness texture
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    // normal texture
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    // occlusion texture
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 7,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    // emissive texture
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 8,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 9,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    // Material Uniform
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 10,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let primitive_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&format!("Primitive pipeline layout")),
-                bind_group_layouts: &[
-                    render_bind_group_layout,
-                    geometry_bind_group_layout,
-                    &material_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
-
-        let primitive_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
-
-        let default_texture = device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Material default texture"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&wgpu::TextureViewDescriptor {
-                label: Some("Material default texture view"),
-                ..Default::default()
-            });
-
-        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Material default sampler"),
-            ..Default::default()
-        });
-
-        Self {
-            material_bind_group_layout,
-            primitive_pipeline_layout,
-            primitive_shader_module,
-            default_texture,
-            default_sampler,
-        }
     }
 }
 

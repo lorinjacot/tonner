@@ -5,11 +5,7 @@ use gltf::texture::WrappingMode;
 use wgpu::AddressMode;
 
 use crate::{
-    Id, Resources,
-    geometry::MorphTargetBuilder,
-    mesh::{AlphaMode, Material, Mesh},
-    scene::{Node, Scene, animation},
-    storage::DenseEntry,
+    geometry::MorphTargetBuilder, material::{AlphaMode, Material}, mesh::Mesh, scene::{animation, Node, Scene}, storage::DenseEntry, Id, Resources
 };
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[];

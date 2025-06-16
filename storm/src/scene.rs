@@ -15,7 +15,8 @@ use wgpu::util::DeviceExt;
 use crate::{
     Environment, Resources,
     geometry::Indices,
-    mesh::{AlphaMode, Mesh, PrimitivePipeline},
+    material::AlphaMode,
+    mesh::{Mesh, PrimitivePipeline},
     storage::{DenseEntry, Id, SparseMap, SparseSet},
 };
 
@@ -877,7 +878,7 @@ impl Scene {
             let mut transparent_primitives = Vec::new();
 
             for (pipeline, geometry, material) in mesh.primitives() {
-                let pipeline = &resources.primitive_pipelines[*pipeline];
+                let pipeline = &resources.meshes.primitive_pipeline(*pipeline).unwrap();
                 let (pipeline_primitives, primitive_ids) = match pipeline.alpha_mode() {
                     AlphaMode::Opaque | AlphaMode::Mask => {
                         (&mut self.opaque_pipeline_primitives, &mut opaque_primitives)

@@ -366,6 +366,87 @@ impl BufferViewTarget {
     }
 }
 
+///A camera’s projection. A node **MAY** reference a camera to apply a transform to place the camera in the scene.
+#[derive(Serialize, Deserialize)]
+struct Camera {
+    /// An orthographic camera containing properties to create an orthographic projection matrix.
+    /// This property **MUST NOT** be defined when [perspective](Camera::perspective) is defined.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    orthographic: Option<OrthographicCamera>,
+
+    /// A perspective camera containing properties to create a perspective projection matrix.
+    /// This property **MUST NOT** be defined when [orthographic](Camera::orthographic) is defined.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    perspective: Option<PerspectiveCamera>,
+
+    /// Specifies if the camera uses a perspective or orthographic projection.
+    /// Based on this, either the camera’s [perspective](Camera::perspective)
+    /// or [orthographic](Camera::orthographic) property **MUST** be defined.
+    #[serde(rename = "type")]
+    type_: CameraType,
+
+    /// The user-defined name of this object. This is not necessarily unique,
+    /// e.g., an accessor and a buffer could have the same name, or two accessors
+    /// could even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// An orthographic camera containing properties to create an orthographic projection matrix.
+#[derive(Serialize, Deserialize)]
+struct OrthographicCamera {
+    /// The floating-point horizontal magnification of the view. This value **MUST NOT**
+    /// be equal to zero. This value **SHOULD NOT** be negative.
+    xmag: f32,
+
+    /// The floating-point vertical magnification of the view. This value **MUST NOT**
+    /// be equal to zero. This value **SHOULD NOT** be negative.
+    ymag: f32,
+
+    /// The floating-point distance to the far clipping plane. This value **MUST NOT**
+    /// be equal to zero. zfar **MUST** be greater than znear.
+    zfar: f32,
+
+    /// The floating-point distance to the near clipping plane.
+    znear: f32,
+}
+
+/// A perspective camera containing properties to create a perspective projection matrix.
+#[derive(Serialize, Deserialize)]
+struct PerspectiveCamera {
+    /// The floating-point aspect ratio of the field of view. When undefined, the aspect
+    /// ratio of the rendering viewport **MUST** be used.
+    #[serde(rename = "aspectRatio")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aspect_ratio: Option<f32>,
+
+    /// The floating-point vertical field of view in radians. This value **SHOULD** be less than π.
+    yfov: f32,
+
+    /// The floating-point distance to the far clipping plane. When defined, `zfar` **MUST** be greater
+    /// than [znear](PerspectiveCamera::znear). If `zfar` is undefined, client implementations **SHOULD**
+    /// use infinite projection matrix.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zfar: Option<f32>,
+
+    /// The floating-point distance to the near clipping plane.
+    znear: f32,
+}
+
+/// Specifies if the camera uses a perspective or orthographic projection.
+/// Based on this, either the camera’s [perspective](Camera::perspective)
+/// or [orthographic](Camera::orthographic) property **MUST** be defined.
+#[derive(Serialize, Deserialize)]
+enum CameraType {
+    Perspective,
+    Orthographic,
+}
+
 fn is_0(value: &usize) -> bool {
     *value == 0
 }

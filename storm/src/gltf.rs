@@ -1046,17 +1046,165 @@ struct Node {
     name: Option<String>,
 }
 
+/// Texture sampler properties for filtering and wrapping modes.
 #[derive(Serialize, Deserialize)]
-struct Sampler {}
+struct Sampler {
+    /// Magnification filter.
+    #[serde(rename = "magFilter")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "MagFilter::is_none")]
+    mag_filter: MagFilter,
 
-#[derive(Serialize, Deserialize)]
-struct Scene {}
+    /// Minification filter.
+    #[serde(rename = "minFilter")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "MinFilter::is_none")]
+    min_filter: MinFilter,
 
-#[derive(Serialize, Deserialize)]
-struct Skin {}
+    /// S (U) wrapping mode. All valid values correspond to WebGL enums.
+    #[serde(rename = "wrapS")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "WrappingMode::is_none")]
+    wrap_s: WrappingMode,
 
+    /// T (V) wrapping mode.
+    #[serde(rename = "wrapT")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "WrappingMode::is_none")]
+    wrap_t: WrappingMode,
+
+    /// The user-defined name of this object. This is not necessarily unique, e.g.,
+    /// an accessor and a buffer could have the same name, or two accessors could
+    /// even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// Magnification filter.
+#[derive(Default, Serialize, Deserialize)]
+enum MagFilter {
+    #[default]
+    None = 0,
+    NEAREST = 9728,
+    LINEAR = 9729,
+}
+
+impl MagFilter {
+    fn is_none(&self) -> bool {
+        match self {
+            MagFilter::None => true,
+            _ => false,
+        }
+    }
+}
+
+/// Minification filter.
+#[derive(Default, Serialize, Deserialize)]
+enum MinFilter {
+    #[default]
+    None = 0,
+    Nearest = 9728,
+    Linear = 9729,
+    NearestMipmapNearest = 9984,
+    LinearMipmapNearest = 9985,
+    NearestMipmapLinear = 9986,
+    LinearMipmapLinear = 9987,
+}
+
+impl MinFilter {
+    fn is_none(&self) -> bool {
+        match self {
+            MinFilter::None => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Default, Serialize, Deserialize)]
+enum WrappingMode {
+    #[default]
+    None = 0,
+    ClampToEdge = 33071,
+    MirroredRepeat = 33648,
+    Repeat = 10497,
+}
+
+impl WrappingMode {
+    fn is_none(&self) -> bool {
+        match self {
+            WrappingMode::None => true,
+            _ => false,
+        }
+    }
+}
+
+/// The root nodes of a scene.
 #[derive(Serialize, Deserialize)]
-struct Texture {}
+struct Scene {
+    /// The indices of each root node.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    nodes: Vec<usize>,
+
+    /// The user-defined name of this object. This is not necessarily unique, e.g.,
+    /// an accessor and a buffer could have the same name, or two accessors could
+    /// even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+// Joints and matrices defining a skin.
+#[derive(Serialize, Deserialize)]
+struct Skin {
+    /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
+    /// Its [Accessor::count] property **MUST** be greater than or equal to the number of
+    /// elements of the joints array. When undefined, each matrix is a 4x4 identity matrix.
+    #[serde(rename = "inverseBindMatrices")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inverse_bind_matrices: Option<usize>,
+
+    /// The index of the node used as a skeleton root. The node **MUST** be the closest common
+    /// root of the joints hierarchy or a direct or indirect parent node of the closest common root.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skeleton: Option<usize>,
+
+    /// Indices of skeleton nodes, used as joints in this skin.
+    joints: Vec<usize>,
+
+    /// The user-defined name of this object. This is not necessarily unique, e.g.,
+    /// an accessor and a buffer could have the same name, or two accessors could
+    /// even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// A texture and its sampler.
+#[derive(Serialize, Deserialize)]
+struct Texture {
+    /// The index of the sampler used by this texture. When undefined, a sampler
+    /// with repeat wrapping and auto filtering **SHOULD** be used.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sampler: Option<usize>,
+
+    /// The index of the image used by this texture. When undefined, an extension or
+    /// other mechanism **SHOULD** supply an alternate texture source, otherwise behavior is undefined.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<usize>,
+
+    /// The user-defined name of this object. This is not necessarily unique, e.g.,
+    /// an accessor and a buffer could have the same name, or two accessors could
+    /// even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
 
 fn is_0(value: &usize) -> bool {
     *value == 0

@@ -1,6 +1,7 @@
 use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /// The root object for a glTF asset.
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,6 +146,7 @@ struct Accessor {
     count: usize,
 
     /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
+    #[serde(rename = "type")]
     type_: AccessorType,
 
     /// Maximum value of each component in this accessor. Array elements
@@ -191,7 +193,7 @@ struct Accessor {
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
 /// type **MUST NOT** be used for any accessor that is not referenced by
 /// [mesh.primitive.indices](MeshPrimitive::indices).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum AccessorComponentType {
     Byte = 5120,
@@ -266,7 +268,7 @@ struct SparseAccessorIndices {
 }
 
 /// The indices data type.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum SparseAccessorComponentType {
     UnsignedByte = 5121,
@@ -476,7 +478,7 @@ struct BufferView {
     name: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum BufferViewTarget {
     #[default]
@@ -1019,7 +1021,7 @@ struct MorphTarget {
 }
 
 /// The topology type of primitives to render.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 enum PrimitiveMode {
     Points = 0,
@@ -1148,7 +1150,7 @@ struct Sampler {
 }
 
 /// Magnification filter.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum MagFilter {
     #[default]
@@ -1167,7 +1169,7 @@ impl MagFilter {
 }
 
 /// Minification filter.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum MinFilter {
     #[default]
@@ -1189,7 +1191,7 @@ impl MinFilter {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum WrappingMode {
     #[default]

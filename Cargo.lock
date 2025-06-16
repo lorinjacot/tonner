@@ -2320,6 +2320,7 @@ dependencies = [
  "gltf-json",
  "image",
  "mikktspace-sys",
+ "serde",
  "wgpu",
 ]
 

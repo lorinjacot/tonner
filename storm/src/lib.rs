@@ -9,6 +9,7 @@ pub use storage::{DenseEntry, Id};
 mod asset;
 mod environment;
 pub mod geometry;
+mod gltf;
 pub mod material;
 pub mod math;
 pub mod mesh;

@@ -532,8 +532,56 @@ enum CameraType {
     Orthographic,
 }
 
+/// Image data used to create a texture. Image **MAY** be referenced by an URI (or IRI) or a buffer view index.
 #[derive(Serialize, Deserialize)]
-struct Image {}
+struct Image {
+    /// The URI (or IRI) of the image. Relative paths are relative to the current glTF asset.
+    /// Instead of referencing an external file, this field **MAY** contain a `data:`-URI.
+    /// This field **MUST NOT** be defined when [buffer_view](Image::buffer_view) is defined.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uri: Option<String>,
+
+    /// The image’s media type. This field **MUST** be defined when
+    /// [buffer_view](Image::buffer_view) is defined.
+    #[serde(rename = "mimeType")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "ImageMimeType::is_none")]
+    mime_type: ImageMimeType,
+
+    /// The index of the [BufferView] that contains the image.
+    /// This field **MUST NOT** be defined when [uri](Image::uri) is defined.
+    #[serde(rename = "bufferView")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    buffer_view: Option<usize>,
+
+    /// The user-defined name of this object. This is not necessarily unique,
+    /// e.g., an accessor and a buffer could have the same name, or two accessors
+    /// could even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// The image’s media type. This field **MUST** be defined when
+/// [buffer_view](Image::buffer_view) is defined.
+#[derive(Default, Serialize, Deserialize)]
+enum ImageMimeType {
+    #[default]
+    None,
+    ImageJpeg,
+    ImagePng,
+}
+
+impl ImageMimeType {
+    fn is_none(&self) -> bool {
+        match self {
+            ImageMimeType::None => true,
+            _ => false,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct Material {}

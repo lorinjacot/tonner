@@ -1,5 +1,25 @@
 use serde::{Deserialize, Serialize};
 
+/// Metadata about the glTF asset.
+#[derive(Serialize, Deserialize)]
+struct Asset {
+    /// A copyright message suitable for display to credit the content creator.
+    copyright: Option<String>,
+
+    /// Tool that generated this glTF model. Useful for debugging.
+    generator: Option<String>,
+
+    /// The glTF version in the form of `<major>.<minor>` that this asset targets.
+    version: String,
+
+    /// The minimum glTF version in the form of `<major>.<minor>` that this asset targets.
+    /// This property **MUST NOT** be greater than the asset version.
+    #[serde(rename = "minVersion")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_version: Option<String>,
+}
+
 /// A typed view into a buffer view that contains raw binary data.
 #[derive(Serialize, Deserialize)]
 struct Accessor {

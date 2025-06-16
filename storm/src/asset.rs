@@ -71,7 +71,18 @@ pub fn open_gltf<'r>(
             for primitive in mesh.primitives() {
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
                 if let Some(positions) = reader.read_positions() {
-                    let mut geometry_builder = resources.geometry_builder().positions(positions);
+                    let topology = match primitive.mode() {
+                        gltf::mesh::Mode::Points => wgpu::PrimitiveTopology::PointList,
+                        gltf::mesh::Mode::LineStrip => wgpu::PrimitiveTopology::LineStrip,
+                        gltf::mesh::Mode::Lines => wgpu::PrimitiveTopology::LineList,
+                        gltf::mesh::Mode::Triangles => wgpu::PrimitiveTopology::TriangleList,
+                        gltf::mesh::Mode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
+                        _ => panic!("unsupported primitive topology {:?}", primitive.mode()),
+                    };
+                    let mut geometry_builder = resources
+                        .geometry_builder()
+                        .positions(positions)
+                        .topology(topology);
                     if let Some(indices) = reader.read_indices() {
                         geometry_builder =
                             geometry_builder.indices_u32(indices.into_u32().collect());
@@ -81,9 +92,10 @@ pub fn open_gltf<'r>(
                     }
                     if let Some(tangents) = reader.read_tangents() {
                         geometry_builder = geometry_builder.tangents(tangents);
-                    } else if let Some(normal_texture) = primitive.material().normal_texture() {
+                    }
+                    if let Some(normal_texture) = primitive.material().normal_texture() {
                         geometry_builder =
-                            geometry_builder.generate_tangents(normal_texture.tex_coord());
+                            geometry_builder.normal_tex_coord(normal_texture.tex_coord());
                     }
                     for set in 0.. {
                         match reader.read_tex_coords(set) {

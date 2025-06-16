@@ -149,6 +149,10 @@ impl<'r> MeshBuilder<'r> {
                     bool_to_f64(material.has_emissive_texture()),
                 );
                 constants.insert(
+                    "has_normal".to_string(),
+                    geometry.has_normal() as u32 as f64,
+                );
+                constants.insert(
                     "alpha_mode".to_string(),
                     material.alpha_mode() as u32 as f64,
                 );
@@ -160,6 +164,7 @@ impl<'r> MeshBuilder<'r> {
                 let pipeline = match manager.primitive_pipelines.iter().find(|pipeline| {
                     pipeline.constants == constants
                         && pipeline.double_sided == material.double_sided()
+                        && pipeline.topology == geometry.topology()
                 }) {
                     Some(pipeline) => pipeline.id(),
                     None => {
@@ -182,7 +187,7 @@ impl<'r> MeshBuilder<'r> {
                                 buffers: &vertex_buffer_layouts,
                             },
                             primitive: wgpu::PrimitiveState {
-                                topology: wgpu::PrimitiveTopology::TriangleList,
+                                topology: geometry.topology(),
                                 strip_index_format: None,
                                 front_face: wgpu::FrontFace::Ccw,
                                 cull_mode,
@@ -227,6 +232,7 @@ impl<'r> MeshBuilder<'r> {
                                 mirror_pipeline,
                                 constants,
                                 double_sided: material.double_sided(),
+                                topology: geometry.topology(),
                             })
                             .id()
                     }
@@ -302,6 +308,7 @@ pub struct PrimitivePipeline {
     mirror_pipeline: wgpu::RenderPipeline,
     constants: HashMap<String, f64>,
     double_sided: bool,
+    topology: wgpu::PrimitiveTopology,
 }
 
 impl PrimitivePipeline {

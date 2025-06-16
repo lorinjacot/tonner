@@ -20,7 +20,9 @@ pub struct Geometry {
     bind_group: wgpu::BindGroup,
     vertex_count: usize,
     morph_target_count: usize,
+    has_normal: bool,
     has_tangents: bool,
+    topology: wgpu::PrimitiveTopology,
 }
 
 impl Geometry {
@@ -36,8 +38,16 @@ impl Geometry {
         self.morph_target_count
     }
 
+    pub fn has_normal(&self) -> bool {
+        self.has_normal
+    }
+
     pub fn has_tangents(&self) -> bool {
         self.has_tangents
+    }
+
+    pub fn topology(&self) -> wgpu::PrimitiveTopology {
+        self.topology
     }
 
     pub fn attributes_buffer(&self) -> &wgpu::Buffer {
@@ -74,8 +84,9 @@ pub struct GeometryBuilder<'a, 'r> {
     resources: &'r mut Resources,
     indices: IndicesSlices<'a>,
     attributes: MorphTargetBuilder<'a>,
-    generate_tangents: Option<u32>,
+    normal_tex_coord: Option<u32>,
     targets: Vec<MorphTargetBuilder<'a>>,
+    topology: wgpu::PrimitiveTopology,
 }
 
 impl<'a, 'r> GeometryBuilder<'a, 'r> {
@@ -93,8 +104,9 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                 joints_0: None,
                 weights_0: None,
             },
-            generate_tangents: None,
+            normal_tex_coord: None,
             targets: Vec::new(),
+            topology: wgpu::PrimitiveTopology::TriangleList,
         }
     }
 
@@ -123,8 +135,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn generate_tangents(mut self, normal_tex_coord: u32) -> Self {
-        self.generate_tangents = Some(normal_tex_coord);
+    pub fn normal_tex_coord(mut self, normal_tex_coord: u32) -> Self {
+        self.normal_tex_coord = Some(normal_tex_coord);
         self
     }
 
@@ -150,6 +162,11 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
 
     pub fn morph_target(mut self, morph_target: MorphTargetBuilder<'a>) -> Self {
         self.targets.push(morph_target);
+        self
+    }
+
+    pub fn topology(mut self, topology: wgpu::PrimitiveTopology) -> Self {
+        self.topology = topology;
         self
     }
 
@@ -244,11 +261,26 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
     }
 
     pub fn build(mut self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
-        let generate_normals = self.attributes.normals.is_none();
+        let (has_normal, generate_normals) = match self.topology {
+            wgpu::PrimitiveTopology::PointList
+            | wgpu::PrimitiveTopology::LineList
+            | wgpu::PrimitiveTopology::LineStrip => {
+                self.normal_tex_coord = None;
+                (self.attributes.normals.is_some(), false)
+            }
+            _ => (true, self.attributes.normals.is_none()),
+        };
         if generate_normals {
+            // ignore provided tangents
             self.attributes.tangents = None;
         }
-        let has_tangents = self.attributes.tangents.is_some() || self.generate_tangents.is_some();
+        let has_tangents = if self.attributes.tangents.is_some() {
+            // use provided tangents
+            self.normal_tex_coord = None;
+            true
+        } else {
+            self.normal_tex_coord.is_some()
+        };
 
         let mut positions = self
             .attributes
@@ -340,7 +372,8 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             }));
         }
 
-        if generate_normals || self.generate_tangents.is_some() {
+        // we cannot generate normals and tangents with indexed geometries
+        if generate_normals || self.normal_tex_coord.is_some() {
             match self.indices {
                 IndicesSlices::None => (),
                 IndicesSlices::U16(slice) => {
@@ -379,7 +412,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             compute_normals(&mut attributes);
         }
 
-        if let Some(normal_tex_coord) = self.generate_tangents {
+        if let Some(normal_tex_coord) = self.normal_tex_coord {
             let mut mikk_t_space = MikkTSpace {
                 attributes: &mut attributes,
                 normal_tex_coord,
@@ -472,7 +505,9 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             bind_group,
             vertex_count,
             morph_target_count,
+            has_normal,
             has_tangents,
+            topology: self.topology,
         })
     }
 }

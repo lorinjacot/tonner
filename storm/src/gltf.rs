@@ -2,6 +2,91 @@ use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 
+/// The root object for a glTF asset.
+#[derive(Serialize, Deserialize)]
+struct Gltf {
+    /// Names of glTF extensions used in this asset.
+    #[serde(rename = "extensionsUsed")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    extensions_used: Vec<String>,
+
+    /// Names of glTF extensions required to properly load this asset.
+    #[serde(rename = "extensionsRequired")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    extensions_required: Vec<String>,
+
+    /// An array of accessors. An accessor is a typed view into a bufferView.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    accessors: Vec<Accessor>,
+
+    /// An array of keyframe animations.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    animations: Vec<Animation>,
+
+    /// Metadata about the glTF asset.
+    asset: Asset,
+
+    /// An array of buffers. A buffer points to binary geometry, animation, or skins.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    buffers: Vec<Buffer>,
+
+    /// An array of bufferViews. A bufferView is a view into a buffer generally representing a subset of the buffer.
+    #[serde(rename = "bufferViews")]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    buffer_views: Vec<BufferView>,
+
+    /// An array of cameras. A camera defines a projection matrix.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cameras: Vec<Camera>,
+
+    /// An array of images. An image defines data used to create a texture.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    images: Vec<Image>,
+
+    /// An array of meshes. A mesh is a set of primitives to be rendered.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    meshes: Vec<Mesh>,
+
+    /// An array of nodes.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    nodes: Vec<Node>,
+
+    /// An array of samplers. A sampler contains properties for texture filtering and wrapping modes.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    samplers: Vec<Sampler>,
+
+    /// The index of the default scene. This property **MUST NOT** be defined, when [scenes](Gltf::scenes) is undefined.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scene: Option<usize>,
+
+    /// An array of scenes.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    scenes: Vec<Scene>,
+
+    /// An array of skins. A skin is defined by joints and matrices.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skins: Vec<Skin>,
+
+    /// An array of textures.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    textures: Vec<Texture>,
+}
+
 /// Metadata about the glTF asset.
 #[derive(Serialize, Deserialize)]
 struct Asset {
@@ -446,6 +531,30 @@ enum CameraType {
     Perspective,
     Orthographic,
 }
+
+#[derive(Serialize, Deserialize)]
+struct Image {}
+
+#[derive(Serialize, Deserialize)]
+struct Material {}
+
+#[derive(Serialize, Deserialize)]
+struct Mesh {}
+
+#[derive(Serialize, Deserialize)]
+struct Node {}
+
+#[derive(Serialize, Deserialize)]
+struct Sampler {}
+
+#[derive(Serialize, Deserialize)]
+struct Scene {}
+
+#[derive(Serialize, Deserialize)]
+struct Skin {}
+
+#[derive(Serialize, Deserialize)]
+struct Texture {}
 
 fn is_0(value: &usize) -> bool {
     *value == 0

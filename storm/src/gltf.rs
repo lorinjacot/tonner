@@ -144,10 +144,35 @@ struct Accessor {
     count: usize,
 
     /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
-    ///
-    /// Also contains the maximum and mininum values of each component in this accessor.
-    /// Array elements **MUST** be treated as having the same data type as [component_type](Accessor::component_type).
-    type_min_max: AccessorType,
+    type_: AccessorType,
+
+    /// Maximum value of each component in this accessor. Array elements
+    /// **MUST** be treated as having the same data type as [Accessor::component_type].
+    /// Both [Accessor::min] and [Accessor::max] arrays have the same length.
+    /// The length is determined by the value of the type property;
+    /// it can be 1, 2, 3, 4, 9, or 16.
+    /// 
+    /// [Accessor::normalized] property has no effect on array values:
+    /// they always correspond to the actual values stored in the buffer.
+    /// When the accessor is sparse, this property **MUST** contain maximum
+    /// values of accessor data with sparse substitution applied.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max: Option<Vec<f32>>,
+
+    /// Minimum value of each component in this accessor. Array elements
+    /// **MUST** be treated as having the same data type as [Accessor::component_type].
+    /// Both [Accessor::min] and [Accessor::max] arrays have the same length.
+    /// The length is determined by the value of the type property;
+    /// it can be 1, 2, 3, 4, 9, or 16.
+    /// 
+    /// [Accessor::normalized] property has no effect on array values:
+    /// they always correspond to the actual values stored in the buffer.
+    /// When the accessor is sparse, this property **MUST** contain maximum
+    /// values of accessor data with sparse substitution applied.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min: Option<Vec<f32>>,
 
     /// Sparse storage of elements that deviate from their initialization value.
     #[serde(default)]
@@ -177,34 +202,13 @@ enum AccessorComponentType {
 /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
 #[derive(Serialize, Deserialize)]
 enum AccessorType {
-    SCALAR {
-        max: Option<[f32; 1]>,
-        min: Option<[f32; 1]>,
-    },
-    VEC2 {
-        max: Option<[f32; 2]>,
-        min: Option<[f32; 2]>,
-    },
-    VEC3 {
-        max: Option<[f32; 3]>,
-        min: Option<[f32; 3]>,
-    },
-    VEC4 {
-        max: Option<[f32; 4]>,
-        min: Option<[f32; 4]>,
-    },
-    MAT2 {
-        max: Option<[f32; 4]>,
-        min: Option<[f32; 4]>,
-    },
-    MAT3 {
-        max: Option<[f32; 9]>,
-        min: Option<[f32; 9]>,
-    },
-    MAT4 {
-        max: Option<[f32; 16]>,
-        min: Option<[f32; 16]>,
-    },
+    SCALAR,
+    VEC2,
+    VEC3,
+    VEC4,
+    MAT2,
+    MAT3,
+    MAT4,
 }
 
 /// Sparse storage of accessor values that deviate from their initialization value.
@@ -647,6 +651,7 @@ struct Material {
     /// material as fully transparent. This value **MUST** be ignored for other alpha modes.
     /// When [Material::alpha_mode] is not defined, this value **MUST NOT** be defined.
     #[serde(rename = "alphaCutoff")]
+    #[serde(default = "default_05")]
     #[serde(skip_serializing_if = "is_05")]
     alpha_cutoff: f32,
 
@@ -667,6 +672,7 @@ struct PbrMetallicRoughness {
     /// The factors for the base color of the material. This value defines linear multipliers
     /// for the sampled texels of the base color texture.
     #[serde(rename = "baseColorFactor")]
+    #[serde(default = "default_4x10")]
     #[serde(skip_serializing_if = "is_4x10")]
     base_color_factor: [f32; 4],
 
@@ -684,12 +690,14 @@ struct PbrMetallicRoughness {
     /// The factor for the metalness of the material. This value defines a linear multiplier
     /// or the sampled metalness values of the metallic-roughness texture.
     #[serde(rename = "metallicFactor")]
+    #[serde(default = "default_10")]
     #[serde(skip_serializing_if = "is_10")]
     metallic_factor: f32,
 
     /// The factor for the roughness of the material. This value defines a linear multiplier
     /// for the sampled roughness values of the metallic-roughness texture.
     #[serde(rename = "roughnessFactor")]
+    #[serde(default = "default_10")]
     #[serde(skip_serializing_if = "is_10")]
     roughness_factor: f32,
 
@@ -760,6 +768,7 @@ struct MaterialNormalTexture {
     /// The scalar parameter applied to each normal vector of the texture. This value scales
     /// the normal vector in X and Y directions using the formula:
     /// `scaledNormal = normalize(<sampled normal texture value> * 2.0 - 1.0) * vec3(<normal scale>, <normal scale>, 1.0)`.
+    #[serde(default = "default_10")]
     #[serde(skip_serializing_if = "is_10")]
     scale: f32,
 }
@@ -782,6 +791,7 @@ struct MaterialOcclusionTexture {
     /// A scalar parameter controlling the amount of occlusion applied. A value of `0.0` means no occlusion.
     /// A value of `1.0` means full occlusion. This value affects the final occlusion value as:
     /// `1.0 + strength * (<sampled occlusion texture value> - 1.0)`.
+    #[serde(default = "default_10")]
     #[serde(skip_serializing_if = "is_10")]
     strength: f32,
 }
@@ -1218,12 +1228,24 @@ fn is_3x00(value: &[f32; 3]) -> bool {
     *value == [0.0; 3]
 }
 
+fn default_05() -> f32 {
+    0.5
+}
+
 fn is_05(value: &f32) -> bool {
     *value == 0.5
 }
 
+fn default_10() -> f32 {
+    1.0
+}
+
 fn is_10(value: &f32) -> bool {
     *value == 1.0
+}
+
+fn default_4x10() -> [f32; 4] {
+    [1.0; 4]
 }
 
 fn is_4x10(value: &[f32; 4]) -> bool {

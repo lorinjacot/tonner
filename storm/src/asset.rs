@@ -1,4 +1,4 @@
-use std::{fs::read, iter::repeat_n};
+use std::iter::repeat_n;
 
 use glam::{Mat4, Quat};
 use gltf::texture::WrappingMode;
@@ -7,7 +7,7 @@ use wgpu::AddressMode;
 use crate::{
     Id, Resources,
     geometry::MorphTargetBuilder,
-    gltf::Gltf,
+    gltf::GltfAsset,
     material::{AlphaMode, Material},
     mesh::Mesh,
     scene::{Node, Scene, animation},
@@ -22,17 +22,8 @@ pub fn open_gltf<'r>(
     encoder: &mut wgpu::CommandEncoder,
     render_width: u32,
     render_height: u32,
-) -> Result<(Vec<Scene>, Option<usize>), gltf::Error> {
-    let content = read(&path).unwrap();
-    let result: Result<Gltf, _> = serde_json::from_slice(&content);
-    match result {
-        Ok(gltf) => {
-            dbg!(gltf);
-        }
-        Err(err) => {
-            dbg!(err);
-        }
-    }
+) -> Result<(Vec<Scene>, Option<usize>), Box<dyn std::error::Error>> {
+    let _asset = GltfAsset::open(&path)?;
 
     let (document, buffers, images_data) = gltf::import(path)?;
 

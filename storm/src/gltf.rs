@@ -1,11 +1,137 @@
-use std::num::NonZeroUsize;
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+    num::NonZeroUsize,
+    path::Path,
+};
 
+use bytemuck::bytes_of_mut;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum GltfError {
+    #[error("Failed to read the asset: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Invalid binary gltf container: {0}")]
+    Glb(#[from] GlbError),
+    #[error("Failed to parse json: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("Unsupported asset: {0}")]
+    Unsupported(String),
+}
+
+#[derive(Error, Debug)]
+pub enum GlbError {
+    #[error("Binary glTF container version should be 2")]
+    UnknownVersion,
+    #[error("Glb asset should have at least one chunk")]
+    FirstChunkMissing,
+    #[error("Invalid chunk length")]
+    InvalidChunkLength,
+    #[error("The first glb chunk should be the structured JSON content of the asset")]
+    InvalidFirstChunkType,
+}
+
+pub struct GltfAsset {
+    json: Gltf,
+    binary_buffer: Option<Vec<u8>>,
+}
+
+const GLB_HEADER_SIZE: u32 = 3 * size_of::<u32>() as u32;
+const MIN_CHUNK_SIZE: u32 = 2 * size_of::<u32>() as u32;
+const ASCII_GLTF: u32 = 0x46546C67;
+const ASCII_JSON: u32 = 0x4E4F534A;
+const ASCII_BIN: u32 = 0x004E4942;
+
+impl GltfAsset {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, GltfError> {
+        let file = File::open(path)?;
+        let mut reader = BufReader::new(file);
+
+        let mut magic: u32 = 0;
+        reader.read_exact(bytes_of_mut(&mut magic))?;
+        if magic != ASCII_GLTF {
+            return Err(GltfError::Unsupported(
+                "Only Binary glTF (.glb) asset are supported".to_string(),
+            ));
+        }
+
+        let mut version: u32 = 0;
+        reader.read_exact(bytes_of_mut(&mut version))?;
+        if version != 2 {
+            return Err(GlbError::UnknownVersion.into());
+        }
+
+        let mut length: u32 = 0;
+        reader.read_exact(bytes_of_mut(&mut length))?;
+        length -= GLB_HEADER_SIZE;
+
+        let mut reader = reader.take(length as u64);
+
+        if length < MIN_CHUNK_SIZE {
+            return Err(GlbError::FirstChunkMissing.into());
+        }
+        let json = GlbChunk::from_reader(&mut reader)?;
+        length -= json.chunk_length;
+        if json.chunk_type != ASCII_JSON {
+            return Err(GlbError::InvalidFirstChunkType.into());
+        }
+        let json = serde_json::from_slice(&json.chunk_data)?;
+
+        let binary_buffer = if length >= MIN_CHUNK_SIZE {
+            let binary_buffer = GlbChunk::from_reader(&mut reader)?;
+            // length -= binary_buffer.chunk_length;
+            if binary_buffer.chunk_type != ASCII_BIN {
+                return Err(GlbError::InvalidFirstChunkType.into());
+            }
+            Some(binary_buffer.chunk_data)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            json,
+            binary_buffer,
+        })
+    }
+}
+
+struct GlbChunk {
+    chunk_length: u32,
+    chunk_type: u32,
+    chunk_data: Vec<u8>,
+}
+
+impl GlbChunk {
+    fn from_reader<R: Read>(reader: &mut R) -> Result<Self, GltfError> {
+        let mut chunk_length: u32 = 0;
+        reader.read_exact(bytes_of_mut(&mut chunk_length))?;
+
+        let mut chunk_type: u32 = 0;
+        reader.read_exact(bytes_of_mut(&mut chunk_type))?;
+
+        let mut chunk_data = Vec::with_capacity(chunk_length as usize);
+        reader
+            .take(chunk_length as u64)
+            .read_to_end(&mut chunk_data)?;
+
+        if (chunk_data.len() as u32) < chunk_length {
+            return Err(GlbError::InvalidChunkLength.into());
+        }
+
+        Ok(Self {
+            chunk_length,
+            chunk_type,
+            chunk_data,
+        })
+    }
+}
 
 /// The root object for a glTF asset.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Gltf {
+struct Gltf {
     /// Names of glTF extensions used in this asset.
     #[serde(rename = "extensionsUsed")]
     #[serde(default)]

@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use glam::{Vec3, vec3};
+use glam::{Vec2, Vec3, Vec4, vec2, vec3, vec4};
 use mikktspace_sys::{MikkTSpaceInterface, gen_tang_space_default};
 use wgpu::util::DeviceExt;
 
@@ -120,17 +120,17 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn positions(mut self, positions: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+    pub fn positions(mut self, positions: impl IntoIterator<Item = Vec3> + 'a) -> Self {
         self.attributes = self.attributes.positions(positions);
         self
     }
 
-    pub fn normals(mut self, normals: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+    pub fn normals(mut self, normals: impl IntoIterator<Item = Vec3> + 'a) -> Self {
         self.attributes = self.attributes.normals(normals);
         self
     }
 
-    pub fn tangents(mut self, tangents: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+    pub fn tangents(mut self, tangents: impl IntoIterator<Item = Vec4> + 'a) -> Self {
         self.attributes.tangents = Some(Box::new(tangents.into_iter()));
         self
     }
@@ -140,12 +140,12 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = [f32; 2]> + 'a) -> Self {
+    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = Vec2> + 'a) -> Self {
         self.attributes = self.attributes.tex_coords(tex_coords);
         self
     }
 
-    pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+    pub fn colors(mut self, colors: impl IntoIterator<Item = Vec4> + 'a) -> Self {
         self.attributes = self.attributes.colors(colors);
         self
     }
@@ -155,7 +155,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn weights(mut self, weights: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+    pub fn weights(mut self, weights: impl IntoIterator<Item = Vec4> + 'a) -> Self {
         self.attributes = self.attributes.weights(weights);
         self
     }
@@ -218,9 +218,9 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
                     desc.radius * phi.sin() * theta.sin(),
                 );
 
-                positions.push(vertex.to_array());
-                normals.push(vertex.normalize().to_array());
-                uvs.push([u + u_offset, 1.0 - v]);
+                positions.push(vertex);
+                normals.push(vertex.normalize());
+                uvs.push(vec2(u + u_offset, 1.0 - v));
 
                 vertices_row.push(index);
                 index += 1;
@@ -289,23 +289,23 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let mut normals = self
             .attributes
             .normals
-            .unwrap_or_else(|| Box::new(repeat([0.0; 3])));
+            .unwrap_or_else(|| Box::new(repeat(Vec3::ZERO)));
         let mut tangents = self
             .attributes
             .tangents
-            .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
+            .unwrap_or_else(|| Box::new(repeat(Vec4::ZERO)));
         let mut tex_coords_0 = self
             .attributes
             .tex_coords_0
-            .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
+            .unwrap_or_else(|| Box::new(repeat(Vec2::ZERO)));
         let mut tex_coords_1 = self
             .attributes
             .tex_coords_1
-            .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
+            .unwrap_or_else(|| Box::new(repeat(Vec2::ZERO)));
         let mut colors_0 = self
             .attributes
             .colors_0
-            .unwrap_or_else(|| Box::new(repeat([1.0; 4])));
+            .unwrap_or_else(|| Box::new(repeat(Vec4::ONE)));
         let mut joints_0 = self
             .attributes
             .joints_0
@@ -313,7 +313,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let mut weights_0 = self
             .attributes
             .weights_0
-            .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
+            .unwrap_or_else(|| Box::new(repeat(Vec4::ZERO)));
 
         let mut vertex_count = positions.size_hint().0;
         let morph_target_count = self.targets.len();
@@ -341,20 +341,22 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         for target in self.targets {
             let mut positions = target
                 .positions
-                .unwrap_or_else(|| Box::new(repeat([0.0; 3])));
-            let mut normals = target.normals.unwrap_or_else(|| Box::new(repeat([0.0; 3])));
+                .unwrap_or_else(|| Box::new(repeat(Vec3::ZERO)));
+            let mut normals = target
+                .normals
+                .unwrap_or_else(|| Box::new(repeat(Vec3::ZERO)));
             let mut tangents = target
                 .tangents
-                .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
+                .unwrap_or_else(|| Box::new(repeat(Vec4::ZERO)));
             let mut tex_coords_0 = target
                 .tex_coords_0
-                .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
+                .unwrap_or_else(|| Box::new(repeat(Vec2::ZERO)));
             let mut tex_coords_1 = target
                 .tex_coords_1
-                .unwrap_or_else(|| Box::new(repeat([0.0; 2])));
+                .unwrap_or_else(|| Box::new(repeat(Vec2::ZERO)));
             let mut colors_0 = target
                 .colors_0
-                .unwrap_or_else(|| Box::new(repeat([0.0; 4])));
+                .unwrap_or_else(|| Box::new(repeat(Vec4::ZERO)));
 
             attributes.extend(from_fn(|| {
                 Some(Attribute {
@@ -514,14 +516,14 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
 
 #[must_use]
 pub struct MorphTargetBuilder<'a> {
-    positions: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
-    normals: Option<Box<dyn Iterator<Item = [f32; 3]> + 'a>>,
-    tangents: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
-    tex_coords_0: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
-    tex_coords_1: Option<Box<dyn Iterator<Item = [f32; 2]> + 'a>>,
-    colors_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+    positions: Option<Box<dyn Iterator<Item = Vec3> + 'a>>,
+    normals: Option<Box<dyn Iterator<Item = Vec3> + 'a>>,
+    tangents: Option<Box<dyn Iterator<Item = Vec4> + 'a>>,
+    tex_coords_0: Option<Box<dyn Iterator<Item = Vec2> + 'a>>,
+    tex_coords_1: Option<Box<dyn Iterator<Item = Vec2> + 'a>>,
+    colors_0: Option<Box<dyn Iterator<Item = Vec4> + 'a>>,
     joints_0: Option<Box<dyn Iterator<Item = [u32; 4]> + 'a>>,
-    weights_0: Option<Box<dyn Iterator<Item = [f32; 4]> + 'a>>,
+    weights_0: Option<Box<dyn Iterator<Item = Vec4> + 'a>>,
 }
 
 impl<'a> MorphTargetBuilder<'a> {
@@ -538,24 +540,22 @@ impl<'a> MorphTargetBuilder<'a> {
         }
     }
 
-    pub fn positions(mut self, positions: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+    pub fn positions(mut self, positions: impl IntoIterator<Item = Vec3> + 'a) -> Self {
         self.positions = Some(Box::new(positions.into_iter()));
         self
     }
 
-    pub fn normals(mut self, normals: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
+    pub fn normals(mut self, normals: impl IntoIterator<Item = Vec3> + 'a) -> Self {
         self.normals = Some(Box::new(normals.into_iter()));
         self
     }
 
-    pub fn tangents(mut self, tangents: impl IntoIterator<Item = [f32; 3]> + 'a) -> Self {
-        self.tangents = Some(Box::new(
-            tangents.into_iter().map(|[a, b, c]| [a, b, c, 0.0]),
-        ));
+    pub fn tangents(mut self, tangents: impl IntoIterator<Item = Vec3> + 'a) -> Self {
+        self.tangents = Some(Box::new(tangents.into_iter().map(|v| v.extend(0.0))));
         self
     }
 
-    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = [f32; 2]> + 'a) -> Self {
+    pub fn tex_coords(mut self, tex_coords: impl IntoIterator<Item = Vec2> + 'a) -> Self {
         if self.tex_coords_0.is_none() {
             self.tex_coords_0 = Some(Box::new(tex_coords.into_iter()));
         } else if self.tex_coords_1.is_none() {
@@ -566,7 +566,7 @@ impl<'a> MorphTargetBuilder<'a> {
         self
     }
 
-    pub fn colors(mut self, colors: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+    pub fn colors(mut self, colors: impl IntoIterator<Item = Vec4> + 'a) -> Self {
         if self.colors_0.is_none() {
             self.colors_0 = Some(Box::new(colors.into_iter()));
         } else {
@@ -584,7 +584,7 @@ impl<'a> MorphTargetBuilder<'a> {
         self
     }
 
-    pub fn weights(mut self, weights: impl IntoIterator<Item = [f32; 4]> + 'a) -> Self {
+    pub fn weights(mut self, weights: impl IntoIterator<Item = Vec4> + 'a) -> Self {
         if self.weights_0.is_none() {
             self.weights_0 = Some(Box::new(weights.into_iter()));
         } else {
@@ -664,9 +664,9 @@ enum IndicesSlices<'a> {
 fn compute_normals(attributes: &mut [Attribute]) {
     let mut iter = attributes.iter_mut();
     while let Some((a, b, c)) = next_triangle(&mut iter) {
-        let ab = Vec3::from_array(b.position) - Vec3::from_array(a.position);
-        let ac = Vec3::from_array(c.position) - Vec3::from_array(a.position);
-        let normal = ab.cross(ac).to_array();
+        let ab = b.position - a.position;
+        let ac = c.position - a.position;
+        let normal = ab.cross(ac);
         a.normal = normal;
         b.normal = normal;
         c.normal = normal;
@@ -704,23 +704,23 @@ impl<'a> MikkTSpaceInterface for MikkTSpace<'a> {
     }
 
     fn get_position(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.attribute(face, vert).position
+        self.attribute(face, vert).position.to_array()
     }
 
     fn get_normal(&self, face: usize, vert: usize) -> [f32; 3] {
-        self.attribute(face, vert).normal
+        self.attribute(face, vert).normal.to_array()
     }
 
     fn get_tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
         match self.normal_tex_coord {
-            0 => self.attribute(face, vert).tex_coord_0,
-            1 => self.attribute(face, vert).tex_coord_1,
+            0 => self.attribute(face, vert).tex_coord_0.to_array(),
+            1 => self.attribute(face, vert).tex_coord_1.to_array(),
             _ => unreachable!(),
         }
     }
 
     fn set_tspace_basic(&mut self, tangent: [f32; 3], sign: f32, face: usize, vert: usize) {
-        self.attribute_mut(face, vert).tangent = [tangent[0], tangent[1], tangent[2], -sign];
+        self.attribute_mut(face, vert).tangent = vec4(tangent[0], tangent[1], tangent[2], -sign);
     }
 }
 
@@ -735,14 +735,14 @@ struct AttributeStorageHeader {
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct Attribute {
-    position: [f32; 3],
+    position: Vec3,
     _pad0: u32,
-    normal: [f32; 3],
+    normal: Vec3,
     _pad1: u32,
-    tangent: [f32; 4],
-    tex_coord_0: [f32; 2],
-    tex_coord_1: [f32; 2],
-    color_0: [f32; 4],
+    tangent: Vec4,
+    tex_coord_0: Vec2,
+    tex_coord_1: Vec2,
+    color_0: Vec4,
     joints_0: [u32; 4],
-    weights_0: [f32; 4],
+    weights_0: Vec4,
 }

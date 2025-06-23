@@ -1,6 +1,6 @@
 use std::iter::repeat_n;
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use gltf::texture::WrappingMode;
 use wgpu::AddressMode;
 
@@ -75,17 +75,18 @@ pub fn open_gltf<'r>(
                     };
                     let mut geometry_builder = resources
                         .geometry_builder()
-                        .positions(positions)
+                        .positions(positions.map(Vec3::from_array))
                         .topology(topology);
                     if let Some(indices) = reader.read_indices() {
                         geometry_builder =
                             geometry_builder.indices_u32(indices.into_u32().collect());
                     }
                     if let Some(normals) = reader.read_normals() {
-                        geometry_builder = geometry_builder.normals(normals);
+                        geometry_builder = geometry_builder.normals(normals.map(Vec3::from_array));
                     }
                     if let Some(tangents) = reader.read_tangents() {
-                        geometry_builder = geometry_builder.tangents(tangents);
+                        geometry_builder =
+                            geometry_builder.tangents(tangents.map(Vec4::from_array));
                     }
                     if let Some(normal_texture) = primitive.material().normal_texture() {
                         geometry_builder =
@@ -94,8 +95,8 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_tex_coords(set) {
                             Some(tex_coords) => {
-                                geometry_builder =
-                                    geometry_builder.tex_coords(tex_coords.into_f32());
+                                geometry_builder = geometry_builder
+                                    .tex_coords(tex_coords.into_f32().map(Vec2::from_array));
                             }
                             None => break,
                         }
@@ -103,7 +104,7 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_colors(set) {
                             Some(colors) => {
-                                geometry_builder = geometry_builder.colors(colors.into_rgba_f32());
+                                geometry_builder = geometry_builder.colors(colors.into_rgba_f32().map(Vec4::from_array));
                             }
                             None => break,
                         }
@@ -128,7 +129,7 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_weights(set) {
                             Some(weights) => {
-                                geometry_builder = geometry_builder.weights(weights.into_f32());
+                                geometry_builder = geometry_builder.weights(weights.into_f32().map(Vec4::from_array));
                             }
                             None => break,
                         }
@@ -136,13 +137,13 @@ pub fn open_gltf<'r>(
                     for (positions, normals, tangents) in reader.read_morph_targets() {
                         let mut builder = MorphTargetBuilder::new();
                         if let Some(positions) = positions {
-                            builder = builder.positions(positions);
+                            builder = builder.positions(positions.map(Vec3::from_array));
                         }
                         if let Some(normals) = normals {
-                            builder = builder.normals(normals);
+                            builder = builder.normals(normals.map(Vec3::from_array));
                         }
                         if let Some(tangents) = tangents {
-                            builder = builder.tangents(tangents);
+                            builder = builder.tangents(tangents.map(Vec3::from_array));
                         }
                         geometry_builder = geometry_builder.morph_target(builder);
                     }

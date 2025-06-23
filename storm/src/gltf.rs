@@ -2,12 +2,13 @@ use std::{
     fmt::Display,
     fs::File,
     io::{BufReader, Read},
+    marker::PhantomData,
     num::NonZeroUsize,
     path::Path,
 };
 
-use bytemuck::bytes_of_mut;
-use glam::{Mat4, Quat, Vec3};
+use bytemuck::{Pod, bytes_of_mut, from_bytes};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4, vec2, vec3, vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
@@ -24,12 +25,25 @@ pub enum GltfError {
     Json(#[from] serde_json::Error),
     #[error("Invalid {entity} index: {index}")]
     InvalidIndex { entity: GltfEntity, index: usize },
+    #[error(
+        "{usage} cannot have accessor with {accessor_type} of {component_type} (normalized: {normalized})"
+    )]
+    InvalidAccessorDataType {
+        accessor_type: AccessorType,
+        component_type: AccessorComponentType,
+        normalized: bool,
+        usage: AccessorUsage,
+    },
     #[error("Unsupported asset: {0}")]
     Unsupported(String),
 }
 
 #[derive(Debug)]
 pub enum GltfEntity {
+    Accessor,
+    Buffer,
+    BufferView,
+    Mesh,
     Node,
     Scene,
     Skin,
@@ -38,10 +52,39 @@ pub enum GltfEntity {
 impl Display for GltfEntity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Accessor => write!(f, "accessor"),
+            Self::Buffer => write!(f, "buffer"),
+            Self::BufferView => write!(f, "buffer view"),
+            Self::Mesh => write!(f, "mesh"),
             Self::Node => write!(f, "node"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum AccessorUsage {
+    Position,
+    Normal,
+    Tangent,
+    TexCoord,
+    Color,
+    Joints,
+    Weights,
+}
+
+impl Display for AccessorUsage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Position => "Primitive position attribute",
+            Self::Normal => "Primitive normal attribute",
+            Self::Tangent => "Primitive tangent attribute",
+            Self::TexCoord => "Primitive texture coordinate attribute",
+            Self::Color => "Primitive color attribute",
+            Self::Joints => "Primitive joints attribute",
+            Self::Weights => "Primitive weights attribute",
+        })
     }
 }
 
@@ -61,7 +104,7 @@ pub enum GlbError {
 
 pub struct GltfAsset {
     json: Gltf,
-    binary_buffer: Option<Vec<u8>>,
+    buffers: Vec<Vec<u8>>,
 }
 
 const GLB_HEADER_SIZE: u32 = 3 * size_of::<u32>() as u32;
@@ -105,21 +148,16 @@ impl GltfAsset {
         }
         let json = serde_json::from_slice(&json.chunk_data)?;
 
-        let binary_buffer = if length >= MIN_CHUNK_SIZE {
+        let mut buffers = Vec::new();
+
+        if length >= MIN_CHUNK_SIZE {
             let binary_buffer = GlbChunk::from_reader(&mut reader)?;
             // length -= binary_buffer.chunk_length;
-            if binary_buffer.chunk_type != ASCII_BIN {
-                return Err(GlbError::InvalidFirstChunkType.into());
+            if binary_buffer.chunk_type == ASCII_BIN {
+                buffers.push(binary_buffer.chunk_data);
             }
-            Some(binary_buffer.chunk_data)
-        } else {
-            None
-        };
-
-        Ok(Self {
-            json,
-            binary_buffer,
-        })
+        }
+        Ok(Self { json, buffers })
     }
 
     pub fn load_scene(
@@ -232,16 +270,394 @@ impl GltfAsset {
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<Id<crate::mesh::Mesh>> {
-        todo!()
+        let mesh = self.json.meshes.get(index).ok_or(GltfError::InvalidIndex {
+            entity: GltfEntity::Mesh,
+            index,
+        })?;
+        if let Some(id) = mesh.id {
+            return Ok(id);
+        }
+        let name = mesh.name.clone();
+
+        let mut primitives = Vec::with_capacity(mesh.primitives.len());
+        for primitive in &mesh.primitives {
+            if let Some(position) = primitive.attributes.position {
+                let topology = match primitive.mode {
+                    PrimitiveMode::Points => wgpu::PrimitiveTopology::PointList,
+                    PrimitiveMode::LineStrip => wgpu::PrimitiveTopology::LineStrip,
+                    PrimitiveMode::Lines => wgpu::PrimitiveTopology::LineList,
+                    PrimitiveMode::Triangles => wgpu::PrimitiveTopology::TriangleList,
+                    PrimitiveMode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
+                    _ => {
+                        return Err(GltfError::Unsupported(format!(
+                            "primitive topology type {} is not supported",
+                            primitive.mode
+                        )));
+                    }
+                };
+
+                let accessor =
+                    self.json
+                        .accessors
+                        .get(position)
+                        .ok_or(GltfError::InvalidIndex {
+                            entity: GltfEntity::Accessor,
+                            index: position,
+                        })?;
+
+                let positions = match (accessor.type_, accessor.component_type, accessor.normalized)
+                {
+                    (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                        self.accessor_iter::<Vec3>(position)?
+                    }
+                    (accessor_type, component_type, normalized) => {
+                        return Err(GltfError::InvalidAccessorDataType {
+                            accessor_type,
+                            component_type,
+                            normalized,
+                            usage: AccessorUsage::Position,
+                        });
+                    }
+                };
+
+                let mut builder = resources
+                    .geometry_builder()
+                    .positions(positions.cloned())
+                    .topology(topology);
+
+                if let Some(normal) = primitive.attributes.normal {
+                    let accessor =
+                        self.json
+                            .accessors
+                            .get(normal)
+                            .ok_or(GltfError::InvalidIndex {
+                                entity: GltfEntity::Accessor,
+                                index: normal,
+                            })?;
+
+                    let normals =
+                        match (accessor.type_, accessor.component_type, accessor.normalized) {
+                            (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                self.accessor_iter::<Vec3>(position)?
+                            }
+                            (accessor_type, component_type, normalized) => {
+                                return Err(GltfError::InvalidAccessorDataType {
+                                    accessor_type,
+                                    component_type,
+                                    normalized,
+                                    usage: AccessorUsage::Normal,
+                                });
+                            }
+                        };
+
+                    builder = builder.normals(normals.cloned());
+                }
+
+                if let Some(tangent) = primitive.attributes.tangent {
+                    let accessor =
+                        self.json
+                            .accessors
+                            .get(tangent)
+                            .ok_or(GltfError::InvalidIndex {
+                                entity: GltfEntity::Accessor,
+                                index: tangent,
+                            })?;
+
+                    let tangents =
+                        match (accessor.type_, accessor.component_type, accessor.normalized) {
+                            (AccessorType::Vec4, AccessorComponentType::Float, false) => {
+                                self.accessor_iter::<Vec4>(position)?
+                            }
+                            (accessor_type, component_type, normalized) => {
+                                return Err(GltfError::InvalidAccessorDataType {
+                                    accessor_type,
+                                    component_type,
+                                    normalized,
+                                    usage: AccessorUsage::Tangent,
+                                });
+                            }
+                        };
+
+                    builder = builder.tangents(tangents.cloned());
+                }
+
+                for tex_coord in [
+                    primitive.attributes.tex_coord_0,
+                    primitive.attributes.tex_coord_1,
+                ] {
+                    if let Some(tex_coord) = tex_coord {
+                        let accessor =
+                            self.json
+                                .accessors
+                                .get(tex_coord)
+                                .ok_or(GltfError::InvalidIndex {
+                                    entity: GltfEntity::Accessor,
+                                    index: tex_coord,
+                                })?;
+
+                        builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
+                                    builder
+                                        .tex_coords(self.accessor_iter::<Vec2>(position)?.cloned())
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.tex_coords(
+                                        self.accessor_iter::<[u8; 2]>(position)?.map(u8x2_to_vec2),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec2,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.tex_coords(
+                                    self.accessor_iter::<[u16; 2]>(position)?.map(u16x2_to_vec2),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::TexCoord,
+                                    });
+                                }
+                            };
+                    }
+                }
+
+                if let Some(color) = primitive.attributes.color_0 {
+                    let accessor =
+                        self.json
+                            .accessors
+                            .get(color)
+                            .ok_or(GltfError::InvalidIndex {
+                                entity: GltfEntity::Accessor,
+                                index: color,
+                            })?;
+
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
+                            .colors(self.accessor_iter::<Vec3>(position)?.map(|v| v.extend(1.0))),
+                        (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => builder
+                            .colors(
+                                self.accessor_iter::<[u8; 3]>(position)?
+                                    .map(u8x3_to_vec3)
+                                    .map(|v| v.extend(1.0)),
+                            ),
+                        (AccessorType::Vec3, AccessorComponentType::UnsignedShort, true) => builder
+                            .colors(
+                                self.accessor_iter::<[u16; 3]>(position)?
+                                    .map(u16x3_to_vec3)
+                                    .map(|v| v.extend(1.0)),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => {
+                            builder.colors(self.accessor_iter::<Vec4>(position)?.cloned())
+                        }
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
+                            .colors(self.accessor_iter::<[u8; 4]>(position)?.map(u8x4_to_vec4)),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
+                            .colors(self.accessor_iter::<[u16; 4]>(position)?.map(u16x4_to_vec4)),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Color,
+                            });
+                        }
+                    };
+                }
+
+                if let Some(joints) = primitive.attributes.joints_0 {
+                    let accessor =
+                        self.json
+                            .accessors
+                            .get(joints)
+                            .ok_or(GltfError::InvalidIndex {
+                                entity: GltfEntity::Accessor,
+                                index: joints,
+                            })?;
+
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, false) => builder
+                            .joints(self.accessor_iter::<[u8; 4]>(position)?.map(u8x4_to_u32x4)),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, false) => {
+                            builder.joints(
+                                self.accessor_iter::<[u16; 4]>(position)?
+                                    .map(u16x4_to_u32x4),
+                            )
+                        }
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Joints,
+                            });
+                        }
+                    };
+                }
+
+                if let Some(weights) = primitive.attributes.weights_0 {
+                    let accessor =
+                        self.json
+                            .accessors
+                            .get(weights)
+                            .ok_or(GltfError::InvalidIndex {
+                                entity: GltfEntity::Accessor,
+                                index: weights,
+                            })?;
+
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => {
+                            builder.weights(self.accessor_iter::<Vec4>(position)?.cloned())
+                        }
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
+                            .weights(self.accessor_iter::<[u8; 4]>(position)?.map(u8x4_to_vec4)),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
+                            .weights(self.accessor_iter::<[u16; 4]>(position)?.map(u16x4_to_vec4)),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Weights,
+                            });
+                        }
+                    };
+                }
+
+                let geometry = builder.build(encoder).id();
+                let material = primitive.material;
+                primitives.push((geometry, material));
+            }
+        }
+
+        let mut prims = Vec::with_capacity(primitives.len());
+        for (geometry, material) in primitives {
+            prims.push((
+                geometry,
+                self.get_or_load_material(material, resources, encoder)?,
+            ));
+        }
+
+        let id = resources
+            .mesh_builder()
+            .name(name)
+            .primitives(prims)
+            .build()
+            .id();
+
+        self.json.meshes[index].id = Some(id);
+
+        Ok(id)
     }
 
     fn get_or_load_material(
         &mut self,
-        index: usize,
+        index: Option<usize>,
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<Id<crate::material::Material>> {
         todo!()
+    }
+
+    fn accessor_iter<E: Pod + 'static>(&self, index: usize) -> Result<DenseAccessorIter<'_, E>> {
+        let accessor = self
+            .json
+            .accessors
+            .get(index)
+            .ok_or(GltfError::InvalidIndex {
+                entity: GltfEntity::Accessor,
+                index,
+            })?;
+        let buffer_view = if let Some(buffer_view) = accessor.buffer_view {
+            buffer_view
+        } else {
+            todo!("sparse accessor support");
+        };
+        let buffer_view =
+            self.json
+                .buffer_views
+                .get(buffer_view)
+                .ok_or(GltfError::InvalidIndex {
+                    entity: GltfEntity::BufferView,
+                    index: buffer_view,
+                })?;
+
+        let bytes = match self.buffers.get(buffer_view.buffer) {
+            Some(bytes) => bytes,
+            None => todo!("load buffer into memory"),
+        };
+
+        let byte_stride = buffer_view
+            .byte_stride
+            .map_or(size_of::<E>(), NonZeroUsize::get);
+        let start = accessor.byte_offset + buffer_view.byte_offset;
+        let end = start + accessor.count * byte_stride;
+
+        Ok(DenseAccessorIter {
+            bytes,
+            start,
+            end,
+            byte_stride,
+            data_type: PhantomData,
+        })
+    }
+}
+
+fn u8x2_to_vec2(a: &[u8; 2]) -> Vec2 {
+    vec2(a[0] as f32, a[1] as f32) / 255.0
+}
+
+fn u8x3_to_vec3(a: &[u8; 3]) -> Vec3 {
+    vec3(a[0] as f32, a[1] as f32, a[2] as f32) / 255.0
+}
+
+fn u8x4_to_vec4(a: &[u8; 4]) -> Vec4 {
+    vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 255.0
+}
+
+fn u16x2_to_vec2(a: &[u16; 2]) -> Vec2 {
+    vec2(a[0] as f32, a[1] as f32) / 65535.0
+}
+
+fn u16x3_to_vec3(a: &[u16; 3]) -> Vec3 {
+    vec3(a[0] as f32, a[1] as f32, a[2] as f32) / 65535.0
+}
+
+fn u16x4_to_vec4(a: &[u16; 4]) -> Vec4 {
+    vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 65535.0
+}
+
+fn u8x4_to_u32x4(a: &[u8; 4]) -> [u32; 4] {
+    [a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32]
+}
+
+fn u16x4_to_u32x4(a: &[u16; 4]) -> [u32; 4] {
+    [a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32]
+}
+
+struct DenseAccessorIter<'a, E: Pod + 'static> {
+    bytes: &'a [u8],
+    start: usize,
+    end: usize,
+    byte_stride: usize,
+    data_type: PhantomData<E>,
+}
+
+impl<'a, E: Pod + 'static> Iterator for DenseAccessorIter<'a, E> {
+    type Item = &'a E;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_end = self.start + size_of::<E>();
+        if next_end < self.end {
+            let next = from_bytes(&self.bytes[self.start..next_end]);
+            self.start += self.byte_stride;
+            Some(next)
+        } else {
+            None
+        }
     }
 }
 
@@ -471,9 +887,9 @@ struct Accessor {
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
 /// type **MUST NOT** be used for any accessor that is not referenced by
 /// [mesh.primitive.indices](MeshPrimitive::indices).
-#[derive(Debug, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
-enum AccessorComponentType {
+pub enum AccessorComponentType {
     Byte = 5120,
     UnsignedByte = 5121,
     Short = 5122,
@@ -482,9 +898,22 @@ enum AccessorComponentType {
     Float = 5126,
 }
 
+impl Display for AccessorComponentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Byte => "byte",
+            Self::UnsignedByte => "unsigned_byte",
+            Self::Short => "short",
+            Self::UnsignedShort => "unsigned_short",
+            Self::UnsignedInt => "unsigned_int",
+            Self::Float => "float",
+        })
+    }
+}
+
 /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
-#[derive(Debug, Serialize, Deserialize)]
-enum AccessorType {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum AccessorType {
     #[serde(rename = "SCALAR")]
     Scalar,
 
@@ -505,6 +934,20 @@ enum AccessorType {
 
     #[serde(rename = "MAT4")]
     Mat4,
+}
+
+impl Display for AccessorType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Scalar => "scalar",
+            Self::Vec2 => "vec2",
+            Self::Vec3 => "vec3",
+            Self::Vec4 => "vec4",
+            Self::Mat2 => "mat2",
+            Self::Mat3 => "mat3",
+            Self::Mat4 => "mat4",
+        })
+    }
 }
 
 /// Sparse storage of accessor values that deviate from their initialization value.
@@ -916,10 +1359,6 @@ impl ImageMimeType {
 /// The material appearance of a primitive.
 #[derive(Debug, Serialize, Deserialize)]
 struct Material {
-    /// Storm storage id, if the resource has been loaded.
-    #[serde(skip)]
-    id: Option<Id<crate::material::Material>>,
-
     /// The user-defined name of this object. This is not necessarily unique, e.g.,
     /// an accessor and a buffer could have the same name, or two accessors could
     /// even have the same name.
@@ -1163,6 +1602,10 @@ impl AlphaMode {
 /// A set of primitives to be rendered. Its global transform is defined by a node that references it.
 #[derive(Debug, Serialize, Deserialize)]
 struct Mesh {
+    /// Storm storage id, if the resource has been loaded.
+    #[serde(skip)]
+    id: Option<Id<crate::mesh::Mesh>>,
+
     /// An array of primitives, each defining geometry to be rendered.
     primitives: Vec<MeshPrimitive>,
 
@@ -1303,7 +1746,7 @@ struct MorphTarget {
 }
 
 /// The topology type of primitives to render.
-#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Copy, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 enum PrimitiveMode {
     Points = 0,
@@ -1322,6 +1765,24 @@ impl PrimitiveMode {
             PrimitiveMode::Triangles => true,
             _ => false,
         }
+    }
+}
+
+impl Display for PrimitiveMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Points => "points",
+                Self::Lines => "lines",
+                Self::LineLoop => "line loop",
+                Self::LineStrip => "line strip",
+                Self::Triangles => "triangles",
+                Self::TriangleStrip => "triangle strip",
+                Self::TriangleFan => "triangle fan",
+            }
+        )
     }
 }
 

@@ -56,8 +56,8 @@ impl<'r> MeshBuilder<'r> {
         }
     }
 
-    pub fn name(mut self, name: String) -> Self {
-        self.name = Some(name);
+    pub fn name(mut self, name: impl Into<Option<String>>) -> Self {
+        self.name = name.into();
         self
     }
 

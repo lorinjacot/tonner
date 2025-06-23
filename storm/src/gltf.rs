@@ -1,4 +1,5 @@
 use std::{
+    fmt::Display,
     fs::File,
     io::{BufReader, Read},
     num::NonZeroUsize,
@@ -6,9 +7,12 @@ use std::{
 };
 
 use bytemuck::bytes_of_mut;
+use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
+
+use crate::{DenseEntry, Id, Resources};
 
 #[derive(Error, Debug)]
 pub enum GltfError {
@@ -18,9 +22,30 @@ pub enum GltfError {
     Glb(#[from] GlbError),
     #[error("Failed to parse json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Invalid {entity} index: {index}")]
+    InvalidIndex { entity: GltfEntity, index: usize },
     #[error("Unsupported asset: {0}")]
     Unsupported(String),
 }
+
+#[derive(Debug)]
+pub enum GltfEntity {
+    Node,
+    Scene,
+    Skin,
+}
+
+impl Display for GltfEntity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Node => write!(f, "node"),
+            Self::Scene => write!(f, "scene"),
+            Self::Skin => write!(f, "skin"),
+        }
+    }
+}
+
+type Result<T> = std::result::Result<T, GltfError>;
 
 #[derive(Error, Debug)]
 pub enum GlbError {
@@ -46,7 +71,7 @@ const ASCII_JSON: u32 = 0x4E4F534A;
 const ASCII_BIN: u32 = 0x004E4942;
 
 impl GltfAsset {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, GltfError> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
 
@@ -96,6 +121,128 @@ impl GltfAsset {
             binary_buffer,
         })
     }
+
+    pub fn load_scene(
+        &mut self,
+        scene_index: usize,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+        render_width: u32,
+        render_height: u32,
+    ) -> Result<crate::Scene> {
+        let scene = self
+            .json
+            .scenes
+            .get(scene_index)
+            .ok_or(GltfError::InvalidIndex {
+                entity: GltfEntity::Scene,
+                index: scene_index,
+            })?;
+
+        let name = scene.name.clone().unwrap_or_default();
+        let root_nodes = scene.nodes.clone();
+
+        let mut scene = crate::Scene::new(name, resources, encoder, render_width, render_height);
+
+        for node in root_nodes {
+            self.load_node(node, None, &mut scene, resources, encoder)?;
+        }
+
+        self.load_skins();
+
+        self.load_animations();
+
+        for node in &mut self.json.nodes {
+            node.id = None;
+        }
+
+        Ok(scene)
+    }
+
+    fn load_node(
+        &mut self,
+        index: usize,
+        parent: Option<Id<crate::Node>>,
+        scene: &mut crate::Scene,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Id<crate::Node>> {
+        let node = self.json.nodes.get(index).ok_or(GltfError::InvalidIndex {
+            entity: GltfEntity::Node,
+            index,
+        })?;
+
+        let mesh = match node.mesh {
+            Some(index) => Some(self.get_or_load_mesh(index, resources, encoder)?),
+            None => None,
+        };
+
+        let node = &mut self.json.nodes[index];
+        let id = scene
+            .node_builder()
+            .name(node.name.clone())
+            .parent(parent)
+            .local_matrix(node.matrix.map(|m| Mat4::from_cols_array(&m)))
+            .translation_rotation_scale(
+                node.translation.map(|a| Vec3::from_array(a)),
+                node.rotation.map(|a| Quat::from_array(a)),
+                node.scale.map(|a| Vec3::from_array(a)),
+            )
+            .mesh(mesh)
+            .weights(
+                node.weights
+                    .clone()
+                    .or(self.json.meshes[index].weights.clone()),
+            )
+            .build(resources)
+            .id();
+
+        node.id = Some(id);
+        if let Some(index) = node.skin {
+            self.json
+                .skins
+                .get_mut(index)
+                .ok_or(GltfError::InvalidIndex {
+                    entity: GltfEntity::Skin,
+                    index,
+                })?
+                .nodes
+                .push(id);
+        }
+
+        let children = node.children.clone();
+        for child in children {
+            self.load_node(child, Some(id), scene, resources, encoder)?;
+        }
+
+        Ok(id)
+    }
+
+    fn load_skins(&mut self) {
+        todo!()
+    }
+
+    fn load_animations(&mut self) {
+        todo!()
+    }
+
+    fn get_or_load_mesh(
+        &mut self,
+        index: usize,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Id<crate::mesh::Mesh>> {
+        todo!()
+    }
+
+    fn get_or_load_material(
+        &mut self,
+        index: usize,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Id<crate::material::Material>> {
+        todo!()
+    }
 }
 
 struct GlbChunk {
@@ -105,7 +252,7 @@ struct GlbChunk {
 }
 
 impl GlbChunk {
-    fn from_reader<R: Read>(reader: &mut R) -> Result<Self, GltfError> {
+    fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
         let mut chunk_length: u32 = 0;
         reader.read_exact(bytes_of_mut(&mut chunk_length))?;
 
@@ -177,6 +324,11 @@ struct Gltf {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     images: Vec<Image>,
+
+    /// An array of materials. A material defines the appearance of a primitive.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    materials: Vec<Material>,
 
     /// An array of meshes. A mesh is a set of primitives to be rendered.
     #[serde(default)]
@@ -764,6 +916,10 @@ impl ImageMimeType {
 /// The material appearance of a primitive.
 #[derive(Debug, Serialize, Deserialize)]
 struct Material {
+    /// Storm storage id, if the resource has been loaded.
+    #[serde(skip)]
+    id: Option<Id<crate::material::Material>>,
+
     /// The user-defined name of this object. This is not necessarily unique, e.g.,
     /// an accessor and a buffer could have the same name, or two accessors could
     /// even have the same name.
@@ -1182,6 +1338,10 @@ impl PrimitiveMode {
 /// **MUST NOT** be present.
 #[derive(Debug, Serialize, Deserialize)]
 struct Node {
+    /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
+    #[serde(skip)]
+    id: Option<Id<crate::Node>>,
+
     /// The index of the camera referenced by this node.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1355,6 +1515,10 @@ struct Scene {
 // Joints and matrices defining a skin.
 #[derive(Debug, Serialize, Deserialize)]
 struct Skin {
+    /// Nodes using this skin. Cleared once the scene has been loaded.
+    #[serde(skip)]
+    nodes: Vec<Id<crate::Node>>,
+
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
     /// the number of elements of the joints array. When undefined, each matrix is a 4x4

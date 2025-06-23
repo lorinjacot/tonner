@@ -138,7 +138,7 @@ pub struct NodeBuilder<'s> {
     mesh: Option<Id<Mesh>>,
     camera: Option<CameraDescriptor>,
     point_light: Option<Vec3>,
-    weights: Vec<f32>,
+    weights: Option<Vec<f32>>,
 }
 
 impl<'s> NodeBuilder<'s> {
@@ -152,28 +152,31 @@ impl<'s> NodeBuilder<'s> {
             mesh: None,
             camera: None,
             point_light: None,
-            weights: Vec::new(),
+            weights: None,
         }
     }
 
-    pub fn name(mut self, name: String) -> Self {
-        self.name = Some(name);
+    pub fn name(mut self, name: impl Into<Option<String>>) -> Self {
+        self.name = name.into();
         self
     }
 
-    pub fn parent(mut self, parent: Option<Id<Node>>) -> Self {
-        self.parent = parent;
+    pub fn parent(mut self, parent: impl Into<Option<Id<Node>>>) -> Self {
+        self.parent = parent.into();
         self
     }
 
     pub fn translation_rotation_scale(
         mut self,
-        translation: Vec3,
-        rotation: Quat,
-        scale: Vec3,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
     ) -> Self {
-        self.local_transform
-            .translation_rotation_scale(translation, rotation, scale);
+        self.local_transform.translation_rotation_scale(
+            translation.into().unwrap_or(Vec3::ZERO),
+            rotation.into().unwrap_or(Quat::IDENTITY),
+            scale.into().unwrap_or(Vec3::ONE),
+        );
         self
     }
 
@@ -182,13 +185,14 @@ impl<'s> NodeBuilder<'s> {
         self
     }
 
-    pub fn local_matrix(mut self, matrix: Mat4) -> Self {
-        self.local_transform.set_matrix(matrix);
+    pub fn local_matrix(mut self, matrix: impl Into<Option<Mat4>>) -> Self {
+        self.local_transform
+            .set_matrix(matrix.into().unwrap_or(Mat4::IDENTITY));
         self
     }
 
-    pub fn mesh(mut self, mesh: Id<Mesh>) -> Self {
-        self.mesh = Some(mesh);
+    pub fn mesh(mut self, mesh: impl Into<Option<Id<Mesh>>>) -> Self {
+        self.mesh = mesh.into();
         self
     }
 
@@ -202,8 +206,8 @@ impl<'s> NodeBuilder<'s> {
         self
     }
 
-    pub fn weights(mut self, weight: Vec<f32>) -> Self {
-        self.weights = weight;
+    pub fn weights(mut self, weight: impl Into<Option<Vec<f32>>>) -> Self {
+        self.weights = weight.into();
         self
     }
 
@@ -230,7 +234,7 @@ impl<'s> NodeBuilder<'s> {
             local_transform: self.local_transform,
             world_matrix: self.world_matrix,
             mesh: self.mesh.map(|mesh| mesh.id()),
-            weights: self.weights,
+            weights: self.weights.unwrap_or_default(),
             skin: None,
         };
         let node = self.scene.nodes.insert(node).id();

@@ -1,6 +1,6 @@
 use std::iter::repeat_n;
 
-use glam::{Mat4, Quat};
+use glam::{Mat4, Quat, Vec3};
 use gltf::texture::WrappingMode;
 use wgpu::AddressMode;
 
@@ -23,7 +23,10 @@ pub fn open_gltf<'r>(
     render_width: u32,
     render_height: u32,
 ) -> Result<(Vec<Scene>, Option<usize>), Box<dyn std::error::Error>> {
-    let _asset = GltfAsset::open(&path)?;
+    let mut asset = GltfAsset::open(&path)?;
+    let _scene = asset
+        .load_scene(0, resources, encoder, render_width, render_height)
+        .unwrap();
 
     let (document, buffers, images_data) = gltf::import(path)?;
 
@@ -481,7 +484,7 @@ impl Scene {
             builder = builder.mesh(mesh_mapping[mesh.index()]);
         }
         if let Some(weights) = node.weights().or(default_weights) {
-            builder = builder.weights(weights.into());
+            builder = builder.weights(weights.to_vec());
         }
         builder = match node.transform() {
             gltf::scene::Transform::Decomposed {
@@ -489,9 +492,9 @@ impl Scene {
                 rotation,
                 scale,
             } => builder.translation_rotation_scale(
-                translation.into(),
+                Vec3::from_array(translation),
                 Quat::from_array(rotation),
-                scale.into(),
+                Vec3::from_array(scale),
             ),
             gltf::scene::Transform::Matrix { matrix } => {
                 builder.local_matrix(Mat4::from_cols_array_2d(&matrix))

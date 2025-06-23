@@ -244,17 +244,17 @@ impl Engine {
 
             let target = scene
                 .node_builder()
-                .name("Orbit camera target".to_string().into())
+                .name("Orbit camera target".to_string())
                 .build(&resources)
                 .id();
             let cursor = scene
                 .node_builder()
-                .name("Orbit camera cursor".to_string().into())
+                .name("Orbit camera cursor".to_string())
                 .build(&resources)
                 .id();
             let camera = scene
                 .node_builder()
-                .name("Orbit camera node".to_string().into())
+                .name("Orbit camera node".to_string())
                 .local_position(1.5 * Vec3::Z)
                 .camera(
                     storm::camera::CameraDescriptor {

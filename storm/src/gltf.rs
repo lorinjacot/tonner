@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
 
-use crate::{DenseEntry, Id, Resources};
+use crate::{DenseEntry, Id, Resources, geometry::MorphTargetBuilder};
 
 #[derive(Error, Debug)]
 pub enum GltfError {
@@ -72,6 +72,11 @@ pub enum AccessorUsage {
     Color,
     Joints,
     Weights,
+    MorphTargetPosition,
+    MorphTargetNormal,
+    MorphTargetTangent,
+    MorphTargetTexCoord,
+    MorphTargetColor,
 }
 
 impl Display for AccessorUsage {
@@ -84,6 +89,11 @@ impl Display for AccessorUsage {
             Self::Color => "Primitive color attribute",
             Self::Joints => "Primitive joints attribute",
             Self::Weights => "Primitive weights attribute",
+            Self::MorphTargetPosition => "Primitive morph target position attribute",
+            Self::MorphTargetNormal => "Primitive morph target normal attribute",
+            Self::MorphTargetTangent => "Primitive morph target tangent attribute",
+            Self::MorphTargetTexCoord => "Primitive morph target texture coordinate attribute",
+            Self::MorphTargetColor => "Primitive morph target color attribute",
         })
     }
 }
@@ -527,6 +537,226 @@ impl GltfAsset {
                     };
                 }
 
+                for morph_target in &primitive.targets {
+                    let mut target_builder = MorphTargetBuilder::new();
+
+                    if let Some(position) = morph_target.position {
+                        let accessor =
+                            self.json
+                                .accessors
+                                .get(position)
+                                .ok_or(GltfError::InvalidIndex {
+                                    entity: GltfEntity::Accessor,
+                                    index: position,
+                                })?;
+
+                        target_builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    target_builder
+                                        .positions(self.accessor_iter::<Vec3>(position)?.cloned())
+                                }
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetPosition,
+                                    });
+                                }
+                            };
+                    }
+
+                    if let Some(normal) = morph_target.normal {
+                        let accessor =
+                            self.json
+                                .accessors
+                                .get(normal)
+                                .ok_or(GltfError::InvalidIndex {
+                                    entity: GltfEntity::Accessor,
+                                    index: normal,
+                                })?;
+
+                        target_builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    target_builder
+                                        .normals(self.accessor_iter::<Vec3>(normal)?.cloned())
+                                }
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetNormal,
+                                    });
+                                }
+                            };
+                    }
+
+                    if let Some(tangent) = morph_target.tangent {
+                        let accessor =
+                            self.json
+                                .accessors
+                                .get(tangent)
+                                .ok_or(GltfError::InvalidIndex {
+                                    entity: GltfEntity::Accessor,
+                                    index: tangent,
+                                })?;
+
+                        target_builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    target_builder
+                                        .tangents(self.accessor_iter::<Vec3>(tangent)?.cloned())
+                                }
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetTangent,
+                                    });
+                                }
+                            };
+                    }
+
+                    for tex_coord in [morph_target.tex_coord_0, morph_target.tex_coord_1] {
+                        if let Some(tex_coord) = tex_coord {
+                            let accessor = self.json.accessors.get(tex_coord).ok_or(
+                                GltfError::InvalidIndex {
+                                    entity: GltfEntity::Accessor,
+                                    index: tex_coord,
+                                },
+                            )?;
+
+                            target_builder = match (
+                                accessor.type_,
+                                accessor.component_type,
+                                accessor.normalized,
+                            ) {
+                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
+                                    target_builder
+                                        .tex_coords(self.accessor_iter::<Vec2>(tex_coord)?.cloned())
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::Byte, true) => {
+                                    target_builder.tex_coords(
+                                        self.accessor_iter::<[i8; 2]>(tex_coord)?.map(i8x2_to_vec2),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::Short, true) => {
+                                    target_builder.tex_coords(
+                                        self.accessor_iter::<[i16; 2]>(tex_coord)?
+                                            .map(i16x2_to_vec2),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
+                                    target_builder.tex_coords(
+                                        self.accessor_iter::<[u8; 2]>(tex_coord)?.map(u8x2_to_vec2),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec2,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => target_builder.tex_coords(
+                                    self.accessor_iter::<[u16; 2]>(tex_coord)?
+                                        .map(u16x2_to_vec2),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetTexCoord,
+                                    });
+                                }
+                            };
+                        }
+                    }
+
+                    if let Some(color) = morph_target.color_0 {
+                        let accessor =
+                            self.json
+                                .accessors
+                                .get(color)
+                                .ok_or(GltfError::InvalidIndex {
+                                    entity: GltfEntity::Accessor,
+                                    index: color,
+                                })?;
+
+                        builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    builder.colors(
+                                        self.accessor_iter::<Vec3>(color)?.map(|v| v.extend(1.0)),
+                                    )
+                                }
+                                (AccessorType::Vec3, AccessorComponentType::Byte, true) => builder
+                                    .colors(
+                                        self.accessor_iter::<[i8; 3]>(color)?
+                                            .map(i8x3_to_vec3)
+                                            .map(|v| v.extend(1.0)),
+                                    ),
+                                (AccessorType::Vec3, AccessorComponentType::Short, true) => builder
+                                    .colors(
+                                        self.accessor_iter::<[i16; 3]>(color)?
+                                            .map(i16x3_to_vec3)
+                                            .map(|v| v.extend(1.0)),
+                                    ),
+                                (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.colors(
+                                        self.accessor_iter::<[u8; 3]>(color)?
+                                            .map(u8x3_to_vec3)
+                                            .map(|v| v.extend(1.0)),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec3,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.colors(
+                                    self.accessor_iter::<[u16; 3]>(color)?
+                                        .map(u16x3_to_vec3)
+                                        .map(|v| v.extend(1.0)),
+                                ),
+                                (AccessorType::Vec4, AccessorComponentType::Float, false) => {
+                                    builder.colors(self.accessor_iter::<Vec4>(color)?.cloned())
+                                }
+                                (AccessorType::Vec4, AccessorComponentType::Byte, true) => builder
+                                    .colors(
+                                        self.accessor_iter::<[i8; 4]>(color)?.map(i8x4_to_vec4),
+                                    ),
+                                (AccessorType::Vec4, AccessorComponentType::Short, true) => builder
+                                    .colors(
+                                        self.accessor_iter::<[i16; 4]>(color)?.map(i16x4_to_vec4),
+                                    ),
+                                (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.colors(
+                                        self.accessor_iter::<[u8; 4]>(color)?.map(u8x4_to_vec4),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec4,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.colors(
+                                    self.accessor_iter::<[u16; 4]>(color)?.map(u16x4_to_vec4),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetColor,
+                                    });
+                                }
+                            };
+                    }
+
+                    builder = builder.morph_target(target_builder);
+                }
+
                 let geometry = builder.build(encoder).id();
                 let material = primitive.material;
                 primitives.push((geometry, material));
@@ -606,6 +836,19 @@ impl GltfAsset {
     }
 }
 
+fn i8x2_to_vec2(a: &[i8; 2]) -> Vec2 {
+    (vec2(a[0] as f32, a[1] as f32) / 127.0).max(vec2(-1.0, -1.0))
+}
+
+fn i8x3_to_vec3(a: &[i8; 3]) -> Vec3 {
+    (vec3(a[0] as f32, a[1] as f32, a[2] as f32) / 127.0).max(vec3(-1.0, -1.0, -1.0))
+}
+
+fn i8x4_to_vec4(a: &[i8; 4]) -> Vec4 {
+    (vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 127.0)
+        .max(vec4(-1.0, -1.0, -1.0, -1.0))
+}
+
 fn u8x2_to_vec2(a: &[u8; 2]) -> Vec2 {
     vec2(a[0] as f32, a[1] as f32) / 255.0
 }
@@ -616,6 +859,19 @@ fn u8x3_to_vec3(a: &[u8; 3]) -> Vec3 {
 
 fn u8x4_to_vec4(a: &[u8; 4]) -> Vec4 {
     vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 255.0
+}
+
+fn i16x2_to_vec2(a: &[i16; 2]) -> Vec2 {
+    (vec2(a[0] as f32, a[1] as f32) / 32767.0).max(vec2(-1.0, -1.0))
+}
+
+fn i16x3_to_vec3(a: &[i16; 3]) -> Vec3 {
+    (vec3(a[0] as f32, a[1] as f32, a[2] as f32) / 32767.0).max(vec3(-1.0, -1.0, -1.0))
+}
+
+fn i16x4_to_vec4(a: &[i16; 4]) -> Vec4 {
+    (vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 32767.0)
+        .max(vec4(-1.0, -1.0, -1.0, -1.0))
 }
 
 fn u16x2_to_vec2(a: &[u16; 2]) -> Vec2 {
@@ -1649,8 +1905,8 @@ struct MeshPrimitive {
 
     /// An array of morph targets.
     #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    targets: Option<Vec<MorphTarget>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    targets: Vec<MorphTarget>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

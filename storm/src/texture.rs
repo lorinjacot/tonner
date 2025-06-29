@@ -75,8 +75,8 @@ pub struct TextureBuilder<'a> {
 }
 
 impl<'a> TextureBuilder<'a> {
-    pub fn name(mut self, name: &'a str) -> Self {
-        self.name = Some(name);
+    pub fn name(mut self, name: impl Into<Option<&'a str>>) -> Self {
+        self.name = name.into();
         self
     }
 

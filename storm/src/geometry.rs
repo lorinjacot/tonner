@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use glam::{Vec2, Vec3, Vec4, vec2, vec3, vec4};
+use glam::{UVec4, Vec2, Vec3, Vec4, vec2, vec3, vec4};
 use mikktspace_sys::{MikkTSpaceInterface, gen_tang_space_default};
 use wgpu::util::DeviceExt;
 
@@ -150,7 +150,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         self
     }
 
-    pub fn joints(mut self, joints: impl IntoIterator<Item = [u32; 4]> + 'a) -> Self {
+    pub fn joints(mut self, joints: impl IntoIterator<Item = UVec4> + 'a) -> Self {
         self.attributes = self.attributes.joints(joints);
         self
     }
@@ -309,7 +309,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let mut joints_0 = self
             .attributes
             .joints_0
-            .unwrap_or_else(|| Box::new(repeat([0; 4])));
+            .unwrap_or_else(|| Box::new(repeat(UVec4::ZERO)));
         let mut weights_0 = self
             .attributes
             .weights_0
@@ -522,7 +522,7 @@ pub struct MorphTargetBuilder<'a> {
     tex_coords_0: Option<Box<dyn Iterator<Item = Vec2> + 'a>>,
     tex_coords_1: Option<Box<dyn Iterator<Item = Vec2> + 'a>>,
     colors_0: Option<Box<dyn Iterator<Item = Vec4> + 'a>>,
-    joints_0: Option<Box<dyn Iterator<Item = [u32; 4]> + 'a>>,
+    joints_0: Option<Box<dyn Iterator<Item = UVec4> + 'a>>,
     weights_0: Option<Box<dyn Iterator<Item = Vec4> + 'a>>,
 }
 
@@ -575,7 +575,7 @@ impl<'a> MorphTargetBuilder<'a> {
         self
     }
 
-    pub fn joints(mut self, joints: impl IntoIterator<Item = [u32; 4]> + 'a) -> Self {
+    pub fn joints(mut self, joints: impl IntoIterator<Item = UVec4> + 'a) -> Self {
         if self.joints_0.is_none() {
             self.joints_0 = Some(Box::new(joints.into_iter()));
         } else {
@@ -743,6 +743,6 @@ struct Attribute {
     tex_coord_0: Vec2,
     tex_coord_1: Vec2,
     color_0: Vec4,
-    joints_0: [u32; 4],
+    joints_0: UVec4,
     weights_0: Vec4,
 }

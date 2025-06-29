@@ -591,7 +591,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             }
             Source::EquirectangularMap(radiance_image) => {
                 let radiance_texture = TextureBuilder::default()
-                    .name(&format!("{name} radiance texture"))
+                    .name(format!("{name} radiance texture").as_ref())
                     .from_dynamic_image(radiance_image, false)
                     .build(self.resources, encoder);
                 let radiance_texture_view =
@@ -624,7 +624,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                         });
 
                 let environment_cubemap_texture = TextureBuilder::default()
-                    .name(&format!("{name} environment cubemap"))
+                    .name(Some(format!("{name} environment cubemap").as_ref()))
                     .empty(
                         wgpu::Extent3d {
                             width: ENVIRONMENT_MAP_SIZE,
@@ -723,7 +723,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                 });
 
         let irradiance_map = TextureBuilder::default()
-            .name(&format!("{name} irradiance map"))
+            .name(Some(format!("{name} irradiance map").as_ref()))
             .empty(
                 wgpu::Extent3d {
                     width: IRRADIANCE_MAP_SIZE,
@@ -782,7 +782,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             .clone();
 
         let prefilter_map = TextureBuilder::default()
-            .name(&format!("{name} prefilter map"))
+            .name(Some(format!("{name} prefilter map").as_ref()))
             .empty(
                 wgpu::Extent3d {
                     width: PREFILTER_MAP_SIZE,

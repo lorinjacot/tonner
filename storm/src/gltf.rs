@@ -1,14 +1,15 @@
 use std::{
     fmt::Display,
     fs::File,
-    io::{BufReader, Read},
+    io::{BufReader, Cursor, Read},
     marker::PhantomData,
     num::NonZeroUsize,
     path::Path,
 };
 
 use bytemuck::{Pod, bytes_of_mut, from_bytes};
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4, vec2, vec3, vec4};
+use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
+use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
@@ -34,6 +35,12 @@ pub enum GltfError {
         normalized: bool,
         usage: AccessorUsage,
     },
+    #[error("Failed to read external image: {0}")]
+    Image(#[from] image::ImageError),
+    #[error("Each image should have either an URI or reference a bufferView")]
+    MissingImageContent,
+    #[error("Each image referencing a bufferView should have its mimeType defined")]
+    MissingImageMimeType,
     #[error("Unsupported asset: {0}")]
     Unsupported(String),
 }
@@ -43,9 +50,11 @@ pub enum GltfEntity {
     Accessor,
     Buffer,
     BufferView,
+    Image,
     Material,
     Mesh,
     Node,
+    Sampler,
     Scene,
     Skin,
     Texture,
@@ -57,9 +66,11 @@ impl Display for GltfEntity {
             Self::Accessor => write!(f, "accessor"),
             Self::Buffer => write!(f, "buffer"),
             Self::BufferView => write!(f, "buffer view"),
+            Self::Image => write!(f, "image"),
             Self::Material => write!(f, "material"),
             Self::Mesh => write!(f, "mesh"),
             Self::Node => write!(f, "node"),
+            Self::Sampler => write!(f, "sampler"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),
             Self::Texture => write!(f, "texture"),
@@ -282,11 +293,13 @@ impl GltfAsset {
     }
 
     fn load_skins(&mut self) {
-        todo!()
+        // todo!()
+        println!("TODO: load_skins")
     }
 
     fn load_animations(&mut self) {
-        todo!()
+        // todo!()
+        println!("TODO: load_animations");
     }
 
     fn get_or_load_mesh(
@@ -332,9 +345,10 @@ impl GltfAsset {
 
                 let positions = match (accessor.type_, accessor.component_type, accessor.normalized)
                 {
-                    (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                        self.accessor_iter::<Vec3>(position)?
-                    }
+                    (AccessorType::Vec3, AccessorComponentType::Float, false) => self
+                        .accessor_iter::<f32, 3>(position)?
+                        .cloned()
+                        .map(Vec3::from_array),
                     (accessor_type, component_type, normalized) => {
                         return Err(GltfError::InvalidAccessorDataType {
                             accessor_type,
@@ -347,7 +361,7 @@ impl GltfAsset {
 
                 let mut builder = resources
                     .geometry_builder()
-                    .positions(positions.cloned())
+                    .positions(positions)
                     .topology(topology);
 
                 if let Some(normal) = primitive.attributes.normal {
@@ -360,22 +374,22 @@ impl GltfAsset {
                                 index: normal,
                             })?;
 
-                    let normals =
-                        match (accessor.type_, accessor.component_type, accessor.normalized) {
-                            (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                self.accessor_iter::<Vec3>(position)?
-                            }
-                            (accessor_type, component_type, normalized) => {
-                                return Err(GltfError::InvalidAccessorDataType {
-                                    accessor_type,
-                                    component_type,
-                                    normalized,
-                                    usage: AccessorUsage::Normal,
-                                });
-                            }
-                        };
-
-                    builder = builder.normals(normals.cloned());
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
+                            .normals(
+                                self.accessor_iter::<f32, 3>(normal)?
+                                    .cloned()
+                                    .map(Vec3::from_array),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Normal,
+                            });
+                        }
+                    };
                 }
 
                 if let Some(tangent) = primitive.attributes.tangent {
@@ -388,22 +402,22 @@ impl GltfAsset {
                                 index: tangent,
                             })?;
 
-                    let tangents =
-                        match (accessor.type_, accessor.component_type, accessor.normalized) {
-                            (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                                self.accessor_iter::<Vec4>(position)?
-                            }
-                            (accessor_type, component_type, normalized) => {
-                                return Err(GltfError::InvalidAccessorDataType {
-                                    accessor_type,
-                                    component_type,
-                                    normalized,
-                                    usage: AccessorUsage::Tangent,
-                                });
-                            }
-                        };
-
-                    builder = builder.tangents(tangents.cloned());
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
+                            .tangents(
+                                self.accessor_iter::<f32, 4>(tangent)?
+                                    .cloned()
+                                    .map(Vec4::from_array),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Tangent,
+                            });
+                        }
+                    };
                 }
 
                 for tex_coord in [
@@ -423,12 +437,15 @@ impl GltfAsset {
                         builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec2, AccessorComponentType::Float, false) => {
-                                    builder
-                                        .tex_coords(self.accessor_iter::<Vec2>(position)?.cloned())
+                                    builder.tex_coords(
+                                        self.accessor_iter::<f32, 2>(tex_coord)?
+                                            .cloned()
+                                            .map(Vec2::from_array),
+                                    )
                                 }
                                 (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
                                     builder.tex_coords(
-                                        self.accessor_iter::<[u8; 2]>(position)?.map(u8x2_to_vec2),
+                                        self.accessor_iter::<u8, 2>(tex_coord)?.map(u8x2_to_vec2),
                                     )
                                 }
                                 (
@@ -436,7 +453,7 @@ impl GltfAsset {
                                     AccessorComponentType::UnsignedShort,
                                     true,
                                 ) => builder.tex_coords(
-                                    self.accessor_iter::<[u16; 2]>(position)?.map(u16x2_to_vec2),
+                                    self.accessor_iter::<u16, 2>(tex_coord)?.map(u16x2_to_vec2),
                                 ),
                                 (accessor_type, component_type, normalized) => {
                                     return Err(GltfError::InvalidAccessorDataType {
@@ -462,26 +479,36 @@ impl GltfAsset {
 
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
-                            .colors(self.accessor_iter::<Vec3>(position)?.map(|v| v.extend(1.0))),
+                            .colors(
+                                self.accessor_iter::<f32, 3>(color)?
+                                    .cloned()
+                                    .map(Vec3::from_array)
+                                    .map(|v| v.extend(1.0)),
+                            ),
                         (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => builder
                             .colors(
-                                self.accessor_iter::<[u8; 3]>(position)?
+                                self.accessor_iter::<u8, 3>(color)?
                                     .map(u8x3_to_vec3)
                                     .map(|v| v.extend(1.0)),
                             ),
                         (AccessorType::Vec3, AccessorComponentType::UnsignedShort, true) => builder
                             .colors(
-                                self.accessor_iter::<[u16; 3]>(position)?
+                                self.accessor_iter::<u16, 3>(color)?
                                     .map(u16x3_to_vec3)
                                     .map(|v| v.extend(1.0)),
                             ),
-                        (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                            builder.colors(self.accessor_iter::<Vec4>(position)?.cloned())
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
+                            .colors(
+                                self.accessor_iter::<f32, 4>(color)?
+                                    .cloned()
+                                    .map(Vec4::from_array),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
+                            builder.colors(self.accessor_iter::<u8, 4>(color)?.map(u8x4_to_vec4))
                         }
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
-                            .colors(self.accessor_iter::<[u8; 4]>(position)?.map(u8x4_to_vec4)),
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
-                            .colors(self.accessor_iter::<[u16; 4]>(position)?.map(u16x4_to_vec4)),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => {
+                            builder.colors(self.accessor_iter::<u16, 4>(color)?.map(u16x4_to_vec4))
+                        }
                         (accessor_type, component_type, normalized) => {
                             return Err(GltfError::InvalidAccessorDataType {
                                 accessor_type,
@@ -504,13 +531,12 @@ impl GltfAsset {
                             })?;
 
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, false) => builder
-                            .joints(self.accessor_iter::<[u8; 4]>(position)?.map(u8x4_to_u32x4)),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, false) => {
+                            builder.joints(self.accessor_iter::<u8, 4>(joints)?.map(u8x4_to_uvec4))
+                        }
                         (AccessorType::Vec4, AccessorComponentType::UnsignedShort, false) => {
-                            builder.joints(
-                                self.accessor_iter::<[u16; 4]>(position)?
-                                    .map(u16x4_to_u32x4),
-                            )
+                            builder
+                                .joints(self.accessor_iter::<u16, 4>(joints)?.map(u16x4_to_uvec4))
                         }
                         (accessor_type, component_type, normalized) => {
                             return Err(GltfError::InvalidAccessorDataType {
@@ -534,13 +560,17 @@ impl GltfAsset {
                             })?;
 
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                            builder.weights(self.accessor_iter::<Vec4>(position)?.cloned())
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
+                            .weights(
+                                self.accessor_iter::<f32, 4>(weights)?
+                                    .cloned()
+                                    .map(Vec4::from_array),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
+                            builder.weights(self.accessor_iter::<u8, 4>(weights)?.map(u8x4_to_vec4))
                         }
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
-                            .weights(self.accessor_iter::<[u8; 4]>(position)?.map(u8x4_to_vec4)),
                         (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
-                            .weights(self.accessor_iter::<[u16; 4]>(position)?.map(u16x4_to_vec4)),
+                            .weights(self.accessor_iter::<u16, 4>(weights)?.map(u16x4_to_vec4)),
                         (accessor_type, component_type, normalized) => {
                             return Err(GltfError::InvalidAccessorDataType {
                                 accessor_type,
@@ -568,8 +598,11 @@ impl GltfAsset {
                         target_builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder
-                                        .positions(self.accessor_iter::<Vec3>(position)?.cloned())
+                                    target_builder.positions(
+                                        self.accessor_iter::<f32, 3>(position)?
+                                            .cloned()
+                                            .map(Vec3::from_array),
+                                    )
                                 }
                                 (accessor_type, component_type, normalized) => {
                                     return Err(GltfError::InvalidAccessorDataType {
@@ -595,8 +628,11 @@ impl GltfAsset {
                         target_builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder
-                                        .normals(self.accessor_iter::<Vec3>(normal)?.cloned())
+                                    target_builder.normals(
+                                        self.accessor_iter::<f32, 3>(normal)?
+                                            .cloned()
+                                            .map(Vec3::from_array),
+                                    )
                                 }
                                 (accessor_type, component_type, normalized) => {
                                     return Err(GltfError::InvalidAccessorDataType {
@@ -622,8 +658,11 @@ impl GltfAsset {
                         target_builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder
-                                        .tangents(self.accessor_iter::<Vec3>(tangent)?.cloned())
+                                    target_builder.tangents(
+                                        self.accessor_iter::<f32, 3>(tangent)?
+                                            .cloned()
+                                            .map(Vec3::from_array),
+                                    )
                                 }
                                 (accessor_type, component_type, normalized) => {
                                     return Err(GltfError::InvalidAccessorDataType {
@@ -651,23 +690,25 @@ impl GltfAsset {
                                 accessor.normalized,
                             ) {
                                 (AccessorType::Vec2, AccessorComponentType::Float, false) => {
-                                    target_builder
-                                        .tex_coords(self.accessor_iter::<Vec2>(tex_coord)?.cloned())
+                                    target_builder.tex_coords(
+                                        self.accessor_iter::<f32, 2>(tex_coord)?
+                                            .cloned()
+                                            .map(Vec2::from_array),
+                                    )
                                 }
                                 (AccessorType::Vec2, AccessorComponentType::Byte, true) => {
                                     target_builder.tex_coords(
-                                        self.accessor_iter::<[i8; 2]>(tex_coord)?.map(i8x2_to_vec2),
+                                        self.accessor_iter::<i8, 2>(tex_coord)?.map(i8x2_to_vec2),
                                     )
                                 }
                                 (AccessorType::Vec2, AccessorComponentType::Short, true) => {
                                     target_builder.tex_coords(
-                                        self.accessor_iter::<[i16; 2]>(tex_coord)?
-                                            .map(i16x2_to_vec2),
+                                        self.accessor_iter::<i16, 2>(tex_coord)?.map(i16x2_to_vec2),
                                     )
                                 }
                                 (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
                                     target_builder.tex_coords(
-                                        self.accessor_iter::<[u8; 2]>(tex_coord)?.map(u8x2_to_vec2),
+                                        self.accessor_iter::<u8, 2>(tex_coord)?.map(u8x2_to_vec2),
                                     )
                                 }
                                 (
@@ -675,8 +716,7 @@ impl GltfAsset {
                                     AccessorComponentType::UnsignedShort,
                                     true,
                                 ) => target_builder.tex_coords(
-                                    self.accessor_iter::<[u16; 2]>(tex_coord)?
-                                        .map(u16x2_to_vec2),
+                                    self.accessor_iter::<u16, 2>(tex_coord)?.map(u16x2_to_vec2),
                                 ),
                                 (accessor_type, component_type, normalized) => {
                                     return Err(GltfError::InvalidAccessorDataType {
@@ -704,24 +744,27 @@ impl GltfAsset {
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
                                     builder.colors(
-                                        self.accessor_iter::<Vec3>(color)?.map(|v| v.extend(1.0)),
+                                        self.accessor_iter::<f32, 3>(color)?
+                                            .cloned()
+                                            .map(Vec3::from_array)
+                                            .map(|v| v.extend(1.0)),
                                     )
                                 }
                                 (AccessorType::Vec3, AccessorComponentType::Byte, true) => builder
                                     .colors(
-                                        self.accessor_iter::<[i8; 3]>(color)?
+                                        self.accessor_iter::<i8, 3>(color)?
                                             .map(i8x3_to_vec3)
                                             .map(|v| v.extend(1.0)),
                                     ),
                                 (AccessorType::Vec3, AccessorComponentType::Short, true) => builder
                                     .colors(
-                                        self.accessor_iter::<[i16; 3]>(color)?
+                                        self.accessor_iter::<i16, 3>(color)?
                                             .map(i16x3_to_vec3)
                                             .map(|v| v.extend(1.0)),
                                     ),
                                 (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => {
                                     builder.colors(
-                                        self.accessor_iter::<[u8; 3]>(color)?
+                                        self.accessor_iter::<u8, 3>(color)?
                                             .map(u8x3_to_vec3)
                                             .map(|v| v.extend(1.0)),
                                     )
@@ -731,24 +774,26 @@ impl GltfAsset {
                                     AccessorComponentType::UnsignedShort,
                                     true,
                                 ) => builder.colors(
-                                    self.accessor_iter::<[u16; 3]>(color)?
+                                    self.accessor_iter::<u16, 3>(color)?
                                         .map(u16x3_to_vec3)
                                         .map(|v| v.extend(1.0)),
                                 ),
                                 (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                                    builder.colors(self.accessor_iter::<Vec4>(color)?.cloned())
+                                    builder.colors(
+                                        self.accessor_iter::<f32, 4>(color)?
+                                            .cloned()
+                                            .map(Vec4::from_array),
+                                    )
                                 }
                                 (AccessorType::Vec4, AccessorComponentType::Byte, true) => builder
-                                    .colors(
-                                        self.accessor_iter::<[i8; 4]>(color)?.map(i8x4_to_vec4),
-                                    ),
+                                    .colors(self.accessor_iter::<i8, 4>(color)?.map(i8x4_to_vec4)),
                                 (AccessorType::Vec4, AccessorComponentType::Short, true) => builder
                                     .colors(
-                                        self.accessor_iter::<[i16; 4]>(color)?.map(i16x4_to_vec4),
+                                        self.accessor_iter::<i16, 4>(color)?.map(i16x4_to_vec4),
                                     ),
                                 (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
                                     builder.colors(
-                                        self.accessor_iter::<[u8; 4]>(color)?.map(u8x4_to_vec4),
+                                        self.accessor_iter::<u8, 4>(color)?.map(u8x4_to_vec4),
                                     )
                                 }
                                 (
@@ -756,7 +801,7 @@ impl GltfAsset {
                                     AccessorComponentType::UnsignedShort,
                                     true,
                                 ) => builder.colors(
-                                    self.accessor_iter::<[u16; 4]>(color)?.map(u16x4_to_vec4),
+                                    self.accessor_iter::<u16, 4>(color)?.map(u16x4_to_vec4),
                                 ),
                                 (accessor_type, component_type, normalized) => {
                                     return Err(GltfError::InvalidAccessorDataType {
@@ -940,7 +985,44 @@ impl GltfAsset {
         index: usize,
         resources: &mut Resources,
     ) -> Result<wgpu::Sampler> {
-        todo!()
+        let sampler = self
+            .json
+            .samplers
+            .get(index)
+            .ok_or(GltfError::InvalidIndex {
+                entity: GltfEntity::Sampler,
+                index,
+            })?;
+        if let Some(sampler) = sampler.wgpu.clone() {
+            return Ok(sampler);
+        }
+
+        let mag_filter = match sampler.mag_filter {
+            MagFilter::Linear => wgpu::FilterMode::Linear,
+            MagFilter::Nearest | MagFilter::None => wgpu::FilterMode::Nearest,
+        };
+        let (min_filter, mipmap_filter) = match sampler.min_filter {
+            MinFilter::LinearMipmapNearest | MinFilter::Linear => {
+                (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
+            }
+            MinFilter::LinearMipmapLinear => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
+            MinFilter::NearestMipmapNearest | MinFilter::Nearest | MinFilter::None => {
+                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
+            }
+            MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
+        };
+
+        let sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: sampler.name.as_deref(),
+            address_mode_u: wrapping_mode_to_address_mode(sampler.wrap_s),
+            address_mode_v: wrapping_mode_to_address_mode(sampler.wrap_t),
+            mag_filter,
+            min_filter,
+            mipmap_filter,
+            ..Default::default()
+        });
+        self.json.samplers[index].wgpu = Some(sampler.clone());
+        Ok(sampler)
     }
 
     fn get_or_load_image(
@@ -950,10 +1032,62 @@ impl GltfAsset {
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<wgpu::Texture> {
-        todo!()
+        let image = self.json.images.get(index).ok_or(GltfError::InvalidIndex {
+            entity: GltfEntity::Image,
+            index,
+        })?;
+        if let Some(image) = image.wgpu.clone() {
+            return Ok(image);
+        }
+
+        let name = image.name.as_deref();
+        let image = if let Some(uri) = &image.uri {
+            if uri.starts_with("data:") {
+                todo!("`data:`-URI support")
+            } else {
+                ImageReader::open(uri)?.decode()?
+            }
+        } else {
+            let buffer_view = image.buffer_view.ok_or(GltfError::MissingImageContent)?;
+            let format = match image.mime_type {
+                ImageMimeType::ImageJpeg => ImageFormat::Jpeg,
+                ImageMimeType::ImagePng => ImageFormat::Png,
+                ImageMimeType::None => return Err(GltfError::MissingImageMimeType),
+            };
+            let buffer_view =
+                self.json
+                    .buffer_views
+                    .get(buffer_view)
+                    .ok_or(GltfError::InvalidIndex {
+                        entity: GltfEntity::BufferView,
+                        index: buffer_view,
+                    })?;
+            let bytes = match self.buffers.get(buffer_view.buffer) {
+                Some(bytes) => bytes,
+                None => todo!("load buffer into memory"),
+            };
+
+            let start = buffer_view.byte_offset;
+            let end = start + buffer_view.byte_length;
+
+            let reader = Cursor::new(&bytes[start..end]);
+
+            ImageReader::with_format(reader, format).decode()?
+        };
+
+        let texture = crate::texture::TextureBuilder::default()
+            .name(name)
+            .from_dynamic_image(&image, srgb)
+            // .generate_mips()
+            .build(resources, encoder);
+        self.json.images[index].wgpu = Some(texture.clone());
+        Ok(texture)
     }
 
-    fn accessor_iter<E: Pod + 'static>(&self, index: usize) -> Result<DenseAccessorIter<'_, E>> {
+    fn accessor_iter<T: Pod + 'static, const N: usize>(
+        &self,
+        index: usize,
+    ) -> Result<DenseAccessorIter<'_, T, N>> {
         let accessor = self
             .json
             .accessors
@@ -983,7 +1117,7 @@ impl GltfAsset {
 
         let byte_stride = buffer_view
             .byte_stride
-            .map_or(size_of::<E>(), NonZeroUsize::get);
+            .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
         let start = accessor.byte_offset + buffer_view.byte_offset;
         let end = start + accessor.count * byte_stride;
 
@@ -994,6 +1128,15 @@ impl GltfAsset {
             byte_stride,
             data_type: PhantomData,
         })
+    }
+}
+
+fn wrapping_mode_to_address_mode(wrapping_mode: WrappingMode) -> wgpu::AddressMode {
+    match wrapping_mode {
+        WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+        WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+        WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+        WrappingMode::None => wgpu::AddressMode::Repeat,
     }
 }
 
@@ -1047,27 +1190,27 @@ fn u16x4_to_vec4(a: &[u16; 4]) -> Vec4 {
     vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 65535.0
 }
 
-fn u8x4_to_u32x4(a: &[u8; 4]) -> [u32; 4] {
-    [a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32]
+fn u8x4_to_uvec4(a: &[u8; 4]) -> UVec4 {
+    uvec4(a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32)
 }
 
-fn u16x4_to_u32x4(a: &[u16; 4]) -> [u32; 4] {
-    [a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32]
+fn u16x4_to_uvec4(a: &[u16; 4]) -> UVec4 {
+    uvec4(a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32)
 }
 
-struct DenseAccessorIter<'a, E: Pod + 'static> {
+struct DenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
     bytes: &'a [u8],
     start: usize,
     end: usize,
     byte_stride: usize,
-    data_type: PhantomData<E>,
+    data_type: PhantomData<[T; N]>,
 }
 
-impl<'a, E: Pod + 'static> Iterator for DenseAccessorIter<'a, E> {
-    type Item = &'a E;
+impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T, N> {
+    type Item = &'a [T; N];
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next_end = self.start + size_of::<E>();
+        let next_end = self.start + size_of::<[T; N]>();
         if next_end < self.end {
             let next = from_bytes(&self.bytes[self.start..next_end]);
             self.start += self.byte_stride;
@@ -1721,6 +1864,10 @@ enum CameraType {
 /// Image data used to create a texture. Image **MAY** be referenced by an URI (or IRI) or a buffer view index.
 #[derive(Debug, Serialize, Deserialize)]
 struct Image {
+    /// wgpu texture, if the resource has been loaded.
+    #[serde(skip)]
+    wgpu: Option<wgpu::Texture>,
+
     /// The URI (or IRI) of the image. Relative paths are relative to the current glTF asset.
     /// Instead of referencing an external file, this field **MAY** contain a `data:`-URI.
     /// This field **MUST NOT** be defined when [bufferView](Image::buffer_view) is defined.
@@ -2302,6 +2449,10 @@ struct Node {
 /// Texture sampler properties for filtering and wrapping modes.
 #[derive(Debug, Serialize, Deserialize)]
 struct Sampler {
+    /// wgpu sampler, if the resource has been loaded.
+    #[serde(skip)]
+    wgpu: Option<wgpu::Sampler>,
+
     /// Magnification filter.
     #[serde(rename = "magFilter")]
     #[serde(default)]
@@ -2376,7 +2527,7 @@ impl MinFilter {
     }
 }
 
-#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Copy, Default, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum WrappingMode {
     #[default]

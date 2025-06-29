@@ -1,6 +1,6 @@
 use std::iter::repeat_n;
 
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4, uvec4};
 use gltf::texture::WrappingMode;
 use wgpu::AddressMode;
 
@@ -117,11 +117,11 @@ pub fn open_gltf<'r>(
                                 geometry_builder = match joints {
                                     gltf::mesh::util::ReadJoints::U8(iter) => geometry_builder
                                         .joints(iter.map(|[a, b, c, d]| {
-                                            [a as u32, b as u32, c as u32, d as u32]
+                                            uvec4(a as u32, b as u32, c as u32, d as u32)
                                         })),
                                     gltf::mesh::util::ReadJoints::U16(iter) => geometry_builder
                                         .joints(iter.map(|[a, b, c, d]| {
-                                            [a as u32, b as u32, c as u32, d as u32]
+                                            uvec4(a as u32, b as u32, c as u32, d as u32)
                                         })),
                                 }
                             }
@@ -606,11 +606,8 @@ fn create_image(
         ),
         gltf::image::Format::R32G32B32A32FLOAT => (&data.pixels, wgpu::TextureFormat::Rgba32Float),
     };
-    let name = image
-        .name()
-        .map_or_else(|| format!("Image {}", image.index()), str::to_string);
     TextureBuilder::default()
-        .name(&name)
+        .name(image.name())
         .bytes(
             wgpu::Extent3d {
                 width: data.width,

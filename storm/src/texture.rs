@@ -67,7 +67,6 @@ impl TextureBuilderData {
 
 #[must_use]
 pub struct TextureBuilder<'a> {
-    resources: &'a mut Resources,
     name: Option<&'a str>,
     source: Source<'a>,
     mip_level_count: u32,
@@ -76,24 +75,6 @@ pub struct TextureBuilder<'a> {
 }
 
 impl<'a> TextureBuilder<'a> {
-    pub fn new(resources: &'a mut Resources) -> Self {
-        Self {
-            resources,
-            name: None,
-            source: Source::Empty {
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-                format: wgpu::TextureFormat::R8Unorm,
-            },
-            mip_level_count: 1,
-            generate_mips: false,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-        }
-    }
-
     pub fn name(mut self, name: &'a str) -> Self {
         self.name = Some(name);
         self
@@ -143,6 +124,7 @@ impl<'a> TextureBuilder<'a> {
 
     pub fn build_callback(
         mut self,
+        resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
         callback: impl FnOnce(&wgpu::Texture, &mut Resources, &mut wgpu::CommandEncoder),
     ) -> wgpu::Texture {
@@ -166,19 +148,16 @@ impl<'a> TextureBuilder<'a> {
 
         let (texture, format) = match self.source {
             Source::Empty { format, .. } => {
-                let texture = self
-                    .resources
-                    .device
-                    .create_texture(&wgpu::TextureDescriptor {
-                        label: self.name,
-                        size,
-                        mip_level_count: self.mip_level_count,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format,
-                        usage: self.usage,
-                        view_formats: &[],
-                    });
+                let texture = resources.device.create_texture(&wgpu::TextureDescriptor {
+                    label: self.name,
+                    size,
+                    mip_level_count: self.mip_level_count,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: self.usage,
+                    view_formats: &[],
+                });
                 (texture, format)
             }
             Source::Bytes { format, bytes, .. } => {
@@ -193,8 +172,8 @@ impl<'a> TextureBuilder<'a> {
                     view_formats: &[],
                 };
                 let texture = if self.generate_mips {
-                    let source = self.resources.device.create_texture_with_data(
-                        &self.resources.queue,
+                    let source = resources.device.create_texture_with_data(
+                        &resources.queue,
                         &wgpu::TextureDescriptor {
                             mip_level_count: 1,
                             usage: wgpu::TextureUsages::COPY_SRC,
@@ -203,13 +182,10 @@ impl<'a> TextureBuilder<'a> {
                         wgpu::util::TextureDataOrder::LayerMajor,
                         bytes,
                     );
-                    let destination =
-                        self.resources
-                            .device
-                            .create_texture(&wgpu::TextureDescriptor {
-                                usage: desc.usage | wgpu::TextureUsages::COPY_DST,
-                                ..desc
-                            });
+                    let destination = resources.device.create_texture(&wgpu::TextureDescriptor {
+                        usage: desc.usage | wgpu::TextureUsages::COPY_DST,
+                        ..desc
+                    });
                     encoder.copy_texture_to_texture(
                         wgpu::TexelCopyTextureInfoBase {
                             texture: &source,
@@ -227,8 +203,8 @@ impl<'a> TextureBuilder<'a> {
                     );
                     destination
                 } else {
-                    self.resources.device.create_texture_with_data(
-                        &self.resources.queue,
+                    resources.device.create_texture_with_data(
+                        &resources.queue,
                         &desc,
                         wgpu::util::TextureDataOrder::LayerMajor,
                         bytes,
@@ -262,8 +238,8 @@ impl<'a> TextureBuilder<'a> {
                 if srgb {
                     format = format.add_srgb_suffix();
                 }
-                let texture = self.resources.device.create_texture_with_data(
-                    &self.resources.queue,
+                let texture = resources.device.create_texture_with_data(
+                    &resources.queue,
                     &wgpu::TextureDescriptor {
                         label: self.name,
                         size,
@@ -281,27 +257,23 @@ impl<'a> TextureBuilder<'a> {
             }
         };
 
-        callback(&texture, self.resources, encoder);
+        callback(&texture, resources, encoder);
 
         if self.generate_mips {
-            let pipeline = self
-                .resources
+            let pipeline = resources
                 .texture_builder_data
                 .generate_mips_pipelines
                 .entry(format)
                 .or_insert_with(|| {
-                    self.resources
+                    resources
                         .device
                         .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                             label: Some("Generate mips pipeline"),
                             layout: Some(
-                                &self
-                                    .resources
-                                    .texture_builder_data
-                                    .generate_mips_pipeline_layout,
+                                &resources.texture_builder_data.generate_mips_pipeline_layout,
                             ),
                             vertex: wgpu::VertexState {
-                                module: &self.resources.texture_builder_data.shader_module,
+                                module: &resources.texture_builder_data.shader_module,
                                 entry_point: Some("vs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 buffers: &[],
@@ -322,7 +294,7 @@ impl<'a> TextureBuilder<'a> {
                                 alpha_to_coverage_enabled: false,
                             },
                             fragment: Some(wgpu::FragmentState {
-                                module: &self.resources.texture_builder_data.shader_module,
+                                module: &resources.texture_builder_data.shader_module,
                                 entry_point: Some("fs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 targets: &[Some(format.into())],
@@ -345,12 +317,11 @@ impl<'a> TextureBuilder<'a> {
                     });
 
                     let bind_group =
-                        self.resources
+                        resources
                             .device
                             .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some("Generate mips bind group"),
-                                layout: &self
-                                    .resources
+                                layout: &resources
                                     .texture_builder_data
                                     .generate_mips_bind_group_layout,
                                 entries: &[
@@ -361,10 +332,7 @@ impl<'a> TextureBuilder<'a> {
                                     wgpu::BindGroupEntry {
                                         binding: 1,
                                         resource: wgpu::BindingResource::Sampler(
-                                            &self
-                                                .resources
-                                                .texture_builder_data
-                                                .generate_mips_sampler,
+                                            &resources.texture_builder_data.generate_mips_sampler,
                                         ),
                                     },
                                 ],
@@ -403,8 +371,31 @@ impl<'a> TextureBuilder<'a> {
         texture
     }
 
-    pub fn build(self, encoder: &mut wgpu::CommandEncoder) -> wgpu::Texture {
-        self.build_callback(encoder, |_, _, _| ())
+    pub fn build(
+        self,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> wgpu::Texture {
+        self.build_callback(resources, encoder, |_, _, _| ())
+    }
+}
+
+impl<'a> Default for TextureBuilder<'a> {
+    fn default() -> Self {
+        Self {
+            name: None,
+            source: Source::Empty {
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                format: wgpu::TextureFormat::R8Unorm,
+            },
+            mip_level_count: 1,
+            generate_mips: false,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        }
     }
 }
 

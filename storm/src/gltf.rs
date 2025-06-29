@@ -43,10 +43,12 @@ pub enum GltfEntity {
     Accessor,
     Buffer,
     BufferView,
+    Material,
     Mesh,
     Node,
     Scene,
     Skin,
+    Texture,
 }
 
 impl Display for GltfEntity {
@@ -55,10 +57,12 @@ impl Display for GltfEntity {
             Self::Accessor => write!(f, "accessor"),
             Self::Buffer => write!(f, "buffer"),
             Self::BufferView => write!(f, "buffer view"),
+            Self::Material => write!(f, "material"),
             Self::Mesh => write!(f, "mesh"),
             Self::Node => write!(f, "node"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),
+            Self::Texture => write!(f, "texture"),
         }
     }
 }
@@ -104,17 +108,18 @@ type Result<T> = std::result::Result<T, GltfError>;
 pub enum GlbError {
     #[error("Binary glTF container version should be 2")]
     UnknownVersion,
-    #[error("Glb asset should have at least one chunk")]
-    FirstChunkMissing,
+    #[error("A glb asset must have a JSON chunk as first chunk")]
+    JsonChunkMissing,
+    #[error("This glb asset must have a BIN chunk as second chunk")]
+    BinChunkMissing,
     #[error("Invalid chunk length")]
     InvalidChunkLength,
-    #[error("The first glb chunk should be the structured JSON content of the asset")]
-    InvalidFirstChunkType,
 }
 
 pub struct GltfAsset {
     json: Gltf,
     buffers: Vec<Vec<u8>>,
+    default_material: Option<Material>,
 }
 
 const GLB_HEADER_SIZE: u32 = 3 * size_of::<u32>() as u32;
@@ -149,25 +154,35 @@ impl GltfAsset {
         let mut reader = reader.take(length as u64);
 
         if length < MIN_CHUNK_SIZE {
-            return Err(GlbError::FirstChunkMissing.into());
+            return Err(GlbError::JsonChunkMissing.into());
         }
         let json = GlbChunk::from_reader(&mut reader)?;
-        length -= json.chunk_length;
+        length -= MIN_CHUNK_SIZE + json.chunk_length;
         if json.chunk_type != ASCII_JSON {
-            return Err(GlbError::InvalidFirstChunkType.into());
+            return Err(GlbError::JsonChunkMissing.into());
         }
-        let json = serde_json::from_slice(&json.chunk_data)?;
+        let json: Gltf = serde_json::from_slice(&json.chunk_data)?;
 
         let mut buffers = Vec::new();
-
-        if length >= MIN_CHUNK_SIZE {
-            let binary_buffer = GlbChunk::from_reader(&mut reader)?;
-            // length -= binary_buffer.chunk_length;
-            if binary_buffer.chunk_type == ASCII_BIN {
-                buffers.push(binary_buffer.chunk_data);
+        match json.buffers.first() {
+            Some(buffer) if buffer.uri.is_none() => {
+                if length < MIN_CHUNK_SIZE {
+                    return Err(GlbError::BinChunkMissing.into());
+                }
+                let bin = GlbChunk::from_reader(&mut reader)?;
+                if bin.chunk_type != ASCII_BIN {
+                    return Err(GlbError::BinChunkMissing.into());
+                }
+                buffers.push(bin.chunk_data);
             }
+            _ => (),
         }
-        Ok(Self { json, buffers })
+
+        Ok(Self {
+            json,
+            buffers,
+            default_material: None,
+        })
     }
 
     pub fn load_scene(
@@ -789,6 +804,152 @@ impl GltfAsset {
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<Id<crate::material::Material>> {
+        let material = match index {
+            Some(index) => self
+                .json
+                .materials
+                .get(index)
+                .ok_or(GltfError::InvalidIndex {
+                    entity: GltfEntity::Material,
+                    index,
+                })?,
+            None => self.default_material.get_or_insert_with(Material::default),
+        };
+
+        if let Some(id) = material.id {
+            return Ok(id);
+        }
+
+        let pbr = &material.pbr_metallic_roughness;
+
+        let mut builder = crate::material::MaterialBuilder::default()
+            .base_color_factor(pbr.base_color_factor)
+            .metallic_factor(pbr.metallic_factor)
+            .roughness_factor(pbr.roughness_factor)
+            .emissive_factor(material.emissive_factor)
+            .alpha_mode(match material.alpha_mode {
+                AlphaMode::Opaque => crate::material::AlphaMode::Opaque,
+                AlphaMode::Mask => crate::material::AlphaMode::Mask,
+                AlphaMode::Blend => crate::material::AlphaMode::Blend,
+            })
+            .alpha_cutoff(material.alpha_cutoff)
+            .double_sided(material.double_sided);
+
+        let base_color_texture = pbr.base_color_texture.clone();
+        let metallic_roughness_texture = pbr.metallic_roughness_texture.clone();
+        let normal_texture = material.normal_texture.clone();
+        let occlusion_texture = material.occlusion_texture.clone();
+        let emissive_texture = material.emissive_texture.clone();
+
+        if let Some(info) = base_color_texture {
+            let id = self.get_or_load_texture(info.index, true, resources, encoder)?;
+            builder = builder
+                .base_color_texture(id)
+                .base_color_tex_coord(info.tex_coord as u32);
+        }
+
+        if let Some(info) = metallic_roughness_texture {
+            let id = self.get_or_load_texture(info.index, false, resources, encoder)?;
+            builder = builder
+                .metallic_roughness_texture(id)
+                .metallic_roughness_tex_coord(info.tex_coord as u32);
+        }
+
+        if let Some(info) = normal_texture {
+            let id = self.get_or_load_texture(info.index, false, resources, encoder)?;
+            builder = builder
+                .normal_texture(id)
+                .normal_tex_coord(info.tex_coord as u32)
+                .normal_scale(info.scale);
+        }
+
+        if let Some(info) = occlusion_texture {
+            let id = self.get_or_load_texture(info.index, false, resources, encoder)?;
+            builder = builder
+                .occlusion_texture(id)
+                .occlusion_tex_coord(info.tex_coord as u32)
+                .occlusion_strength(info.strength);
+        }
+
+        if let Some(info) = emissive_texture {
+            let id = self.get_or_load_texture(info.index, true, resources, encoder)?;
+            builder = builder
+                .emissive_texture(id)
+                .emissive_tex_coord(info.tex_coord as u32);
+        }
+
+        let id = builder.build(resources).id();
+
+        match index {
+            Some(index) => &mut self.json.materials[index],
+            None => self.default_material.as_mut().unwrap(),
+        }
+        .id = Some(id);
+
+        Ok(id)
+    }
+
+    fn get_or_load_texture(
+        &mut self,
+        index: usize,
+        srgb: bool,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Id<crate::material::Texture>> {
+        let texture = self
+            .json
+            .textures
+            .get(index)
+            .ok_or(GltfError::InvalidIndex {
+                entity: GltfEntity::Texture,
+                index,
+            })?;
+        if let Some(id) = texture.id {
+            return Ok(id);
+        }
+
+        let name = texture.name.clone();
+        let sampler = texture.sampler;
+        let source = texture.source.clone();
+
+        let sampler = match sampler {
+            Some(index) => Some(self.get_or_load_sampler(index, resources)?),
+            None => None,
+        };
+
+        let source = self.get_or_load_image(
+            source
+                .ok_or_else(|| GltfError::Unsupported("Gltf texture with no source".to_string()))?,
+            srgb,
+            resources,
+            encoder,
+        )?;
+
+        let id = crate::material::TextureBuilder::default()
+            .name(name)
+            .sampler(sampler)
+            .texture(source)
+            .build(resources)
+            .id();
+        self.json.textures[index].id = Some(id);
+        Ok(id)
+    }
+
+    fn get_or_load_sampler(
+        &mut self,
+        index: usize,
+        resources: &mut Resources,
+    ) -> Result<wgpu::Sampler> {
+        todo!()
+    }
+
+    fn get_or_load_image(
+        &mut self,
+        index: usize,
+        srgb: bool,
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<wgpu::Texture> {
         todo!()
     }
 
@@ -1615,6 +1776,10 @@ impl ImageMimeType {
 /// The material appearance of a primitive.
 #[derive(Debug, Serialize, Deserialize)]
 struct Material {
+    /// Storm storage id, if the resource has been loaded.
+    #[serde(skip)]
+    id: Option<Id<crate::material::Material>>,
+
     /// The user-defined name of this object. This is not necessarily unique, e.g.,
     /// an accessor and a buffer could have the same name, or two accessors could
     /// even have the same name.
@@ -1690,6 +1855,23 @@ struct Material {
     double_sided: bool,
 }
 
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            id: None,
+            name: None,
+            pbr_metallic_roughness: PbrMetallicRoughness::default(),
+            normal_texture: None,
+            occlusion_texture: None,
+            emissive_texture: None,
+            emissive_factor: Default::default(),
+            alpha_mode: AlphaMode::default(),
+            alpha_cutoff: 0.5,
+            double_sided: false,
+        }
+    }
+}
+
 /// A set of parameter values that are used to define the metallic-roughness material model
 /// from Physically-Based Rendering (PBR) methodology.
 #[derive(Debug, Serialize, Deserialize)]
@@ -1760,7 +1942,7 @@ impl Default for PbrMetallicRoughness {
 }
 
 /// Reference to a texture.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TextureInfo {
     /// The index of the texture.
     index: usize,
@@ -1777,7 +1959,7 @@ struct TextureInfo {
 }
 
 /// Reference to a texture.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct NormalTextureInfo {
     /// The index of the texture.
     index: usize,
@@ -1801,7 +1983,7 @@ struct NormalTextureInfo {
 }
 
 /// Reference to a texture.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OcclusionTextureInfo {
     /// The index of the texture.
     index: usize,
@@ -2265,6 +2447,10 @@ struct Skin {
 /// A texture and its sampler.
 #[derive(Debug, Serialize, Deserialize)]
 struct Texture {
+    /// Storm storage id, if the resource has been loaded.
+    #[serde(skip)]
+    id: Option<Id<crate::material::Texture>>,
+
     /// The index of the sampler used by this texture. When undefined, a sampler
     /// with repeat wrapping and auto filtering **SHOULD** be used.
     #[serde(default)]

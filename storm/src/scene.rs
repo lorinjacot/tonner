@@ -18,6 +18,7 @@ use crate::{
     material::AlphaMode,
     mesh::{Mesh, PrimitivePipeline},
     storage::{DenseEntry, Id, SparseMap, SparseSet},
+    texture::TextureBuilder,
 };
 
 pub mod animation;
@@ -965,45 +966,41 @@ fn create_render_attachments(
         depth_or_array_layers: 1,
     };
 
-    let opaque_attachment = resources
-        .texture_builder()
+    let opaque_attachment = TextureBuilder::default()
         .name("Opaque render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Opaque render attachment"),
             ..Default::default()
         });
 
-    let accumulation_attachment = resources
-        .texture_builder()
+    let accumulation_attachment = TextureBuilder::default()
         .name("Accumulation render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Accumulation render attachment"),
             ..Default::default()
         });
 
-    let revealage_attachment = resources
-        .texture_builder()
+    let revealage_attachment = TextureBuilder::default()
         .name("Revealage render attachment")
         .empty(size, wgpu::TextureFormat::R8Unorm)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Revealage render attachment"),
             ..Default::default()
         });
 
-    let depth_attachment = resources
-        .texture_builder()
+    let depth_attachment = TextureBuilder::default()
         .name("Depth render attachment")
         .empty(size, wgpu::TextureFormat::Depth24Plus)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Depth render attachment"),
             ..Default::default()
@@ -1039,12 +1036,11 @@ fn create_render_attachments(
 
     let mut horizontal = true;
     let bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2] = repeat_with(|| {
-        let texture = resources
-            .texture_builder()
+        let texture = TextureBuilder::default()
             .name("Bloom texture")
             .empty(size, wgpu::TextureFormat::Rgba16Float)
             .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
-            .build(encoder)
+            .build(resources, encoder)
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("Bloom texture view"),
                 ..Default::default()

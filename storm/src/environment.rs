@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources};
+use crate::{DenseEntry, Id, Resources, texture::TextureBuilder};
 
 pub const CUBE_VERTICES: &[Vec3] = &[
     // front face
@@ -590,12 +590,10 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                 })
             }
             Source::EquirectangularMap(radiance_image) => {
-                let radiance_texture = self
-                    .resources
-                    .texture_builder()
+                let radiance_texture = TextureBuilder::default()
                     .name(&format!("{name} radiance texture"))
                     .from_dynamic_image(radiance_image, false)
-                    .build(encoder);
+                    .build(self.resources, encoder);
                 let radiance_texture_view =
                     radiance_texture.create_view(&wgpu::TextureViewDescriptor {
                         label: Some(&format!("{name} radiance view")),
@@ -625,9 +623,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                             ],
                         });
 
-                let environment_cubemap_texture = self
-                    .resources
-                    .texture_builder()
+                let environment_cubemap_texture = TextureBuilder::default()
                     .name(&format!("{name} environment cubemap"))
                     .empty(
                         wgpu::Extent3d {
@@ -643,6 +639,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                     )
                     .generate_mips()
                     .build_callback(
+                        self.resources,
                         encoder,
                         move |environment_cubemap_texture, resources, encoder| {
                             for face in 0..6 {
@@ -725,9 +722,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                     ],
                 });
 
-        let irradiance_map = self
-            .resources
-            .texture_builder()
+        let irradiance_map = TextureBuilder::default()
             .name(&format!("{name} irradiance map"))
             .empty(
                 wgpu::Extent3d {
@@ -738,7 +733,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
                 IRRADIANCE_MAP_FORMAT,
             )
             .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-            .build(encoder);
+            .build(self.resources, encoder);
 
         for face in 0..6 {
             let irrandiance_map_view = irradiance_map.create_view(&wgpu::TextureViewDescriptor {
@@ -786,9 +781,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             .environment_map_sampler
             .clone();
 
-        let prefilter_map = self
-            .resources
-            .texture_builder()
+        let prefilter_map = TextureBuilder::default()
             .name(&format!("{name} prefilter map"))
             .empty(
                 wgpu::Extent3d {
@@ -800,7 +793,7 @@ impl<'a, 'r> EnvironmentBuilder<'a, 'r> {
             )
             .mip_level_count(PREFILTER_MAP_MIP_COUNT)
             .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-            .build(encoder);
+            .build(self.resources, encoder);
 
         for mip in 0..PREFILTER_MAP_MIP_COUNT {
             let roughness = mip as f32 / (PREFILTER_MAP_MIP_COUNT - 1) as f32;

@@ -8,10 +8,11 @@ use crate::{
     Id, Resources,
     geometry::MorphTargetBuilder,
     gltf::GltfAsset,
-    material::{AlphaMode, Material},
+    material::{AlphaMode, Material, MaterialBuilder},
     mesh::Mesh,
     scene::{Node, Scene, animation},
     storage::DenseEntry,
+    texture::TextureBuilder,
 };
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[];
@@ -104,7 +105,8 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_colors(set) {
                             Some(colors) => {
-                                geometry_builder = geometry_builder.colors(colors.into_rgba_f32().map(Vec4::from_array));
+                                geometry_builder = geometry_builder
+                                    .colors(colors.into_rgba_f32().map(Vec4::from_array));
                             }
                             None => break,
                         }
@@ -129,7 +131,8 @@ pub fn open_gltf<'r>(
                     for set in 0.. {
                         match reader.read_weights(set) {
                             Some(weights) => {
-                                geometry_builder = geometry_builder.weights(weights.into_f32().map(Vec4::from_array));
+                                geometry_builder = geometry_builder
+                                    .weights(weights.into_f32().map(Vec4::from_array));
                             }
                             None => break,
                         }
@@ -314,10 +317,10 @@ fn create_material(
     material: gltf::Material,
     images_data: &[gltf::image::Data],
     resources: &mut Resources,
-    images: &mut [Option<wgpu::TextureView>],
+    images: &mut [Option<wgpu::Texture>],
     samplers: &mut [Option<wgpu::Sampler>],
     default_sampler: &mut Option<wgpu::Sampler>,
-    textures: &mut [Option<(wgpu::TextureView, wgpu::Sampler)>],
+    textures: &mut [Option<(wgpu::Texture, wgpu::Sampler)>],
     encoder: &mut wgpu::CommandEncoder,
 ) -> Id<Material> {
     let pbr_metallic_roughness = material.pbr_metallic_roughness();
@@ -396,8 +399,7 @@ fn create_material(
             )
         });
     }
-    let mut builder = resources
-        .material_builder()
+    let mut builder = MaterialBuilder::default()
         .base_color_factor(pbr_metallic_roughness.base_color_factor())
         .metallic_factor(pbr_metallic_roughness.metallic_factor())
         .roughness_factor(pbr_metallic_roughness.roughness_factor())
@@ -406,59 +408,77 @@ fn create_material(
             gltf::material::AlphaMode::Blend => AlphaMode::Blend,
             gltf::material::AlphaMode::Mask => AlphaMode::Mask,
             gltf::material::AlphaMode::Opaque => AlphaMode::Opaque,
-        });
+        })
+        .double_sided(material.double_sided());
     if let Some(base_color_texture) = pbr_metallic_roughness.base_color_texture() {
         let (texture, sampler) = textures[base_color_texture.texture().index()]
             .as_ref()
             .unwrap();
+        let texture = crate::material::TextureBuilder::default()
+            .texture(texture.clone())
+            .sampler(sampler.clone())
+            .build(resources)
+            .id();
         builder = builder
             .base_color_tex_coord(base_color_texture.tex_coord())
-            .base_color_texture(texture)
-            .base_color_sampler(sampler);
+            .base_color_texture(texture);
     }
     if let Some(metallic_roughness_texture) = pbr_metallic_roughness.metallic_roughness_texture() {
         let (texture, sampler) = textures[metallic_roughness_texture.texture().index()]
             .as_ref()
             .unwrap();
+        let texture = crate::material::TextureBuilder::default()
+            .texture(texture.clone())
+            .sampler(sampler.clone())
+            .build(resources)
+            .id();
         builder = builder
             .metallic_roughness_tex_coord(metallic_roughness_texture.tex_coord())
-            .metallic_roughness_texture(texture)
-            .metallic_roughness_sampler(sampler);
+            .metallic_roughness_texture(texture);
     }
     if let Some(normal_texture) = material.normal_texture() {
         let (texture, sampler) = textures[normal_texture.texture().index()].as_ref().unwrap();
+        let texture = crate::material::TextureBuilder::default()
+            .texture(texture.clone())
+            .sampler(sampler.clone())
+            .build(resources)
+            .id();
         builder = builder
             .normal_scale(normal_texture.scale())
             .normal_tex_coord(normal_texture.tex_coord())
-            .normal_texture(texture)
-            .normal_sampler(sampler);
+            .normal_texture(texture);
     }
     if let Some(occlusion_texture) = material.occlusion_texture() {
         let (texture, sampler) = textures[occlusion_texture.texture().index()]
             .as_ref()
             .unwrap();
+        let texture = crate::material::TextureBuilder::default()
+            .texture(texture.clone())
+            .sampler(sampler.clone())
+            .build(resources)
+            .id();
         builder = builder
             .occlusion_strength(occlusion_texture.strength())
             .occlusion_tex_coord(occlusion_texture.tex_coord())
-            .occlusion_texture(texture)
-            .occlusion_sampler(sampler);
+            .occlusion_texture(texture);
     }
     if let Some(emissive_texture) = material.emissive_texture() {
         let (texture, sampler) = textures[emissive_texture.texture().index()]
             .as_ref()
             .unwrap();
+        let texture = crate::material::TextureBuilder::default()
+            .texture(texture.clone())
+            .sampler(sampler.clone())
+            .build(resources)
+            .id();
         builder = builder
             .emissive_tex_coord(emissive_texture.tex_coord())
-            .emissive_texture(texture)
-            .emissive_sampler(sampler);
+            .emissive_texture(texture);
     }
     if let Some(alpha_cutoff) = material.alpha_cutoff() {
         builder = builder.alpha_cutoff(alpha_cutoff);
     }
-    if material.double_sided() {
-        builder = builder.double_sided();
-    }
-    builder.build().id()
+    builder.build(resources).id()
 }
 
 impl Scene {
@@ -527,11 +547,11 @@ fn create_texture(
     images_data: &[gltf::image::Data],
     srgb: bool,
     resources: &mut Resources,
-    images: &mut [Option<wgpu::TextureView>],
+    images: &mut [Option<wgpu::Texture>],
     samplers: &mut [Option<wgpu::Sampler>],
     default_sampler: &mut Option<wgpu::Sampler>,
     encoder: &mut wgpu::CommandEncoder,
-) -> (wgpu::TextureView, wgpu::Sampler) {
+) -> (wgpu::Texture, wgpu::Sampler) {
     let image = texture.source();
     let image = images[image.index()]
         .get_or_insert_with(|| create_image(image, srgb, images_data, resources, encoder))
@@ -552,7 +572,7 @@ fn create_image(
     images_data: &[gltf::image::Data],
     resources: &mut Resources,
     encoder: &mut wgpu::CommandEncoder,
-) -> wgpu::TextureView {
+) -> wgpu::Texture {
     let data = &images_data[image.index()];
     let (bytes, format) = match data.format {
         gltf::image::Format::R8 => (&data.pixels, wgpu::TextureFormat::R8Unorm),
@@ -589,8 +609,7 @@ fn create_image(
     let name = image
         .name()
         .map_or_else(|| format!("Image {}", image.index()), str::to_string);
-    resources
-        .texture_builder()
+    TextureBuilder::default()
         .name(&name)
         .bytes(
             wgpu::Extent3d {
@@ -602,11 +621,7 @@ fn create_image(
             &bytes,
         )
         .generate_mips()
-        .build(encoder)
-        .create_view(&wgpu::TextureViewDescriptor {
-            label: Some(&name),
-            ..Default::default()
-        })
+        .build(resources, encoder)
 }
 
 fn rgb_to_rgba(bytes: &Vec<u8>, bytes_per_channel: usize) -> Vec<u8> {

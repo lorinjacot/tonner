@@ -584,16 +584,8 @@ impl Resources {
         geometry::GeometryBuilder::new(self)
     }
 
-    pub fn material_builder(&mut self) -> material::MaterialBuilder {
-        material::MaterialBuilder::new(self)
-    }
-
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {
         mesh::MeshBuilder::new(self)
-    }
-
-    fn texture_builder(&mut self) -> texture::TextureBuilder {
-        texture::TextureBuilder::new(self)
     }
 
     pub fn environment_builder<'a, 's>(&'s mut self) -> environment::EnvironmentBuilder<'a, 's> {

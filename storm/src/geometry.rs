@@ -732,7 +732,7 @@ struct AttributeStorageHeader {
     _pad: [u32; 2],
 }
 
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct Attribute {
     position: Vec3,

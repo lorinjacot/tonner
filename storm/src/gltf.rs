@@ -1276,7 +1276,7 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_end = self.start + size_of::<[T; N]>();
-        if next_end < self.end {
+        if next_end <= self.end {
             let next = from_bytes(&self.bytes[self.start..next_end]);
             self.start += self.byte_stride;
             Some(next)

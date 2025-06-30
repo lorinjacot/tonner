@@ -25,7 +25,7 @@ pub fn open_gltf<'r>(
     render_height: u32,
 ) -> Result<(Vec<Scene>, Option<usize>), Box<dyn std::error::Error>> {
     let mut asset = GltfAsset::open(&path)?;
-    let _scene = asset
+    let scene = asset
         .load_scene(0, resources, encoder, render_width, render_height)
         .unwrap();
 
@@ -182,7 +182,7 @@ pub fn open_gltf<'r>(
         })
         .collect();
 
-    let scenes =
+    let mut scenes: Vec<Scene> =
         document
             .scenes()
             .map(|gltf_scene| {
@@ -309,7 +309,8 @@ pub fn open_gltf<'r>(
             })
             .collect();
 
-    let default_scene = document.default_scene().map(|scene| scene.index());
+    let default_scene = Some(scenes.len());
+    scenes.push(scene);
     Ok((scenes, default_scene))
 }
 

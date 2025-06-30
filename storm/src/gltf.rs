@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fmt::Display,
     fs::File,
     io::{BufReader, Cursor, Read},
@@ -7,7 +8,7 @@ use std::{
     path::Path,
 };
 
-use bytemuck::{Pod, bytes_of_mut, from_bytes};
+use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
 use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
 use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,8 @@ pub enum GltfError {
     MissingImageContent,
     #[error("Each image referencing a bufferView should have its mimeType defined")]
     MissingImageMimeType,
+    #[error("A dense accessor must have its bufferView defined")]
+    MissingAccessorBufferView,
     #[error("Unsupported asset: {0}")]
     Unsupported(String),
 }
@@ -80,6 +83,7 @@ impl Display for GltfEntity {
 
 #[derive(Debug)]
 pub enum AccessorUsage {
+    Indices,
     Position,
     Normal,
     Tangent,
@@ -97,6 +101,7 @@ pub enum AccessorUsage {
 impl Display for AccessorUsage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Indices => "Primitive indices",
             Self::Position => "Primitive position attribute",
             Self::Normal => "Primitive normal attribute",
             Self::Tangent => "Primitive tangent attribute",
@@ -817,6 +822,47 @@ impl GltfAsset {
                     builder = builder.morph_target(target_builder);
                 }
 
+                if let Some(indices) = primitive.indices {
+                    let accessor =
+                        self.json
+                            .accessors
+                            .get(indices)
+                            .ok_or(GltfError::InvalidIndex {
+                                entity: GltfEntity::Accessor,
+                                index: indices,
+                            })?;
+                    let bytes = match &accessor.sparse {
+                        Some(_sparse) => todo!("sparse accessor support"),
+                        None => self.get_buffer_view(
+                            accessor
+                                .buffer_view
+                                .ok_or(GltfError::MissingAccessorBufferView)?,
+                        )?,
+                    };
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
+                            let indices: &[u8] = cast_slice(bytes);
+                            builder.indices_u16(
+                                indices.into_iter().map(|index| *index as u16).collect(),
+                            )
+                        }
+                        (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
+                            builder.indices_u16(Cow::Borrowed(cast_slice(bytes)))
+                        }
+                        (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
+                            builder.indices_u32(Cow::Borrowed(cast_slice(bytes)))
+                        }
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Indices,
+                            });
+                        }
+                    }
+                }
+
                 let geometry = builder.build(encoder).id();
                 let material = primitive.material;
                 primitives.push((geometry, material));
@@ -841,6 +887,24 @@ impl GltfAsset {
         self.json.meshes[index].id = Some(id);
 
         Ok(id)
+    }
+
+    fn get_buffer_view(&self, index: usize) -> Result<&[u8]> {
+        let buffer_view = self
+            .json
+            .buffer_views
+            .get(index)
+            .ok_or(GltfError::InvalidIndex {
+                entity: GltfEntity::BufferView,
+                index,
+            })?;
+        let start = buffer_view.byte_offset;
+        let end = start + buffer_view.byte_length;
+
+        match self.buffers.get(buffer_view.buffer) {
+            Some(bytes) => Ok(&bytes[start..end]),
+            None => todo!("load buffer"),
+        }
     }
 
     fn get_or_load_material(
@@ -1096,11 +1160,12 @@ impl GltfAsset {
                 entity: GltfEntity::Accessor,
                 index,
             })?;
-        let buffer_view = if let Some(buffer_view) = accessor.buffer_view {
-            buffer_view
-        } else {
+        if accessor.sparse.is_some() {
             todo!("sparse accessor support");
-        };
+        }
+        let buffer_view = accessor
+            .buffer_view
+            .ok_or(GltfError::MissingAccessorBufferView)?;
         let buffer_view =
             self.json
                 .buffer_views

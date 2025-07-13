@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
 
-use crate::{DenseEntry, Id, Resources, geometry::MorphTargetBuilder};
+use crate::{DenseEntry, Id, Resources, geometry::MorphTargetBuilder, scene::animation};
 
 #[derive(Error, Debug)]
 pub enum GltfError {
@@ -51,6 +51,7 @@ pub enum GltfError {
 #[derive(Debug)]
 pub enum GltfEntity {
     Accessor,
+    AnimationSampler,
     Buffer,
     BufferView,
     Image,
@@ -67,6 +68,7 @@ impl Display for GltfEntity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Accessor => write!(f, "accessor"),
+            Self::AnimationSampler => write!(f, "animation sampler"),
             Self::Buffer => write!(f, "buffer"),
             Self::BufferView => write!(f, "buffer view"),
             Self::Image => write!(f, "image"),
@@ -96,25 +98,29 @@ pub enum AccessorUsage {
     MorphTargetTangent,
     MorphTargetTexCoord,
     MorphTargetColor,
+    AnimationOutpus { path: AnimationTargetPath },
 }
 
 impl Display for AccessorUsage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Indices => "Primitive indices",
-            Self::Position => "Primitive position attribute",
-            Self::Normal => "Primitive normal attribute",
-            Self::Tangent => "Primitive tangent attribute",
-            Self::TexCoord => "Primitive texture coordinate attribute",
-            Self::Color => "Primitive color attribute",
-            Self::Joints => "Primitive joints attribute",
-            Self::Weights => "Primitive weights attribute",
-            Self::MorphTargetPosition => "Primitive morph target position attribute",
-            Self::MorphTargetNormal => "Primitive morph target normal attribute",
-            Self::MorphTargetTangent => "Primitive morph target tangent attribute",
-            Self::MorphTargetTexCoord => "Primitive morph target texture coordinate attribute",
-            Self::MorphTargetColor => "Primitive morph target color attribute",
-        })
+        match self {
+            Self::Indices => write!(f, "Primitive indices"),
+            Self::Position => write!(f, "Primitive position attribute"),
+            Self::Normal => write!(f, "Primitive normal attribute"),
+            Self::Tangent => write!(f, "Primitive tangent attribute"),
+            Self::TexCoord => write!(f, "Primitive texture coordinate attribute"),
+            Self::Color => write!(f, "Primitive color attribute"),
+            Self::Joints => write!(f, "Primitive joints attribute"),
+            Self::Weights => write!(f, "Primitive weights attribute"),
+            Self::MorphTargetPosition => write!(f, "Primitive morph target position attribute"),
+            Self::MorphTargetNormal => write!(f, "Primitive morph target normal attribute"),
+            Self::MorphTargetTangent => write!(f, "Primitive morph target tangent attribute"),
+            Self::MorphTargetTexCoord => {
+                write!(f, "Primitive morph target texture coordinate attribute")
+            }
+            Self::MorphTargetColor => write!(f, "Primitive morph target color attribute"),
+            Self::AnimationOutpus { path } => write!(f, "Animation outputs value for {path}"),
+        }
     }
 }
 
@@ -227,9 +233,240 @@ impl GltfAsset {
             self.load_node(node, None, &mut scene, resources, encoder)?;
         }
 
-        self.load_skins();
+        let nodes_inverse_bind_matrices: Vec<_> = self
+            .json
+            .skins
+            .iter_mut()
+            .filter_map(|skin| {
+                if skin.nodes.is_empty() {
+                    None
+                } else {
+                    Some((std::mem::take(&mut skin.nodes), skin.inverse_bind_matrices))
+                }
+            })
+            .collect();
+        for (nodes, inverse_bind_matrices) in nodes_inverse_bind_matrices {
+            let mut builder = scene.skin_builder().nodes(nodes.iter().cloned());
+            if let Some(inverse_bind_matrices) = inverse_bind_matrices {
+                builder = builder.inverse_bind_matrices(
+                    self.accessor_iter::<f32, { 4 * 4 }>(inverse_bind_matrices)?
+                        .map(Mat4::from_cols_array),
+                )
+            }
 
-        self.load_animations();
+            let skin = builder.build().id();
+            for node in nodes {
+                scene.add_skin_to_node(skin, node);
+            }
+        }
+
+        'anim: for animation in &self.json.animations {
+            let mut node_morph_targets_count_channel = Vec::new();
+            'channel: for channel in &animation.channels {
+                let node = match channel.target.node {
+                    Some(node) => node,
+                    None => continue 'channel,
+                };
+                match self
+                    .json
+                    .nodes
+                    .get(node)
+                    .ok_or(GltfError::InvalidIndex {
+                        entity: GltfEntity::Node,
+                        index: node,
+                    })?
+                    .id
+                {
+                    Some(id) => {
+                        let morph_targets_count = scene[id].weights().len();
+                        node_morph_targets_count_channel.push((id, morph_targets_count, channel));
+                    }
+                    None => {
+                        continue 'anim;
+                    }
+                }
+            }
+            let mut channels = Vec::with_capacity(node_morph_targets_count_channel.len());
+            for (node, morph_targets_count, channel) in node_morph_targets_count_channel {
+                let sampler =
+                    animation
+                        .samplers
+                        .get(channel.sampler)
+                        .ok_or(GltfError::InvalidIndex {
+                            entity: GltfEntity::AnimationSampler,
+                            index: channel.sampler,
+                        })?;
+                let inputs = self
+                    .accessor_iter::<f32, 1>(sampler.input)?
+                    .map(|t| t[0])
+                    .collect();
+                let interpolation = match sampler.interpolation {
+                    AnimationInterpolation::Step => animation::Interpolation::Step,
+                    AnimationInterpolation::Linear => animation::Interpolation::Linear,
+                    AnimationInterpolation::Cubicspline => animation::Interpolation::CubicSpline,
+                };
+                let accessor =
+                    self.json
+                        .accessors
+                        .get(sampler.output)
+                        .ok_or(GltfError::InvalidIndex {
+                            entity: GltfEntity::Accessor,
+                            index: sampler.output,
+                        })?;
+                let outputs = match (
+                    channel.target.path,
+                    accessor.type_,
+                    accessor.component_type,
+                    accessor.normalized,
+                ) {
+                    (
+                        AnimationTargetPath::Translation,
+                        AccessorType::Vec3,
+                        AccessorComponentType::Float,
+                        false,
+                    ) => animation::Outputs::Translations(
+                        self.accessor_iter::<f32, 3>(sampler.output)?
+                            .cloned()
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Rotation,
+                        AccessorType::Vec4,
+                        AccessorComponentType::Float,
+                        false,
+                    ) => animation::Outputs::Rotations(
+                        self.accessor_iter::<f32, 4>(sampler.output)?
+                            .cloned()
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Rotation,
+                        AccessorType::Vec4,
+                        AccessorComponentType::Byte,
+                        true,
+                    ) => animation::Outputs::Rotations(
+                        self.accessor_iter::<i8, 4>(sampler.output)?
+                            .map(i8x4_to_f32x4)
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Rotation,
+                        AccessorType::Vec4,
+                        AccessorComponentType::UnsignedByte,
+                        true,
+                    ) => animation::Outputs::Rotations(
+                        self.accessor_iter::<u8, 4>(sampler.output)?
+                            .map(u8x4_to_f32x4)
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Rotation,
+                        AccessorType::Vec4,
+                        AccessorComponentType::Short,
+                        true,
+                    ) => animation::Outputs::Rotations(
+                        self.accessor_iter::<i16, 4>(sampler.output)?
+                            .map(i16x4_to_f32x4)
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Rotation,
+                        AccessorType::Vec4,
+                        AccessorComponentType::UnsignedShort,
+                        true,
+                    ) => animation::Outputs::Rotations(
+                        self.accessor_iter::<u16, 4>(sampler.output)?
+                            .map(u16x4_to_f32x4)
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Scale,
+                        AccessorType::Vec3,
+                        AccessorComponentType::Float,
+                        false,
+                    ) => animation::Outputs::Scales(
+                        self.accessor_iter::<f32, 3>(sampler.output)?
+                            .cloned()
+                            .collect(),
+                    ),
+                    (
+                        AnimationTargetPath::Weights,
+                        AccessorType::Scalar,
+                        AccessorComponentType::Float,
+                        false,
+                    ) => animation::Outputs::Weights(
+                        self.accessor_iter::<f32, 1>(sampler.output)?
+                            .map(|w| w[0])
+                            .collect(),
+                        morph_targets_count,
+                    ),
+                    (
+                        AnimationTargetPath::Weights,
+                        AccessorType::Scalar,
+                        AccessorComponentType::Byte,
+                        true,
+                    ) => animation::Outputs::Weights(
+                        self.accessor_iter::<i8, 1>(sampler.output)?
+                            .map(i8x1_to_f32)
+                            .collect(),
+                        morph_targets_count,
+                    ),
+                    (
+                        AnimationTargetPath::Weights,
+                        AccessorType::Scalar,
+                        AccessorComponentType::UnsignedByte,
+                        true,
+                    ) => animation::Outputs::Weights(
+                        self.accessor_iter::<u8, 1>(sampler.output)?
+                            .map(u8x1_to_f32)
+                            .collect(),
+                        morph_targets_count,
+                    ),
+                    (
+                        AnimationTargetPath::Weights,
+                        AccessorType::Scalar,
+                        AccessorComponentType::Short,
+                        true,
+                    ) => animation::Outputs::Weights(
+                        self.accessor_iter::<i16, 1>(sampler.output)?
+                            .map(i16x1_to_f32)
+                            .collect(),
+                        morph_targets_count,
+                    ),
+                    (
+                        AnimationTargetPath::Weights,
+                        AccessorType::Scalar,
+                        AccessorComponentType::UnsignedShort,
+                        true,
+                    ) => animation::Outputs::Weights(
+                        self.accessor_iter::<u16, 1>(sampler.output)?
+                            .map(u16x1_to_f32)
+                            .collect(),
+                        morph_targets_count,
+                    ),
+                    (path, accessor_type, component_type, normalized) => {
+                        return Err(GltfError::InvalidAccessorDataType {
+                            accessor_type,
+                            component_type,
+                            normalized,
+                            usage: AccessorUsage::AnimationOutpus { path },
+                        });
+                    }
+                };
+                channels.push(animation::Channel {
+                    node,
+                    inputs,
+                    interpolation,
+                    outputs,
+                });
+            }
+            scene
+                .animation_builder()
+                .name(animation.name.clone())
+                .repeat()
+                .channels(channels)
+                .build();
+        }
 
         for node in &mut self.json.nodes {
             node.id = None;
@@ -269,9 +506,10 @@ impl GltfAsset {
             )
             .mesh(mesh)
             .weights(
-                node.weights
-                    .clone()
-                    .or(self.json.meshes[index].weights.clone()),
+                node.weights.clone().or(node
+                    .mesh
+                    .map(|index| self.json.meshes[index].weights.clone())
+                    .flatten()),
             )
             .build(resources)
             .id();
@@ -295,16 +533,6 @@ impl GltfAsset {
         }
 
         Ok(id)
-    }
-
-    fn load_skins(&mut self) {
-        // todo!()
-        println!("TODO: load_skins")
-    }
-
-    fn load_animations(&mut self) {
-        // todo!()
-        println!("TODO: load_animations");
     }
 
     fn get_or_load_mesh(
@@ -1205,6 +1433,10 @@ fn wrapping_mode_to_address_mode(wrapping_mode: WrappingMode) -> wgpu::AddressMo
     }
 }
 
+fn i8x1_to_f32(a: &[i8; 1]) -> f32 {
+    (a[0] as f32 / 127.0).max(-1.0)
+}
+
 fn i8x2_to_vec2(a: &[i8; 2]) -> Vec2 {
     (vec2(a[0] as f32, a[1] as f32) / 127.0).max(vec2(-1.0, -1.0))
 }
@@ -1218,6 +1450,14 @@ fn i8x4_to_vec4(a: &[i8; 4]) -> Vec4 {
         .max(vec4(-1.0, -1.0, -1.0, -1.0))
 }
 
+fn i8x4_to_f32x4(a: &[i8; 4]) -> [f32; 4] {
+    i8x4_to_vec4(a).to_array()
+}
+
+fn u8x1_to_f32(a: &[u8; 1]) -> f32 {
+    a[0] as f32 / 255.0
+}
+
 fn u8x2_to_vec2(a: &[u8; 2]) -> Vec2 {
     vec2(a[0] as f32, a[1] as f32) / 255.0
 }
@@ -1228,6 +1468,14 @@ fn u8x3_to_vec3(a: &[u8; 3]) -> Vec3 {
 
 fn u8x4_to_vec4(a: &[u8; 4]) -> Vec4 {
     vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 255.0
+}
+
+fn u8x4_to_f32x4(a: &[u8; 4]) -> [f32; 4] {
+    u8x4_to_vec4(a).to_array()
+}
+
+fn i16x1_to_f32(a: &[i16; 1]) -> f32 {
+    (a[0] as f32 / 32767.0).max(-1.0)
 }
 
 fn i16x2_to_vec2(a: &[i16; 2]) -> Vec2 {
@@ -1243,6 +1491,14 @@ fn i16x4_to_vec4(a: &[i16; 4]) -> Vec4 {
         .max(vec4(-1.0, -1.0, -1.0, -1.0))
 }
 
+fn i16x4_to_f32x4(a: &[i16; 4]) -> [f32; 4] {
+    i16x4_to_vec4(a).to_array()
+}
+
+fn u16x1_to_f32(a: &[u16; 1]) -> f32 {
+    a[0] as f32 / 65535.0
+}
+
 fn u16x2_to_vec2(a: &[u16; 2]) -> Vec2 {
     vec2(a[0] as f32, a[1] as f32) / 65535.0
 }
@@ -1253,6 +1509,10 @@ fn u16x3_to_vec3(a: &[u16; 3]) -> Vec3 {
 
 fn u16x4_to_vec4(a: &[u16; 4]) -> Vec4 {
     vec4(a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32) / 65535.0
+}
+
+fn u16x4_to_f32x4(a: &[u16; 4]) -> [f32; 4] {
+    u16x4_to_vec4(a).to_array()
 }
 
 fn u8x4_to_uvec4(a: &[u8; 4]) -> UVec4 {
@@ -1700,8 +1960,8 @@ struct AnimationTarget {
 /// the values are a quaternion in the order (x, y, z, w), where w is the scalar.
 /// For the [Scale](AnimationTargetPath::Scale) property, the values are the scaling
 /// factors along the X, Y, and Z axes.
-#[derive(Debug, Serialize, Deserialize)]
-enum AnimationTargetPath {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum AnimationTargetPath {
     #[serde(rename = "translation")]
     Translation,
 
@@ -1713,6 +1973,17 @@ enum AnimationTargetPath {
 
     #[serde(rename = "weights")]
     Weights,
+}
+
+impl Display for AnimationTargetPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Translation => "translation",
+            Self::Rotation => "rotation",
+            Self::Scale => "scale",
+            Self::Weights => "weights",
+        })
+    }
 }
 
 /// An animation sampler combines timestamps with a sequence of output values and defines an interpolation algorithm.

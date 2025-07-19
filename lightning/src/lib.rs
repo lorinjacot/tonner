@@ -141,7 +141,7 @@ impl Engine {
         let window = create_window(
             &egui_ctx,
             event_loop,
-            &ViewportBuilder::default().with_maximized(true),
+            &ViewportBuilder::default().with_maximized(false),
         )
         .unwrap();
         let window = Arc::new(window);

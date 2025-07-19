@@ -2,10 +2,10 @@ use std::{
     borrow::Cow,
     fmt::Display,
     fs::File,
-    io::{BufReader, Cursor, Read},
+    io::{BufReader, Cursor, Read, Seek},
     marker::PhantomData,
     num::NonZeroUsize,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
@@ -139,70 +139,77 @@ pub enum GlbError {
 }
 
 pub struct GltfAsset {
+    parent: PathBuf,
     json: Gltf,
-    buffers: Vec<Vec<u8>>,
     default_material: Option<Material>,
 }
 
 const GLB_HEADER_SIZE: u32 = 3 * size_of::<u32>() as u32;
-const MIN_CHUNK_SIZE: u32 = 2 * size_of::<u32>() as u32;
-const ASCII_GLTF: u32 = 0x46546C67;
-const ASCII_JSON: u32 = 0x4E4F534A;
-const ASCII_BIN: u32 = 0x004E4942;
+const GLTF: u32 = 0x46546C67;
+const JSON: u32 = 0x4E4F534A;
+const BIN: u32 = 0x004E4942;
 
 impl GltfAsset {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
+        let path = path.as_ref();
+        let mut file = File::open(path)?;
+        let parent = path
+            .parent()
+            .expect("a file should have a parent")
+            .to_owned();
 
         let mut magic: u32 = 0;
-        reader.read_exact(bytes_of_mut(&mut magic))?;
-        if magic != ASCII_GLTF {
-            return Err(GltfError::Unsupported(
-                "Only Binary glTF (.glb) asset are supported".to_string(),
-            ));
-        }
+        file.read_exact(bytes_of_mut(&mut magic))?;
+        let mut json = if magic == GLTF {
+            let mut reader = BufReader::new(file);
 
-        let mut version: u32 = 0;
-        reader.read_exact(bytes_of_mut(&mut version))?;
-        if version != 2 {
-            return Err(GlbError::UnknownVersion.into());
-        }
-
-        let mut length: u32 = 0;
-        reader.read_exact(bytes_of_mut(&mut length))?;
-        length -= GLB_HEADER_SIZE;
-
-        let mut reader = reader.take(length as u64);
-
-        if length < MIN_CHUNK_SIZE {
-            return Err(GlbError::JsonChunkMissing.into());
-        }
-        let json = GlbChunk::from_reader(&mut reader)?;
-        length -= MIN_CHUNK_SIZE + json.chunk_length;
-        if json.chunk_type != ASCII_JSON {
-            return Err(GlbError::JsonChunkMissing.into());
-        }
-        let json: Gltf = serde_json::from_slice(&json.chunk_data)?;
-
-        let mut buffers = Vec::new();
-        match json.buffers.first() {
-            Some(buffer) if buffer.uri.is_none() => {
-                if length < MIN_CHUNK_SIZE {
-                    return Err(GlbError::BinChunkMissing.into());
-                }
-                let bin = GlbChunk::from_reader(&mut reader)?;
-                if bin.chunk_type != ASCII_BIN {
-                    return Err(GlbError::BinChunkMissing.into());
-                }
-                buffers.push(bin.chunk_data);
+            let mut version: u32 = 0;
+            reader.read_exact(bytes_of_mut(&mut version))?;
+            if version != 2 {
+                return Err(GlbError::UnknownVersion.into());
             }
-            _ => (),
+
+            let mut length: u32 = 0;
+            reader.read_exact(bytes_of_mut(&mut length))?;
+            length -= GLB_HEADER_SIZE;
+            let mut reader = reader.take(length as u64);
+
+            let json = GlbChunk::from_reader(&mut reader)?;
+            if json.chunk_type != JSON {
+                return Err(GlbError::JsonChunkMissing.into());
+            }
+            let mut json: Gltf = serde_json::from_slice(&json.chunk_data)?;
+
+            if let Some(buffer) = json.buffers.first_mut() {
+                if buffer.uri.is_none() {
+                    let bin = GlbChunk::from_reader(&mut reader)?;
+                    if bin.chunk_type != BIN {
+                        return Err(GlbError::BinChunkMissing.into());
+                    }
+                    buffer.bytes = bin.chunk_data;
+                }
+            }
+            json
+        } else {
+            file.rewind()?;
+
+            let mut json = String::new();
+            file.read_to_string(&mut json)?;
+
+            serde_json::from_str(&json)?
+        };
+
+        for buffer in &mut json.buffers {
+            if let Some(uri) = &buffer.uri {
+                let path = parent.join(uri);
+                let mut file = File::open(path)?;
+                file.read_to_end(&mut buffer.bytes)?;
+            }
         }
 
         Ok(Self {
+            parent,
             json,
-            buffers,
             default_material: None,
         })
     }
@@ -1137,8 +1144,8 @@ impl GltfAsset {
         let start = buffer_view.byte_offset;
         let end = start + buffer_view.byte_length;
 
-        match self.buffers.get(buffer_view.buffer) {
-            Some(bytes) => Ok(&bytes[start..end]),
+        match self.json.buffers.get(buffer_view.buffer) {
+            Some(buffer) => Ok(&buffer.bytes[start..end]),
             None => todo!("load buffer"),
         }
     }
@@ -1362,8 +1369,8 @@ impl GltfAsset {
                         entity: GltfEntity::BufferView,
                         index: buffer_view,
                     })?;
-            let bytes = match self.buffers.get(buffer_view.buffer) {
-                Some(bytes) => bytes,
+            let bytes = match self.json.buffers.get(buffer_view.buffer) {
+                Some(buffer) => &buffer.bytes,
                 None => todo!("load buffer into memory"),
             };
 
@@ -1411,8 +1418,8 @@ impl GltfAsset {
                     index: buffer_view,
                 })?;
 
-        let bytes = match self.buffers.get(buffer_view.buffer) {
-            Some(bytes) => bytes,
+        let bytes = match self.json.buffers.get(buffer_view.buffer) {
+            Some(buffer) => &buffer.bytes,
             None => todo!("load buffer into memory"),
         };
 
@@ -1555,7 +1562,6 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
 }
 
 struct GlbChunk {
-    chunk_length: u32,
     chunk_type: u32,
     chunk_data: Vec<u8>,
 }
@@ -1578,7 +1584,6 @@ impl GlbChunk {
         }
 
         Ok(Self {
-            chunk_length,
             chunk_type,
             chunk_data,
         })
@@ -2049,6 +2054,10 @@ impl AnimationInterpolation {
 /// A buffer points to binary geometry, animation, or skins.
 #[derive(Debug, Serialize, Deserialize)]
 struct Buffer {
+    /// The content of the buffer. Empty if unsupported uri.
+    #[serde(skip)]
+    bytes: Vec<u8>,
+
     /// The URI (or IRI) of the buffer. Relative paths are relative to
     /// the current glTF asset. Instead of referencing an external file,
     /// this field **MAY** contain a `data:`-URI.

@@ -233,20 +233,28 @@ impl GltfAsset {
             self.load_node(node, None, &mut scene, resources, encoder)?;
         }
 
-        let nodes_inverse_bind_matrices: Vec<_> = self
-            .json
-            .skins
-            .iter_mut()
-            .filter_map(|skin| {
-                if skin.nodes.is_empty() {
-                    None
-                } else {
-                    Some((std::mem::take(&mut skin.nodes), skin.inverse_bind_matrices))
+        let mut data = Vec::with_capacity(self.json.skins.len());
+        for skin in &mut self.json.skins {
+            if !skin.nodes.is_empty() {
+                let mut joints = Vec::with_capacity(skin.joints.len());
+                for &index in skin.joints.iter() {
+                    joints.push(self.json.nodes.get(index).and_then(|node| node.id).ok_or(
+                        GltfError::InvalidIndex {
+                            entity: GltfEntity::Node,
+                            index,
+                        },
+                    )?);
                 }
-            })
-            .collect();
-        for (nodes, inverse_bind_matrices) in nodes_inverse_bind_matrices {
-            let mut builder = scene.skin_builder().nodes(nodes.iter().cloned());
+                data.push((
+                    std::mem::take(&mut skin.nodes),
+                    joints,
+                    skin.inverse_bind_matrices,
+                ));
+            }
+        }
+
+        for (nodes, joints, inverse_bind_matrices) in data {
+            let mut builder = scene.skin_builder().nodes(joints);
             if let Some(inverse_bind_matrices) = inverse_bind_matrices {
                 builder = builder.inverse_bind_matrices(
                     self.accessor_iter::<f32, { 4 * 4 }>(inverse_bind_matrices)?
@@ -494,16 +502,16 @@ impl GltfAsset {
         };
 
         let node = &mut self.json.nodes[index];
-        let id = scene
-            .node_builder()
-            .name(node.name.clone())
-            .parent(parent)
-            .local_matrix(node.matrix.map(|m| Mat4::from_cols_array(&m)))
-            .translation_rotation_scale(
-                node.translation.map(|a| Vec3::from_array(a)),
-                node.rotation.map(|a| Quat::from_array(a)),
-                node.scale.map(|a| Vec3::from_array(a)),
-            )
+        let mut builder = scene.node_builder().name(node.name.clone()).parent(parent);
+        builder = match &node.matrix {
+            Some(matrix) => builder.local_matrix(Mat4::from_cols_array(matrix)),
+            None => builder.translation_rotation_scale(
+                node.translation.map_or(Vec3::ZERO, Vec3::from_array),
+                node.rotation.map_or(Quat::IDENTITY, Quat::from_array),
+                node.scale.map_or(Vec3::ONE, Vec3::from_array),
+            ),
+        };
+        let id = builder
             .mesh(mesh)
             .weights(
                 node.weights.clone().or(node

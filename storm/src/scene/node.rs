@@ -168,15 +168,12 @@ impl<'s> NodeBuilder<'s> {
 
     pub fn translation_rotation_scale(
         mut self,
-        translation: impl Into<Option<Vec3>>,
-        rotation: impl Into<Option<Quat>>,
-        scale: impl Into<Option<Vec3>>,
+        translation: Vec3,
+        rotation: Quat,
+        scale: Vec3,
     ) -> Self {
-        self.local_transform.translation_rotation_scale(
-            translation.into().unwrap_or(Vec3::ZERO),
-            rotation.into().unwrap_or(Quat::IDENTITY),
-            scale.into().unwrap_or(Vec3::ONE),
-        );
+        self.local_transform
+            .translation_rotation_scale(translation, rotation, scale);
         self
     }
 

@@ -9,6 +9,7 @@ use std::{
 };
 
 use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
+use data_url::{DataUrl, DataUrlError, forgiving_base64::InvalidBase64};
 use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
 use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,12 @@ pub enum GltfError {
     MissingImageMimeType,
     #[error("A dense accessor must have its bufferView defined")]
     MissingAccessorBufferView,
+    #[error("Invalid uri {0}")]
+    InvalidUri(String),
+    #[error("Invalid base64 encoding")]
+    InvalidBase64(#[from] InvalidBase64),
+    #[error("Unsupported mime type {0}/{1}")]
+    UnsupportedMimeType(String, String),
     #[error("Unsupported asset: {0}")]
     Unsupported(String),
 }
@@ -1349,10 +1356,29 @@ impl GltfAsset {
 
         let name = image.name.as_deref();
         let image = if let Some(uri) = &image.uri {
-            if uri.starts_with("data:") {
-                todo!("`data:`-URI support")
-            } else {
-                ImageReader::open(uri)?.decode()?
+            match DataUrl::process(&uri) {
+                Ok(url) => {
+                    let mime_type = url.mime_type();
+                    let (body, _fragment) = url.decode_to_vec()?;
+                    ImageReader::with_format(
+                        Cursor::new(body),
+                        match (mime_type.type_.as_str(), mime_type.subtype.as_str()) {
+                            ("image", "png") => ImageFormat::Png,
+                            ("image", "jpeg") => ImageFormat::Jpeg,
+                            _ => {
+                                return Err(GltfError::UnsupportedMimeType(
+                                    mime_type.type_.clone(),
+                                    mime_type.subtype.clone(),
+                                ));
+                            }
+                        },
+                    )
+                    .decode()?
+                }
+                Err(DataUrlError::NoComma) => return Err(GltfError::InvalidUri(uri.clone())),
+                Err(DataUrlError::NotADataUrl) => {
+                    ImageReader::open(self.parent.join(uri))?.decode()?
+                }
             }
         } else {
             let buffer_view = image.buffer_view.ok_or(GltfError::MissingImageContent)?;
@@ -2626,7 +2652,7 @@ struct PrimitiveAttributes {
     tex_coord_1: Option<usize>,
 
     /// RGB or RGBA vertex color linear multiplier
-    #[serde(rename = "COLOR_n")]
+    #[serde(rename = "COLOR_0")]
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     color_0: Option<usize>,

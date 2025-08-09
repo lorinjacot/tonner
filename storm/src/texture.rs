@@ -95,20 +95,6 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
-    pub fn bytes(
-        mut self,
-        size: wgpu::Extent3d,
-        format: wgpu::TextureFormat,
-        bytes: &'a [u8],
-    ) -> Self {
-        self.source = Source::Bytes {
-            size,
-            format,
-            bytes,
-        };
-        self
-    }
-
     pub fn from_dynamic_image(mut self, dynamic_image: &'a DynamicImage, srgb: bool) -> Self {
         self.source = Source::DynamicImage {
             dynamic_image,
@@ -130,7 +116,6 @@ impl<'a> TextureBuilder<'a> {
     ) -> wgpu::Texture {
         let size = match self.source {
             Source::Empty { size, .. } => size,
-            Source::Bytes { size, .. } => size,
             Source::DynamicImage { dynamic_image, .. } => wgpu::Extent3d {
                 width: dynamic_image.width(),
                 height: dynamic_image.height(),
@@ -158,58 +143,6 @@ impl<'a> TextureBuilder<'a> {
                     usage: self.usage,
                     view_formats: &[],
                 });
-                (texture, format)
-            }
-            Source::Bytes { format, bytes, .. } => {
-                let desc = wgpu::TextureDescriptor {
-                    label: self.name,
-                    size,
-                    mip_level_count: self.mip_level_count,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: self.usage,
-                    view_formats: &[],
-                };
-                let texture = if self.generate_mips {
-                    let source = resources.device.create_texture_with_data(
-                        &resources.queue,
-                        &wgpu::TextureDescriptor {
-                            mip_level_count: 1,
-                            usage: wgpu::TextureUsages::COPY_SRC,
-                            ..desc
-                        },
-                        wgpu::util::TextureDataOrder::LayerMajor,
-                        bytes,
-                    );
-                    let destination = resources.device.create_texture(&wgpu::TextureDescriptor {
-                        usage: desc.usage | wgpu::TextureUsages::COPY_DST,
-                        ..desc
-                    });
-                    encoder.copy_texture_to_texture(
-                        wgpu::TexelCopyTextureInfoBase {
-                            texture: &source,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        wgpu::TexelCopyTextureInfoBase {
-                            texture: &destination,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        desc.size,
-                    );
-                    destination
-                } else {
-                    resources.device.create_texture_with_data(
-                        &resources.queue,
-                        &desc,
-                        wgpu::util::TextureDataOrder::LayerMajor,
-                        bytes,
-                    )
-                };
                 (texture, format)
             }
             Source::DynamicImage {
@@ -403,11 +336,6 @@ enum Source<'a> {
     Empty {
         size: wgpu::Extent3d,
         format: wgpu::TextureFormat,
-    },
-    Bytes {
-        size: wgpu::Extent3d,
-        format: wgpu::TextureFormat,
-        bytes: &'a [u8],
     },
     DynamicImage {
         dynamic_image: &'a DynamicImage,

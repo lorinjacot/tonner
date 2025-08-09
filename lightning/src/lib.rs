@@ -233,7 +233,7 @@ impl Engine {
             |path| match open_gltf(path, &mut resources, &mut encoder, size.width, size.height) {
                 Ok(value) => value,
                 Err(err) => {
-                    eprintln!("{err}");
+                    eprintln!("{err:?}");
                     panic!()
                 }
             },

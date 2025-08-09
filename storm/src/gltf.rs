@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::{Context, anyhow};
 use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
 use data_url::{DataUrl, DataUrlError, forgiving_base64::InvalidBase64};
 use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
@@ -20,8 +21,6 @@ use crate::{DenseEntry, Id, Resources, geometry::MorphTargetBuilder, scene::anim
 
 #[derive(Error, Debug)]
 pub enum GltfError {
-    #[error("Failed to read the asset: {0}")]
-    Io(#[from] std::io::Error),
     #[error("Invalid binary gltf container: {0}")]
     Glb(#[from] GlbError),
     #[error("Failed to parse json: {0}")]
@@ -39,33 +38,24 @@ pub enum GltfError {
     },
     #[error("Failed to read external image: {0}")]
     Image(#[from] image::ImageError),
-    #[error("Each image should have either an URI or reference a bufferView")]
-    MissingImageContent,
-    #[error("Each image referencing a bufferView should have its mimeType defined")]
-    MissingImageMimeType,
     #[error("A dense accessor must have its bufferView defined")]
     MissingAccessorBufferView,
-    #[error("Invalid uri {0}")]
-    InvalidUri(String),
     #[error("Invalid base64 encoding")]
     InvalidBase64(#[from] InvalidBase64),
-    #[error("Unsupported mime type {0}/{1}")]
-    UnsupportedMimeType(String, String),
     #[error("Unsupported asset: {0}")]
     Unsupported(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 #[derive(Debug)]
 pub enum GltfEntity {
     Accessor,
     AnimationSampler,
-    Buffer,
     BufferView,
-    Image,
     Material,
     Mesh,
     Node,
-    Sampler,
     Scene,
     Skin,
     Texture,
@@ -76,13 +66,10 @@ impl Display for GltfEntity {
         match self {
             Self::Accessor => write!(f, "accessor"),
             Self::AnimationSampler => write!(f, "animation sampler"),
-            Self::Buffer => write!(f, "buffer"),
             Self::BufferView => write!(f, "buffer view"),
-            Self::Image => write!(f, "image"),
             Self::Material => write!(f, "material"),
             Self::Mesh => write!(f, "mesh"),
             Self::Node => write!(f, "node"),
-            Self::Sampler => write!(f, "sampler"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),
             Self::Texture => write!(f, "texture"),
@@ -159,29 +146,36 @@ const BIN: u32 = 0x004E4942;
 impl GltfAsset {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
-        let mut file = File::open(path)?;
+        let read_failed_ctx = || format!("Failed to read asset from {path:?}");
+
+        let mut file = File::open(path).with_context(read_failed_ctx)?;
         let parent = path
             .parent()
             .expect("a file should have a parent")
             .to_owned();
 
         let mut magic: u32 = 0;
-        file.read_exact(bytes_of_mut(&mut magic))?;
+        file.read_exact(bytes_of_mut(&mut magic))
+            .with_context(read_failed_ctx)?;
         let mut json = if magic == GLTF {
             let mut reader = BufReader::new(file);
 
             let mut version: u32 = 0;
-            reader.read_exact(bytes_of_mut(&mut version))?;
+            reader
+                .read_exact(bytes_of_mut(&mut version))
+                .with_context(read_failed_ctx)?;
             if version != 2 {
                 return Err(GlbError::UnknownVersion.into());
             }
 
             let mut length: u32 = 0;
-            reader.read_exact(bytes_of_mut(&mut length))?;
+            reader
+                .read_exact(bytes_of_mut(&mut length))
+                .with_context(read_failed_ctx)?;
             length -= GLB_HEADER_SIZE;
             let mut reader = reader.take(length as u64);
 
-            let json = GlbChunk::from_reader(&mut reader)?;
+            let json = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
             if json.chunk_type != JSON {
                 return Err(GlbError::JsonChunkMissing.into());
             }
@@ -189,7 +183,7 @@ impl GltfAsset {
 
             if let Some(buffer) = json.buffers.first_mut() {
                 if buffer.uri.is_none() {
-                    let bin = GlbChunk::from_reader(&mut reader)?;
+                    let bin = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
                     if bin.chunk_type != BIN {
                         return Err(GlbError::BinChunkMissing.into());
                     }
@@ -198,10 +192,11 @@ impl GltfAsset {
             }
             json
         } else {
-            file.rewind()?;
+            file.rewind().with_context(read_failed_ctx)?;
 
             let mut json = String::new();
-            file.read_to_string(&mut json)?;
+            file.read_to_string(&mut json)
+                .with_context(read_failed_ctx)?;
 
             serde_json::from_str(&json)?
         };
@@ -209,8 +204,11 @@ impl GltfAsset {
         for buffer in &mut json.buffers {
             if let Some(uri) = &buffer.uri {
                 let path = parent.join(uri);
-                let mut file = File::open(path)?;
-                file.read_to_end(&mut buffer.bytes)?;
+
+                let read_failed_ctx = || format!("Failed to read binary buffer from {path:?}");
+                let mut file = File::open(&path).with_context(read_failed_ctx)?;
+                file.read_to_end(&mut buffer.bytes)
+                    .with_context(read_failed_ctx)?;
             }
         }
 
@@ -1269,20 +1267,36 @@ impl GltfAsset {
 
         let name = texture.name.clone();
         let sampler = texture.sampler;
-        let source = texture.source.clone();
+        let source = texture
+            .source
+            .ok_or(anyhow!("image.source must be defined"))?;
 
         let sampler = match sampler {
-            Some(index) => Some(self.get_or_load_sampler(index, resources)?),
+            Some(index) => Some(
+                self.json
+                    .samplers
+                    .get_mut(index)
+                    .ok_or(anyhow!("texture.sampler {index} is out of range"))?
+                    .load(resources)
+                    .with_context(|| format!("Failed to load texture.sampler {index}"))?,
+            ),
             None => None,
         };
 
-        let source = self.get_or_load_image(
-            source
-                .ok_or_else(|| GltfError::Unsupported("Gltf texture with no source".to_string()))?,
-            srgb,
-            resources,
-            encoder,
-        )?;
+        let source = self
+            .json
+            .images
+            .get_mut(source)
+            .ok_or(anyhow!("texture.image {source} is out of range"))?
+            .load(
+                srgb,
+                &self.parent,
+                &self.json.buffer_views,
+                &self.json.buffers,
+                resources,
+                encoder,
+            )
+            .with_context(|| format!("Failed to load texture.image {source}"))?;
 
         let id = crate::material::TextureBuilder::default()
             .name(name)
@@ -1292,129 +1306,6 @@ impl GltfAsset {
             .id();
         self.json.textures[index].id = Some(id);
         Ok(id)
-    }
-
-    fn get_or_load_sampler(
-        &mut self,
-        index: usize,
-        resources: &mut Resources,
-    ) -> Result<wgpu::Sampler> {
-        let sampler = self
-            .json
-            .samplers
-            .get(index)
-            .ok_or(GltfError::InvalidIndex {
-                entity: GltfEntity::Sampler,
-                index,
-            })?;
-        if let Some(sampler) = sampler.wgpu.clone() {
-            return Ok(sampler);
-        }
-
-        let mag_filter = match sampler.mag_filter {
-            MagFilter::Linear => wgpu::FilterMode::Linear,
-            MagFilter::Nearest | MagFilter::None => wgpu::FilterMode::Nearest,
-        };
-        let (min_filter, mipmap_filter) = match sampler.min_filter {
-            MinFilter::LinearMipmapNearest | MinFilter::Linear => {
-                (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
-            }
-            MinFilter::LinearMipmapLinear => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
-            MinFilter::NearestMipmapNearest | MinFilter::Nearest | MinFilter::None => {
-                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
-            }
-            MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
-        };
-
-        let sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: sampler.name.as_deref(),
-            address_mode_u: wrapping_mode_to_address_mode(sampler.wrap_s),
-            address_mode_v: wrapping_mode_to_address_mode(sampler.wrap_t),
-            mag_filter,
-            min_filter,
-            mipmap_filter,
-            ..Default::default()
-        });
-        self.json.samplers[index].wgpu = Some(sampler.clone());
-        Ok(sampler)
-    }
-
-    fn get_or_load_image(
-        &mut self,
-        index: usize,
-        srgb: bool,
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<wgpu::Texture> {
-        let image = self.json.images.get(index).ok_or(GltfError::InvalidIndex {
-            entity: GltfEntity::Image,
-            index,
-        })?;
-        if let Some(image) = image.wgpu.clone() {
-            return Ok(image);
-        }
-
-        let name = image.name.as_deref();
-        let image = if let Some(uri) = &image.uri {
-            match DataUrl::process(&uri) {
-                Ok(url) => {
-                    let mime_type = url.mime_type();
-                    let (body, _fragment) = url.decode_to_vec()?;
-                    ImageReader::with_format(
-                        Cursor::new(body),
-                        match (mime_type.type_.as_str(), mime_type.subtype.as_str()) {
-                            ("image", "png") => ImageFormat::Png,
-                            ("image", "jpeg") => ImageFormat::Jpeg,
-                            _ => {
-                                return Err(GltfError::UnsupportedMimeType(
-                                    mime_type.type_.clone(),
-                                    mime_type.subtype.clone(),
-                                ));
-                            }
-                        },
-                    )
-                    .decode()?
-                }
-                Err(DataUrlError::NoComma) => return Err(GltfError::InvalidUri(uri.clone())),
-                Err(DataUrlError::NotADataUrl) => {
-                    ImageReader::open(self.parent.join(uri))?.decode()?
-                }
-            }
-        } else {
-            let buffer_view = image.buffer_view.ok_or(GltfError::MissingImageContent)?;
-            let format = match image.mime_type {
-                ImageMimeType::ImageJpeg => ImageFormat::Jpeg,
-                ImageMimeType::ImagePng => ImageFormat::Png,
-                ImageMimeType::None => return Err(GltfError::MissingImageMimeType),
-            };
-            let buffer_view =
-                self.json
-                    .buffer_views
-                    .get(buffer_view)
-                    .ok_or(GltfError::InvalidIndex {
-                        entity: GltfEntity::BufferView,
-                        index: buffer_view,
-                    })?;
-            let bytes = match self.json.buffers.get(buffer_view.buffer) {
-                Some(buffer) => &buffer.bytes,
-                None => todo!("load buffer into memory"),
-            };
-
-            let start = buffer_view.byte_offset;
-            let end = start + buffer_view.byte_length;
-
-            let reader = Cursor::new(&bytes[start..end]);
-
-            ImageReader::with_format(reader, format).decode()?
-        };
-
-        let texture = crate::texture::TextureBuilder::default()
-            .name(name)
-            .from_dynamic_image(&image, srgb)
-            // .generate_mips()
-            .build(resources, encoder);
-        self.json.images[index].wgpu = Some(texture.clone());
-        Ok(texture)
     }
 
     fn accessor_iter<T: Pod + 'static, const N: usize>(
@@ -1462,15 +1353,6 @@ impl GltfAsset {
             byte_stride,
             data_type: PhantomData,
         })
-    }
-}
-
-fn wrapping_mode_to_address_mode(wrapping_mode: WrappingMode) -> wgpu::AddressMode {
-    match wrapping_mode {
-        WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
-        WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
-        WrappingMode::Repeat => wgpu::AddressMode::Repeat,
-        WrappingMode::None => wgpu::AddressMode::Repeat,
     }
 }
 
@@ -1593,17 +1475,22 @@ struct GlbChunk {
 }
 
 impl GlbChunk {
-    fn from_reader<R: Read>(reader: &mut R) -> Result<Self> {
+    fn from_reader<R: Read>(reader: &mut R, read_failed_ctx: &impl Fn() -> String) -> Result<Self> {
         let mut chunk_length: u32 = 0;
-        reader.read_exact(bytes_of_mut(&mut chunk_length))?;
+        reader
+            .read_exact(bytes_of_mut(&mut chunk_length))
+            .with_context(read_failed_ctx)?;
 
         let mut chunk_type: u32 = 0;
-        reader.read_exact(bytes_of_mut(&mut chunk_type))?;
+        reader
+            .read_exact(bytes_of_mut(&mut chunk_type))
+            .with_context(read_failed_ctx)?;
 
         let mut chunk_data = Vec::with_capacity(chunk_length as usize);
         reader
             .take(chunk_length as u64)
-            .read_to_end(&mut chunk_data)?;
+            .read_to_end(&mut chunk_data)
+            .with_context(read_failed_ctx)?;
 
         if (chunk_data.len() as u32) < chunk_length {
             return Err(GlbError::InvalidChunkLength.into());
@@ -2276,6 +2163,83 @@ struct Image {
     name: Option<String>,
 }
 
+impl Image {
+    fn load(
+        &mut self,
+        srgb: bool,
+        parent: &Path,
+        buffer_views: &[BufferView],
+        buffers: &[Buffer],
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> anyhow::Result<wgpu::Texture> {
+        if let Some(image) = &self.wgpu {
+            return Ok(image.clone());
+        }
+
+        let name = self.name.as_deref();
+        let image = if let Some(uri) = &self.uri {
+            match DataUrl::process(&uri) {
+                Ok(url) => {
+                    let mime_type = url.mime_type();
+                    let (body, _fragment) = url.decode_to_vec()?;
+                    ImageReader::with_format(
+                        Cursor::new(body),
+                        match (mime_type.type_.as_str(), mime_type.subtype.as_str()) {
+                            ("image", "png") => ImageFormat::Png,
+                            ("image", "jpeg") => ImageFormat::Jpeg,
+                            (type_, subtype) => {
+                                anyhow::bail!("Unsupported image format {type_}/{subtype}")
+                            }
+                        },
+                    )
+                    .decode()?
+                }
+                Err(DataUrlError::NoComma) => anyhow::bail!("Invalid data url"),
+                Err(DataUrlError::NotADataUrl) => {
+                    let path = parent.join(uri);
+                    ImageReader::open(&path)
+                        .with_context(|| format!("Failed to open image at {path:?}"))?
+                        .decode()?
+                }
+            }
+        } else {
+            let buffer_view = self.buffer_view.ok_or(anyhow!(
+                "one of image.uri or image.buffer_view must be defined'"
+            ))?;
+            let format = match self.mime_type {
+                ImageMimeType::ImageJpeg => ImageFormat::Jpeg,
+                ImageMimeType::ImagePng => ImageFormat::Png,
+                ImageMimeType::None => anyhow::bail!(
+                    "image.mime_type must be defined when image.buffer_view is defined"
+                ),
+            };
+            let buffer_view = buffer_views
+                .get(buffer_view)
+                .ok_or(anyhow!("image.buffer_view is out of range"))?;
+            let bytes = match buffers.get(buffer_view.buffer) {
+                Some(buffer) => &buffer.bytes,
+                None => todo!("load buffer into memory"),
+            };
+
+            let start = buffer_view.byte_offset;
+            let end = start + buffer_view.byte_length;
+
+            let reader = Cursor::new(&bytes[start..end]);
+
+            ImageReader::with_format(reader, format).decode()?
+        };
+
+        let texture = crate::texture::TextureBuilder::default()
+            .name(name)
+            .from_dynamic_image(&image, srgb)
+            // .generate_mips()
+            .build(resources, encoder);
+        self.wgpu = Some(texture.clone());
+        Ok(texture)
+    }
+}
+
 /// The image’s media type. This field **MUST** be defined when
 /// [bufferView](Image::buffer_view) is defined.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -2862,6 +2826,50 @@ struct Sampler {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+impl Sampler {
+    fn load(&mut self, resources: &mut Resources) -> anyhow::Result<wgpu::Sampler> {
+        if let Some(sampler) = &self.wgpu {
+            return Ok(sampler.clone());
+        }
+
+        let mag_filter = match self.mag_filter {
+            MagFilter::Linear => wgpu::FilterMode::Linear,
+            MagFilter::Nearest | MagFilter::None => wgpu::FilterMode::Nearest,
+        };
+        let (min_filter, mipmap_filter) = match self.min_filter {
+            MinFilter::LinearMipmapNearest | MinFilter::Linear => {
+                (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
+            }
+            MinFilter::LinearMipmapLinear => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
+            MinFilter::NearestMipmapNearest | MinFilter::Nearest | MinFilter::None => {
+                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
+            }
+            MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
+        };
+
+        let sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: self.name.as_deref(),
+            address_mode_u: wrapping_mode_to_address_mode(self.wrap_s),
+            address_mode_v: wrapping_mode_to_address_mode(self.wrap_t),
+            mag_filter,
+            min_filter,
+            mipmap_filter,
+            ..Default::default()
+        });
+        self.wgpu = Some(sampler.clone());
+        Ok(sampler)
+    }
+}
+
+fn wrapping_mode_to_address_mode(wrapping_mode: WrappingMode) -> wgpu::AddressMode {
+    match wrapping_mode {
+        WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+        WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+        WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+        WrappingMode::None => wgpu::AddressMode::Repeat,
+    }
 }
 
 /// Magnification filter.

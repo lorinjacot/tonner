@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
 use data_url::{DataUrl, DataUrlError, forgiving_base64::InvalidBase64};
 use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
@@ -17,7 +17,11 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use thiserror::Error;
 
-use crate::{DenseEntry, Id, Resources, geometry::MorphTargetBuilder, scene::animation};
+use crate::{
+    DenseEntry, Id, Resources,
+    geometry::{GeometryBuilder, MorphTargetBuilder},
+    scene::animation,
+};
 
 #[derive(Error, Debug)]
 pub enum GltfError {
@@ -42,8 +46,6 @@ pub enum GltfError {
     MissingAccessorBufferView,
     #[error("Invalid base64 encoding")]
     InvalidBase64(#[from] InvalidBase64),
-    #[error("Unsupported asset: {0}")]
-    Unsupported(String),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -53,12 +55,9 @@ pub enum GltfEntity {
     Accessor,
     AnimationSampler,
     BufferView,
-    Material,
-    Mesh,
     Node,
     Scene,
     Skin,
-    Texture,
 }
 
 impl Display for GltfEntity {
@@ -67,12 +66,9 @@ impl Display for GltfEntity {
             Self::Accessor => write!(f, "accessor"),
             Self::AnimationSampler => write!(f, "animation sampler"),
             Self::BufferView => write!(f, "buffer view"),
-            Self::Material => write!(f, "material"),
-            Self::Mesh => write!(f, "mesh"),
             Self::Node => write!(f, "node"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),
-            Self::Texture => write!(f, "texture"),
         }
     }
 }
@@ -135,7 +131,7 @@ pub enum GlbError {
 pub struct GltfAsset {
     parent: PathBuf,
     json: Gltf,
-    default_material: Option<Material>,
+    default_material: Option<Id<crate::material::Material>>,
 }
 
 const GLB_HEADER_SIZE: u32 = 3 * size_of::<u32>() as u32;
@@ -502,14 +498,33 @@ impl GltfAsset {
         scene: &mut crate::Scene,
         resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Id<crate::Node>> {
+    ) -> anyhow::Result<Id<crate::Node>> {
         let node = self.json.nodes.get(index).ok_or(GltfError::InvalidIndex {
             entity: GltfEntity::Node,
             index,
         })?;
 
         let mesh = match node.mesh {
-            Some(index) => Some(self.get_or_load_mesh(index, resources, encoder)?),
+            Some(index) => Some(
+                self.json
+                    .meshes
+                    .get_mut(index)
+                    .ok_or(anyhow!("node.mesh {index} is out of range"))?
+                    .load(
+                        &self.parent,
+                        &self.json.accessors,
+                        &mut self.json.materials,
+                        &mut self.default_material,
+                        &mut self.json.textures,
+                        &mut self.json.samplers,
+                        &mut self.json.images,
+                        &self.json.buffer_views,
+                        &self.json.buffers,
+                        resources,
+                        encoder,
+                    )
+                    .with_context(|| format!("Failed to load node.mesh {index}"))?,
+            ),
             None => None,
         };
 
@@ -552,759 +567,6 @@ impl GltfAsset {
             self.load_node(child, Some(id), scene, resources, encoder)?;
         }
 
-        Ok(id)
-    }
-
-    fn get_or_load_mesh(
-        &mut self,
-        index: usize,
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Id<crate::mesh::Mesh>> {
-        let mesh = self.json.meshes.get(index).ok_or(GltfError::InvalidIndex {
-            entity: GltfEntity::Mesh,
-            index,
-        })?;
-        if let Some(id) = mesh.id {
-            return Ok(id);
-        }
-        let name = mesh.name.clone();
-
-        let mut primitives = Vec::with_capacity(mesh.primitives.len());
-        for primitive in &mesh.primitives {
-            if let Some(position) = primitive.attributes.position {
-                let topology = match primitive.mode {
-                    PrimitiveMode::Points => wgpu::PrimitiveTopology::PointList,
-                    PrimitiveMode::LineStrip => wgpu::PrimitiveTopology::LineStrip,
-                    PrimitiveMode::Lines => wgpu::PrimitiveTopology::LineList,
-                    PrimitiveMode::Triangles => wgpu::PrimitiveTopology::TriangleList,
-                    PrimitiveMode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
-                    _ => {
-                        return Err(GltfError::Unsupported(format!(
-                            "primitive topology type {} is not supported",
-                            primitive.mode
-                        )));
-                    }
-                };
-
-                let accessor =
-                    self.json
-                        .accessors
-                        .get(position)
-                        .ok_or(GltfError::InvalidIndex {
-                            entity: GltfEntity::Accessor,
-                            index: position,
-                        })?;
-
-                let positions = match (accessor.type_, accessor.component_type, accessor.normalized)
-                {
-                    (AccessorType::Vec3, AccessorComponentType::Float, false) => self
-                        .accessor_iter::<f32, 3>(position)?
-                        .cloned()
-                        .map(Vec3::from_array),
-                    (accessor_type, component_type, normalized) => {
-                        return Err(GltfError::InvalidAccessorDataType {
-                            accessor_type,
-                            component_type,
-                            normalized,
-                            usage: AccessorUsage::Position,
-                        });
-                    }
-                };
-
-                let mut builder = resources
-                    .geometry_builder()
-                    .positions(positions)
-                    .topology(topology);
-
-                if let Some(normal) = primitive.attributes.normal {
-                    let accessor =
-                        self.json
-                            .accessors
-                            .get(normal)
-                            .ok_or(GltfError::InvalidIndex {
-                                entity: GltfEntity::Accessor,
-                                index: normal,
-                            })?;
-
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
-                            .normals(
-                                self.accessor_iter::<f32, 3>(normal)?
-                                    .cloned()
-                                    .map(Vec3::from_array),
-                            ),
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Normal,
-                            });
-                        }
-                    };
-                }
-
-                if let Some(tangent) = primitive.attributes.tangent {
-                    let accessor =
-                        self.json
-                            .accessors
-                            .get(tangent)
-                            .ok_or(GltfError::InvalidIndex {
-                                entity: GltfEntity::Accessor,
-                                index: tangent,
-                            })?;
-
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
-                            .tangents(
-                                self.accessor_iter::<f32, 4>(tangent)?
-                                    .cloned()
-                                    .map(Vec4::from_array),
-                            ),
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Tangent,
-                            });
-                        }
-                    };
-                }
-
-                for tex_coord in [
-                    primitive.attributes.tex_coord_0,
-                    primitive.attributes.tex_coord_1,
-                ] {
-                    if let Some(tex_coord) = tex_coord {
-                        let accessor =
-                            self.json
-                                .accessors
-                                .get(tex_coord)
-                                .ok_or(GltfError::InvalidIndex {
-                                    entity: GltfEntity::Accessor,
-                                    index: tex_coord,
-                                })?;
-
-                        builder =
-                            match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
-                                    builder.tex_coords(
-                                        self.accessor_iter::<f32, 2>(tex_coord)?
-                                            .cloned()
-                                            .map(Vec2::from_array),
-                                    )
-                                }
-                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
-                                    builder.tex_coords(
-                                        self.accessor_iter::<u8, 2>(tex_coord)?.map(u8x2_to_vec2),
-                                    )
-                                }
-                                (
-                                    AccessorType::Vec2,
-                                    AccessorComponentType::UnsignedShort,
-                                    true,
-                                ) => builder.tex_coords(
-                                    self.accessor_iter::<u16, 2>(tex_coord)?.map(u16x2_to_vec2),
-                                ),
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::TexCoord,
-                                    });
-                                }
-                            };
-                    }
-                }
-
-                if let Some(color) = primitive.attributes.color_0 {
-                    let accessor =
-                        self.json
-                            .accessors
-                            .get(color)
-                            .ok_or(GltfError::InvalidIndex {
-                                entity: GltfEntity::Accessor,
-                                index: color,
-                            })?;
-
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
-                            .colors(
-                                self.accessor_iter::<f32, 3>(color)?
-                                    .cloned()
-                                    .map(Vec3::from_array)
-                                    .map(|v| v.extend(1.0)),
-                            ),
-                        (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => builder
-                            .colors(
-                                self.accessor_iter::<u8, 3>(color)?
-                                    .map(u8x3_to_vec3)
-                                    .map(|v| v.extend(1.0)),
-                            ),
-                        (AccessorType::Vec3, AccessorComponentType::UnsignedShort, true) => builder
-                            .colors(
-                                self.accessor_iter::<u16, 3>(color)?
-                                    .map(u16x3_to_vec3)
-                                    .map(|v| v.extend(1.0)),
-                            ),
-                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
-                            .colors(
-                                self.accessor_iter::<f32, 4>(color)?
-                                    .cloned()
-                                    .map(Vec4::from_array),
-                            ),
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
-                            builder.colors(self.accessor_iter::<u8, 4>(color)?.map(u8x4_to_vec4))
-                        }
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => {
-                            builder.colors(self.accessor_iter::<u16, 4>(color)?.map(u16x4_to_vec4))
-                        }
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Color,
-                            });
-                        }
-                    };
-                }
-
-                if let Some(joints) = primitive.attributes.joints_0 {
-                    let accessor =
-                        self.json
-                            .accessors
-                            .get(joints)
-                            .ok_or(GltfError::InvalidIndex {
-                                entity: GltfEntity::Accessor,
-                                index: joints,
-                            })?;
-
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, false) => {
-                            builder.joints(self.accessor_iter::<u8, 4>(joints)?.map(u8x4_to_uvec4))
-                        }
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, false) => {
-                            builder
-                                .joints(self.accessor_iter::<u16, 4>(joints)?.map(u16x4_to_uvec4))
-                        }
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Joints,
-                            });
-                        }
-                    };
-                }
-
-                if let Some(weights) = primitive.attributes.weights_0 {
-                    let accessor =
-                        self.json
-                            .accessors
-                            .get(weights)
-                            .ok_or(GltfError::InvalidIndex {
-                                entity: GltfEntity::Accessor,
-                                index: weights,
-                            })?;
-
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
-                            .weights(
-                                self.accessor_iter::<f32, 4>(weights)?
-                                    .cloned()
-                                    .map(Vec4::from_array),
-                            ),
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
-                            builder.weights(self.accessor_iter::<u8, 4>(weights)?.map(u8x4_to_vec4))
-                        }
-                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
-                            .weights(self.accessor_iter::<u16, 4>(weights)?.map(u16x4_to_vec4)),
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Weights,
-                            });
-                        }
-                    };
-                }
-
-                for morph_target in &primitive.targets {
-                    let mut target_builder = MorphTargetBuilder::new();
-
-                    if let Some(position) = morph_target.position {
-                        let accessor =
-                            self.json
-                                .accessors
-                                .get(position)
-                                .ok_or(GltfError::InvalidIndex {
-                                    entity: GltfEntity::Accessor,
-                                    index: position,
-                                })?;
-
-                        target_builder =
-                            match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder.positions(
-                                        self.accessor_iter::<f32, 3>(position)?
-                                            .cloned()
-                                            .map(Vec3::from_array),
-                                    )
-                                }
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::MorphTargetPosition,
-                                    });
-                                }
-                            };
-                    }
-
-                    if let Some(normal) = morph_target.normal {
-                        let accessor =
-                            self.json
-                                .accessors
-                                .get(normal)
-                                .ok_or(GltfError::InvalidIndex {
-                                    entity: GltfEntity::Accessor,
-                                    index: normal,
-                                })?;
-
-                        target_builder =
-                            match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder.normals(
-                                        self.accessor_iter::<f32, 3>(normal)?
-                                            .cloned()
-                                            .map(Vec3::from_array),
-                                    )
-                                }
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::MorphTargetNormal,
-                                    });
-                                }
-                            };
-                    }
-
-                    if let Some(tangent) = morph_target.tangent {
-                        let accessor =
-                            self.json
-                                .accessors
-                                .get(tangent)
-                                .ok_or(GltfError::InvalidIndex {
-                                    entity: GltfEntity::Accessor,
-                                    index: tangent,
-                                })?;
-
-                        target_builder =
-                            match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder.tangents(
-                                        self.accessor_iter::<f32, 3>(tangent)?
-                                            .cloned()
-                                            .map(Vec3::from_array),
-                                    )
-                                }
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::MorphTargetTangent,
-                                    });
-                                }
-                            };
-                    }
-
-                    for tex_coord in [morph_target.tex_coord_0, morph_target.tex_coord_1] {
-                        if let Some(tex_coord) = tex_coord {
-                            let accessor = self.json.accessors.get(tex_coord).ok_or(
-                                GltfError::InvalidIndex {
-                                    entity: GltfEntity::Accessor,
-                                    index: tex_coord,
-                                },
-                            )?;
-
-                            target_builder = match (
-                                accessor.type_,
-                                accessor.component_type,
-                                accessor.normalized,
-                            ) {
-                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
-                                    target_builder.tex_coords(
-                                        self.accessor_iter::<f32, 2>(tex_coord)?
-                                            .cloned()
-                                            .map(Vec2::from_array),
-                                    )
-                                }
-                                (AccessorType::Vec2, AccessorComponentType::Byte, true) => {
-                                    target_builder.tex_coords(
-                                        self.accessor_iter::<i8, 2>(tex_coord)?.map(i8x2_to_vec2),
-                                    )
-                                }
-                                (AccessorType::Vec2, AccessorComponentType::Short, true) => {
-                                    target_builder.tex_coords(
-                                        self.accessor_iter::<i16, 2>(tex_coord)?.map(i16x2_to_vec2),
-                                    )
-                                }
-                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
-                                    target_builder.tex_coords(
-                                        self.accessor_iter::<u8, 2>(tex_coord)?.map(u8x2_to_vec2),
-                                    )
-                                }
-                                (
-                                    AccessorType::Vec2,
-                                    AccessorComponentType::UnsignedShort,
-                                    true,
-                                ) => target_builder.tex_coords(
-                                    self.accessor_iter::<u16, 2>(tex_coord)?.map(u16x2_to_vec2),
-                                ),
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::MorphTargetTexCoord,
-                                    });
-                                }
-                            };
-                        }
-                    }
-
-                    if let Some(color) = morph_target.color_0 {
-                        let accessor =
-                            self.json
-                                .accessors
-                                .get(color)
-                                .ok_or(GltfError::InvalidIndex {
-                                    entity: GltfEntity::Accessor,
-                                    index: color,
-                                })?;
-
-                        builder =
-                            match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    builder.colors(
-                                        self.accessor_iter::<f32, 3>(color)?
-                                            .cloned()
-                                            .map(Vec3::from_array)
-                                            .map(|v| v.extend(1.0)),
-                                    )
-                                }
-                                (AccessorType::Vec3, AccessorComponentType::Byte, true) => builder
-                                    .colors(
-                                        self.accessor_iter::<i8, 3>(color)?
-                                            .map(i8x3_to_vec3)
-                                            .map(|v| v.extend(1.0)),
-                                    ),
-                                (AccessorType::Vec3, AccessorComponentType::Short, true) => builder
-                                    .colors(
-                                        self.accessor_iter::<i16, 3>(color)?
-                                            .map(i16x3_to_vec3)
-                                            .map(|v| v.extend(1.0)),
-                                    ),
-                                (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => {
-                                    builder.colors(
-                                        self.accessor_iter::<u8, 3>(color)?
-                                            .map(u8x3_to_vec3)
-                                            .map(|v| v.extend(1.0)),
-                                    )
-                                }
-                                (
-                                    AccessorType::Vec3,
-                                    AccessorComponentType::UnsignedShort,
-                                    true,
-                                ) => builder.colors(
-                                    self.accessor_iter::<u16, 3>(color)?
-                                        .map(u16x3_to_vec3)
-                                        .map(|v| v.extend(1.0)),
-                                ),
-                                (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                                    builder.colors(
-                                        self.accessor_iter::<f32, 4>(color)?
-                                            .cloned()
-                                            .map(Vec4::from_array),
-                                    )
-                                }
-                                (AccessorType::Vec4, AccessorComponentType::Byte, true) => builder
-                                    .colors(self.accessor_iter::<i8, 4>(color)?.map(i8x4_to_vec4)),
-                                (AccessorType::Vec4, AccessorComponentType::Short, true) => builder
-                                    .colors(
-                                        self.accessor_iter::<i16, 4>(color)?.map(i16x4_to_vec4),
-                                    ),
-                                (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
-                                    builder.colors(
-                                        self.accessor_iter::<u8, 4>(color)?.map(u8x4_to_vec4),
-                                    )
-                                }
-                                (
-                                    AccessorType::Vec4,
-                                    AccessorComponentType::UnsignedShort,
-                                    true,
-                                ) => builder.colors(
-                                    self.accessor_iter::<u16, 4>(color)?.map(u16x4_to_vec4),
-                                ),
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::MorphTargetColor,
-                                    });
-                                }
-                            };
-                    }
-
-                    builder = builder.morph_target(target_builder);
-                }
-
-                if let Some(indices) = primitive.indices {
-                    let accessor =
-                        self.json
-                            .accessors
-                            .get(indices)
-                            .ok_or(GltfError::InvalidIndex {
-                                entity: GltfEntity::Accessor,
-                                index: indices,
-                            })?;
-                    let bytes = match &accessor.sparse {
-                        Some(_sparse) => todo!("sparse accessor support"),
-                        None => self.get_buffer_view(
-                            accessor
-                                .buffer_view
-                                .ok_or(GltfError::MissingAccessorBufferView)?,
-                        )?,
-                    };
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                        (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
-                            let indices: &[u8] = cast_slice(bytes);
-                            builder.indices_u16(
-                                indices.into_iter().map(|index| *index as u16).collect(),
-                            )
-                        }
-                        (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
-                            builder.indices_u16(Cow::Borrowed(cast_slice(bytes)))
-                        }
-                        (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
-                            builder.indices_u32(Cow::Borrowed(cast_slice(bytes)))
-                        }
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Indices,
-                            });
-                        }
-                    }
-                }
-
-                let geometry = builder.build(encoder).id();
-                let material = primitive.material;
-                primitives.push((geometry, material));
-            }
-        }
-
-        let mut prims = Vec::with_capacity(primitives.len());
-        for (geometry, material) in primitives {
-            prims.push((
-                geometry,
-                self.get_or_load_material(material, resources, encoder)?,
-            ));
-        }
-
-        let id = resources
-            .mesh_builder()
-            .name(name)
-            .primitives(prims)
-            .build()
-            .id();
-
-        self.json.meshes[index].id = Some(id);
-
-        Ok(id)
-    }
-
-    fn get_buffer_view(&self, index: usize) -> Result<&[u8]> {
-        let buffer_view = self
-            .json
-            .buffer_views
-            .get(index)
-            .ok_or(GltfError::InvalidIndex {
-                entity: GltfEntity::BufferView,
-                index,
-            })?;
-        let start = buffer_view.byte_offset;
-        let end = start + buffer_view.byte_length;
-
-        match self.json.buffers.get(buffer_view.buffer) {
-            Some(buffer) => Ok(&buffer.bytes[start..end]),
-            None => todo!("load buffer"),
-        }
-    }
-
-    fn get_or_load_material(
-        &mut self,
-        index: Option<usize>,
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Id<crate::material::Material>> {
-        let material = match index {
-            Some(index) => self
-                .json
-                .materials
-                .get(index)
-                .ok_or(GltfError::InvalidIndex {
-                    entity: GltfEntity::Material,
-                    index,
-                })?,
-            None => self.default_material.get_or_insert_with(Material::default),
-        };
-
-        if let Some(id) = material.id {
-            return Ok(id);
-        }
-
-        let pbr = &material.pbr_metallic_roughness;
-
-        let mut builder = crate::material::MaterialBuilder::default()
-            .base_color_factor(pbr.base_color_factor)
-            .metallic_factor(pbr.metallic_factor)
-            .roughness_factor(pbr.roughness_factor)
-            .emissive_factor(material.emissive_factor)
-            .alpha_mode(match material.alpha_mode {
-                AlphaMode::Opaque => crate::material::AlphaMode::Opaque,
-                AlphaMode::Mask => crate::material::AlphaMode::Mask,
-                AlphaMode::Blend => crate::material::AlphaMode::Blend,
-            })
-            .alpha_cutoff(material.alpha_cutoff)
-            .double_sided(material.double_sided);
-
-        let base_color_texture = pbr.base_color_texture.clone();
-        let metallic_roughness_texture = pbr.metallic_roughness_texture.clone();
-        let normal_texture = material.normal_texture.clone();
-        let occlusion_texture = material.occlusion_texture.clone();
-        let emissive_texture = material.emissive_texture.clone();
-
-        if let Some(info) = base_color_texture {
-            let id = self.get_or_load_texture(info.index, true, resources, encoder)?;
-            builder = builder
-                .base_color_texture(id)
-                .base_color_tex_coord(info.tex_coord as u32);
-        }
-
-        if let Some(info) = metallic_roughness_texture {
-            let id = self.get_or_load_texture(info.index, false, resources, encoder)?;
-            builder = builder
-                .metallic_roughness_texture(id)
-                .metallic_roughness_tex_coord(info.tex_coord as u32);
-        }
-
-        if let Some(info) = normal_texture {
-            let id = self.get_or_load_texture(info.index, false, resources, encoder)?;
-            builder = builder
-                .normal_texture(id)
-                .normal_tex_coord(info.tex_coord as u32)
-                .normal_scale(info.scale);
-        }
-
-        if let Some(info) = occlusion_texture {
-            let id = self.get_or_load_texture(info.index, false, resources, encoder)?;
-            builder = builder
-                .occlusion_texture(id)
-                .occlusion_tex_coord(info.tex_coord as u32)
-                .occlusion_strength(info.strength);
-        }
-
-        if let Some(info) = emissive_texture {
-            let id = self.get_or_load_texture(info.index, true, resources, encoder)?;
-            builder = builder
-                .emissive_texture(id)
-                .emissive_tex_coord(info.tex_coord as u32);
-        }
-
-        let id = builder.build(resources).id();
-
-        match index {
-            Some(index) => &mut self.json.materials[index],
-            None => self.default_material.as_mut().unwrap(),
-        }
-        .id = Some(id);
-
-        Ok(id)
-    }
-
-    fn get_or_load_texture(
-        &mut self,
-        index: usize,
-        srgb: bool,
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Id<crate::material::Texture>> {
-        let texture = self
-            .json
-            .textures
-            .get(index)
-            .ok_or(GltfError::InvalidIndex {
-                entity: GltfEntity::Texture,
-                index,
-            })?;
-        if let Some(id) = texture.id {
-            return Ok(id);
-        }
-
-        let name = texture.name.clone();
-        let sampler = texture.sampler;
-        let source = texture
-            .source
-            .ok_or(anyhow!("image.source must be defined"))?;
-
-        let sampler = match sampler {
-            Some(index) => Some(
-                self.json
-                    .samplers
-                    .get_mut(index)
-                    .ok_or(anyhow!("texture.sampler {index} is out of range"))?
-                    .load(resources)
-                    .with_context(|| format!("Failed to load texture.sampler {index}"))?,
-            ),
-            None => None,
-        };
-
-        let source = self
-            .json
-            .images
-            .get_mut(source)
-            .ok_or(anyhow!("texture.image {source} is out of range"))?
-            .load(
-                srgb,
-                &self.parent,
-                &self.json.buffer_views,
-                &self.json.buffers,
-                resources,
-                encoder,
-            )
-            .with_context(|| format!("Failed to load texture.image {source}"))?;
-
-        let id = crate::material::TextureBuilder::default()
-            .name(name)
-            .sampler(sampler)
-            .texture(source)
-            .build(resources)
-            .id();
-        self.json.textures[index].id = Some(id);
         Ok(id)
     }
 
@@ -1693,6 +955,77 @@ struct Accessor {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+impl Accessor {
+    fn get_bytes<'a>(
+        &'a self,
+        buffer_views: &[BufferView],
+        buffers: &'a [Buffer],
+    ) -> anyhow::Result<&'a [u8]> {
+        if self.sparse.is_some() {
+            todo!("sparse accessor support");
+        }
+
+        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
+            "accessor.buffer_view must be defined for dense accessor"
+        ))?;
+        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
+            "accessor.buffer_view {buffer_view_idx} is out of range"
+        ))?;
+
+        let start = buffer_view.byte_offset;
+        let end = start + buffer_view.byte_length;
+
+        Ok(&buffers
+            .get(buffer_view.buffer)
+            .ok_or(anyhow!(
+                "buffer_view.buffer {} is out of range",
+                buffer_view.buffer
+            ))
+            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}"))?
+            .bytes[start..end])
+    }
+
+    fn iter<'a, T: Pod + 'static, const N: usize>(
+        &'a self,
+        buffer_views: &[BufferView],
+        buffers: &'a [Buffer],
+    ) -> anyhow::Result<DenseAccessorIter<'a, T, N>> {
+        if self.sparse.is_some() {
+            todo!("sparse accessor support");
+        }
+
+        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
+            "accessor.buffer_view must be defined for dense accessor"
+        ))?;
+        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
+            "accessor.buffer_view {buffer_view_idx} is out of range"
+        ))?;
+
+        let bytes = &buffers
+            .get(buffer_view.buffer)
+            .ok_or(anyhow!(
+                "buffer_view.buffer {} is out of range",
+                buffer_view.buffer
+            ))
+            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}"))?
+            .bytes;
+
+        let byte_stride = buffer_view
+            .byte_stride
+            .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
+        let start = self.byte_offset + buffer_view.byte_offset;
+        let end = start + self.count * byte_stride;
+
+        Ok(DenseAccessorIter {
+            bytes,
+            start,
+            end,
+            byte_stride,
+            data_type: PhantomData,
+        })
+    }
 }
 
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
@@ -2345,6 +1678,173 @@ struct Material {
     double_sided: bool,
 }
 
+impl Material {
+    fn load(
+        &mut self,
+        parent: &Path,
+        textures: &mut [Texture],
+        samplers: &mut [Sampler],
+        buffer_views: &[BufferView],
+        buffers: &[Buffer],
+        images: &mut [Image],
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> anyhow::Result<Id<crate::material::Material>> {
+        if let Some(id) = self.id {
+            return Ok(id);
+        }
+
+        let pbr = &self.pbr_metallic_roughness;
+
+        let mut builder = crate::material::MaterialBuilder::default()
+            .base_color_factor(pbr.base_color_factor)
+            .metallic_factor(pbr.metallic_factor)
+            .roughness_factor(pbr.roughness_factor)
+            .emissive_factor(self.emissive_factor)
+            .alpha_mode(match self.alpha_mode {
+                AlphaMode::Opaque => crate::material::AlphaMode::Opaque,
+                AlphaMode::Mask => crate::material::AlphaMode::Mask,
+                AlphaMode::Blend => crate::material::AlphaMode::Blend,
+            })
+            .alpha_cutoff(self.alpha_cutoff)
+            .double_sided(self.double_sided);
+
+        if let Some(info) = &pbr.base_color_texture {
+            let id = textures
+                .get_mut(info.index)
+                .ok_or(anyhow!(
+                    "material.base_color_texture {} is out of range",
+                    info.index
+                ))?
+                .load(
+                    true,
+                    parent,
+                    samplers,
+                    images,
+                    buffer_views,
+                    buffers,
+                    resources,
+                    encoder,
+                )
+                .with_context(|| {
+                    format!("Failed to load material.base_color_texture {}", info.index)
+                })?;
+            builder = builder
+                .base_color_texture(id)
+                .base_color_tex_coord(info.tex_coord as u32);
+        }
+
+        if let Some(info) = &pbr.metallic_roughness_texture {
+            let id = textures
+                .get_mut(info.index)
+                .ok_or(anyhow!(
+                    "material.metallic_roughness_texture {} is out of range",
+                    info.index
+                ))?
+                .load(
+                    false,
+                    parent,
+                    samplers,
+                    images,
+                    buffer_views,
+                    buffers,
+                    resources,
+                    encoder,
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to load material.metallic_roughness_texture {}",
+                        info.index
+                    )
+                })?;
+            builder = builder
+                .metallic_roughness_texture(id)
+                .metallic_roughness_tex_coord(info.tex_coord as u32);
+        }
+
+        if let Some(info) = &self.normal_texture {
+            let id = textures
+                .get_mut(info.index)
+                .ok_or(anyhow!(
+                    "material.normal_texture {} is out of range",
+                    info.index
+                ))?
+                .load(
+                    false,
+                    parent,
+                    samplers,
+                    images,
+                    buffer_views,
+                    buffers,
+                    resources,
+                    encoder,
+                )
+                .with_context(|| {
+                    format!("Failed to load material.normal_texture {}", info.index)
+                })?;
+            builder = builder
+                .normal_texture(id)
+                .normal_tex_coord(info.tex_coord as u32)
+                .normal_scale(info.scale);
+        }
+
+        if let Some(info) = &self.occlusion_texture {
+            let id = textures
+                .get_mut(info.index)
+                .ok_or(anyhow!(
+                    "material.occlusion_texture {} is out of range",
+                    info.index
+                ))?
+                .load(
+                    true,
+                    parent,
+                    samplers,
+                    images,
+                    buffer_views,
+                    buffers,
+                    resources,
+                    encoder,
+                )
+                .with_context(|| {
+                    format!("Failed to load material.occlusion_texture {}", info.index)
+                })?;
+            builder = builder
+                .occlusion_texture(id)
+                .occlusion_tex_coord(info.tex_coord as u32)
+                .occlusion_strength(info.strength);
+        }
+
+        if let Some(info) = &self.emissive_texture {
+            let id = textures
+                .get_mut(info.index)
+                .ok_or(anyhow!(
+                    "material.emissive_texture {} is out of range",
+                    info.index
+                ))?
+                .load(
+                    true,
+                    parent,
+                    samplers,
+                    images,
+                    buffer_views,
+                    buffers,
+                    resources,
+                    encoder,
+                )
+                .with_context(|| {
+                    format!("Failed to load material.emissive_texture {}", info.index)
+                })?;
+            builder = builder
+                .emissive_texture(id)
+                .emissive_tex_coord(info.tex_coord as u32);
+        }
+
+        let id = builder.build(resources).id();
+        self.id = Some(id);
+        Ok(id)
+    }
+}
+
 impl Default for Material {
     fn default() -> Self {
         Self {
@@ -2549,6 +2049,754 @@ struct Mesh {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+impl Mesh {
+    fn load(
+        &mut self,
+        parent: &Path,
+        accessors: &[Accessor],
+        materials: &mut [Material],
+        default_material: &mut Option<Id<crate::material::Material>>,
+        textures: &mut [Texture],
+        samplers: &mut [Sampler],
+        images: &mut [Image],
+        buffer_views: &[BufferView],
+        buffers: &[Buffer],
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> anyhow::Result<Id<crate::mesh::Mesh>> {
+        if let Some(id) = self.id {
+            return Ok(id);
+        }
+
+        let name = self.name.clone();
+        let mut primitives = Vec::with_capacity(self.primitives.len());
+        for (idx, primitive) in self.primitives.iter().enumerate() {
+            if let Some(position) = primitive.attributes.position {
+                let material = match primitive.material {
+                    Some(index) => materials
+                        .get_mut(index)
+                        .ok_or(anyhow!("mesh.primitive.material {index} is out of range"))?
+                        .load(
+                            parent,
+                            textures,
+                            samplers,
+                            buffer_views,
+                            buffers,
+                            images,
+                            resources,
+                            encoder,
+                        )
+                        .with_context(|| {
+                            format!("Failed to load mesh.primitive.material {index}")
+                        })?,
+                    None => match default_material {
+                        Some(id) => *id,
+                        None => {
+                            let id = Material::default()
+                                .load(
+                                    parent,
+                                    textures,
+                                    samplers,
+                                    buffer_views,
+                                    buffers,
+                                    images,
+                                    resources,
+                                    encoder,
+                                )
+                                .context("Failed to load default material")?;
+                            *default_material = Some(id);
+                            id
+                        }
+                    },
+                };
+
+                let topology = match primitive.mode {
+                    PrimitiveMode::Points => wgpu::PrimitiveTopology::PointList,
+                    PrimitiveMode::LineStrip => wgpu::PrimitiveTopology::LineStrip,
+                    PrimitiveMode::Lines => wgpu::PrimitiveTopology::LineList,
+                    PrimitiveMode::Triangles => wgpu::PrimitiveTopology::TriangleList,
+                    PrimitiveMode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
+                    mode => bail!("primitive topology type {mode} is not supported"),
+                };
+                let mut builder = GeometryBuilder::default().topology(topology);
+
+                if let Some(normal_tex_coord) = resources.materials[material].normal_tex_coord() {
+                    builder = builder.normal_tex_coord(normal_tex_coord);
+                }
+
+                {
+                    let accessor = accessors.get(position).ok_or_else(|| {
+                        anyhow!(
+                            "mesh.primitives[{idx}].attributes.position {position} is out of range"
+                        )
+                    })?;
+
+                    let ctx = || {
+                        format!(
+                            "Failed to load mesh.primitives[{idx}].attributes.position {position}"
+                        )
+                    };
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
+                            .positions(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec3::from_array),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Position,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                if let Some(normal) = primitive.attributes.normal {
+                    let accessor = accessors.get(normal).ok_or_else(|| {
+                        anyhow!("mesh.primitives[{idx}].attributes.normal {normal} is out of range")
+                    })?;
+
+                    let ctx = || {
+                        format!("Failed to load mesh.primitives[{idx}].attributes.normal {normal}")
+                    };
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
+                            .normals(
+                                accessor
+                                    .iter::<f32, 3>(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec3::from_array),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Normal,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                if let Some(tangent) = primitive.attributes.tangent {
+                    let accessor = accessors.get(tangent).ok_or_else(|| {
+                        anyhow!(
+                            "mesh.primitives[{idx}].attributes.tangent {tangent} is out of range"
+                        )
+                    })?;
+
+                    let ctx = || {
+                        format!(
+                            "Failed to load mesh.primitives[{idx}].attributes.tangent {tangent}"
+                        )
+                    };
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
+                            .tangents(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec4::from_array),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Tangent,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                for (tex_coord_idx, tex_coord) in [
+                    primitive.attributes.tex_coord_0,
+                    primitive.attributes.tex_coord_1,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    if let Some(tex_coord) = tex_coord {
+                        let accessor =accessors
+                                .get(tex_coord).ok_or_else(|| {
+                        anyhow!("mesh.primitives[{idx}].attributes.tex_coord_{tex_coord_idx} {tex_coord} is out of range")
+                    })?;
+
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].attributes.tex_coord_{tex_coord_idx} {tex_coord}"
+                            )
+                        };
+                        builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
+                                    builder.tex_coords(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec2::from_array),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.tex_coords(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(u8x2_to_vec2),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec2,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.tex_coords(
+                                    accessor
+                                        .iter(buffer_views, buffers)
+                                        .with_context(ctx)?
+                                        .map(u16x2_to_vec2),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::TexCoord,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
+                    }
+                }
+
+                if let Some(color) = primitive.attributes.color_0 {
+                    let accessor = accessors.get(color).ok_or_else(|| {
+                        anyhow!("mesh.primitives[{idx}].attributes.color_0 {color} is out of range")
+                    })?;
+
+                    let ctx = || {
+                        format!("Failed to load mesh.primitives[{idx}].attributes.color_0 {color}")
+                    };
+
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
+                            .colors(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec3::from_array)
+                                    .map(|v| v.extend(1.0)),
+                            ),
+                        (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => builder
+                            .colors(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u8x3_to_vec3)
+                                    .map(|v| v.extend(1.0)),
+                            ),
+                        (AccessorType::Vec3, AccessorComponentType::UnsignedShort, true) => builder
+                            .colors(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u16x3_to_vec3)
+                                    .map(|v| v.extend(1.0)),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
+                            .colors(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec4::from_array),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
+                            .colors(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u8x4_to_vec4),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
+                            .colors(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u16x4_to_vec4),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Color,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                if let Some(joints) = primitive.attributes.joints_0 {
+                    let accessor = accessors.get(joints).ok_or_else(|| {
+                        anyhow!(
+                            "mesh.primitives[{idx}].attributes.joints_0 {joints} is out of range"
+                        )
+                    })?;
+
+                    let ctx = || {
+                        format!(
+                            "Failed to load mesh.primitives[{idx}].attributes.joints_0 {joints}"
+                        )
+                    };
+
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, false) => builder
+                            .joints(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u8x4_to_uvec4),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, false) => {
+                            builder.joints(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u16x4_to_uvec4),
+                            )
+                        }
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Joints,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                if let Some(weights) = primitive.attributes.weights_0 {
+                    let accessor = accessors.get(weights).ok_or_else(|| {
+                        anyhow!(
+                            "mesh.primitives[{idx}].attributes.weights_0 {weights} is out of range"
+                        )
+                    })?;
+
+                    let ctx = || {
+                        format!(
+                            "Failed to load mesh.primitives[{idx}].attributes.weights_0 {weights}"
+                        )
+                    };
+
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
+                            .weights(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec4::from_array),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
+                            .weights(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u8x4_to_vec4),
+                            ),
+                        (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
+                            .weights(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u16x4_to_vec4),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Weights,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                for (target_idx, morph_target) in primitive.targets.iter().enumerate() {
+                    let mut target_builder = MorphTargetBuilder::new();
+
+                    if let Some(position) = morph_target.position {
+                        let accessor = accessors.get(position).ok_or_else(|| {
+                            anyhow!(
+                                "mesh.primitives[{idx}].targets[{target_idx}].position {position} is out of range"
+                            )
+                        })?;
+
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].targets[{target_idx}].position {position}"
+                            )
+                        };
+
+                        target_builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    target_builder.positions(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec3::from_array),
+                                    )
+                                }
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetPosition,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
+                    }
+
+                    if let Some(normal) = morph_target.normal {
+                        let accessor = accessors.get(normal).ok_or_else(|| {
+                            anyhow!(
+                                "mesh.primitives[{idx}].targets[{target_idx}].normal {normal} is out of range"
+                            )
+                        })?;
+
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].targets[{target_idx}].normal {normal}"
+                            )
+                        };
+
+                        target_builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    target_builder.normals(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec3::from_array),
+                                    )
+                                }
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetNormal,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
+                    }
+
+                    if let Some(tangent) = morph_target.tangent {
+                        let accessor = accessors.get(tangent).ok_or_else(|| {
+                            anyhow!(
+                                "mesh.primitives[{idx}].targets[{target_idx}].tangent {tangent} is out of range"
+                            )
+                        })?;
+
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].targets[{target_idx}].tangent {tangent}"
+                            )
+                        };
+
+                        target_builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    target_builder.tangents(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec3::from_array),
+                                    )
+                                }
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetTangent,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
+                    }
+
+                    for (tex_coord_idx, tex_coord) in
+                        [morph_target.tex_coord_0, morph_target.tex_coord_1]
+                            .into_iter()
+                            .enumerate()
+                    {
+                        if let Some(tex_coord) = tex_coord {
+                            let accessor = accessors.get(tex_coord).ok_or_else(|| {
+                            anyhow!(
+                                "mesh.primitives[{idx}].targets[{target_idx}].tex_coord_{tex_coord_idx} {tex_coord} is out of range"
+                            )
+                        })?;
+
+                            let ctx = || {
+                                format!(
+                                    "Failed to load mesh.primitives[{idx}].targets[{target_idx}].tex_coord_{tex_coord_idx} {tex_coord}"
+                                )
+                            };
+
+                            target_builder = match (
+                                accessor.type_,
+                                accessor.component_type,
+                                accessor.normalized,
+                            ) {
+                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
+                                    target_builder.tex_coords(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec2::from_array),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::Byte, true) => {
+                                    target_builder.tex_coords(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i8x2_to_vec2),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::Short, true) => {
+                                    target_builder.tex_coords(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i16x2_to_vec2),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
+                                    target_builder.tex_coords(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(u8x2_to_vec2),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec2,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => target_builder.tex_coords(
+                                    accessor
+                                        .iter(buffer_views, buffers)
+                                        .with_context(ctx)?
+                                        .map(u16x2_to_vec2),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetTexCoord,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
+                        }
+                    }
+
+                    if let Some(color) = morph_target.color_0 {
+                        let accessor = accessors.get(color).ok_or_else(|| {
+                            anyhow!(
+                                "mesh.primitives[{idx}].targets[{target_idx}].color_0 {color} is out of range"
+                            )
+                        })?;
+
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].targets[{target_idx}].color_0 {color}"
+                            )
+                        };
+
+                        builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec3, AccessorComponentType::Float, false) => {
+                                    builder.colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec3::from_array)
+                                            .map(|v| v.extend(1.0)),
+                                    )
+                                }
+                                (AccessorType::Vec3, AccessorComponentType::Byte, true) => builder
+                                    .colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i8x3_to_vec3)
+                                            .map(|v| v.extend(1.0)),
+                                    ),
+                                (AccessorType::Vec3, AccessorComponentType::Short, true) => builder
+                                    .colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i16x3_to_vec3)
+                                            .map(|v| v.extend(1.0)),
+                                    ),
+                                (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(u8x3_to_vec3)
+                                            .map(|v| v.extend(1.0)),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec3,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.colors(
+                                    accessor
+                                        .iter(buffer_views, buffers)
+                                        .with_context(ctx)?
+                                        .map(u16x3_to_vec3)
+                                        .map(|v| v.extend(1.0)),
+                                ),
+                                (AccessorType::Vec4, AccessorComponentType::Float, false) => {
+                                    builder.colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec4::from_array),
+                                    )
+                                }
+                                (AccessorType::Vec4, AccessorComponentType::Byte, true) => builder
+                                    .colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i8x4_to_vec4),
+                                    ),
+                                (AccessorType::Vec4, AccessorComponentType::Short, true) => builder
+                                    .colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i16x4_to_vec4),
+                                    ),
+                                (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.colors(
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(u8x4_to_vec4),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec4,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.colors(
+                                    accessor
+                                        .iter(buffer_views, buffers)
+                                        .with_context(ctx)?
+                                        .map(u16x4_to_vec4),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetColor,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
+                    }
+
+                    builder = builder.morph_target(target_builder);
+                }
+
+                if let Some(indices) = primitive.indices {
+                    let accessor = accessors.get(indices).ok_or_else(|| {
+                        anyhow!("mesh.primitives[{idx}].indices {indices} is out of range")
+                    })?;
+
+                    let ctx = || format!("Failed to load mesh.primitives[{idx}].indices {indices}");
+
+                    let bytes = accessor
+                        .get_bytes(buffer_views, buffers)
+                        .with_context(ctx)?;
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
+                            let indices: &[u8] = cast_slice(bytes);
+                            builder.indices_u16(
+                                indices.into_iter().map(|index| *index as u16).collect(),
+                            )
+                        }
+                        (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
+                            builder.indices_u16(Cow::Borrowed(cast_slice(bytes)))
+                        }
+                        (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
+                            builder.indices_u32(Cow::Borrowed(cast_slice(bytes)))
+                        }
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::Indices,
+                            })
+                            .with_context(ctx);
+                        }
+                    }
+                }
+
+                let geometry = builder.build(resources, encoder).id();
+                primitives.push((geometry, material));
+            }
+        }
+
+        let id = resources
+            .mesh_builder()
+            .name(name)
+            .primitives(primitives)
+            .build()
+            .id();
+
+        self.id = Some(id);
+
+        Ok(id)
+    }
 }
 
 /// Geometry to be rendered with the given material.
@@ -3007,6 +3255,54 @@ struct Texture {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+impl Texture {
+    fn load(
+        &mut self,
+        srgb: bool,
+        parent: &Path,
+        samplers: &mut [Sampler],
+        images: &mut [Image],
+        buffer_views: &[BufferView],
+        buffers: &[Buffer],
+        resources: &mut Resources,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> anyhow::Result<Id<crate::material::Texture>> {
+        if let Some(id) = self.id {
+            return Ok(id);
+        }
+
+        let name = self.name.clone();
+        let sampler = self.sampler;
+        let source = self.source.ok_or(anyhow!("image.source must be defined"))?;
+
+        let sampler = match sampler {
+            Some(index) => Some(
+                samplers
+                    .get_mut(index)
+                    .ok_or(anyhow!("texture.sampler {index} is out of range"))?
+                    .load(resources)
+                    .with_context(|| format!("Failed to load texture.sampler {index}"))?,
+            ),
+            None => None,
+        };
+
+        let source = images
+            .get_mut(source)
+            .ok_or(anyhow!("texture.image {source} is out of range"))?
+            .load(srgb, parent, buffer_views, buffers, resources, encoder)
+            .with_context(|| format!("Failed to load texture.image {source}"))?;
+
+        let id = crate::material::TextureBuilder::default()
+            .name(name)
+            .sampler(sampler)
+            .texture(source)
+            .build(resources)
+            .id();
+        self.id = Some(id);
+        Ok(id)
+    }
 }
 
 fn is_0(value: &usize) -> bool {

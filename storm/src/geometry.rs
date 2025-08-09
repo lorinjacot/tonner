@@ -80,8 +80,7 @@ pub(super) enum Indices {
 }
 
 #[must_use]
-pub struct GeometryBuilder<'a, 'r> {
-    resources: &'r mut Resources,
+pub struct GeometryBuilder<'a> {
     indices: IndicesSlices<'a>,
     attributes: MorphTargetBuilder<'a>,
     normal_tex_coord: Option<u32>,
@@ -89,27 +88,7 @@ pub struct GeometryBuilder<'a, 'r> {
     topology: wgpu::PrimitiveTopology,
 }
 
-impl<'a, 'r> GeometryBuilder<'a, 'r> {
-    pub fn new(resources: &'r mut Resources) -> Self {
-        Self {
-            resources,
-            indices: IndicesSlices::None,
-            attributes: MorphTargetBuilder {
-                positions: None,
-                normals: None,
-                tangents: None,
-                tex_coords_0: None,
-                tex_coords_1: None,
-                colors_0: None,
-                joints_0: None,
-                weights_0: None,
-            },
-            normal_tex_coord: None,
-            targets: Vec::new(),
-            topology: wgpu::PrimitiveTopology::TriangleList,
-        }
-    }
-
+impl<'a> GeometryBuilder<'a> {
     pub fn indices_u16(mut self, indices: Cow<'a, [u16]>) -> Self {
         self.indices = IndicesSlices::U16(indices);
         self
@@ -260,7 +239,11 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             .tex_coords(uvs)
     }
 
-    pub fn build(mut self, _encoder: &mut wgpu::CommandEncoder) -> &'r mut Geometry {
+    pub fn build<'r>(
+        mut self,
+        resources: &'r mut Resources,
+        _encoder: &mut wgpu::CommandEncoder,
+    ) -> &'r mut Geometry {
         let (has_normal, generate_normals) = match self.topology {
             wgpu::PrimitiveTopology::PointList
             | wgpu::PrimitiveTopology::LineList
@@ -431,15 +414,12 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let attributes_size = (vertex_count * (1 + morph_target_count) * size_of::<Attribute>())
             as wgpu::BufferAddress;
 
-        let attributes_buffer = self
-            .resources
-            .device
-            .create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Geometry storage buffer"),
-                size: header_size + attributes_size,
-                usage: wgpu::BufferUsages::STORAGE,
-                mapped_at_creation: true,
-            });
+        let attributes_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Geometry storage buffer"),
+            size: header_size + attributes_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
 
         attributes_buffer
             .slice(..header_size)
@@ -469,7 +449,7 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
         let indices = match indices {
             Some((contents, format, index_count)) => {
                 let buffer =
-                    self.resources
+                    resources
                         .device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("Geometry index buffer"),
@@ -487,20 +467,19 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             },
         };
 
-        let bind_group = self
-            .resources
+        let bind_group = resources
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Geometry bind group"),
-                layout: &self.resources.geometry_builder_data.bind_group_layout,
+                layout: &resources.geometry_builder_data.bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
                     resource: attributes_buffer.as_entire_binding(),
                 }],
             });
 
-        let id = self.resources.geometries.next_id();
-        self.resources.geometries.insert(Geometry {
+        let id = resources.geometries.next_id();
+        resources.geometries.insert(Geometry {
             id,
             indices,
             attributes_buffer,
@@ -511,6 +490,27 @@ impl<'a, 'r> GeometryBuilder<'a, 'r> {
             has_tangents,
             topology: self.topology,
         })
+    }
+}
+
+impl<'a> Default for GeometryBuilder<'a> {
+    fn default() -> Self {
+        Self {
+            indices: IndicesSlices::None,
+            attributes: MorphTargetBuilder {
+                positions: None,
+                normals: None,
+                tangents: None,
+                tex_coords_0: None,
+                tex_coords_1: None,
+                colors_0: None,
+                joints_0: None,
+                weights_0: None,
+            },
+            normal_tex_coord: None,
+            targets: Vec::new(),
+            topology: wgpu::PrimitiveTopology::TriangleList,
+        }
     }
 }
 

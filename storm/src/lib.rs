@@ -580,10 +580,6 @@ impl Resources {
         }
     }
 
-    pub fn geometry_builder(&mut self) -> geometry::GeometryBuilder {
-        geometry::GeometryBuilder::new(self)
-    }
-
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {
         mesh::MeshBuilder::new(self)
     }

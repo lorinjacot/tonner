@@ -90,6 +90,7 @@ impl TextureBuilder {
 pub struct Material {
     id: Id<Self>,
     layout: MaterialLayout,
+    normal_tex_coord: Option<u32>,
     bind_group: wgpu::BindGroup,
 }
 
@@ -112,6 +113,10 @@ impl Material {
 
     pub fn has_normal_texture(&self) -> bool {
         self.layout.textures.contains(Textures::NORMAL)
+    }
+
+    pub fn normal_tex_coord(&self) -> Option<u32> {
+        self.normal_tex_coord
     }
 
     pub fn alpha_mode(&self) -> AlphaMode {
@@ -346,6 +351,7 @@ impl MaterialBuilder {
         let id = manager.materials.next_id();
         manager.materials.insert(Material {
             id,
+            normal_tex_coord: self.normal_texture.map(|_| self.uniform.normal_tex_coord),
             bind_group,
             layout: self.layout,
         })

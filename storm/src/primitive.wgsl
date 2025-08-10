@@ -133,7 +133,7 @@ fn vs_main(
             cross(mat_x, mat_y),
         );
 
-        result.world_normal = normal_matrix * attributes.normal;
+        result.world_normal = normal_matrix * determinant(model_matrix) * attributes.normal;
         if has_normal_texture {
             result.world_tangent = vec4(normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
         }

@@ -318,7 +318,7 @@ impl<'a> GeometryBuilder<'a> {
         }));
         vertex_count = attributes.len();
         assert!(
-            self.targets.len() < MAX_MORPH_TARGET_COUNT,
+            self.targets.len() <= MAX_MORPH_TARGET_COUNT,
             "Too many morph target"
         );
         for target in self.targets {

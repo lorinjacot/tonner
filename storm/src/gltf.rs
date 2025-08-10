@@ -334,6 +334,17 @@ pub enum AccessorComponentType {
     Float = 5126,
 }
 
+impl AccessorComponentType {
+    /// Size of the described type in bytes.
+    fn size(&self) -> usize {
+        match self {
+            Self::Byte | Self::UnsignedByte => 1,
+            Self::Short | Self::UnsignedShort => 2,
+            Self::Float | Self::UnsignedInt => 4,
+        }
+    }
+}
+
 impl Display for AccessorComponentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -370,6 +381,21 @@ pub enum AccessorType {
 
     #[serde(rename = "MAT4")]
     Mat4,
+}
+
+impl AccessorType {
+    /// Dimension (e.g. number of components) of the described type.
+    fn dim(&self) -> usize {
+        match self {
+            Self::Scalar => 1,
+            Self::Vec2 => 2,
+            Self::Vec3 => 3,
+            Self::Vec4 => 4,
+            Self::Mat2 => 2 * 2,
+            Self::Mat3 => 3 * 3,
+            Self::Mat4 => 4 * 4,
+        }
+    }
 }
 
 impl Display for AccessorType {

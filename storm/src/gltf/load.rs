@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
 use data_url::{DataUrl, DataUrlError};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
@@ -18,8 +18,8 @@ use crate::{
     DenseEntry, Id, Resources,
     geometry::{GeometryBuilder, MorphTargetBuilder},
     gltf::{
-        AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError,
-        GltfEntity, GltfError,
+        AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError, GltfEntity,
+        GltfError,
     },
     scene::animation,
 };
@@ -82,7 +82,7 @@ impl super::GltfAsset {
             serde_json::from_str(&json)?
         };
 
-        for buffer in &mut json.buffers {
+        for (idx, buffer) in json.buffers.iter_mut().enumerate() {
             if let Some(uri) = &buffer.uri {
                 let path = parent.join(uri);
 
@@ -90,6 +90,11 @@ impl super::GltfAsset {
                 let mut file = File::open(&path).with_context(read_failed_ctx)?;
                 file.read_to_end(&mut buffer.bytes)
                     .with_context(read_failed_ctx)?;
+                if buffer.bytes.len() < buffer.byte_length {
+                    return Err(
+                        anyhow!("the byte lenght of the referenced resource must be greater than or equal to the buffer.byte_length property")
+                    ).with_context(|| format!("Failed to load buffer {idx}"));
+                }
             }
         }
 
@@ -204,7 +209,9 @@ impl super::GltfAsset {
                 let interpolation = match sampler.interpolation {
                     super::AnimationInterpolation::Step => animation::Interpolation::Step,
                     super::AnimationInterpolation::Linear => animation::Interpolation::Linear,
-                    super::AnimationInterpolation::Cubicspline => animation::Interpolation::CubicSpline,
+                    super::AnimationInterpolation::Cubicspline => {
+                        animation::Interpolation::CubicSpline
+                    }
                 };
                 let accessor =
                     self.json
@@ -554,10 +561,32 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
             None
         }
     }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let next_end = self.start + n * self.byte_stride + size_of::<[T; N]>();
+        if next_end <= self.end {
+            let next = from_bytes(&self.bytes[self.start..next_end]);
+            self.start += (n + 1) * self.byte_stride;
+            Some(next)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<'a, T: Pod + 'static, const N: usize> ExactSizeIterator for DenseAccessorIter<'a, T, N> {
+    fn len(&self) -> usize {
+        (self.end - self.start) / self.byte_stride
+    }
 }
 
 impl super::Accessor {
-    fn get_bytes<'a>(
+    fn bytes<'a>(
         &'a self,
         buffer_views: &[super::BufferView],
         buffers: &'a [super::Buffer],
@@ -573,17 +602,20 @@ impl super::Accessor {
             "accessor.buffer_view {buffer_view_idx} is out of range"
         ))?;
 
-        let start = buffer_view.byte_offset;
-        let end = start + buffer_view.byte_length;
+        let start = self.byte_offset;
+        let stride = self.type_.dim() * self.component_type.size();
+        let end = start + self.count * stride;
 
-        Ok(&buffers
-            .get(buffer_view.buffer)
-            .ok_or(anyhow!(
-                "buffer_view.buffer {} is out of range",
-                buffer_view.buffer
-            ))
-            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}"))?
-            .bytes[start..end])
+        if let Some(byte_stride) = buffer_view.byte_stride {
+            ensure!(byte_stride.get() == stride, "data must be tightly packed");
+        }
+        ensure!(end <= buffer_view.byte_length);
+
+        buffer_view
+            .bytes(buffers)
+            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?
+            .get(start..end)
+            .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
     }
 
     fn iter<'a, T: Pod + 'static, const N: usize>(
@@ -602,20 +634,20 @@ impl super::Accessor {
             "accessor.buffer_view {buffer_view_idx} is out of range"
         ))?;
 
-        let bytes = &buffers
-            .get(buffer_view.buffer)
-            .ok_or(anyhow!(
-                "buffer_view.buffer {} is out of range",
-                buffer_view.buffer
-            ))
-            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}"))?
-            .bytes;
+        let bytes = buffer_view
+            .bytes(buffers)
+            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?;
 
         let byte_stride = buffer_view
             .byte_stride
             .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
-        let start = self.byte_offset + buffer_view.byte_offset;
+        let start = self.byte_offset;
         let end = start + self.count * byte_stride;
+
+        ensure!(
+            end <= buffer_view.byte_length,
+            "accessor.buffer_view {buffer_view_idx} is too short"
+        );
 
         Ok(DenseAccessorIter {
             bytes,
@@ -624,6 +656,22 @@ impl super::Accessor {
             byte_stride,
             data_type: PhantomData,
         })
+    }
+}
+
+impl super::BufferView {
+    fn bytes<'a>(&self, buffers: &'a [super::Buffer]) -> Result<&'a [u8]> {
+        let buffer = buffers
+            .get(self.buffer)
+            .ok_or_else(|| anyhow!("buffer_view.buffer {} is out of range", self.buffer))?;
+
+        let start = self.byte_offset;
+        let end = start + self.byte_length;
+
+        buffer
+            .bytes
+            .get(start..end)
+            .with_context(|| format!("buffer_view.buffer {} is too short", self.buffer))
     }
 }
 
@@ -1573,9 +1621,7 @@ impl super::Mesh {
 
                     let ctx = || format!("Failed to load mesh.primitives[{idx}].indices {indices}");
 
-                    let bytes = accessor
-                        .get_bytes(buffer_views, buffers)
-                        .with_context(ctx)?;
+                    let bytes = accessor.bytes(buffer_views, buffers).with_context(ctx)?;
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
                             let indices: &[u8] = cast_slice(bytes);

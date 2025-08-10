@@ -18,14 +18,13 @@ use crate::{
     DenseEntry, Id, Resources,
     geometry::{GeometryBuilder, MorphTargetBuilder},
     gltf::{
-        AccessorComponentType, AccessorType, AccessorUsage, AnimationInterpolation,
-        AnimationTargetPath, BIN, GLB_HEADER_SIZE, GLTF, GlbChunk, GlbError, Gltf, GltfAsset,
-        GltfEntity, GltfError, ImageMimeType, JSON,
+        AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError,
+        GltfEntity, GltfError,
     },
     scene::animation,
 };
 
-impl GltfAsset {
+impl super::GltfAsset {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let read_failed_ctx = || format!("Failed to read asset from {path:?}");
@@ -39,7 +38,7 @@ impl GltfAsset {
         let mut magic: u32 = 0;
         file.read_exact(bytes_of_mut(&mut magic))
             .with_context(read_failed_ctx)?;
-        let mut json = if magic == GLTF {
+        let mut json = if magic == super::GLTF {
             let mut reader = BufReader::new(file);
 
             let mut version: u32 = 0;
@@ -54,19 +53,19 @@ impl GltfAsset {
             reader
                 .read_exact(bytes_of_mut(&mut length))
                 .with_context(read_failed_ctx)?;
-            length -= GLB_HEADER_SIZE;
+            length -= super::GLB_HEADER_SIZE;
             let mut reader = reader.take(length as u64);
 
             let json = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
-            if json.chunk_type != JSON {
+            if json.chunk_type != super::JSON {
                 return Err(GlbError::JsonChunkMissing.into());
             }
-            let mut json: Gltf = serde_json::from_slice(&json.chunk_data)?;
+            let mut json: super::Gltf = serde_json::from_slice(&json.chunk_data)?;
 
             if let Some(buffer) = json.buffers.first_mut() {
                 if buffer.uri.is_none() {
                     let bin = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
-                    if bin.chunk_type != BIN {
+                    if bin.chunk_type != super::BIN {
                         return Err(GlbError::BinChunkMissing.into());
                     }
                     buffer.bytes = bin.chunk_data;
@@ -203,9 +202,9 @@ impl GltfAsset {
                     .map(|t| t[0])
                     .collect();
                 let interpolation = match sampler.interpolation {
-                    AnimationInterpolation::Step => animation::Interpolation::Step,
-                    AnimationInterpolation::Linear => animation::Interpolation::Linear,
-                    AnimationInterpolation::Cubicspline => animation::Interpolation::CubicSpline,
+                    super::AnimationInterpolation::Step => animation::Interpolation::Step,
+                    super::AnimationInterpolation::Linear => animation::Interpolation::Linear,
+                    super::AnimationInterpolation::Cubicspline => animation::Interpolation::CubicSpline,
                 };
                 let accessor =
                     self.json
@@ -222,7 +221,7 @@ impl GltfAsset {
                     accessor.normalized,
                 ) {
                     (
-                        AnimationTargetPath::Translation,
+                        super::AnimationTargetPath::Translation,
                         AccessorType::Vec3,
                         AccessorComponentType::Float,
                         false,
@@ -232,7 +231,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Rotation,
+                        super::AnimationTargetPath::Rotation,
                         AccessorType::Vec4,
                         AccessorComponentType::Float,
                         false,
@@ -242,7 +241,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Rotation,
+                        super::AnimationTargetPath::Rotation,
                         AccessorType::Vec4,
                         AccessorComponentType::Byte,
                         true,
@@ -252,7 +251,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Rotation,
+                        super::AnimationTargetPath::Rotation,
                         AccessorType::Vec4,
                         AccessorComponentType::UnsignedByte,
                         true,
@@ -262,7 +261,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Rotation,
+                        super::AnimationTargetPath::Rotation,
                         AccessorType::Vec4,
                         AccessorComponentType::Short,
                         true,
@@ -272,7 +271,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Rotation,
+                        super::AnimationTargetPath::Rotation,
                         AccessorType::Vec4,
                         AccessorComponentType::UnsignedShort,
                         true,
@@ -282,7 +281,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Scale,
+                        super::AnimationTargetPath::Scale,
                         AccessorType::Vec3,
                         AccessorComponentType::Float,
                         false,
@@ -292,7 +291,7 @@ impl GltfAsset {
                             .collect(),
                     ),
                     (
-                        AnimationTargetPath::Weights,
+                        super::AnimationTargetPath::Weights,
                         AccessorType::Scalar,
                         AccessorComponentType::Float,
                         false,
@@ -303,7 +302,7 @@ impl GltfAsset {
                         morph_targets_count,
                     ),
                     (
-                        AnimationTargetPath::Weights,
+                        super::AnimationTargetPath::Weights,
                         AccessorType::Scalar,
                         AccessorComponentType::Byte,
                         true,
@@ -314,7 +313,7 @@ impl GltfAsset {
                         morph_targets_count,
                     ),
                     (
-                        AnimationTargetPath::Weights,
+                        super::AnimationTargetPath::Weights,
                         AccessorType::Scalar,
                         AccessorComponentType::UnsignedByte,
                         true,
@@ -325,7 +324,7 @@ impl GltfAsset {
                         morph_targets_count,
                     ),
                     (
-                        AnimationTargetPath::Weights,
+                        super::AnimationTargetPath::Weights,
                         AccessorType::Scalar,
                         AccessorComponentType::Short,
                         true,
@@ -336,7 +335,7 @@ impl GltfAsset {
                         morph_targets_count,
                     ),
                     (
-                        AnimationTargetPath::Weights,
+                        super::AnimationTargetPath::Weights,
                         AccessorType::Scalar,
                         AccessorComponentType::UnsignedShort,
                         true,
@@ -673,9 +672,9 @@ impl super::Image {
                 "one of image.uri or image.buffer_view must be defined'"
             ))?;
             let format = match self.mime_type {
-                ImageMimeType::ImageJpeg => ImageFormat::Jpeg,
-                ImageMimeType::ImagePng => ImageFormat::Png,
-                ImageMimeType::None => anyhow::bail!(
+                super::ImageMimeType::ImageJpeg => ImageFormat::Jpeg,
+                super::ImageMimeType::ImagePng => ImageFormat::Png,
+                super::ImageMimeType::None => anyhow::bail!(
                     "image.mime_type must be defined when image.buffer_view is defined"
                 ),
             };

@@ -1073,9 +1073,8 @@ impl super::Mesh {
                 })?;
 
                 let normal_tex_coord = resources.materials[material].normal_tex_coord();
-                let mut builder =
-                    GeometryBuilder::new(accessor.count, primitive.targets.len(), resources)
-                        .topology(topology);
+                let mut builder = GeometryBuilder::new(accessor.count, primitive.targets.len())
+                    .topology(topology);
 
                 if let Some(normal_tex_coord) = normal_tex_coord {
                     builder = builder.normal_tex_coord(normal_tex_coord);
@@ -1822,13 +1821,13 @@ impl super::Mesh {
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
                             let indices: Vec<_> = bytes.iter().map(|index| *index as u16).collect();
-                            builder.indices_u16(&indices)
+                            builder.indices_u16(&indices, resources)
                         }
                         (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
-                            builder.indices_u16(cast_slice(bytes))
+                            builder.indices_u16(cast_slice(bytes), resources)
                         }
                         (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
-                            builder.indices_u32(cast_slice(bytes))
+                            builder.indices_u32(cast_slice(bytes), resources)
                         }
                         (accessor_type, component_type, normalized) => {
                             return Err(GltfError::InvalidAccessorDataType {
@@ -1842,7 +1841,7 @@ impl super::Mesh {
                     }
                 }
 
-                let geometry = builder.build(encoder).id();
+                let geometry = builder.build(resources, encoder).id();
                 primitives.push((geometry, material));
             }
         }

@@ -129,6 +129,10 @@ impl<'r> MeshBuilder<'r> {
 
                 let mut constants = HashMap::with_capacity(3);
                 constants.insert(
+                    "attribute_flags".to_string(),
+                    geometry.attribute_flags().bits() as f64,
+                );
+                constants.insert(
                     "has_base_color_texture".to_string(),
                     bool_to_f64(material.has_base_color_texture()),
                 );
@@ -147,10 +151,6 @@ impl<'r> MeshBuilder<'r> {
                 constants.insert(
                     "has_emissive_texture".to_string(),
                     bool_to_f64(material.has_emissive_texture()),
-                );
-                constants.insert(
-                    "has_normal".to_string(),
-                    geometry.has_normal() as u32 as f64,
                 );
                 constants.insert(
                     "alpha_mode".to_string(),

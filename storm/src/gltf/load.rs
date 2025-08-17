@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     fs::File,
     io::{BufReader, Cursor, Read, Seek},
     marker::PhantomData,
@@ -16,7 +15,7 @@ use image::{ImageFormat, ImageReader};
 use super::transforms::*;
 use crate::{
     DenseEntry, Id, Resources,
-    geometry::{GeometryBuilder, MorphTargetBuilder},
+    geometry::GeometryBuilder,
     gltf::{
         AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError, GltfEntity,
         GltfError,
@@ -466,7 +465,7 @@ impl super::GltfAsset {
     fn accessor_iter<T: Pod + 'static, const N: usize>(
         &self,
         index: usize,
-    ) -> Result<DenseAccessorIter<'_, T, N>> {
+    ) -> Result<TypedDenseAccessorIter<'_, T, N>> {
         let accessor = self
             .json
             .accessors
@@ -501,7 +500,7 @@ impl super::GltfAsset {
         let start = accessor.byte_offset + buffer_view.byte_offset;
         let end = start + accessor.count * byte_stride;
 
-        Ok(DenseAccessorIter {
+        Ok(TypedDenseAccessorIter {
             bytes,
             start,
             end,
@@ -540,7 +539,52 @@ impl GlbChunk {
     }
 }
 
-struct DenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
+struct DenseAccessorIter<'a> {
+    bytes: &'a [u8],
+    start: usize,
+    end: usize,
+    size: usize,
+    byte_stride: usize,
+}
+
+impl<'a> Iterator for DenseAccessorIter<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_end = self.start + self.size;
+        if next_end <= self.end {
+            let next = &self.bytes[self.start..next_end];
+            self.start += self.byte_stride;
+            Some(next)
+        } else {
+            None
+        }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let next_end = self.start + n * self.byte_stride + self.size;
+        if next_end <= self.end {
+            let next = &self.bytes[self.start..next_end];
+            self.start += (n + 1) * self.byte_stride;
+            Some(next)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<'a> ExactSizeIterator for DenseAccessorIter<'a> {
+    fn len(&self) -> usize {
+        (self.end - self.start) / self.byte_stride
+    }
+}
+
+struct TypedDenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
     bytes: &'a [u8],
     start: usize,
     end: usize,
@@ -548,7 +592,7 @@ struct DenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
     data_type: PhantomData<[T; N]>,
 }
 
-impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T, N> {
+impl<'a, T: Pod + 'static, const N: usize> Iterator for TypedDenseAccessorIter<'a, T, N> {
     type Item = &'a [T; N];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -579,21 +623,19 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
     }
 }
 
-impl<'a, T: Pod + 'static, const N: usize> ExactSizeIterator for DenseAccessorIter<'a, T, N> {
+impl<'a, T: Pod + 'static, const N: usize> ExactSizeIterator for TypedDenseAccessorIter<'a, T, N> {
     fn len(&self) -> usize {
         (self.end - self.start) / self.byte_stride
     }
 }
 
 impl super::Accessor {
-    fn bytes<'a>(
+    fn bytes_dense<'a>(
         &'a self,
         buffer_views: &[super::BufferView],
         buffers: &'a [super::Buffer],
     ) -> anyhow::Result<&'a [u8]> {
-        if self.sparse.is_some() {
-            todo!("sparse accessor support");
-        }
+        ensure!(self.sparse.is_none(), "accessor should not be sparse");
 
         let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
             "accessor.buffer_view must be defined for dense accessor"
@@ -622,7 +664,7 @@ impl super::Accessor {
         &'a self,
         buffer_views: &[super::BufferView],
         buffers: &'a [super::Buffer],
-    ) -> anyhow::Result<DenseAccessorIter<'a, T, N>> {
+    ) -> anyhow::Result<TypedDenseAccessorIter<'a, T, N>> {
         if self.sparse.is_some() {
             todo!("sparse accessor support");
         }
@@ -649,12 +691,50 @@ impl super::Accessor {
             "accessor.buffer_view {buffer_view_idx} is too short"
         );
 
-        Ok(DenseAccessorIter {
+        Ok(TypedDenseAccessorIter {
             bytes,
             start,
             end,
             byte_stride,
             data_type: PhantomData,
+        })
+    }
+
+    fn iter_dense<'a>(
+        &'a self,
+        buffer_views: &[super::BufferView],
+        buffers: &'a [super::Buffer],
+    ) -> Result<DenseAccessorIter<'a>> {
+        ensure!(self.sparse.is_none(), "accessor should not be sparse");
+
+        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
+            "accessor.buffer_view must be defined for dense accessor"
+        ))?;
+        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
+            "accessor.buffer_view {buffer_view_idx} is out of range"
+        ))?;
+
+        let bytes = buffer_view
+            .bytes(buffers)
+            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?;
+
+        let size = self.type_.dim() * self.component_type.size();
+
+        let byte_stride = buffer_view.byte_stride.map_or(size, NonZeroUsize::get);
+        let start = self.byte_offset;
+        let end = start + self.count * byte_stride;
+
+        ensure!(
+            end <= buffer_view.byte_length,
+            "accessor.buffer_view {buffer_view_idx} is too short"
+        );
+
+        Ok(DenseAccessorIter {
+            bytes,
+            start,
+            end,
+            size,
+            byte_stride,
         })
     }
 }
@@ -988,9 +1068,16 @@ impl super::Mesh {
                     super::PrimitiveMode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
                     mode => bail!("primitive topology type {mode} is not supported"),
                 };
-                let mut builder = GeometryBuilder::default().topology(topology);
+                let accessor = accessors.get(position).ok_or_else(|| {
+                    anyhow!("mesh.primitives[{idx}].attributes.position {position} is out of range")
+                })?;
 
-                if let Some(normal_tex_coord) = resources.materials[material].normal_tex_coord() {
+                let normal_tex_coord = resources.materials[material].normal_tex_coord();
+                let mut builder =
+                    GeometryBuilder::new(accessor.count, primitive.targets.len(), resources)
+                        .topology(topology);
+
+                if let Some(normal_tex_coord) = normal_tex_coord {
                     builder = builder.normal_tex_coord(normal_tex_coord);
                 }
 
@@ -1089,64 +1176,96 @@ impl super::Mesh {
                     };
                 }
 
-                for (tex_coord_idx, tex_coord) in [
-                    primitive.attributes.tex_coord_0,
-                    primitive.attributes.tex_coord_1,
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    if let Some(tex_coord) = tex_coord {
-                        let accessor =accessors
-                                .get(tex_coord).ok_or_else(|| {
-                        anyhow!("mesh.primitives[{idx}].attributes.tex_coord_{tex_coord_idx} {tex_coord} is out of range")
+                if let Some(tex_coord_0) = primitive.attributes.tex_coord_0 {
+                    let accessor =accessors
+                                .get(tex_coord_0).ok_or_else(|| {
+                        anyhow!("mesh.primitives[{idx}].attributes.tex_coord_0 {tex_coord_0} is out of range")
                     })?;
 
-                        let ctx = || {
-                            format!(
-                                "Failed to load mesh.primitives[{idx}].attributes.tex_coord_{tex_coord_idx} {tex_coord}"
-                            )
-                        };
-                        builder =
-                            match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
-                                    builder.tex_coords(
-                                        accessor
-                                            .iter(buffer_views, buffers)
-                                            .with_context(ctx)?
-                                            .cloned()
-                                            .map(Vec2::from_array),
-                                    )
-                                }
-                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
-                                    builder.tex_coords(
-                                        accessor
-                                            .iter(buffer_views, buffers)
-                                            .with_context(ctx)?
-                                            .map(u8x2_to_vec2),
-                                    )
-                                }
-                                (
-                                    AccessorType::Vec2,
-                                    AccessorComponentType::UnsignedShort,
-                                    true,
-                                ) => builder.tex_coords(
-                                    accessor
-                                        .iter(buffer_views, buffers)
-                                        .with_context(ctx)?
-                                        .map(u16x2_to_vec2),
-                                ),
-                                (accessor_type, component_type, normalized) => {
-                                    return Err(GltfError::InvalidAccessorDataType {
-                                        accessor_type,
-                                        component_type,
-                                        normalized,
-                                        usage: AccessorUsage::TexCoord,
-                                    })
-                                    .with_context(ctx);
-                                }
-                            };
-                    }
+                    let ctx = || {
+                        format!(
+                            "Failed to load mesh.primitives[{idx}].attributes.tex_coord_0 {tex_coord_0}"
+                        )
+                    };
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec2, AccessorComponentType::Float, false) => builder
+                            .tex_coords_0(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec2::from_array),
+                            ),
+                        (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => builder
+                            .tex_coords_0(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u8x2_to_vec2),
+                            ),
+                        (AccessorType::Vec2, AccessorComponentType::UnsignedShort, true) => builder
+                            .tex_coords_0(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u16x2_to_vec2),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::TexCoord,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
+                }
+
+                if let Some(tex_coord_1) = primitive.attributes.tex_coord_1 {
+                    let accessor =accessors
+                                .get(tex_coord_1).ok_or_else(|| {
+                        anyhow!("mesh.primitives[{idx}].attributes.tex_coord_1 {tex_coord_1} is out of range")
+                    })?;
+
+                    let ctx = || {
+                        format!(
+                            "Failed to load mesh.primitives[{idx}].attributes.tex_coord_1 {tex_coord_1}"
+                        )
+                    };
+                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                        (AccessorType::Vec2, AccessorComponentType::Float, false) => builder
+                            .tex_coords_1(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .cloned()
+                                    .map(Vec2::from_array),
+                            ),
+                        (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => builder
+                            .tex_coords_1(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u8x2_to_vec2),
+                            ),
+                        (AccessorType::Vec2, AccessorComponentType::UnsignedShort, true) => builder
+                            .tex_coords_1(
+                                accessor
+                                    .iter(buffer_views, buffers)
+                                    .with_context(ctx)?
+                                    .map(u16x2_to_vec2),
+                            ),
+                        (accessor_type, component_type, normalized) => {
+                            return Err(GltfError::InvalidAccessorDataType {
+                                accessor_type,
+                                component_type,
+                                normalized,
+                                usage: AccessorUsage::TexCoord,
+                            })
+                            .with_context(ctx);
+                        }
+                    };
                 }
 
                 if let Some(color) = primitive.attributes.color_0 {
@@ -1160,7 +1279,7 @@ impl super::Mesh {
 
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Vec3, AccessorComponentType::Float, false) => builder
-                            .colors(
+                            .colors_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1169,7 +1288,7 @@ impl super::Mesh {
                                     .map(|v| v.extend(1.0)),
                             ),
                         (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => builder
-                            .colors(
+                            .colors_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1177,7 +1296,7 @@ impl super::Mesh {
                                     .map(|v| v.extend(1.0)),
                             ),
                         (AccessorType::Vec3, AccessorComponentType::UnsignedShort, true) => builder
-                            .colors(
+                            .colors_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1185,7 +1304,7 @@ impl super::Mesh {
                                     .map(|v| v.extend(1.0)),
                             ),
                         (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
-                            .colors(
+                            .colors_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1193,14 +1312,14 @@ impl super::Mesh {
                                     .map(Vec4::from_array),
                             ),
                         (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
-                            .colors(
+                            .colors_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
                                     .map(u8x4_to_vec4),
                             ),
                         (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
-                            .colors(
+                            .colors_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1233,14 +1352,14 @@ impl super::Mesh {
 
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Vec4, AccessorComponentType::UnsignedByte, false) => builder
-                            .joints(
+                            .joints_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
                                     .map(u8x4_to_uvec4),
                             ),
                         (AccessorType::Vec4, AccessorComponentType::UnsignedShort, false) => {
-                            builder.joints(
+                            builder.joints_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1274,7 +1393,7 @@ impl super::Mesh {
 
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Vec4, AccessorComponentType::Float, false) => builder
-                            .weights(
+                            .weights_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1282,14 +1401,14 @@ impl super::Mesh {
                                     .map(Vec4::from_array),
                             ),
                         (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => builder
-                            .weights(
+                            .weights_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
                                     .map(u8x4_to_vec4),
                             ),
                         (AccessorType::Vec4, AccessorComponentType::UnsignedShort, true) => builder
-                            .weights(
+                            .weights_0(
                                 accessor
                                     .iter(buffer_views, buffers)
                                     .with_context(ctx)?
@@ -1308,8 +1427,6 @@ impl super::Mesh {
                 }
 
                 for (target_idx, morph_target) in primitive.targets.iter().enumerate() {
-                    let mut target_builder = MorphTargetBuilder::new();
-
                     if let Some(position) = morph_target.position {
                         let accessor = accessors.get(position).ok_or_else(|| {
                             anyhow!(
@@ -1323,10 +1440,11 @@ impl super::Mesh {
                             )
                         };
 
-                        target_builder =
+                        builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder.positions(
+                                    builder.morph_target_positions(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1359,10 +1477,11 @@ impl super::Mesh {
                             )
                         };
 
-                        target_builder =
+                        builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder.normals(
+                                    builder.morph_target_normals(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1395,10 +1514,11 @@ impl super::Mesh {
                             )
                         };
 
-                        target_builder =
+                        builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    target_builder.tangents(
+                                    builder.morph_target_tangents(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1418,31 +1538,24 @@ impl super::Mesh {
                             };
                     }
 
-                    for (tex_coord_idx, tex_coord) in
-                        [morph_target.tex_coord_0, morph_target.tex_coord_1]
-                            .into_iter()
-                            .enumerate()
-                    {
-                        if let Some(tex_coord) = tex_coord {
-                            let accessor = accessors.get(tex_coord).ok_or_else(|| {
+                    if let Some(tex_coord_0) = morph_target.tex_coord_0 {
+                        let accessor = accessors.get(tex_coord_0).ok_or_else(|| {
                             anyhow!(
-                                "mesh.primitives[{idx}].targets[{target_idx}].tex_coord_{tex_coord_idx} {tex_coord} is out of range"
+                                "mesh.primitives[{idx}].targets[{target_idx}].tex_coord_0 {tex_coord_0} is out of range"
                             )
                         })?;
 
-                            let ctx = || {
-                                format!(
-                                    "Failed to load mesh.primitives[{idx}].targets[{target_idx}].tex_coord_{tex_coord_idx} {tex_coord}"
-                                )
-                            };
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].targets[{target_idx}].tex_coord_0 {tex_coord_0}"
+                            )
+                        };
 
-                            target_builder = match (
-                                accessor.type_,
-                                accessor.component_type,
-                                accessor.normalized,
-                            ) {
+                        builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec2, AccessorComponentType::Float, false) => {
-                                    target_builder.tex_coords(
+                                    builder.morph_target_tex_coords_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1450,24 +1563,25 @@ impl super::Mesh {
                                             .map(Vec2::from_array),
                                     )
                                 }
-                                (AccessorType::Vec2, AccessorComponentType::Byte, true) => {
-                                    target_builder.tex_coords(
+                                (AccessorType::Vec2, AccessorComponentType::Byte, true) => builder
+                                    .morph_target_tex_coords_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
                                             .map(i8x2_to_vec2),
-                                    )
-                                }
-                                (AccessorType::Vec2, AccessorComponentType::Short, true) => {
-                                    target_builder.tex_coords(
+                                    ),
+                                (AccessorType::Vec2, AccessorComponentType::Short, true) => builder
+                                    .morph_target_tex_coords_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
                                             .map(i16x2_to_vec2),
-                                    )
-                                }
+                                    ),
                                 (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
-                                    target_builder.tex_coords(
+                                    builder.morph_target_tex_coords_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1478,7 +1592,8 @@ impl super::Mesh {
                                     AccessorType::Vec2,
                                     AccessorComponentType::UnsignedShort,
                                     true,
-                                ) => target_builder.tex_coords(
+                                ) => builder.morph_target_tex_coords_0(
+                                    0,
                                     accessor
                                         .iter(buffer_views, buffers)
                                         .with_context(ctx)?
@@ -1494,7 +1609,79 @@ impl super::Mesh {
                                     .with_context(ctx);
                                 }
                             };
-                        }
+                    }
+
+                    if let Some(tex_coord_1) = morph_target.tex_coord_1 {
+                        let accessor = accessors.get(tex_coord_1).ok_or_else(|| {
+                            anyhow!(
+                                "mesh.primitives[{idx}].targets[{target_idx}].tex_coord_1 {tex_coord_1} is out of range"
+                            )
+                        })?;
+
+                        let ctx = || {
+                            format!(
+                                "Failed to load mesh.primitives[{idx}].targets[{target_idx}].tex_coord_1 {tex_coord_1}"
+                            )
+                        };
+
+                        builder =
+                            match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                (AccessorType::Vec2, AccessorComponentType::Float, false) => {
+                                    builder.morph_target_tex_coords_1(
+                                        target_idx,
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .cloned()
+                                            .map(Vec2::from_array),
+                                    )
+                                }
+                                (AccessorType::Vec2, AccessorComponentType::Byte, true) => builder
+                                    .morph_target_tex_coords_1(
+                                        target_idx,
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i8x2_to_vec2),
+                                    ),
+                                (AccessorType::Vec2, AccessorComponentType::Short, true) => builder
+                                    .morph_target_tex_coords_1(
+                                        target_idx,
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(i16x2_to_vec2),
+                                    ),
+                                (AccessorType::Vec2, AccessorComponentType::UnsignedByte, true) => {
+                                    builder.morph_target_tex_coords_1(
+                                        target_idx,
+                                        accessor
+                                            .iter(buffer_views, buffers)
+                                            .with_context(ctx)?
+                                            .map(u8x2_to_vec2),
+                                    )
+                                }
+                                (
+                                    AccessorType::Vec2,
+                                    AccessorComponentType::UnsignedShort,
+                                    true,
+                                ) => builder.morph_target_tex_coords_1(
+                                    target_idx,
+                                    accessor
+                                        .iter(buffer_views, buffers)
+                                        .with_context(ctx)?
+                                        .map(u16x2_to_vec2),
+                                ),
+                                (accessor_type, component_type, normalized) => {
+                                    return Err(GltfError::InvalidAccessorDataType {
+                                        accessor_type,
+                                        component_type,
+                                        normalized,
+                                        usage: AccessorUsage::MorphTargetTexCoord,
+                                    })
+                                    .with_context(ctx);
+                                }
+                            };
                     }
 
                     if let Some(color) = morph_target.color_0 {
@@ -1513,7 +1700,8 @@ impl super::Mesh {
                         builder =
                             match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 (AccessorType::Vec3, AccessorComponentType::Float, false) => {
-                                    builder.colors(
+                                    builder.morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1523,7 +1711,8 @@ impl super::Mesh {
                                     )
                                 }
                                 (AccessorType::Vec3, AccessorComponentType::Byte, true) => builder
-                                    .colors(
+                                    .morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1531,7 +1720,8 @@ impl super::Mesh {
                                             .map(|v| v.extend(1.0)),
                                     ),
                                 (AccessorType::Vec3, AccessorComponentType::Short, true) => builder
-                                    .colors(
+                                    .morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1539,7 +1729,8 @@ impl super::Mesh {
                                             .map(|v| v.extend(1.0)),
                                     ),
                                 (AccessorType::Vec3, AccessorComponentType::UnsignedByte, true) => {
-                                    builder.colors(
+                                    builder.morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1551,7 +1742,8 @@ impl super::Mesh {
                                     AccessorType::Vec3,
                                     AccessorComponentType::UnsignedShort,
                                     true,
-                                ) => builder.colors(
+                                ) => builder.morph_target_colors_0(
+                                    target_idx,
                                     accessor
                                         .iter(buffer_views, buffers)
                                         .with_context(ctx)?
@@ -1559,7 +1751,8 @@ impl super::Mesh {
                                         .map(|v| v.extend(1.0)),
                                 ),
                                 (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                                    builder.colors(
+                                    builder.morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1568,21 +1761,24 @@ impl super::Mesh {
                                     )
                                 }
                                 (AccessorType::Vec4, AccessorComponentType::Byte, true) => builder
-                                    .colors(
+                                    .morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
                                             .map(i8x4_to_vec4),
                                     ),
                                 (AccessorType::Vec4, AccessorComponentType::Short, true) => builder
-                                    .colors(
+                                    .morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
                                             .map(i16x4_to_vec4),
                                     ),
                                 (AccessorType::Vec4, AccessorComponentType::UnsignedByte, true) => {
-                                    builder.colors(
+                                    builder.morph_target_colors_0(
+                                        target_idx,
                                         accessor
                                             .iter(buffer_views, buffers)
                                             .with_context(ctx)?
@@ -1593,7 +1789,8 @@ impl super::Mesh {
                                     AccessorType::Vec4,
                                     AccessorComponentType::UnsignedShort,
                                     true,
-                                ) => builder.colors(
+                                ) => builder.morph_target_colors_0(
+                                    target_idx,
                                     accessor
                                         .iter(buffer_views, buffers)
                                         .with_context(ctx)?
@@ -1610,8 +1807,6 @@ impl super::Mesh {
                                 }
                             };
                     }
-
-                    builder = builder.morph_target(target_builder);
                 }
 
                 if let Some(indices) = primitive.indices {
@@ -1621,19 +1816,19 @@ impl super::Mesh {
 
                     let ctx = || format!("Failed to load mesh.primitives[{idx}].indices {indices}");
 
-                    let bytes = accessor.bytes(buffer_views, buffers).with_context(ctx)?;
+                    let bytes = accessor
+                        .bytes_dense(buffer_views, buffers)
+                        .with_context(ctx)?;
                     builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                         (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
-                            let indices: &[u8] = cast_slice(bytes);
-                            builder.indices_u16(
-                                indices.into_iter().map(|index| *index as u16).collect(),
-                            )
+                            let indices: Vec<_> = bytes.iter().map(|index| *index as u16).collect();
+                            builder.indices_u16(&indices)
                         }
                         (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
-                            builder.indices_u16(Cow::Borrowed(cast_slice(bytes)))
+                            builder.indices_u16(cast_slice(bytes))
                         }
                         (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
-                            builder.indices_u32(Cow::Borrowed(cast_slice(bytes)))
+                            builder.indices_u32(cast_slice(bytes))
                         }
                         (accessor_type, component_type, normalized) => {
                             return Err(GltfError::InvalidAccessorDataType {
@@ -1647,7 +1842,7 @@ impl super::Mesh {
                     }
                 }
 
-                let geometry = builder.build(resources, encoder).id();
+                let geometry = builder.build(encoder).id();
                 primitives.push((geometry, material));
             }
         }

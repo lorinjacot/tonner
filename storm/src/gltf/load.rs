@@ -1,9 +1,11 @@
 use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek},
+    iter::{Zip, zip},
     marker::PhantomData,
     num::NonZeroUsize,
     path::Path,
+    slice,
 };
 
 use anyhow::{Context, Result, anyhow, ensure};
@@ -530,7 +532,7 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.next = n;
+        self.next += n;
         self.next()
     }
 
@@ -538,6 +540,170 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
         let len = (self.bytes.len() - size_of::<[T; N]>()) / self.byte_stride + 1 - self.next;
         (len, Some(len))
     }
+}
+
+struct SparseAccessorIter<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> {
+    default_values: DenseAccessorIter<'a, T, N>,
+    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, [T; N]>>,
+    next_sparse_entry: Option<(usize, &'a [T; N])>,
+}
+
+impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
+    for SparseAccessorIter<'a, I, T, N>
+{
+    type Item = &'a [T; N];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.default_values.next;
+        let default_value = self.default_values.next()?;
+        match self.next_sparse_entry {
+            Some(entry) if entry.0 == next => {
+                let value = entry.1;
+                self.next_sparse_entry = self
+                    .sparse_iter
+                    .next()
+                    .map(|(idx, value)| (idx.to_owned().into(), value));
+                Some(value)
+            }
+            _ => Some(default_value),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.default_values.size_hint()
+    }
+}
+
+struct PureSparseAccessorIter<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> {
+    default_value: &'a [T; N],
+    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, [T; N]>>,
+    next_sparse_entry: Option<(usize, &'a [T; N])>,
+    next: usize,
+    count: usize,
+}
+
+impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
+    for PureSparseAccessorIter<'a, I, T, N>
+{
+    type Item = &'a [T; N];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next < self.count {
+            Some(match self.next_sparse_entry {
+                Some(entry) if entry.0 == self.next => {
+                    let value = entry.1;
+                    self.next_sparse_entry = self
+                        .sparse_iter
+                        .next()
+                        .map(|(idx, value)| (idx.to_owned().into(), value));
+                    value
+                }
+                _ => self.default_value,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+trait StaticDefault: 'static {
+    const DEFAULT: &'static Self;
+}
+
+impl StaticDefault for [i8; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl StaticDefault for [i8; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl StaticDefault for [i8; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl StaticDefault for [i8; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl StaticDefault for [u8; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl StaticDefault for [u8; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl StaticDefault for [u8; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl StaticDefault for [u8; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl StaticDefault for [i16; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl StaticDefault for [i16; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl StaticDefault for [i16; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl StaticDefault for [i16; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl StaticDefault for [u16; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl StaticDefault for [u16; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl StaticDefault for [u16; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl StaticDefault for [u16; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl StaticDefault for [u32; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl StaticDefault for [u32; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl StaticDefault for [u32; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl StaticDefault for [u32; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl StaticDefault for [f32; 1] {
+    const DEFAULT: &'static Self = &[0.0; 1];
+}
+
+impl StaticDefault for [f32; 2] {
+    const DEFAULT: &'static Self = &[0.0; 2];
+}
+
+impl StaticDefault for [f32; 3] {
+    const DEFAULT: &'static Self = &[0.0; 3];
+}
+
+impl StaticDefault for [f32; 4] {
+    const DEFAULT: &'static Self = &[0.0; 4];
 }
 
 impl super::Accessor {
@@ -571,11 +737,166 @@ impl super::Accessor {
             .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
     }
 
+    fn sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize>(
+        &'a self,
+        buffer_views: &[super::BufferView],
+        buffers: &'a [super::Buffer],
+    ) -> Result<SparseAccessorIter<'a, I, T, N>> {
+        let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
+
+        let indices = buffer_views
+            .get(sparse.indices.buffer_view)
+            .with_context(|| {
+                format!(
+                    "accessor.sparse.indices.buffer_view {} is out of range",
+                    sparse.indices.buffer_view
+                )
+            })?;
+        let start = sparse.indices.byte_offset;
+        let end = start + sparse.count * size_of::<I>();
+        let indices: &[I] = cast_slice(
+            indices
+                .bytes(buffers)
+                .with_context(|| {
+                    format!(
+                        "Failed to load accessor.sparse.indices.buffer_view {}",
+                        sparse.indices.buffer_view
+                    )
+                })?
+                .get(start..end)
+                .with_context(|| {
+                    format!(
+                        "accessor.sparse.indices.buffer_view {} is too short",
+                        sparse.indices.buffer_view
+                    )
+                })?,
+        );
+
+        let start = sparse.values.byte_offset;
+        let end = start + sparse.count * size_of::<[T; N]>();
+        let values: &[[T; N]] = cast_slice(
+            buffer_views
+                .get(sparse.values.buffer_view)
+                .with_context(|| {
+                    format!(
+                        "accessor.sparse.values.buffer_view {} is out of range",
+                        sparse.values.buffer_view
+                    )
+                })?
+                .bytes(buffers)
+                .with_context(|| {
+                    format!(
+                        "Failed to load accessor.sparse.values.buffer_view {}",
+                        sparse.values.buffer_view
+                    )
+                })?
+                .get(start..end)
+                .with_context(|| {
+                    format!(
+                        "accessor.sparse.values.buffer_view {} is too short",
+                        sparse.values.buffer_view
+                    )
+                })?,
+        );
+
+        let mut sparse_iter = zip(indices, values);
+        let next_sparse_entry = sparse_iter
+            .next()
+            .map(|(idx, value)| (idx.to_owned().into(), value));
+
+        let default_values = self.dense_iter(buffer_views, buffers)?;
+
+        Ok(SparseAccessorIter {
+            default_values,
+            sparse_iter,
+            next_sparse_entry,
+        })
+    }
+
+    fn pure_sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize>(
+        &'a self,
+        buffer_views: &[super::BufferView],
+        buffers: &'a [super::Buffer],
+    ) -> Result<PureSparseAccessorIter<'a, I, T, N>>
+    where
+        [T; N]: StaticDefault,
+    {
+        let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
+
+        let indices = buffer_views
+            .get(sparse.indices.buffer_view)
+            .with_context(|| {
+                format!(
+                    "accessor.sparse.indices.buffer_view {} is out of range",
+                    sparse.indices.buffer_view
+                )
+            })?;
+        let start = sparse.indices.byte_offset;
+        let end = start + sparse.count * size_of::<I>();
+        let indices: &[I] = cast_slice(
+            indices
+                .bytes(buffers)
+                .with_context(|| {
+                    format!(
+                        "Failed to load accessor.sparse.indices.buffer_view {}",
+                        sparse.indices.buffer_view
+                    )
+                })?
+                .get(start..end)
+                .with_context(|| {
+                    format!(
+                        "accessor.sparse.indices.buffer_view {} is too short",
+                        sparse.indices.buffer_view
+                    )
+                })?,
+        );
+
+        let start = sparse.values.byte_offset;
+        let end = start + sparse.count * size_of::<[T; N]>();
+        let values: &[[T; N]] = cast_slice(
+            buffer_views
+                .get(sparse.values.buffer_view)
+                .with_context(|| {
+                    format!(
+                        "accessor.sparse.values.buffer_view {} is out of range",
+                        sparse.values.buffer_view
+                    )
+                })?
+                .bytes(buffers)
+                .with_context(|| {
+                    format!(
+                        "Failed to load accessor.sparse.values.buffer_view {}",
+                        sparse.values.buffer_view
+                    )
+                })?
+                .get(start..end)
+                .with_context(|| {
+                    format!(
+                        "accessor.sparse.values.buffer_view {} is too short",
+                        sparse.values.buffer_view
+                    )
+                })?,
+        );
+
+        let mut sparse_iter = zip(indices, values);
+        let next_sparse_entry = sparse_iter
+            .next()
+            .map(|(idx, value)| (idx.to_owned().into(), value));
+
+        Ok(PureSparseAccessorIter {
+            default_value: StaticDefault::DEFAULT,
+            sparse_iter,
+            next_sparse_entry,
+            next: 0,
+            count: self.count,
+        })
+    }
+
     fn dense_iter<'a, T: Pod + 'static, const N: usize>(
         &'a self,
         buffer_views: &[super::BufferView],
         buffers: &'a [super::Buffer],
-    ) -> anyhow::Result<DenseAccessorIter<'a, T, N>> {
+    ) -> Result<DenseAccessorIter<'a, T, N>> {
         ensure!(self.sparse.is_none(), "accessor should not be sparse");
 
         let buffer_view_idx = self.buffer_view.ok_or(anyhow!(

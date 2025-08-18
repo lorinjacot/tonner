@@ -706,6 +706,106 @@ impl StaticDefault for [f32; 4] {
     const DEFAULT: &'static Self = &[0.0; 4];
 }
 
+macro_rules! accessor_iter {
+    ($accessor:expr, $buffer_views:expr, buffers:expr, {
+        $expr:expr
+    }) => {};
+}
+
+fn sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize>(
+    sparse: &super::SparseAccessor,
+    buffer_views: &[super::BufferView],
+    buffers: &'a [super::Buffer],
+) -> Result<Zip<slice::Iter<'a, I>, slice::Iter<'a, [T; N]>>> {
+    let indices = buffer_views
+        .get(sparse.indices.buffer_view)
+        .with_context(|| {
+            format!(
+                "accessor.sparse.indices.buffer_view {} is out of range",
+                sparse.indices.buffer_view
+            )
+        })?;
+    let start = sparse.indices.byte_offset;
+    let end = start + sparse.count * size_of::<I>();
+    let indices: &[I] = cast_slice(
+        indices
+            .bytes(buffers)
+            .with_context(|| {
+                format!(
+                    "Failed to load accessor.sparse.indices.buffer_view {}",
+                    sparse.indices.buffer_view
+                )
+            })?
+            .get(start..end)
+            .with_context(|| {
+                format!(
+                    "accessor.sparse.indices.buffer_view {} is too short",
+                    sparse.indices.buffer_view
+                )
+            })?,
+    );
+
+    let start = sparse.values.byte_offset;
+    let end = start + sparse.count * size_of::<[T; N]>();
+    let values: &[[T; N]] = cast_slice(
+        buffer_views
+            .get(sparse.values.buffer_view)
+            .with_context(|| {
+                format!(
+                    "accessor.sparse.values.buffer_view {} is out of range",
+                    sparse.values.buffer_view
+                )
+            })?
+            .bytes(buffers)
+            .with_context(|| {
+                format!(
+                    "Failed to load accessor.sparse.values.buffer_view {}",
+                    sparse.values.buffer_view
+                )
+            })?
+            .get(start..end)
+            .with_context(|| {
+                format!(
+                    "accessor.sparse.values.buffer_view {} is too short",
+                    sparse.values.buffer_view
+                )
+            })?,
+    );
+
+    Ok(zip(indices, values))
+}
+
+fn dense_iter<'a, T: Pod + 'static, const N: usize>(
+    buffer_view: usize,
+    byte_offset: usize,
+    count: usize,
+    buffer_views: &[super::BufferView],
+    buffers: &'a [super::Buffer],
+) -> Result<DenseAccessorIter<'a, T, N>> {
+    let view = buffer_views.get(buffer_view).ok_or(anyhow!(
+        "accessor.buffer_view {buffer_view} is out of range"
+    ))?;
+
+    let byte_stride = view
+        .byte_stride
+        .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
+    let start = byte_offset;
+    let end = start + (count - 1) * byte_stride + size_of::<[T; N]>();
+
+    let bytes = view
+        .bytes(buffers)
+        .with_context(|| format!("Failed to get buffer_view.buffer {buffer_view}"))?
+        .get(start..end)
+        .with_context(|| format!("buffer_view.buffer {buffer_view} is too short"))?;
+
+    Ok(DenseAccessorIter {
+        bytes,
+        next: 0,
+        byte_stride,
+        data_type: PhantomData,
+    })
+}
+
 impl super::Accessor {
     fn bytes_dense<'a>(
         &'a self,
@@ -744,62 +844,7 @@ impl super::Accessor {
     ) -> Result<SparseAccessorIter<'a, I, T, N>> {
         let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
 
-        let indices = buffer_views
-            .get(sparse.indices.buffer_view)
-            .with_context(|| {
-                format!(
-                    "accessor.sparse.indices.buffer_view {} is out of range",
-                    sparse.indices.buffer_view
-                )
-            })?;
-        let start = sparse.indices.byte_offset;
-        let end = start + sparse.count * size_of::<I>();
-        let indices: &[I] = cast_slice(
-            indices
-                .bytes(buffers)
-                .with_context(|| {
-                    format!(
-                        "Failed to load accessor.sparse.indices.buffer_view {}",
-                        sparse.indices.buffer_view
-                    )
-                })?
-                .get(start..end)
-                .with_context(|| {
-                    format!(
-                        "accessor.sparse.indices.buffer_view {} is too short",
-                        sparse.indices.buffer_view
-                    )
-                })?,
-        );
-
-        let start = sparse.values.byte_offset;
-        let end = start + sparse.count * size_of::<[T; N]>();
-        let values: &[[T; N]] = cast_slice(
-            buffer_views
-                .get(sparse.values.buffer_view)
-                .with_context(|| {
-                    format!(
-                        "accessor.sparse.values.buffer_view {} is out of range",
-                        sparse.values.buffer_view
-                    )
-                })?
-                .bytes(buffers)
-                .with_context(|| {
-                    format!(
-                        "Failed to load accessor.sparse.values.buffer_view {}",
-                        sparse.values.buffer_view
-                    )
-                })?
-                .get(start..end)
-                .with_context(|| {
-                    format!(
-                        "accessor.sparse.values.buffer_view {} is too short",
-                        sparse.values.buffer_view
-                    )
-                })?,
-        );
-
-        let mut sparse_iter = zip(indices, values);
+        let mut sparse_iter = sparse_iter::<I, T, N>(sparse, buffer_views, buffers)?;
         let next_sparse_entry = sparse_iter
             .next()
             .map(|(idx, value)| (idx.to_owned().into(), value));
@@ -823,62 +868,7 @@ impl super::Accessor {
     {
         let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
 
-        let indices = buffer_views
-            .get(sparse.indices.buffer_view)
-            .with_context(|| {
-                format!(
-                    "accessor.sparse.indices.buffer_view {} is out of range",
-                    sparse.indices.buffer_view
-                )
-            })?;
-        let start = sparse.indices.byte_offset;
-        let end = start + sparse.count * size_of::<I>();
-        let indices: &[I] = cast_slice(
-            indices
-                .bytes(buffers)
-                .with_context(|| {
-                    format!(
-                        "Failed to load accessor.sparse.indices.buffer_view {}",
-                        sparse.indices.buffer_view
-                    )
-                })?
-                .get(start..end)
-                .with_context(|| {
-                    format!(
-                        "accessor.sparse.indices.buffer_view {} is too short",
-                        sparse.indices.buffer_view
-                    )
-                })?,
-        );
-
-        let start = sparse.values.byte_offset;
-        let end = start + sparse.count * size_of::<[T; N]>();
-        let values: &[[T; N]] = cast_slice(
-            buffer_views
-                .get(sparse.values.buffer_view)
-                .with_context(|| {
-                    format!(
-                        "accessor.sparse.values.buffer_view {} is out of range",
-                        sparse.values.buffer_view
-                    )
-                })?
-                .bytes(buffers)
-                .with_context(|| {
-                    format!(
-                        "Failed to load accessor.sparse.values.buffer_view {}",
-                        sparse.values.buffer_view
-                    )
-                })?
-                .get(start..end)
-                .with_context(|| {
-                    format!(
-                        "accessor.sparse.values.buffer_view {} is too short",
-                        sparse.values.buffer_view
-                    )
-                })?,
-        );
-
-        let mut sparse_iter = zip(indices, values);
+        let mut sparse_iter = sparse_iter::<I, T, N>(sparse, buffer_views, buffers)?;
         let next_sparse_entry = sparse_iter
             .next()
             .map(|(idx, value)| (idx.to_owned().into(), value));
@@ -899,31 +889,17 @@ impl super::Accessor {
     ) -> Result<DenseAccessorIter<'a, T, N>> {
         ensure!(self.sparse.is_none(), "accessor should not be sparse");
 
-        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
+        let buffer_view = self.buffer_view.ok_or(anyhow!(
             "accessor.buffer_view must be defined for dense accessor"
         ))?;
-        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
-            "accessor.buffer_view {buffer_view_idx} is out of range"
-        ))?;
 
-        let byte_stride = buffer_view
-            .byte_stride
-            .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
-        let start = self.byte_offset;
-        let end = start + (self.count - 1) * byte_stride + size_of::<[T; N]>();
-
-        let bytes = buffer_view
-            .bytes(buffers)
-            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?
-            .get(start..end)
-            .with_context(|| format!("buffer_view.buffer {} is too short", buffer_view.buffer))?;
-
-        Ok(DenseAccessorIter {
-            bytes,
-            next: 0,
-            byte_stride,
-            data_type: PhantomData,
-        })
+        dense_iter(
+            buffer_view,
+            self.byte_offset,
+            self.count,
+            buffer_views,
+            buffers,
+        )
     }
 }
 

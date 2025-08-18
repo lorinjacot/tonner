@@ -28,8 +28,6 @@ pub enum GltfError {
     },
     #[error("Failed to read external image: {0}")]
     Image(#[from] image::ImageError),
-    #[error("A dense accessor must have its bufferView defined")]
-    MissingAccessorBufferView,
     #[error("Invalid base64 encoding")]
     InvalidBase64(#[from] InvalidBase64),
     #[error(transparent)]
@@ -40,7 +38,6 @@ pub enum GltfError {
 pub enum GltfEntity {
     Accessor,
     AnimationSampler,
-    BufferView,
     Node,
     Scene,
     Skin,
@@ -51,7 +48,6 @@ impl Display for GltfEntity {
         match self {
             Self::Accessor => write!(f, "accessor"),
             Self::AnimationSampler => write!(f, "animation sampler"),
-            Self::BufferView => write!(f, "buffer view"),
             Self::Node => write!(f, "node"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),

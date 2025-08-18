@@ -477,36 +477,8 @@ impl super::GltfAsset {
         if accessor.sparse.is_some() {
             todo!("sparse accessor support");
         }
-        let buffer_view = accessor
-            .buffer_view
-            .ok_or(GltfError::MissingAccessorBufferView)?;
-        let buffer_view =
-            self.json
-                .buffer_views
-                .get(buffer_view)
-                .ok_or(GltfError::InvalidIndex {
-                    entity: GltfEntity::BufferView,
-                    index: buffer_view,
-                })?;
 
-        let bytes = match self.json.buffers.get(buffer_view.buffer) {
-            Some(buffer) => &buffer.bytes,
-            None => todo!("load buffer into memory"),
-        };
-
-        let byte_stride = buffer_view
-            .byte_stride
-            .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
-        let start = accessor.byte_offset + buffer_view.byte_offset;
-        let end = start + accessor.count * byte_stride;
-
-        Ok(DenseAccessorIter {
-            bytes,
-            start,
-            end,
-            byte_stride,
-            data_type: PhantomData,
-        })
+        accessor.dense_iter(&self.json.buffer_views, &self.json.buffers)
     }
 }
 
@@ -541,8 +513,7 @@ impl GlbChunk {
 
 struct DenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
     bytes: &'a [u8],
-    start: usize,
-    end: usize,
+    next: usize,
     byte_stride: usize,
     data_type: PhantomData<[T; N]>,
 }
@@ -551,36 +522,21 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
     type Item = &'a [T; N];
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next_end = self.start + size_of::<[T; N]>();
-        if next_end <= self.end {
-            let next = from_bytes(&self.bytes[self.start..next_end]);
-            self.start += self.byte_stride;
-            Some(next)
-        } else {
-            None
-        }
+        let start = self.next * self.byte_stride;
+        let end = start + size_of::<[T; N]>();
+        let next = from_bytes(self.bytes.get(start..end)?);
+        self.next += 1;
+        Some(next)
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let next_end = self.start + n * self.byte_stride + size_of::<[T; N]>();
-        if next_end <= self.end {
-            let next = from_bytes(&self.bytes[self.start..next_end]);
-            self.start += (n + 1) * self.byte_stride;
-            Some(next)
-        } else {
-            None
-        }
+        self.next = n;
+        self.next()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.len();
+        let len = (self.bytes.len() - size_of::<[T; N]>()) / self.byte_stride + 1 - self.next;
         (len, Some(len))
-    }
-}
-
-impl<'a, T: Pod + 'static, const N: usize> ExactSizeIterator for DenseAccessorIter<'a, T, N> {
-    fn len(&self) -> usize {
-        (self.end - self.start) / self.byte_stride
     }
 }
 
@@ -629,25 +585,21 @@ impl super::Accessor {
             "accessor.buffer_view {buffer_view_idx} is out of range"
         ))?;
 
-        let bytes = buffer_view
-            .bytes(buffers)
-            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?;
-
         let byte_stride = buffer_view
             .byte_stride
             .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
         let start = self.byte_offset;
-        let end = start + self.count * byte_stride;
+        let end = start + (self.count - 1) * byte_stride + size_of::<[T; N]>();
 
-        ensure!(
-            end <= buffer_view.byte_length,
-            "accessor.buffer_view {buffer_view_idx} is too short"
-        );
+        let bytes = buffer_view
+            .bytes(buffers)
+            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?
+            .get(start..end)
+            .with_context(|| format!("buffer_view.buffer {} is too short", buffer_view.buffer))?;
 
         Ok(DenseAccessorIter {
             bytes,
-            start,
-            end,
+            next: 0,
             byte_stride,
             data_type: PhantomData,
         })

@@ -112,11 +112,10 @@ fn vs_main(
 
         if contains(attribute_flags, tex_coord_0_flag) {
             attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
-            if contains(attribute_flags, tex_coord_1_flag) {
-                attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
-            }
         }
-        
+        if contains(attribute_flags, tex_coord_1_flag) {
+            attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
+        }
         if contains(attribute_flags, color_0_flag) {
             attributes.color_0 += weight * morph_attributes.color_0;
         }
@@ -160,9 +159,9 @@ fn vs_main(
     
     if contains(attribute_flags, tex_coord_0_flag) {
         result.tex_coord_0 = attributes.tex_coord_0;
-        if contains(attribute_flags, tex_coord_1_flag) {
-            result.tex_coord_1 = attributes.tex_coord_1;
-        }
+    }
+    if contains(attribute_flags, tex_coord_1_flag) {
+        result.tex_coord_1 = attributes.tex_coord_1;
     }
     if contains(attribute_flags, color_0_flag) {
         result.color_0 = attributes.color_0;
@@ -208,9 +207,9 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
     var tex_coords: array<vec2<f32>, 2>;
     if contains(attribute_flags, tex_coord_0_flag) {
         tex_coords[0] = vertex.tex_coord_0;
-        if contains(attribute_flags, tex_coord_1_flag) {
-            tex_coords[1] = vertex.tex_coord_1;
-        }
+    }
+    if contains(attribute_flags, tex_coord_1_flag) {
+        tex_coords[1] = vertex.tex_coord_1;
     }
 
     var base_color = material.base_color_factor;

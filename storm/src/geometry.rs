@@ -442,7 +442,8 @@ impl GeometryBuilder {
 
                     match format {
                         wgpu::IndexFormat::Uint16 => {
-                            let indices: &[u16] = cast_slice(&index_view);
+                            let indices: &[u16] =
+                                cast_slice(&index_view[..count * format.byte_size()]);
 
                             for target in 0..=self.morph_target_count {
                                 let start = target * self.vertex_count;

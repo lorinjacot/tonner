@@ -62,18 +62,6 @@ impl Display for GltfEntity {
 #[derive(Debug)]
 pub enum AccessorUsage {
     Indices,
-    Position,
-    Normal,
-    Tangent,
-    TexCoord,
-    Color,
-    Joints,
-    Weights,
-    MorphTargetPosition,
-    MorphTargetNormal,
-    MorphTargetTangent,
-    MorphTargetTexCoord,
-    MorphTargetColor,
     AnimationOutpus { path: AnimationTargetPath },
 }
 
@@ -81,20 +69,6 @@ impl Display for AccessorUsage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Indices => write!(f, "Primitive indices"),
-            Self::Position => write!(f, "Primitive position attribute"),
-            Self::Normal => write!(f, "Primitive normal attribute"),
-            Self::Tangent => write!(f, "Primitive tangent attribute"),
-            Self::TexCoord => write!(f, "Primitive texture coordinate attribute"),
-            Self::Color => write!(f, "Primitive color attribute"),
-            Self::Joints => write!(f, "Primitive joints attribute"),
-            Self::Weights => write!(f, "Primitive weights attribute"),
-            Self::MorphTargetPosition => write!(f, "Primitive morph target position attribute"),
-            Self::MorphTargetNormal => write!(f, "Primitive morph target normal attribute"),
-            Self::MorphTargetTangent => write!(f, "Primitive morph target tangent attribute"),
-            Self::MorphTargetTexCoord => {
-                write!(f, "Primitive morph target texture coordinate attribute")
-            }
-            Self::MorphTargetColor => write!(f, "Primitive morph target color attribute"),
             Self::AnimationOutpus { path } => write!(f, "Animation outputs value for {path}"),
         }
     }

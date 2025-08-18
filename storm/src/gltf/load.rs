@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
 use data_url::{DataUrl, DataUrlError};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
@@ -465,7 +465,7 @@ impl super::GltfAsset {
     fn accessor_iter<T: Pod + 'static, const N: usize>(
         &self,
         index: usize,
-    ) -> Result<TypedDenseAccessorIter<'_, T, N>> {
+    ) -> Result<DenseAccessorIter<'_, T, N>> {
         let accessor = self
             .json
             .accessors
@@ -500,7 +500,7 @@ impl super::GltfAsset {
         let start = accessor.byte_offset + buffer_view.byte_offset;
         let end = start + accessor.count * byte_stride;
 
-        Ok(TypedDenseAccessorIter {
+        Ok(DenseAccessorIter {
             bytes,
             start,
             end,
@@ -539,52 +539,7 @@ impl GlbChunk {
     }
 }
 
-struct DenseAccessorIter<'a> {
-    bytes: &'a [u8],
-    start: usize,
-    end: usize,
-    size: usize,
-    byte_stride: usize,
-}
-
-impl<'a> Iterator for DenseAccessorIter<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next_end = self.start + self.size;
-        if next_end <= self.end {
-            let next = &self.bytes[self.start..next_end];
-            self.start += self.byte_stride;
-            Some(next)
-        } else {
-            None
-        }
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let next_end = self.start + n * self.byte_stride + self.size;
-        if next_end <= self.end {
-            let next = &self.bytes[self.start..next_end];
-            self.start += (n + 1) * self.byte_stride;
-            Some(next)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.len();
-        (len, Some(len))
-    }
-}
-
-impl<'a> ExactSizeIterator for DenseAccessorIter<'a> {
-    fn len(&self) -> usize {
-        (self.end - self.start) / self.byte_stride
-    }
-}
-
-struct TypedDenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
+struct DenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
     bytes: &'a [u8],
     start: usize,
     end: usize,
@@ -592,7 +547,7 @@ struct TypedDenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
     data_type: PhantomData<[T; N]>,
 }
 
-impl<'a, T: Pod + 'static, const N: usize> Iterator for TypedDenseAccessorIter<'a, T, N> {
+impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T, N> {
     type Item = &'a [T; N];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -623,7 +578,7 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for TypedDenseAccessorIter<'
     }
 }
 
-impl<'a, T: Pod + 'static, const N: usize> ExactSizeIterator for TypedDenseAccessorIter<'a, T, N> {
+impl<'a, T: Pod + 'static, const N: usize> ExactSizeIterator for DenseAccessorIter<'a, T, N> {
     fn len(&self) -> usize {
         (self.end - self.start) / self.byte_stride
     }
@@ -660,14 +615,12 @@ impl super::Accessor {
             .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
     }
 
-    fn iter<'a, T: Pod + 'static, const N: usize>(
+    fn dense_iter<'a, T: Pod + 'static, const N: usize>(
         &'a self,
         buffer_views: &[super::BufferView],
         buffers: &'a [super::Buffer],
-    ) -> anyhow::Result<TypedDenseAccessorIter<'a, T, N>> {
-        if self.sparse.is_some() {
-            todo!("sparse accessor support");
-        }
+    ) -> anyhow::Result<DenseAccessorIter<'a, T, N>> {
+        ensure!(self.sparse.is_none(), "accessor should not be sparse");
 
         let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
             "accessor.buffer_view must be defined for dense accessor"
@@ -691,50 +644,12 @@ impl super::Accessor {
             "accessor.buffer_view {buffer_view_idx} is too short"
         );
 
-        Ok(TypedDenseAccessorIter {
+        Ok(DenseAccessorIter {
             bytes,
             start,
             end,
             byte_stride,
             data_type: PhantomData,
-        })
-    }
-
-    fn iter_dense<'a>(
-        &'a self,
-        buffer_views: &[super::BufferView],
-        buffers: &'a [super::Buffer],
-    ) -> Result<DenseAccessorIter<'a>> {
-        ensure!(self.sparse.is_none(), "accessor should not be sparse");
-
-        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
-            "accessor.buffer_view must be defined for dense accessor"
-        ))?;
-        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
-            "accessor.buffer_view {buffer_view_idx} is out of range"
-        ))?;
-
-        let bytes = buffer_view
-            .bytes(buffers)
-            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?;
-
-        let size = self.type_.dim() * self.component_type.size();
-
-        let byte_stride = buffer_view.byte_stride.map_or(size, NonZeroUsize::get);
-        let start = self.byte_offset;
-        let end = start + self.count * byte_stride;
-
-        ensure!(
-            end <= buffer_view.byte_length,
-            "accessor.buffer_view {buffer_view_idx} is too short"
-        );
-
-        Ok(DenseAccessorIter {
-            bytes,
-            start,
-            end,
-            size,
-            byte_stride,
         })
     }
 }
@@ -1139,7 +1054,7 @@ impl super::Mesh {
                         builder.$method(
                             $($target_idx,)?
                             $accessor
-                                .iter(buffer_views, buffers)
+                                .dense_iter(buffer_views, buffers)
                                 .with_context($accessor_ctx)
                                 $(.with_context($target_ctx))?
                                 .with_context(primitive_ctx)?
@@ -1152,7 +1067,7 @@ impl super::Mesh {
                         builder.$method(
                             $($target_idx,)?
                             $accessor
-                                .iter(buffer_views, buffers)
+                                .dense_iter(buffer_views, buffers)
                                 .with_context($accessor_ctx)
                                 $(.with_context($target_ctx))?
                                 .with_context(primitive_ctx)?
@@ -1259,7 +1174,8 @@ impl super::Mesh {
                 );
 
                 for (target_idx, morph_target) in primitive.targets.iter().enumerate() {
-                    let morph_target_ctx = || format!("Failed to load primitive.target[{target_idx}]");
+                    let morph_target_ctx =
+                        || format!("Failed to load primitive.target[{target_idx}]");
 
                     macro_rules! load_morph_target_attribute {
                         ($attr:expr, $method:ident, [
@@ -1298,42 +1214,6 @@ impl super::Mesh {
                                             .with_context(accessor_ctx)
                                             .with_context(morph_target_ctx)
                                             .with_context(primitive_ctx);
-                                    }
-                                };
-                            }
-                        };
-                    }
-
-                    macro_rules! load_morph_attribute {
-                        ($attr:expr, $method:ident, [
-                            $(($type_:ident, $component:ident, $normalized:ident$(, extend($value:literal))?)),+$(,)?
-                        ]) => {
-                            if let Some(accessor_idx) = $attr {
-                                let accessor = accessors
-                                                .get(accessor_idx)
-                                                .ok_or_else(|| {
-                                                    anyhow!("mesh.primitives[{idx}].attributes.$attr {accessor_idx} is out of range")
-                                                })?;
-
-                                let ctx = || {
-                                    format!(
-                                        "Failed to load mesh.primitives[{idx}].attributes.$attr {accessor_idx}"
-                                    )
-                                };
-                                builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
-                                    $(
-                                        (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                            case!($method(morph_target(target_idx), ($type_, $component, $normalized$(, extend($value))?), accessor, ctx))
-                                        }
-                                    )+
-                                    (accessor_type, component_type, normalized) => {
-                                        return Err(GltfError::InvalidAccessorDataType {
-                                            accessor_type,
-                                            component_type,
-                                            normalized,
-                                            usage: AccessorUsage::TexCoord,
-                                        })
-                                        .with_context(ctx);
                                     }
                                 };
                             }

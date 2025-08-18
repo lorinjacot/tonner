@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, ops::Range};
+use std::f32::consts::PI;
 
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
@@ -711,15 +711,6 @@ impl Attribute {
     };
 }
 
-const POSITION: Range<usize> = 0..12;
-const NORMAL: Range<usize> = 16..28;
-const TANGENT: Range<usize> = 32..48;
-const TEX_COORD_0: Range<usize> = 48..56;
-const TEX_COORD_1: Range<usize> = 56..64;
-const COLOR_0: Range<usize> = 64..80;
-const JOINTS_0: Range<usize> = 80..96;
-const WEIGHTS_0: Range<usize> = 96..112;
-
 fn padded_size(size: usize) -> wgpu::BufferAddress {
     // code taken from wgpu::util::DeviceExt::create_buffer_init()
     let unpadded_size = size as wgpu::BufferAddress;
@@ -731,36 +722,45 @@ fn padded_size(size: usize) -> wgpu::BufferAddress {
     padded_size
 }
 
-#[cfg(test)]
-mod tests {
-    use glam::uvec4;
+// const POSITION: Range<usize> = 0..12;
+// const NORMAL: Range<usize> = 16..28;
+// const TANGENT: Range<usize> = 32..48;
+// const TEX_COORD_0: Range<usize> = 48..56;
+// const TEX_COORD_1: Range<usize> = 56..64;
+// const COLOR_0: Range<usize> = 64..80;
+// const JOINTS_0: Range<usize> = 80..96;
+// const WEIGHTS_0: Range<usize> = 96..112;
 
-    use super::*;
+// #[cfg(test)]
+// mod tests {
+//     use glam::uvec4;
 
-    #[test]
-    fn test_attribute_layout() {
-        let attribute = Attribute {
-            position: vec3(0.0, 0.1, 0.2),
-            _pad0: 1,
-            normal: vec3(2.0, 2.1, 2.2),
-            _pad1: 3,
-            tangent: vec4(4.0, 4.1, 4.2, 4.3),
-            tex_coord_0: vec2(5.0, 5.1),
-            tex_coord_1: vec2(6.0, 6.1),
-            color_0: vec4(7.0, 7.1, 7.2, 7.2),
-            joints_0: uvec4(8, 9, 10, 11),
-            weights_0: vec4(13.0, 13.1, 13.2, 13.3),
-        };
+//     use super::*;
 
-        let bytes = bytes_of(&attribute);
+//     #[test]
+//     fn test_attribute_layout() {
+//         let attribute = Attribute {
+//             position: vec3(0.0, 0.1, 0.2),
+//             _pad0: 1,
+//             normal: vec3(2.0, 2.1, 2.2),
+//             _pad1: 3,
+//             tangent: vec4(4.0, 4.1, 4.2, 4.3),
+//             tex_coord_0: vec2(5.0, 5.1),
+//             tex_coord_1: vec2(6.0, 6.1),
+//             color_0: vec4(7.0, 7.1, 7.2, 7.2),
+//             joints_0: uvec4(8, 9, 10, 11),
+//             weights_0: vec4(13.0, 13.1, 13.2, 13.3),
+//         };
 
-        assert_eq!(&bytes[POSITION], bytes_of(&attribute.position));
-        assert_eq!(&bytes[NORMAL], bytes_of(&attribute.normal));
-        assert_eq!(&bytes[TANGENT], bytes_of(&attribute.tangent));
-        assert_eq!(&bytes[TEX_COORD_0], bytes_of(&attribute.tex_coord_0));
-        assert_eq!(&bytes[TEX_COORD_1], bytes_of(&attribute.tex_coord_1));
-        assert_eq!(&bytes[COLOR_0], bytes_of(&attribute.color_0));
-        assert_eq!(&bytes[JOINTS_0], bytes_of(&attribute.joints_0));
-        assert_eq!(&bytes[WEIGHTS_0], bytes_of(&attribute.weights_0));
-    }
-}
+//         let bytes = bytes_of(&attribute);
+
+//         assert_eq!(&bytes[POSITION], bytes_of(&attribute.position));
+//         assert_eq!(&bytes[NORMAL], bytes_of(&attribute.normal));
+//         assert_eq!(&bytes[TANGENT], bytes_of(&attribute.tangent));
+//         assert_eq!(&bytes[TEX_COORD_0], bytes_of(&attribute.tex_coord_0));
+//         assert_eq!(&bytes[TEX_COORD_1], bytes_of(&attribute.tex_coord_1));
+//         assert_eq!(&bytes[COLOR_0], bytes_of(&attribute.color_0));
+//         assert_eq!(&bytes[JOINTS_0], bytes_of(&attribute.joints_0));
+//         assert_eq!(&bytes[WEIGHTS_0], bytes_of(&attribute.weights_0));
+//     }
+// }

@@ -22,7 +22,7 @@ use crate::{
         AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError, GltfEntity,
         GltfError,
     },
-    scene::animation,
+    skin::SkinBuilder,
 };
 
 impl super::GltfAsset {
@@ -155,10 +155,33 @@ impl super::GltfAsset {
         for (nodes, joints, inverse_bind_matrices) in data {
             let mut builder = scene.skin_builder().nodes(joints);
             if let Some(inverse_bind_matrices) = inverse_bind_matrices {
-                builder = builder.inverse_bind_matrices(
-                    self.accessor_iter::<f32, { 4 * 4 }>(inverse_bind_matrices)?
-                        .map(Mat4::from_cols_array),
-                )
+                struct RegisterBindMatrices<'a, 's> {
+                    builder: SkinBuilder<'a, 's>,
+                }
+
+                impl<'a, 's> IteratorConsumer<'a, [f32; 4 * 4]> for RegisterBindMatrices<'a, 's> {
+                    type Return = SkinBuilder<'a, 's>;
+
+                    fn consume<I: Iterator<Item = &'a [f32; 4 * 4]> + 'a>(
+                        self,
+                        iter: I,
+                    ) -> Result<Self::Return> {
+                        Ok(self
+                            .builder
+                            .inverse_bind_matrices(iter.map(Mat4::from_cols_array)))
+                    }
+                }
+
+                let consumer = RegisterBindMatrices { builder };
+                let accessor = self
+                    .json
+                    .accessors
+                    .get(inverse_bind_matrices)
+                    .with_context(|| {
+                        format!("inverse_bind_matrices {inverse_bind_matrices} is out of range")
+                    })?;
+
+                builder = accessor.iter(&self.json.buffer_views, &self.json.buffers, consumer)?;
             }
 
             let skin = builder.build().id();
@@ -167,216 +190,216 @@ impl super::GltfAsset {
             }
         }
 
-        'anim: for animation in &self.json.animations {
-            let mut node_morph_targets_count_channel = Vec::new();
-            'channel: for channel in &animation.channels {
-                let node = match channel.target.node {
-                    Some(node) => node,
-                    None => continue 'channel,
-                };
-                match self
-                    .json
-                    .nodes
-                    .get(node)
-                    .ok_or(GltfError::InvalidIndex {
-                        entity: GltfEntity::Node,
-                        index: node,
-                    })?
-                    .id
-                {
-                    Some(id) => {
-                        let morph_targets_count = scene[id].weights().len();
-                        node_morph_targets_count_channel.push((id, morph_targets_count, channel));
-                    }
-                    None => {
-                        continue 'anim;
-                    }
-                }
-            }
-            let mut channels = Vec::with_capacity(node_morph_targets_count_channel.len());
-            for (node, morph_targets_count, channel) in node_morph_targets_count_channel {
-                let sampler =
-                    animation
-                        .samplers
-                        .get(channel.sampler)
-                        .ok_or(GltfError::InvalidIndex {
-                            entity: GltfEntity::AnimationSampler,
-                            index: channel.sampler,
-                        })?;
-                let inputs = self
-                    .accessor_iter::<f32, 1>(sampler.input)?
-                    .map(|t| t[0])
-                    .collect();
-                let interpolation = match sampler.interpolation {
-                    super::AnimationInterpolation::Step => animation::Interpolation::Step,
-                    super::AnimationInterpolation::Linear => animation::Interpolation::Linear,
-                    super::AnimationInterpolation::Cubicspline => {
-                        animation::Interpolation::CubicSpline
-                    }
-                };
-                let accessor =
-                    self.json
-                        .accessors
-                        .get(sampler.output)
-                        .ok_or(GltfError::InvalidIndex {
-                            entity: GltfEntity::Accessor,
-                            index: sampler.output,
-                        })?;
-                let outputs = match (
-                    channel.target.path,
-                    accessor.type_,
-                    accessor.component_type,
-                    accessor.normalized,
-                ) {
-                    (
-                        super::AnimationTargetPath::Translation,
-                        AccessorType::Vec3,
-                        AccessorComponentType::Float,
-                        false,
-                    ) => animation::Outputs::Translations(
-                        self.accessor_iter::<f32, 3>(sampler.output)?
-                            .cloned()
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Rotation,
-                        AccessorType::Vec4,
-                        AccessorComponentType::Float,
-                        false,
-                    ) => animation::Outputs::Rotations(
-                        self.accessor_iter::<f32, 4>(sampler.output)?
-                            .cloned()
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Rotation,
-                        AccessorType::Vec4,
-                        AccessorComponentType::Byte,
-                        true,
-                    ) => animation::Outputs::Rotations(
-                        self.accessor_iter::<i8, 4>(sampler.output)?
-                            .map(i8x4_to_f32x4)
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Rotation,
-                        AccessorType::Vec4,
-                        AccessorComponentType::UnsignedByte,
-                        true,
-                    ) => animation::Outputs::Rotations(
-                        self.accessor_iter::<u8, 4>(sampler.output)?
-                            .map(u8x4_to_f32x4)
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Rotation,
-                        AccessorType::Vec4,
-                        AccessorComponentType::Short,
-                        true,
-                    ) => animation::Outputs::Rotations(
-                        self.accessor_iter::<i16, 4>(sampler.output)?
-                            .map(i16x4_to_f32x4)
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Rotation,
-                        AccessorType::Vec4,
-                        AccessorComponentType::UnsignedShort,
-                        true,
-                    ) => animation::Outputs::Rotations(
-                        self.accessor_iter::<u16, 4>(sampler.output)?
-                            .map(u16x4_to_f32x4)
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Scale,
-                        AccessorType::Vec3,
-                        AccessorComponentType::Float,
-                        false,
-                    ) => animation::Outputs::Scales(
-                        self.accessor_iter::<f32, 3>(sampler.output)?
-                            .cloned()
-                            .collect(),
-                    ),
-                    (
-                        super::AnimationTargetPath::Weights,
-                        AccessorType::Scalar,
-                        AccessorComponentType::Float,
-                        false,
-                    ) => animation::Outputs::Weights(
-                        self.accessor_iter::<f32, 1>(sampler.output)?
-                            .map(|w| w[0])
-                            .collect(),
-                        morph_targets_count,
-                    ),
-                    (
-                        super::AnimationTargetPath::Weights,
-                        AccessorType::Scalar,
-                        AccessorComponentType::Byte,
-                        true,
-                    ) => animation::Outputs::Weights(
-                        self.accessor_iter::<i8, 1>(sampler.output)?
-                            .map(i8x1_to_f32)
-                            .collect(),
-                        morph_targets_count,
-                    ),
-                    (
-                        super::AnimationTargetPath::Weights,
-                        AccessorType::Scalar,
-                        AccessorComponentType::UnsignedByte,
-                        true,
-                    ) => animation::Outputs::Weights(
-                        self.accessor_iter::<u8, 1>(sampler.output)?
-                            .map(u8x1_to_f32)
-                            .collect(),
-                        morph_targets_count,
-                    ),
-                    (
-                        super::AnimationTargetPath::Weights,
-                        AccessorType::Scalar,
-                        AccessorComponentType::Short,
-                        true,
-                    ) => animation::Outputs::Weights(
-                        self.accessor_iter::<i16, 1>(sampler.output)?
-                            .map(i16x1_to_f32)
-                            .collect(),
-                        morph_targets_count,
-                    ),
-                    (
-                        super::AnimationTargetPath::Weights,
-                        AccessorType::Scalar,
-                        AccessorComponentType::UnsignedShort,
-                        true,
-                    ) => animation::Outputs::Weights(
-                        self.accessor_iter::<u16, 1>(sampler.output)?
-                            .map(u16x1_to_f32)
-                            .collect(),
-                        morph_targets_count,
-                    ),
-                    (path, accessor_type, component_type, normalized) => {
-                        return Err(GltfError::InvalidAccessorDataType {
-                            accessor_type,
-                            component_type,
-                            normalized,
-                            usage: AccessorUsage::AnimationOutpus { path },
-                        })
-                        .with_context(|| format!("Failed to load animation"));
-                    }
-                };
-                channels.push(animation::Channel {
-                    node,
-                    inputs,
-                    interpolation,
-                    outputs,
-                });
-            }
-            scene
-                .animation_builder()
-                .name(animation.name.clone())
-                .repeat()
-                .channels(channels)
-                .build();
-        }
+        // 'anim: for animation in &self.json.animations {
+        //     let mut node_morph_targets_count_channel = Vec::new();
+        //     'channel: for channel in &animation.channels {
+        //         let node = match channel.target.node {
+        //             Some(node) => node,
+        //             None => continue 'channel,
+        //         };
+        //         match self
+        //             .json
+        //             .nodes
+        //             .get(node)
+        //             .ok_or(GltfError::InvalidIndex {
+        //                 entity: GltfEntity::Node,
+        //                 index: node,
+        //             })?
+        //             .id
+        //         {
+        //             Some(id) => {
+        //                 let morph_targets_count = scene[id].weights().len();
+        //                 node_morph_targets_count_channel.push((id, morph_targets_count, channel));
+        //             }
+        //             None => {
+        //                 continue 'anim;
+        //             }
+        //         }
+        //     }
+        //     let mut channels = Vec::with_capacity(node_morph_targets_count_channel.len());
+        //     for (node, morph_targets_count, channel) in node_morph_targets_count_channel {
+        //         let sampler =
+        //             animation
+        //                 .samplers
+        //                 .get(channel.sampler)
+        //                 .ok_or(GltfError::InvalidIndex {
+        //                     entity: GltfEntity::AnimationSampler,
+        //                     index: channel.sampler,
+        //                 })?;
+        //         let inputs = self
+        //             .accessor_iter::<f32, 1>(sampler.input)?
+        //             .map(|t| t[0])
+        //             .collect();
+        //         let interpolation = match sampler.interpolation {
+        //             super::AnimationInterpolation::Step => animation::Interpolation::Step,
+        //             super::AnimationInterpolation::Linear => animation::Interpolation::Linear,
+        //             super::AnimationInterpolation::Cubicspline => {
+        //                 animation::Interpolation::CubicSpline
+        //             }
+        //         };
+        //         let accessor =
+        //             self.json
+        //                 .accessors
+        //                 .get(sampler.output)
+        //                 .ok_or(GltfError::InvalidIndex {
+        //                     entity: GltfEntity::Accessor,
+        //                     index: sampler.output,
+        //                 })?;
+        //         let outputs = match (
+        //             channel.target.path,
+        //             accessor.type_,
+        //             accessor.component_type,
+        //             accessor.normalized,
+        //         ) {
+        //             (
+        //                 super::AnimationTargetPath::Translation,
+        //                 AccessorType::Vec3,
+        //                 AccessorComponentType::Float,
+        //                 false,
+        //             ) => animation::Outputs::Translations(
+        //                 self.accessor_iter::<f32, 3>(sampler.output)?
+        //                     .cloned()
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Rotation,
+        //                 AccessorType::Vec4,
+        //                 AccessorComponentType::Float,
+        //                 false,
+        //             ) => animation::Outputs::Rotations(
+        //                 self.accessor_iter::<f32, 4>(sampler.output)?
+        //                     .cloned()
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Rotation,
+        //                 AccessorType::Vec4,
+        //                 AccessorComponentType::Byte,
+        //                 true,
+        //             ) => animation::Outputs::Rotations(
+        //                 self.accessor_iter::<i8, 4>(sampler.output)?
+        //                     .map(i8x4_to_f32x4)
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Rotation,
+        //                 AccessorType::Vec4,
+        //                 AccessorComponentType::UnsignedByte,
+        //                 true,
+        //             ) => animation::Outputs::Rotations(
+        //                 self.accessor_iter::<u8, 4>(sampler.output)?
+        //                     .map(u8x4_to_f32x4)
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Rotation,
+        //                 AccessorType::Vec4,
+        //                 AccessorComponentType::Short,
+        //                 true,
+        //             ) => animation::Outputs::Rotations(
+        //                 self.accessor_iter::<i16, 4>(sampler.output)?
+        //                     .map(i16x4_to_f32x4)
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Rotation,
+        //                 AccessorType::Vec4,
+        //                 AccessorComponentType::UnsignedShort,
+        //                 true,
+        //             ) => animation::Outputs::Rotations(
+        //                 self.accessor_iter::<u16, 4>(sampler.output)?
+        //                     .map(u16x4_to_f32x4)
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Scale,
+        //                 AccessorType::Vec3,
+        //                 AccessorComponentType::Float,
+        //                 false,
+        //             ) => animation::Outputs::Scales(
+        //                 self.accessor_iter::<f32, 3>(sampler.output)?
+        //                     .cloned()
+        //                     .collect(),
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Weights,
+        //                 AccessorType::Scalar,
+        //                 AccessorComponentType::Float,
+        //                 false,
+        //             ) => animation::Outputs::Weights(
+        //                 self.accessor_iter::<f32, 1>(sampler.output)?
+        //                     .map(|w| w[0])
+        //                     .collect(),
+        //                 morph_targets_count,
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Weights,
+        //                 AccessorType::Scalar,
+        //                 AccessorComponentType::Byte,
+        //                 true,
+        //             ) => animation::Outputs::Weights(
+        //                 self.accessor_iter::<i8, 1>(sampler.output)?
+        //                     .map(i8x1_to_f32)
+        //                     .collect(),
+        //                 morph_targets_count,
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Weights,
+        //                 AccessorType::Scalar,
+        //                 AccessorComponentType::UnsignedByte,
+        //                 true,
+        //             ) => animation::Outputs::Weights(
+        //                 self.accessor_iter::<u8, 1>(sampler.output)?
+        //                     .map(u8x1_to_f32)
+        //                     .collect(),
+        //                 morph_targets_count,
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Weights,
+        //                 AccessorType::Scalar,
+        //                 AccessorComponentType::Short,
+        //                 true,
+        //             ) => animation::Outputs::Weights(
+        //                 self.accessor_iter::<i16, 1>(sampler.output)?
+        //                     .map(i16x1_to_f32)
+        //                     .collect(),
+        //                 morph_targets_count,
+        //             ),
+        //             (
+        //                 super::AnimationTargetPath::Weights,
+        //                 AccessorType::Scalar,
+        //                 AccessorComponentType::UnsignedShort,
+        //                 true,
+        //             ) => animation::Outputs::Weights(
+        //                 self.accessor_iter::<u16, 1>(sampler.output)?
+        //                     .map(u16x1_to_f32)
+        //                     .collect(),
+        //                 morph_targets_count,
+        //             ),
+        //             (path, accessor_type, component_type, normalized) => {
+        //                 return Err(GltfError::InvalidAccessorDataType {
+        //                     accessor_type,
+        //                     component_type,
+        //                     normalized,
+        //                     usage: AccessorUsage::AnimationOutpus { path },
+        //                 })
+        //                 .with_context(|| format!("Failed to load animation"));
+        //             }
+        //         };
+        //         channels.push(animation::Channel {
+        //             node,
+        //             inputs,
+        //             interpolation,
+        //             outputs,
+        //         });
+        //     }
+        //     scene
+        //         .animation_builder()
+        //         .name(animation.name.clone())
+        //         .repeat()
+        //         .channels(channels)
+        //         .build();
+        // }
 
         for node in &mut self.json.nodes {
             node.id = None;
@@ -462,25 +485,6 @@ impl super::GltfAsset {
         }
 
         Ok(id)
-    }
-
-    fn accessor_iter<T: Pod + 'static, const N: usize>(
-        &self,
-        index: usize,
-    ) -> Result<DenseAccessorIter<'_, T, N>> {
-        let accessor = self
-            .json
-            .accessors
-            .get(index)
-            .ok_or(GltfError::InvalidIndex {
-                entity: GltfEntity::Accessor,
-                index,
-            })?;
-        if accessor.sparse.is_some() {
-            todo!("sparse accessor support");
-        }
-
-        accessor.dense_iter(&self.json.buffer_views, &self.json.buffers)
     }
 }
 
@@ -633,6 +637,10 @@ impl Value for [f32; 3] {
 
 impl Value for [f32; 4] {
     const DEFAULT: &'static Self = &[0.0; 4];
+}
+
+impl Value for [f32; 4 * 4] {
+    const DEFAULT: &'static Self = &[0.0; 4 * 4];
 }
 
 struct DenseAccessorIter<'a, V: Value> {
@@ -816,14 +824,14 @@ fn dense_iter<'a, V: Value>(
     })
 }
 
-trait IteratorConsumer<T> {
+trait IteratorConsumer<'a, T: 'static> {
     type Return;
 
-    fn consume<I: Iterator<Item = T>>(self, iter: I) -> Result<Self::Return>;
+    fn consume<I: Iterator<Item = &'a T> + 'a>(self, iter: I) -> Result<Self::Return>;
 }
 
 impl super::Accessor {
-    fn iter<'a, V: Value, C: IteratorConsumer<&'a V>>(
+    fn iter<'a, V: Value, C: IteratorConsumer<'a, V>>(
         &'a self,
         buffer_views: &[super::BufferView],
         buffers: &'a [super::Buffer],

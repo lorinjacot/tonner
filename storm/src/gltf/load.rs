@@ -513,19 +513,141 @@ impl GlbChunk {
     }
 }
 
-struct DenseAccessorIter<'a, T: Pod + 'static, const N: usize> {
+trait Index: Copy + Pod {
+    fn as_usize(&self) -> usize;
+}
+
+impl Index for u8 {
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+}
+
+impl Index for u16 {
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+}
+
+impl Index for u32 {
+    fn as_usize(&self) -> usize {
+        *self as usize
+    }
+}
+
+trait Value: Pod + 'static {
+    const DEFAULT: &'static Self;
+}
+
+impl Value for [i8; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl Value for [i8; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl Value for [i8; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl Value for [i8; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl Value for [u8; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl Value for [u8; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl Value for [u8; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl Value for [u8; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl Value for [i16; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl Value for [i16; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl Value for [i16; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl Value for [i16; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl Value for [u16; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl Value for [u16; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl Value for [u16; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl Value for [u16; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl Value for [u32; 1] {
+    const DEFAULT: &'static Self = &[0; 1];
+}
+
+impl Value for [u32; 2] {
+    const DEFAULT: &'static Self = &[0; 2];
+}
+
+impl Value for [u32; 3] {
+    const DEFAULT: &'static Self = &[0; 3];
+}
+
+impl Value for [u32; 4] {
+    const DEFAULT: &'static Self = &[0; 4];
+}
+
+impl Value for [f32; 1] {
+    const DEFAULT: &'static Self = &[0.0; 1];
+}
+
+impl Value for [f32; 2] {
+    const DEFAULT: &'static Self = &[0.0; 2];
+}
+
+impl Value for [f32; 3] {
+    const DEFAULT: &'static Self = &[0.0; 3];
+}
+
+impl Value for [f32; 4] {
+    const DEFAULT: &'static Self = &[0.0; 4];
+}
+
+struct DenseAccessorIter<'a, V: Value> {
     bytes: &'a [u8],
     next: usize,
     byte_stride: usize,
-    data_type: PhantomData<[T; N]>,
+    data_type: PhantomData<V>,
 }
 
-impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T, N> {
-    type Item = &'a [T; N];
+impl<'a, V: Value> Iterator for DenseAccessorIter<'a, V> {
+    type Item = &'a V;
 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.next * self.byte_stride;
-        let end = start + size_of::<[T; N]>();
+        let end = start + size_of::<V>();
         let next = from_bytes(self.bytes.get(start..end)?);
         self.next += 1;
         Some(next)
@@ -537,21 +659,19 @@ impl<'a, T: Pod + 'static, const N: usize> Iterator for DenseAccessorIter<'a, T,
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = (self.bytes.len() - size_of::<[T; N]>()) / self.byte_stride + 1 - self.next;
+        let len = (self.bytes.len() - size_of::<V>()) / self.byte_stride + 1 - self.next;
         (len, Some(len))
     }
 }
 
-struct SparseAccessorIter<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> {
-    default_values: DenseAccessorIter<'a, T, N>,
-    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, [T; N]>>,
-    next_sparse_entry: Option<(usize, &'a [T; N])>,
+struct SparseAccessorIter<'a, I: Index, V: Value> {
+    default_values: DenseAccessorIter<'a, V>,
+    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, V>>,
+    next_sparse_entry: Option<(usize, &'a V)>,
 }
 
-impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
-    for SparseAccessorIter<'a, I, T, N>
-{
-    type Item = &'a [T; N];
+impl<'a, I: Index, V: Value> Iterator for SparseAccessorIter<'a, I, V> {
+    type Item = &'a V;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.default_values.next;
@@ -562,7 +682,7 @@ impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
                 self.next_sparse_entry = self
                     .sparse_iter
                     .next()
-                    .map(|(idx, value)| (idx.to_owned().into(), value));
+                    .map(|(idx, value)| (idx.as_usize(), value));
                 Some(value)
             }
             _ => Some(default_value),
@@ -574,18 +694,16 @@ impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
     }
 }
 
-struct PureSparseAccessorIter<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> {
-    default_value: &'a [T; N],
-    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, [T; N]>>,
-    next_sparse_entry: Option<(usize, &'a [T; N])>,
+struct PureSparseAccessorIter<'a, I: Index, V: Value> {
+    default_value: &'a V,
+    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, V>>,
+    next_sparse_entry: Option<(usize, &'a V)>,
     next: usize,
     count: usize,
 }
 
-impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
-    for PureSparseAccessorIter<'a, I, T, N>
-{
-    type Item = &'a [T; N];
+impl<'a, I: Index, V: Value> Iterator for PureSparseAccessorIter<'a, I, V> {
+    type Item = &'a V;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next < self.count {
@@ -595,7 +713,7 @@ impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
                     self.next_sparse_entry = self
                         .sparse_iter
                         .next()
-                        .map(|(idx, value)| (idx.to_owned().into(), value));
+                        .map(|(idx, value)| (idx.as_usize(), value));
                     value
                 }
                 _ => self.default_value,
@@ -606,117 +724,11 @@ impl<'a, I: Copy + Into<usize>, T: Pod + 'static, const N: usize> Iterator
     }
 }
 
-trait StaticDefault: 'static {
-    const DEFAULT: &'static Self;
-}
-
-impl StaticDefault for [i8; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl StaticDefault for [i8; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl StaticDefault for [i8; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl StaticDefault for [i8; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl StaticDefault for [u8; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl StaticDefault for [u8; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl StaticDefault for [u8; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl StaticDefault for [u8; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl StaticDefault for [i16; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl StaticDefault for [i16; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl StaticDefault for [i16; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl StaticDefault for [i16; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl StaticDefault for [u16; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl StaticDefault for [u16; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl StaticDefault for [u16; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl StaticDefault for [u16; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl StaticDefault for [u32; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl StaticDefault for [u32; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl StaticDefault for [u32; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl StaticDefault for [u32; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl StaticDefault for [f32; 1] {
-    const DEFAULT: &'static Self = &[0.0; 1];
-}
-
-impl StaticDefault for [f32; 2] {
-    const DEFAULT: &'static Self = &[0.0; 2];
-}
-
-impl StaticDefault for [f32; 3] {
-    const DEFAULT: &'static Self = &[0.0; 3];
-}
-
-impl StaticDefault for [f32; 4] {
-    const DEFAULT: &'static Self = &[0.0; 4];
-}
-
-macro_rules! accessor_iter {
-    ($accessor:expr, $buffer_views:expr, buffers:expr, {
-        $expr:expr
-    }) => {};
-}
-
-fn sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize>(
+fn sparse_iter<'a, I: Index, V: Value>(
     sparse: &super::SparseAccessor,
     buffer_views: &[super::BufferView],
     buffers: &'a [super::Buffer],
-) -> Result<Zip<slice::Iter<'a, I>, slice::Iter<'a, [T; N]>>> {
+) -> Result<Zip<slice::Iter<'a, I>, slice::Iter<'a, V>>> {
     let indices = buffer_views
         .get(sparse.indices.buffer_view)
         .with_context(|| {
@@ -746,8 +758,8 @@ fn sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize
     );
 
     let start = sparse.values.byte_offset;
-    let end = start + sparse.count * size_of::<[T; N]>();
-    let values: &[[T; N]] = cast_slice(
+    let end = start + sparse.count * size_of::<V>();
+    let values: &[V] = cast_slice(
         buffer_views
             .get(sparse.values.buffer_view)
             .with_context(|| {
@@ -775,22 +787,20 @@ fn sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize
     Ok(zip(indices, values))
 }
 
-fn dense_iter<'a, T: Pod + 'static, const N: usize>(
+fn dense_iter<'a, V: Value>(
     buffer_view: usize,
     byte_offset: usize,
     count: usize,
     buffer_views: &[super::BufferView],
     buffers: &'a [super::Buffer],
-) -> Result<DenseAccessorIter<'a, T, N>> {
+) -> Result<DenseAccessorIter<'a, V>> {
     let view = buffer_views.get(buffer_view).ok_or(anyhow!(
         "accessor.buffer_view {buffer_view} is out of range"
     ))?;
 
-    let byte_stride = view
-        .byte_stride
-        .map_or(size_of::<[T; N]>(), NonZeroUsize::get);
+    let byte_stride = view.byte_stride.map_or(size_of::<V>(), NonZeroUsize::get);
     let start = byte_offset;
-    let end = start + (count - 1) * byte_stride + size_of::<[T; N]>();
+    let end = start + (count - 1) * byte_stride + size_of::<V>();
 
     let bytes = view
         .bytes(buffers)
@@ -806,7 +816,125 @@ fn dense_iter<'a, T: Pod + 'static, const N: usize>(
     })
 }
 
+trait IteratorConsumer<T> {
+    type Return;
+
+    fn consume<I: Iterator<Item = T>>(self, iter: I) -> Result<Self::Return>;
+}
+
 impl super::Accessor {
+    fn iter<'a, V: Value, C: IteratorConsumer<&'a V>>(
+        &'a self,
+        buffer_views: &[super::BufferView],
+        buffers: &'a [super::Buffer],
+        consumer: C,
+    ) -> Result<C::Return> {
+        match &self.sparse {
+            Some(sparse) => match sparse.indices.component_type {
+                super::SparseAccessorComponentType::UnsignedByte => {
+                    let mut sparse_iter = sparse_iter::<u8, V>(sparse, buffer_views, buffers)?;
+                    let next_sparse_entry = sparse_iter.next().map(|(idx, v)| (idx.as_usize(), v));
+
+                    match self.buffer_view {
+                        Some(buffer_view) => {
+                            let default_values = dense_iter(
+                                buffer_view,
+                                self.byte_offset,
+                                self.count,
+                                buffer_views,
+                                buffers,
+                            )?;
+
+                            consumer.consume(SparseAccessorIter {
+                                default_values,
+                                sparse_iter,
+                                next_sparse_entry,
+                            })
+                        }
+                        None => consumer.consume(PureSparseAccessorIter {
+                            default_value: Value::DEFAULT,
+                            sparse_iter,
+                            next_sparse_entry,
+                            next: 0,
+                            count: self.count,
+                        }),
+                    }
+                }
+                super::SparseAccessorComponentType::UnsignedShort => {
+                    let mut sparse_iter = sparse_iter::<u16, V>(sparse, buffer_views, buffers)?;
+                    let next_sparse_entry = sparse_iter.next().map(|(idx, v)| (idx.as_usize(), v));
+
+                    match self.buffer_view {
+                        Some(buffer_view) => {
+                            let default_values = dense_iter(
+                                buffer_view,
+                                self.byte_offset,
+                                self.count,
+                                buffer_views,
+                                buffers,
+                            )?;
+
+                            consumer.consume(SparseAccessorIter {
+                                default_values,
+                                sparse_iter,
+                                next_sparse_entry,
+                            })
+                        }
+                        None => consumer.consume(PureSparseAccessorIter {
+                            default_value: Value::DEFAULT,
+                            sparse_iter,
+                            next_sparse_entry,
+                            next: 0,
+                            count: self.count,
+                        }),
+                    }
+                }
+                super::SparseAccessorComponentType::UnsignedInt => {
+                    let mut sparse_iter = sparse_iter::<u32, V>(sparse, buffer_views, buffers)?;
+                    let next_sparse_entry = sparse_iter.next().map(|(idx, v)| (idx.as_usize(), v));
+
+                    match self.buffer_view {
+                        Some(buffer_view) => {
+                            let default_values = dense_iter(
+                                buffer_view,
+                                self.byte_offset,
+                                self.count,
+                                buffer_views,
+                                buffers,
+                            )?;
+
+                            consumer.consume(SparseAccessorIter {
+                                default_values,
+                                sparse_iter,
+                                next_sparse_entry,
+                            })
+                        }
+                        None => consumer.consume(PureSparseAccessorIter {
+                            default_value: Value::DEFAULT,
+                            sparse_iter,
+                            next_sparse_entry,
+                            next: 0,
+                            count: self.count,
+                        }),
+                    }
+                }
+            },
+            None => {
+                let buffer_view = self
+                    .buffer_view
+                    .context("one of accessor.buffer_view or accessor.sparse has to be defined")?;
+
+                consumer.consume(dense_iter(
+                    buffer_view,
+                    self.byte_offset,
+                    self.count,
+                    buffer_views,
+                    buffers,
+                )?)
+            }
+        }
+    }
+
     fn bytes_dense<'a>(
         &'a self,
         buffer_views: &[super::BufferView],
@@ -864,7 +992,7 @@ impl super::Accessor {
         buffers: &'a [super::Buffer],
     ) -> Result<PureSparseAccessorIter<'a, I, T, N>>
     where
-        [T; N]: StaticDefault,
+        [T; N]: Value,
     {
         let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
 
@@ -874,7 +1002,7 @@ impl super::Accessor {
             .map(|(idx, value)| (idx.to_owned().into(), value));
 
         Ok(PureSparseAccessorIter {
-            default_value: StaticDefault::DEFAULT,
+            default_value: Value::DEFAULT,
             sparse_iter,
             next_sparse_entry,
             next: 0,

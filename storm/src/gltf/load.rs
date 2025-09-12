@@ -972,71 +972,6 @@ impl super::Accessor {
             .get(start..end)
             .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
     }
-
-    fn sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize>(
-        &'a self,
-        buffer_views: &[super::BufferView],
-        buffers: &'a [super::Buffer],
-    ) -> Result<SparseAccessorIter<'a, I, T, N>> {
-        let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
-
-        let mut sparse_iter = sparse_iter::<I, T, N>(sparse, buffer_views, buffers)?;
-        let next_sparse_entry = sparse_iter
-            .next()
-            .map(|(idx, value)| (idx.to_owned().into(), value));
-
-        let default_values = self.dense_iter(buffer_views, buffers)?;
-
-        Ok(SparseAccessorIter {
-            default_values,
-            sparse_iter,
-            next_sparse_entry,
-        })
-    }
-
-    fn pure_sparse_iter<'a, I: Copy + Into<usize> + Pod, T: Pod + 'static, const N: usize>(
-        &'a self,
-        buffer_views: &[super::BufferView],
-        buffers: &'a [super::Buffer],
-    ) -> Result<PureSparseAccessorIter<'a, I, T, N>>
-    where
-        [T; N]: Value,
-    {
-        let sparse = self.sparse.as_ref().context("accessor should be sparse")?;
-
-        let mut sparse_iter = sparse_iter::<I, T, N>(sparse, buffer_views, buffers)?;
-        let next_sparse_entry = sparse_iter
-            .next()
-            .map(|(idx, value)| (idx.to_owned().into(), value));
-
-        Ok(PureSparseAccessorIter {
-            default_value: Value::DEFAULT,
-            sparse_iter,
-            next_sparse_entry,
-            next: 0,
-            count: self.count,
-        })
-    }
-
-    fn dense_iter<'a, T: Pod + 'static, const N: usize>(
-        &'a self,
-        buffer_views: &[super::BufferView],
-        buffers: &'a [super::Buffer],
-    ) -> Result<DenseAccessorIter<'a, T, N>> {
-        ensure!(self.sparse.is_none(), "accessor should not be sparse");
-
-        let buffer_view = self.buffer_view.ok_or(anyhow!(
-            "accessor.buffer_view must be defined for dense accessor"
-        ))?;
-
-        dense_iter(
-            buffer_view,
-            self.byte_offset,
-            self.count,
-            buffer_views,
-            buffers,
-        )
-    }
 }
 
 impl super::BufferView {
@@ -1389,6 +1324,36 @@ impl super::Mesh {
                     builder = builder.normal_tex_coord(normal_tex_coord);
                 }
 
+                macro_rules! dim {
+                    (Vec2) => {
+                        2
+                    };
+                    (Vec3) => {
+                        3
+                    };
+                    (Vec4) => {
+                        4
+                    };
+                }
+
+                macro_rules! rust_type {
+                    (Byte) => {
+                        i8
+                    };
+                    (UnsignedByte) => {
+                        u8
+                    };
+                    (Short) => {
+                        i16
+                    };
+                    (UnsignedShort) => {
+                        u16
+                    };
+                    (UnsignedInt) => {
+                        u32
+                    };
+                }
+
                 macro_rules! transform {
                     (Vec2, Byte, true) => {
                         i8x2_to_vec2
@@ -1435,37 +1400,73 @@ impl super::Mesh {
                 }
 
                 macro_rules! case {
-                    ($method:ident($(morph_target($target_idx:expr, $target_ctx:ident), )?($type_:ident, Float, false$(, extend($value:literal))?), $accessor:ident, $accessor_ctx:ident)) => {{
-                        builder.$method(
-                            $($target_idx,)?
-                            $accessor
-                                .dense_iter(buffer_views, buffers)
-                                .with_context($accessor_ctx)
-                                $(.with_context($target_ctx))?
-                                .with_context(primitive_ctx)?
-                                .cloned()
-                                .map($type_::from_array)
-                                $(.map(|v| v.extend($value)))?,
-                        )
+                    ($method:ident, (
+                        $type_:ident,
+                        Float,
+                        false
+                        $(, extend($value:literal))?
+                    ), $accessor:ident, $accessor_ctx:ident) => {{
+                        struct Consumer {
+                            builder: GeometryBuilder,
+                        }
+
+                        impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {                            
+                            type Return = GeometryBuilder;
+
+                            fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
+                                Ok(self.builder.$method(
+                                    iter
+                                        .cloned()
+                                        .map($type_::from_array)
+                                        $(.map(|v| v.extend($value)))?,
+                                ))
+                            }
+                        }
+
+                        Consumer {
+                            builder
+                        }
                     }};
-                    ($method:ident($(morph_target($target_idx:expr, $target_ctx:ident), )?($type_:ident, $component:ident, $normalized:ident$(, extend($value:literal))?), $accessor:ident, $accessor_ctx:ident)) => {{
-                        builder.$method(
-                            $($target_idx,)?
-                            $accessor
-                                .dense_iter(buffer_views, buffers)
-                                .with_context($accessor_ctx)
-                                $(.with_context($target_ctx))?
-                                .with_context(primitive_ctx)?
-                                .map(transform!($type_, $component, $normalized))
-                                $(.map(|v| v.extend($value)))?,
-                        )
+                    ($method:ident, (
+                        $type_:ident,
+                        $component:ident,
+                        $normalized:ident
+                        $(, extend($value:literal))?
+                    ), $accessor:ident, $accessor_ctx:ident) => {{
+                        struct Consumer {
+                            builder: GeometryBuilder,
+                        }
+
+                        impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {                            
+                            type Return = GeometryBuilder;
+
+                            fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
+                                Ok(self.builder.$method(
+                                    iter
+                                        .map(transform!($type_, $component, $normalized))
+                                        $(.map(|v| v.extend($value)))?,
+                                ))
+                            }
+                        }
+
+                        Consumer {
+                            builder
+                        }
                     }};
                 }
 
                 macro_rules! load_attribute {
-                    ($attr:expr, $method:ident, [
-                        $(($type_:ident, $component:ident, $normalized:ident$(, extend($value:literal))?)),+$(,)?
-                    ]) => {
+                    (
+                        $attr:expr,
+                        $method:ident, [
+                            $((
+                                $type_:ident,
+                                $component:ident,
+                                $normalized:ident
+                                $(, extend($value:literal))?
+                            ),)+
+                        ]
+                    ) => {
                         if let Some(accessor_idx) = $attr {
                             let accessor = accessors
                                             .get(accessor_idx).with_context(|| format!(
@@ -1481,7 +1482,21 @@ impl super::Mesh {
                             builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                                 $(
                                     (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                        case!($method(($type_, $component, $normalized$(, extend($value))?), accessor, accessor_ctx))
+                                        accessor.iter(buffer_views, buffers,
+                                             case!(
+                                                $method,
+                                                (
+                                                    $type_,
+                                                    $component,
+                                                    $normalized
+                                                    $(, extend($value))?
+                                                ),
+                                                accessor,
+                                                accessor_ctx
+                                            )
+                                        )
+                                            .with_context(accessor_ctx)
+                                            .with_context(primitive_ctx)?
                                     }
                                 )+
                                 (accessor_type, component_type, normalized) => {
@@ -1505,13 +1520,23 @@ impl super::Mesh {
                 load_attribute!(
                     primitive.attributes.position,
                     positions,
-                    [(Vec3, Float, false)]
+                    [
+                        (Vec3, Float, false),
+                    ]
                 );
-                load_attribute!(primitive.attributes.normal, normals, [(Vec3, Float, false)]);
+                load_attribute!(
+                    primitive.attributes.normal,
+                    normals,
+                    [
+                        (Vec3, Float, false),
+                    ]
+                );
                 load_attribute!(
                     primitive.attributes.tangent,
                     tangents,
-                    [(Vec4, Float, false)]
+                    [
+                        (Vec4, Float, false),
+                    ]
                 );
                 load_attribute!(
                     primitive.attributes.tex_coord_0,
@@ -1562,9 +1587,76 @@ impl super::Mesh {
                     let morph_target_ctx =
                         || format!("Failed to load primitive.target[{target_idx}]");
 
-                    macro_rules! load_morph_target_attribute {
+                    macro_rules! case {
+                        ($method:ident, (
+                            $type_:ident,
+                            Float,
+                            false
+                            $(, extend($value:literal))?
+                        ), $accessor:ident, $accessor_ctx:ident) => {{
+                            struct Consumer {
+                                builder: GeometryBuilder,
+                                target_idx: usize,
+                            }
+
+                            impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {                            
+                                type Return = GeometryBuilder;
+
+                                fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
+                                    Ok(self.builder.$method(
+                                        self.target_idx,
+                                        iter
+                                            .cloned()
+                                            .map($type_::from_array)
+                                            $(.map(|v| v.extend($value)))?,
+                                    ))
+                                }
+                            }
+
+                            Consumer {
+                                builder,
+                                target_idx,
+                            }
+                        }};
+                        ($method:ident, (
+                            $type_:ident,
+                            $component:ident,
+                            $normalized:ident
+                            $(, extend($value:literal))?
+                        ), $accessor:ident, $accessor_ctx:ident) => {{
+                            struct Consumer {
+                                builder: GeometryBuilder,
+                                target_idx: usize,
+                            }
+
+                            impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {                            
+                                type Return = GeometryBuilder;
+
+                                fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
+                                    Ok(self.builder.$method(
+                                        self.target_idx,
+                                        iter
+                                            .map(transform!($type_, $component, $normalized))
+                                            $(.map(|v| v.extend($value)))?,
+                                    ))
+                                }
+                            }
+
+                            Consumer {
+                                builder,
+                                target_idx,
+                            }
+                        }};
+                    }
+
+                    macro_rules! load_attribute {
                         ($attr:expr, $method:ident, [
-                            $(($type_:ident, $component:ident, $normalized:ident$(, extend($value:literal))?)),+$(,)?
+                            $((
+                                $type_:ident,
+                                $component:ident,
+                                $normalized:ident
+                                $(, extend($value:literal))?
+                            ),)+
                         ]) => {
                             if let Some(accessor_idx) = $attr {
                                 let accessor = accessors
@@ -1583,7 +1675,17 @@ impl super::Mesh {
                                 builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
                                     $(
                                         (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                            case!($method(morph_target(target_idx, morph_target_ctx), ($type_, $component, $normalized$(, extend($value))?), accessor, accessor_ctx))
+                                            accessor.iter(buffer_views, buffers,
+                                                case!($method, (
+                                                    $type_,
+                                                    $component,
+                                                    $normalized
+                                                    $(, extend($value))?
+                                                ), accessor, accessor_ctx),
+                                            )
+                                                .with_context(accessor_ctx)
+                                                .with_context(morph_target_ctx)
+                                                .with_context(primitive_ctx)?
                                         }
                                     )+
                                     (accessor_type, component_type, normalized) => {
@@ -1605,22 +1707,28 @@ impl super::Mesh {
                         };
                     }
 
-                    load_morph_target_attribute!(
+                    load_attribute!(
                         morph_target.position,
                         morph_target_positions,
-                        [(Vec3, Float, false),]
+                        [
+                            (Vec3, Float, false),
+                        ]
                     );
-                    load_morph_target_attribute!(
+                    load_attribute!(
                         morph_target.normal,
                         morph_target_normals,
-                        [(Vec3, Float, false),]
+                        [
+                            (Vec3, Float, false),
+                        ]
                     );
-                    load_morph_target_attribute!(
+                    load_attribute!(
                         morph_target.tangent,
                         morph_target_tangents,
-                        [(Vec3, Float, false),]
+                        [
+                            (Vec3, Float, false),
+                        ]
                     );
-                    load_morph_target_attribute!(
+                    load_attribute!(
                         morph_target.tex_coord_0,
                         morph_target_tex_coords_0,
                         [
@@ -1631,7 +1739,7 @@ impl super::Mesh {
                             (Vec2, UnsignedShort, true),
                         ]
                     );
-                    load_morph_target_attribute!(
+                    load_attribute!(
                         morph_target.tex_coord_1,
                         morph_target_tex_coords_1,
                         [
@@ -1642,7 +1750,7 @@ impl super::Mesh {
                             (Vec2, UnsignedShort, true),
                         ]
                     );
-                    load_morph_target_attribute!(
+                    load_attribute!(
                         morph_target.color_0,
                         morph_target_colors_0,
                         [

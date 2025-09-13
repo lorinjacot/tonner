@@ -216,7 +216,7 @@ impl Engine {
 
         let mut resources = thread_data.resources.lock().unwrap();
 
-        let radiance_image = include_bytes!("../../asset/environments/newport_loft.hdr");
+        let radiance_image = include_bytes!("../../assets/newport_loft.hdr");
         // let radiance_image = include_bytes!("../../asset/environments/Cannon_Exterior.hdr");
         let radiance_image = std::io::Cursor::new(radiance_image);
         let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();

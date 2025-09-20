@@ -155,7 +155,7 @@ impl super::GltfAsset {
                     builder: SkinBuilder<'a, 's>,
                 }
 
-                impl<'a, 's> IteratorConsumer<'a, [f32; 4 * 4]> for RegisterBindMatrices<'a, 's> {
+                impl<'a, 's> IteratorConsumer<'a, &'a [f32; 4 * 4]> for RegisterBindMatrices<'a, 's> {
                     type Return = SkinBuilder<'a, 's>;
 
                     fn consume<I: Iterator<Item = &'a [f32; 4 * 4]> + 'a>(
@@ -953,7 +953,7 @@ impl super::Mesh {
                             builder: GeometryBuilder,
                         }
 
-                        impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {
+                        impl<'a> IteratorConsumer<'a, &'a [f32; dim!($type_)]> for Consumer {
                             type Return = GeometryBuilder;
 
                             fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -980,7 +980,7 @@ impl super::Mesh {
                             builder: GeometryBuilder,
                         }
 
-                        impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {
+                        impl<'a> IteratorConsumer<'a, &'a [rust_type!($component); dim!($type_)]> for Consumer {
                             type Return = GeometryBuilder;
 
                             fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -1136,7 +1136,7 @@ impl super::Mesh {
                                 target_idx: usize,
                             }
 
-                            impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {
+                            impl<'a> IteratorConsumer<'a, &'a [f32; dim!($type_)]> for Consumer {
                                 type Return = GeometryBuilder;
 
                                 fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -1166,7 +1166,7 @@ impl super::Mesh {
                                 target_idx: usize,
                             }
 
-                            impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {
+                            impl<'a> IteratorConsumer<'a, &'a [rust_type!($component); dim!($type_)]> for Consumer {
                                 type Return = GeometryBuilder;
 
                                 fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {

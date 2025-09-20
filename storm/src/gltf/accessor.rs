@@ -6,8 +6,9 @@ use std::{
     slice,
 };
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytemuck::{Pod, cast_slice, from_bytes};
+use glam::{I8Vec4, Vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -102,7 +103,7 @@ impl Accessor {
     pub(super) fn count(&self) -> usize {
         self.count
     }
-    
+
     /// Specifies if the accessor’s elements are scalars, vectors, or matrices.
     pub(super) fn type_(&self) -> AccessorType {
         self.type_
@@ -127,7 +128,7 @@ impl Accessor {
     /// Works with both dense and sparse accessors.
     /// This method will interpret the bytes contained in
     /// the accessor as `V` without doing any checks.
-    pub(super) fn iter_unchecked<'a, V: Value, C: IteratorConsumer<'a, V>>(
+    pub(super) fn iter_unchecked<'a, V: Value, C: IteratorConsumer<'a, &'a V>>(
         &'a self,
         buffer_views: &[BufferView],
         buffers: &'a [Buffer],
@@ -273,6 +274,90 @@ impl Accessor {
     }
 }
 
+impl Accessor {
+    pub(super) fn iter_vec4<'a, C: IteratorConsumer<'a, Vec4>>(
+        &'a self,
+        buffer_views: &[BufferView],
+        buffers: &'a [Buffer],
+        consumer: C,
+    ) -> Result<C::Return> {
+        macro_rules! from {
+            ($source:ty) => {{
+                struct Consumer<'b, D: IteratorConsumer<'b, Vec4>> {
+                    consumer: D,
+                    lifetype: PhantomData<&'b ()>,
+                }
+
+                impl<'b, D: IteratorConsumer<'b, Vec4>> IteratorConsumer<'b, &'b $source>
+                    for Consumer<'b, D>
+                {
+                    type Return = D::Return;
+
+                    fn consume<I: Iterator<Item = &'b $source> + 'b>(
+                        self,
+                        iter: I,
+                    ) -> Result<Self::Return> {
+                        self.consumer
+                            .consume(iter.cloned().map(Vec4::from_array))
+                    }
+                }
+
+                self.iter_unchecked(
+                    buffer_views,
+                    buffers,
+                    Consumer {
+                        consumer,
+                        lifetype: PhantomData,
+                    },
+                )
+            }};
+            ($source:ty : $via:ty, $transformation:expr) => {{
+                struct Consumer<'b, D: IteratorConsumer<'b, Vec4>> {
+                    consumer: D,
+                    lifetype: PhantomData<&'b ()>,
+                }
+
+                impl<'b, D: IteratorConsumer<'b, Vec4>> IteratorConsumer<'b, &'b $source> for Consumer<'b, D> {
+                    type Return = D::Return;
+
+                    fn consume<I: Iterator<Item = &'b $source> + 'b>(
+                        self,
+                        iter: I,
+                    ) -> Result<Self::Return> {
+                        self.consumer.consume(
+                            iter.cloned()
+                                .map(<$via>::from_array)
+                                .map($transformation),
+                        )
+                    }
+                }
+
+                self.iter_unchecked(
+                    buffer_views,
+                    buffers,
+                    Consumer {
+                        consumer,
+                        lifetype: PhantomData,
+                    },
+                )
+            }};
+        }
+
+        match (self.type_, self.component_type, self.normalized) {
+            (AccessorType::Vec4, AccessorComponentType::Float, false) => {
+                from!([f32; 4])
+            }
+            (AccessorType::Vec4, AccessorComponentType::Byte, true) => {
+                from!([i8; 4] : I8Vec4, |a| a.as_vec4() / 255.0)
+            }
+            (type_, component_type, normalized) => {
+                let normalized = if normalized { "" } else { " normalized" };
+                bail!("Cannot create a Vec4 from a {type_} of {normalized} {component_type}");
+            }
+        }
+    }
+}
+
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)
 /// type **MUST NOT** be used for any accessor that is not referenced by
 /// [mesh.primitive.indices](MeshPrimitive::indices).
@@ -302,10 +387,10 @@ impl Display for AccessorComponentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Byte => "byte",
-            Self::UnsignedByte => "unsigned_byte",
+            Self::UnsignedByte => "unsigned byte",
             Self::Short => "short",
-            Self::UnsignedShort => "unsigned_short",
-            Self::UnsignedInt => "unsigned_int",
+            Self::UnsignedShort => "unsigned short",
+            Self::UnsignedInt => "unsigned int",
             Self::Float => "float",
         })
     }
@@ -433,10 +518,10 @@ struct SparseAccessorValues {
     byte_offset: usize,
 }
 
-pub(super) trait IteratorConsumer<'a, T: 'static> {
+pub(super) trait IteratorConsumer<'a, T: 'a> {
     type Return;
 
-    fn consume<I: Iterator<Item = &'a T> + 'a>(self, iter: I) -> Result<Self::Return>;
+    fn consume<I: Iterator<Item = T> + 'a>(self, iter: I) -> Result<Self::Return>;
 }
 
 /// A iterator over a dense glTF accessor's entries.

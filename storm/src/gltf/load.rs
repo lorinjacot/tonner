@@ -1,15 +1,11 @@
 use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek},
-    iter::{Zip, zip},
-    marker::PhantomData,
-    num::NonZeroUsize,
     path::Path,
-    slice,
 };
 
-use anyhow::{Context, Result, anyhow, ensure};
-use bytemuck::{Pod, bytes_of_mut, cast_slice, from_bytes};
+use anyhow::{Context, Result, anyhow};
+use bytemuck::{bytes_of_mut, cast_slice};
 use data_url::{DataUrl, DataUrlError};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use image::{ImageFormat, ImageReader};
@@ -20,7 +16,7 @@ use crate::{
     geometry::GeometryBuilder,
     gltf::{
         AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError, GltfEntity,
-        GltfError,
+        GltfError, accessor::IteratorConsumer,
     },
     skin::SkinBuilder,
 };
@@ -181,7 +177,11 @@ impl super::GltfAsset {
                         format!("inverse_bind_matrices {inverse_bind_matrices} is out of range")
                     })?;
 
-                builder = accessor.iter(&self.json.buffer_views, &self.json.buffers, consumer)?;
+                builder = accessor.iter_unchecked(
+                    &self.json.buffer_views,
+                    &self.json.buffers,
+                    consumer,
+                )?;
             }
 
             let skin = builder.build().id();
@@ -517,465 +517,8 @@ impl GlbChunk {
     }
 }
 
-trait Index: Copy + Pod {
-    fn as_usize(&self) -> usize;
-}
-
-impl Index for u8 {
-    fn as_usize(&self) -> usize {
-        *self as usize
-    }
-}
-
-impl Index for u16 {
-    fn as_usize(&self) -> usize {
-        *self as usize
-    }
-}
-
-impl Index for u32 {
-    fn as_usize(&self) -> usize {
-        *self as usize
-    }
-}
-
-trait Value: Pod + 'static {
-    const DEFAULT: &'static Self;
-}
-
-impl Value for [i8; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl Value for [i8; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl Value for [i8; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl Value for [i8; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl Value for [u8; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl Value for [u8; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl Value for [u8; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl Value for [u8; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl Value for [i16; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl Value for [i16; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl Value for [i16; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl Value for [i16; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl Value for [u16; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl Value for [u16; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl Value for [u16; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl Value for [u16; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl Value for [u32; 1] {
-    const DEFAULT: &'static Self = &[0; 1];
-}
-
-impl Value for [u32; 2] {
-    const DEFAULT: &'static Self = &[0; 2];
-}
-
-impl Value for [u32; 3] {
-    const DEFAULT: &'static Self = &[0; 3];
-}
-
-impl Value for [u32; 4] {
-    const DEFAULT: &'static Self = &[0; 4];
-}
-
-impl Value for [f32; 1] {
-    const DEFAULT: &'static Self = &[0.0; 1];
-}
-
-impl Value for [f32; 2] {
-    const DEFAULT: &'static Self = &[0.0; 2];
-}
-
-impl Value for [f32; 3] {
-    const DEFAULT: &'static Self = &[0.0; 3];
-}
-
-impl Value for [f32; 4] {
-    const DEFAULT: &'static Self = &[0.0; 4];
-}
-
-impl Value for [f32; 4 * 4] {
-    const DEFAULT: &'static Self = &[0.0; 4 * 4];
-}
-
-struct DenseAccessorIter<'a, V: Value> {
-    bytes: &'a [u8],
-    next: usize,
-    byte_stride: usize,
-    data_type: PhantomData<V>,
-}
-
-impl<'a, V: Value> Iterator for DenseAccessorIter<'a, V> {
-    type Item = &'a V;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let start = self.next * self.byte_stride;
-        let end = start + size_of::<V>();
-        let next = from_bytes(self.bytes.get(start..end)?);
-        self.next += 1;
-        Some(next)
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.next += n;
-        self.next()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = (self.bytes.len() - size_of::<V>()) / self.byte_stride + 1 - self.next;
-        (len, Some(len))
-    }
-}
-
-struct SparseAccessorIter<'a, I: Index, V: Value> {
-    default_values: DenseAccessorIter<'a, V>,
-    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, V>>,
-    next_sparse_entry: Option<(usize, &'a V)>,
-}
-
-impl<'a, I: Index, V: Value> Iterator for SparseAccessorIter<'a, I, V> {
-    type Item = &'a V;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = self.default_values.next;
-        let default_value = self.default_values.next()?;
-        match self.next_sparse_entry {
-            Some(entry) if entry.0 == next => {
-                let value = entry.1;
-                self.next_sparse_entry = self
-                    .sparse_iter
-                    .next()
-                    .map(|(idx, value)| (idx.as_usize(), value));
-                Some(value)
-            }
-            _ => Some(default_value),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.default_values.size_hint()
-    }
-}
-
-struct PureSparseAccessorIter<'a, I: Index, V: Value> {
-    default_value: &'a V,
-    sparse_iter: Zip<slice::Iter<'a, I>, slice::Iter<'a, V>>,
-    next_sparse_entry: Option<(usize, &'a V)>,
-    next: usize,
-    count: usize,
-}
-
-impl<'a, I: Index, V: Value> Iterator for PureSparseAccessorIter<'a, I, V> {
-    type Item = &'a V;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.next < self.count {
-            Some(match self.next_sparse_entry {
-                Some(entry) if entry.0 == self.next => {
-                    let value = entry.1;
-                    self.next_sparse_entry = self
-                        .sparse_iter
-                        .next()
-                        .map(|(idx, value)| (idx.as_usize(), value));
-                    value
-                }
-                _ => self.default_value,
-            })
-        } else {
-            None
-        }
-    }
-}
-
-fn sparse_iter<'a, I: Index, V: Value>(
-    sparse: &super::SparseAccessor,
-    buffer_views: &[super::BufferView],
-    buffers: &'a [super::Buffer],
-) -> Result<Zip<slice::Iter<'a, I>, slice::Iter<'a, V>>> {
-    let indices = buffer_views
-        .get(sparse.indices.buffer_view)
-        .with_context(|| {
-            format!(
-                "accessor.sparse.indices.buffer_view {} is out of range",
-                sparse.indices.buffer_view
-            )
-        })?;
-    let start = sparse.indices.byte_offset;
-    let end = start + sparse.count * size_of::<I>();
-    let indices: &[I] = cast_slice(
-        indices
-            .bytes(buffers)
-            .with_context(|| {
-                format!(
-                    "Failed to load accessor.sparse.indices.buffer_view {}",
-                    sparse.indices.buffer_view
-                )
-            })?
-            .get(start..end)
-            .with_context(|| {
-                format!(
-                    "accessor.sparse.indices.buffer_view {} is too short",
-                    sparse.indices.buffer_view
-                )
-            })?,
-    );
-
-    let start = sparse.values.byte_offset;
-    let end = start + sparse.count * size_of::<V>();
-    let values: &[V] = cast_slice(
-        buffer_views
-            .get(sparse.values.buffer_view)
-            .with_context(|| {
-                format!(
-                    "accessor.sparse.values.buffer_view {} is out of range",
-                    sparse.values.buffer_view
-                )
-            })?
-            .bytes(buffers)
-            .with_context(|| {
-                format!(
-                    "Failed to load accessor.sparse.values.buffer_view {}",
-                    sparse.values.buffer_view
-                )
-            })?
-            .get(start..end)
-            .with_context(|| {
-                format!(
-                    "accessor.sparse.values.buffer_view {} is too short",
-                    sparse.values.buffer_view
-                )
-            })?,
-    );
-
-    Ok(zip(indices, values))
-}
-
-fn dense_iter<'a, V: Value>(
-    buffer_view: usize,
-    byte_offset: usize,
-    count: usize,
-    buffer_views: &[super::BufferView],
-    buffers: &'a [super::Buffer],
-) -> Result<DenseAccessorIter<'a, V>> {
-    let view = buffer_views.get(buffer_view).ok_or(anyhow!(
-        "accessor.buffer_view {buffer_view} is out of range"
-    ))?;
-
-    let byte_stride = view.byte_stride.map_or(size_of::<V>(), NonZeroUsize::get);
-    let start = byte_offset;
-    let end = start + (count - 1) * byte_stride + size_of::<V>();
-
-    let bytes = view
-        .bytes(buffers)
-        .with_context(|| format!("Failed to get buffer_view.buffer {buffer_view}"))?
-        .get(start..end)
-        .with_context(|| format!("buffer_view.buffer {buffer_view} is too short"))?;
-
-    Ok(DenseAccessorIter {
-        bytes,
-        next: 0,
-        byte_stride,
-        data_type: PhantomData,
-    })
-}
-
-trait IteratorConsumer<'a, T: 'static> {
-    type Return;
-
-    fn consume<I: Iterator<Item = &'a T> + 'a>(self, iter: I) -> Result<Self::Return>;
-}
-
-impl super::Accessor {
-    fn iter<'a, V: Value, C: IteratorConsumer<'a, V>>(
-        &'a self,
-        buffer_views: &[super::BufferView],
-        buffers: &'a [super::Buffer],
-        consumer: C,
-    ) -> Result<C::Return> {
-        match &self.sparse {
-            Some(sparse) => match sparse.indices.component_type {
-                super::SparseAccessorComponentType::UnsignedByte => {
-                    let mut sparse_iter = sparse_iter::<u8, V>(sparse, buffer_views, buffers)?;
-                    let next_sparse_entry = sparse_iter.next().map(|(idx, v)| (idx.as_usize(), v));
-
-                    match self.buffer_view {
-                        Some(buffer_view) => {
-                            let default_values = dense_iter(
-                                buffer_view,
-                                self.byte_offset,
-                                self.count,
-                                buffer_views,
-                                buffers,
-                            )?;
-
-                            consumer.consume(SparseAccessorIter {
-                                default_values,
-                                sparse_iter,
-                                next_sparse_entry,
-                            })
-                        }
-                        None => consumer.consume(PureSparseAccessorIter {
-                            default_value: Value::DEFAULT,
-                            sparse_iter,
-                            next_sparse_entry,
-                            next: 0,
-                            count: self.count,
-                        }),
-                    }
-                }
-                super::SparseAccessorComponentType::UnsignedShort => {
-                    let mut sparse_iter = sparse_iter::<u16, V>(sparse, buffer_views, buffers)?;
-                    let next_sparse_entry = sparse_iter.next().map(|(idx, v)| (idx.as_usize(), v));
-
-                    match self.buffer_view {
-                        Some(buffer_view) => {
-                            let default_values = dense_iter(
-                                buffer_view,
-                                self.byte_offset,
-                                self.count,
-                                buffer_views,
-                                buffers,
-                            )?;
-
-                            consumer.consume(SparseAccessorIter {
-                                default_values,
-                                sparse_iter,
-                                next_sparse_entry,
-                            })
-                        }
-                        None => consumer.consume(PureSparseAccessorIter {
-                            default_value: Value::DEFAULT,
-                            sparse_iter,
-                            next_sparse_entry,
-                            next: 0,
-                            count: self.count,
-                        }),
-                    }
-                }
-                super::SparseAccessorComponentType::UnsignedInt => {
-                    let mut sparse_iter = sparse_iter::<u32, V>(sparse, buffer_views, buffers)?;
-                    let next_sparse_entry = sparse_iter.next().map(|(idx, v)| (idx.as_usize(), v));
-
-                    match self.buffer_view {
-                        Some(buffer_view) => {
-                            let default_values = dense_iter(
-                                buffer_view,
-                                self.byte_offset,
-                                self.count,
-                                buffer_views,
-                                buffers,
-                            )?;
-
-                            consumer.consume(SparseAccessorIter {
-                                default_values,
-                                sparse_iter,
-                                next_sparse_entry,
-                            })
-                        }
-                        None => consumer.consume(PureSparseAccessorIter {
-                            default_value: Value::DEFAULT,
-                            sparse_iter,
-                            next_sparse_entry,
-                            next: 0,
-                            count: self.count,
-                        }),
-                    }
-                }
-            },
-            None => {
-                let buffer_view = self
-                    .buffer_view
-                    .context("one of accessor.buffer_view or accessor.sparse has to be defined")?;
-
-                consumer.consume(dense_iter(
-                    buffer_view,
-                    self.byte_offset,
-                    self.count,
-                    buffer_views,
-                    buffers,
-                )?)
-            }
-        }
-    }
-
-    fn bytes_dense<'a>(
-        &'a self,
-        buffer_views: &[super::BufferView],
-        buffers: &'a [super::Buffer],
-    ) -> anyhow::Result<&'a [u8]> {
-        ensure!(self.sparse.is_none(), "accessor should not be sparse");
-
-        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
-            "accessor.buffer_view must be defined for dense accessor"
-        ))?;
-        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
-            "accessor.buffer_view {buffer_view_idx} is out of range"
-        ))?;
-
-        let start = self.byte_offset;
-        let stride = self.type_.dim() * self.component_type.size();
-        let end = start + self.count * stride;
-
-        if let Some(byte_stride) = buffer_view.byte_stride {
-            ensure!(byte_stride.get() == stride, "data must be tightly packed");
-        }
-        ensure!(end <= buffer_view.byte_length);
-
-        buffer_view
-            .bytes(buffers)
-            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?
-            .get(start..end)
-            .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
-    }
-}
-
 impl super::BufferView {
-    fn bytes<'a>(&self, buffers: &'a [super::Buffer]) -> Result<&'a [u8]> {
+    pub(super) fn bytes<'a>(&self, buffers: &'a [super::Buffer]) -> Result<&'a [u8]> {
         let buffer = buffers
             .get(self.buffer)
             .ok_or_else(|| anyhow!("buffer_view.buffer {} is out of range", self.buffer))?;
@@ -1317,7 +860,7 @@ impl super::Mesh {
                     .with_context(primitive_ctx)?;
 
                 let normal_tex_coord = resources.materials[material].normal_tex_coord();
-                let mut builder = GeometryBuilder::new(accessor.count, primitive.targets.len())
+                let mut builder = GeometryBuilder::new(accessor.count(), primitive.targets.len())
                     .topology(topology);
 
                 if let Some(normal_tex_coord) = normal_tex_coord {
@@ -1410,7 +953,7 @@ impl super::Mesh {
                             builder: GeometryBuilder,
                         }
 
-                        impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {                            
+                        impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {
                             type Return = GeometryBuilder;
 
                             fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -1437,7 +980,7 @@ impl super::Mesh {
                             builder: GeometryBuilder,
                         }
 
-                        impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {                            
+                        impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {
                             type Return = GeometryBuilder;
 
                             fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -1479,10 +1022,10 @@ impl super::Mesh {
                                                         stringify!($attr),
                                                     );
 
-                            builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                            builder = match (accessor.type_(), accessor.component_type(), accessor.normalized()) {
                                 $(
                                     (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                        accessor.iter(buffer_views, buffers,
+                                        accessor.iter_unchecked(buffer_views, buffers,
                                              case!(
                                                 $method,
                                                 (
@@ -1520,23 +1063,17 @@ impl super::Mesh {
                 load_attribute!(
                     primitive.attributes.position,
                     positions,
-                    [
-                        (Vec3, Float, false),
-                    ]
+                    [(Vec3, Float, false),]
                 );
                 load_attribute!(
                     primitive.attributes.normal,
                     normals,
-                    [
-                        (Vec3, Float, false),
-                    ]
+                    [(Vec3, Float, false),]
                 );
                 load_attribute!(
                     primitive.attributes.tangent,
                     tangents,
-                    [
-                        (Vec4, Float, false),
-                    ]
+                    [(Vec4, Float, false),]
                 );
                 load_attribute!(
                     primitive.attributes.tex_coord_0,
@@ -1599,7 +1136,7 @@ impl super::Mesh {
                                 target_idx: usize,
                             }
 
-                            impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {                            
+                            impl<'a> IteratorConsumer<'a, [f32; dim!($type_)]> for Consumer {
                                 type Return = GeometryBuilder;
 
                                 fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -1629,7 +1166,7 @@ impl super::Mesh {
                                 target_idx: usize,
                             }
 
-                            impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {                            
+                            impl<'a> IteratorConsumer<'a, [rust_type!($component); dim!($type_)]> for Consumer {
                                 type Return = GeometryBuilder;
 
                                 fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
@@ -1672,10 +1209,10 @@ impl super::Mesh {
                                                             stringify!($attr),
                                                         );
 
-                                builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                                builder = match (accessor.type_(), accessor.component_type(), accessor.normalized()) {
                                     $(
                                         (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                            accessor.iter(buffer_views, buffers,
+                                            accessor.iter_unchecked(buffer_views, buffers,
                                                 case!($method, (
                                                     $type_,
                                                     $component,
@@ -1710,23 +1247,17 @@ impl super::Mesh {
                     load_attribute!(
                         morph_target.position,
                         morph_target_positions,
-                        [
-                            (Vec3, Float, false),
-                        ]
+                        [(Vec3, Float, false),]
                     );
                     load_attribute!(
                         morph_target.normal,
                         morph_target_normals,
-                        [
-                            (Vec3, Float, false),
-                        ]
+                        [(Vec3, Float, false),]
                     );
                     load_attribute!(
                         morph_target.tangent,
                         morph_target_tangents,
-                        [
-                            (Vec3, Float, false),
-                        ]
+                        [(Vec3, Float, false),]
                     );
                     load_attribute!(
                         morph_target.tex_coord_0,
@@ -1778,7 +1309,11 @@ impl super::Mesh {
                     let bytes = accessor
                         .bytes_dense(buffer_views, buffers)
                         .with_context(ctx)?;
-                    builder = match (accessor.type_, accessor.component_type, accessor.normalized) {
+                    builder = match (
+                        accessor.type_(),
+                        accessor.component_type(),
+                        accessor.normalized(),
+                    ) {
                         (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
                             let indices: Vec<_> = bytes.iter().map(|index| *index as u16).collect();
                             builder.indices_u16(&indices, resources)

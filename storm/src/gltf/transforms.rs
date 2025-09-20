@@ -1,4 +1,4 @@
-use glam::{uvec4, vec2, vec3, vec4, UVec4, Vec2, Vec3, Vec4};
+use glam::{UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
 
 pub fn i8x1_to_f32(a: &[i8; 1]) -> f32 {
     (a[0] as f32 / 127.0).max(-1.0)
@@ -88,4 +88,40 @@ pub fn u8x4_to_uvec4(a: &[u8; 4]) -> UVec4 {
 
 pub fn u16x4_to_uvec4(a: &[u16; 4]) -> UVec4 {
     uvec4(a[0] as u32, a[1] as u32, a[2] as u32, a[3] as u32)
+}
+
+pub fn is_0(value: &usize) -> bool {
+    *value == 0
+}
+
+pub fn is_false(value: &bool) -> bool {
+    *value == false
+}
+
+pub fn is_3x00(value: &[f32; 3]) -> bool {
+    *value == [0.0; 3]
+}
+
+pub fn default_05() -> f32 {
+    0.5
+}
+
+pub fn is_05(value: &f32) -> bool {
+    *value == 0.5
+}
+
+pub fn default_10() -> f32 {
+    1.0
+}
+
+pub fn is_10(value: &f32) -> bool {
+    *value == 1.0
+}
+
+pub fn default_4x10() -> [f32; 4] {
+    [1.0; 4]
+}
+
+pub fn is_4x10(value: &[f32; 4]) -> bool {
+    *value == [1.0; 4]
 }

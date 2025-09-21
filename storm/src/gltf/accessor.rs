@@ -8,7 +8,10 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytemuck::{Pod, cast_slice, from_bytes};
-use glam::{I8Vec4, I16Vec4, U8Vec4, U16Vec4, Vec4};
+use glam::{
+    I8Vec2, I8Vec3, I8Vec4, I16Vec2, I16Vec3, I16Vec4, U8Vec2, U8Vec3, U8Vec4, U16Vec2, U16Vec3,
+    U16Vec4, UVec4, Vec2, Vec3, Vec4,
+};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -106,7 +109,7 @@ macro_rules! generate_iter {
         /// Works with both dense and sparse accessors.
         ///
         #[doc = concat!(
-            "This method will automatically convert the following types into `", stringify!($target), "`:"
+            "This method will automatically convert the following types into a `", stringify!($target), "`:"
         )]
         $(#[doc = concat!("- `&", stringify!($source), "`")])+
         ///
@@ -372,12 +375,34 @@ impl Accessor {
             .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
     }
 
+    generate_iter! {pub(super) iter_vec2, item = Vec2, [
+        ((Vec2, Byte, true) => [i8; 2] : I8Vec2, |a| (a.as_vec2() / 127.0).max(-Vec2::ONE)),
+        ((Vec2, UnsignedByte, true) => [u8; 2] : U8Vec2, |a| a.as_vec2() / 255.0),
+        ((Vec2, Short, true) => [i16; 2] : I16Vec2, |a| (a.as_vec2() / 32767.0).max(-Vec2::ONE)),
+        ((Vec2, UnsignedShort, true) => [u16; 2] : U16Vec2, |a| a.as_vec2() / 65535.0),
+        ((Vec2, Float, false) => [f32; 2])
+    ]}
+
+    generate_iter! {pub(super) iter_vec3, item = Vec3, [
+        ((Vec3, Byte, true) => [i8; 3] : I8Vec3, |a| (a.as_vec3() / 127.0).max(-Vec3::ONE)),
+        ((Vec3, UnsignedByte, true) => [u8; 3] : U8Vec3, |a| a.as_vec3() / 255.0),
+        ((Vec3, Short, true) => [i16; 3] : I16Vec3, |a| (a.as_vec3() / 32767.0).max(-Vec3::ONE)),
+        ((Vec3, UnsignedShort, true) => [u16; 3] : U16Vec3, |a| a.as_vec3() / 65535.0),
+        ((Vec3, Float, false) => [f32; 3])
+    ]}
+
     generate_iter! {pub(super) iter_vec4, item = Vec4, [
         ((Vec4, Byte, true) => [i8; 4] : I8Vec4, |a| (a.as_vec4() / 127.0).max(-Vec4::ONE)),
         ((Vec4, UnsignedByte, true) => [u8; 4] : U8Vec4, |a| a.as_vec4() / 255.0),
         ((Vec4, Short, true) => [i16; 4] : I16Vec4, |a| (a.as_vec4() / 32767.0).max(-Vec4::ONE)),
         ((Vec4, UnsignedShort, true) => [u16; 4] : U16Vec4, |a| a.as_vec4() / 65535.0),
         ((Vec4, Float, false) => [f32; 4])
+    ]}
+
+    generate_iter! {pub(super) iter_uvec4, item = UVec4, [
+        ((Vec4, UnsignedByte, false) => [u8; 4] : U8Vec4, |a| a.as_uvec4()),
+        ((Vec4, UnsignedShort, false) => [u16; 4] : U16Vec4, |a| a.as_uvec4()),
+        ((Vec4, UnsignedInt, false) => [u32; 4])
     ]}
 }
 

@@ -345,12 +345,14 @@ impl Accessor {
         }
     }
 
-    pub(super) fn bytes_dense<'a>(
+    /// Return a view over the bytes of all the entries from this glTF accessor.
+    /// This method will fail if the accessor is not sparse or if the data are not tighly packed.
+    pub(super) fn bytes_dense_tighly_packed<'a>(
         &'a self,
         buffer_views: &[BufferView],
         buffers: &'a [Buffer],
     ) -> anyhow::Result<&'a [u8]> {
-        ensure!(self.sparse.is_none(), "accessor should not be sparse");
+        ensure!(self.sparse.is_none(), "accessor must not be sparse");
 
         let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
             "accessor.buffer_view must be defined for dense accessor"
@@ -566,9 +568,18 @@ struct SparseAccessorValues {
     byte_offset: usize,
 }
 
+/// This trait is used by the `Accessor.iter_*` methods. The generated iterators
+/// are given as argument to the `consume`. The value returned by the `consume` method
+/// is then returned by the `Accessor.iter_*` methods.
+///
+/// This trait is a workaround to some limitation of rust higher order functions.
+/// At the time of writing, it is not possible to have a function/method taking a
+/// callable which take a generic argument.
 pub(super) trait IteratorConsumer<'a, T: 'a> {
+    /// The type return after having consume an iterator successfully.
     type Return;
 
+    /// This method take ownership of the iterator and can consume it in any suitable ways.
     fn consume<I: Iterator<Item = T> + 'a>(self, iter: I) -> Result<Self::Return>;
 }
 

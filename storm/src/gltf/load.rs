@@ -1307,7 +1307,7 @@ impl super::Mesh {
                     let ctx = || format!("Failed to load mesh.primitives[{idx}].indices {indices}");
 
                     let bytes = accessor
-                        .bytes_dense(buffer_views, buffers)
+                        .bytes_dense_tighly_packed(buffer_views, buffers)
                         .with_context(ctx)?;
                     builder = match (
                         accessor.type_(),

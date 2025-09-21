@@ -867,81 +867,6 @@ impl super::Mesh {
                     builder = builder.normal_tex_coord(normal_tex_coord);
                 }
 
-                macro_rules! dim {
-                    (Vec2) => {
-                        2
-                    };
-                    (Vec3) => {
-                        3
-                    };
-                    (Vec4) => {
-                        4
-                    };
-                }
-
-                macro_rules! rust_type {
-                    (Byte) => {
-                        i8
-                    };
-                    (UnsignedByte) => {
-                        u8
-                    };
-                    (Short) => {
-                        i16
-                    };
-                    (UnsignedShort) => {
-                        u16
-                    };
-                    (UnsignedInt) => {
-                        u32
-                    };
-                }
-
-                macro_rules! transform {
-                    (Vec2, Byte, true) => {
-                        i8x2_to_vec2
-                    };
-                    (Vec2, Short, true) => {
-                        i16x2_to_vec2
-                    };
-                    (Vec2, UnsignedByte, true) => {
-                        u8x2_to_vec2
-                    };
-                    (Vec2, UnsignedShort, true) => {
-                        u16x2_to_vec2
-                    };
-                    (Vec3, Byte, true) => {
-                        i8x3_to_vec3
-                    };
-                    (Vec3, Short, true) => {
-                        i16x3_to_vec3
-                    };
-                    (Vec3, UnsignedByte, true) => {
-                        u8x3_to_vec3
-                    };
-                    (Vec3, UnsignedShort, true) => {
-                        u16x3_to_vec3
-                    };
-                    (Vec4, Byte, true) => {
-                        i8x4_to_vec4
-                    };
-                    (Vec4, Short, true) => {
-                        i16x4_to_vec4
-                    };
-                    (Vec4, UnsignedByte, true) => {
-                        u8x4_to_vec4
-                    };
-                    (Vec4, UnsignedShort, true) => {
-                        u16x4_to_vec4
-                    };
-                    (Vec4, UnsignedByte, false) => {
-                        u8x4_to_uvec4
-                    };
-                    (Vec4, UnsignedShort, false) => {
-                        u16x4_to_uvec4
-                    };
-                }
-
                 macro_rules! consume_attribute {
                     ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $($ctx:expr),+) => {{
                         struct Consumer {
@@ -1032,181 +957,90 @@ impl super::Mesh {
 
                 for (target_idx, morph_target) in primitive.targets.iter().enumerate() {
                     let morph_target_ctx =
-                        || format!("Failed to load primitive.target[{target_idx}]");
+                        || format!("Failed to load primitive.target[{target_idx}].");
 
-                    macro_rules! case {
-                        ($method:ident, (
-                            $type_:ident,
-                            Float,
-                            false
-                            $(, extend($value:literal))?
-                        ), $accessor:ident, $accessor_ctx:ident) => {{
+                    macro_rules! consume_morph_attribute {
+                        ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $ctx:expr) => {{
                             struct Consumer {
                                 builder: GeometryBuilder,
                                 target_idx: usize,
                             }
 
-                            impl<'a> IteratorConsumer<'a, &'a [f32; dim!($type_)]> for Consumer {
+                            impl<'a> IteratorConsumer<'a, $ty> for Consumer {
                                 type Return = GeometryBuilder;
 
-                                fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
-                                    Ok(self.builder.$method(
-                                        self.target_idx,
-                                        iter
-                                            .cloned()
-                                            .map($type_::from_array)
-                                            $(.map(|v| v.extend($value)))?,
-                                    ))
+                                fn consume<I: Iterator<Item = $ty> + 'a>(
+                                    self,
+                                    iter: I,
+                                ) -> Result<Self::Return> {
+                                    Ok(self.builder.$register(self.target_idx, iter$(.map($transform))?))
                                 }
                             }
 
-                            Consumer {
-                                builder,
-                                target_idx,
-                            }
-                        }};
-                        ($method:ident, (
-                            $type_:ident,
-                            $component:ident,
-                            $normalized:ident
-                            $(, extend($value:literal))?
-                        ), $accessor:ident, $accessor_ctx:ident) => {{
-                            struct Consumer {
-                                builder: GeometryBuilder,
-                                target_idx: usize,
-                            }
-
-                            impl<'a> IteratorConsumer<'a, &'a [rust_type!($component); dim!($type_)]> for Consumer {
-                                type Return = GeometryBuilder;
-
-                                fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
-                                    Ok(self.builder.$method(
-                                        self.target_idx,
-                                        iter
-                                            .map(transform!($type_, $component, $normalized))
-                                            $(.map(|v| v.extend($value)))?,
-                                    ))
-                                }
-                            }
-
-                            Consumer {
-                                builder,
-                                target_idx,
-                            }
+                            builder = $accessor
+                                .$load(buffer_views, buffers, Consumer { builder, target_idx })
+                                .with_context($ctx)
+                                .with_context(morph_target_ctx)
+                                .with_context(primitive_ctx)?;
                         }};
                     }
 
-                    macro_rules! load_attribute {
-                        ($attr:expr, $method:ident, [
-                            $((
-                                $type_:ident,
-                                $component:ident,
-                                $normalized:ident
-                                $(, extend($value:literal))?
-                            ),)+
-                        ]) => {
-                            if let Some(accessor_idx) = $attr {
+                    macro_rules! load_morph_attribute {
+                        ($attr:ident: $ty:ty; $load:ident => $register:ident) => {
+                            if let Some(accessor_idx) = morph_target.$attr {
                                 let accessor = accessors
                                                 .get(accessor_idx).with_context(|| format!(
-                                                    "{} {accessor_idx} is out of range",
-                                                    stringify!($attr),
+                                                    concat!(
+                                                        "Morph targets[{}].",
+                                                        stringify!($attr),
+                                                        " {} is out of range."
+                                                    ),
+                                                    target_idx,
+                                                    accessor_idx
                                                 ))
                                                 .with_context(morph_target_ctx)
                                                 .with_context(primitive_ctx)?;
 
                                 let accessor_ctx = || format!(
-                                                            "Failed to load {} {accessor_idx}",
-                                                            stringify!($attr),
+                                                            concat!(
+                                                                "Failed to load targets[{}].", stringify!($attr), "{}"
+                                                            ),
+                                                            target_idx,
+                                                            accessor_idx
                                                         );
 
-                                builder = match (accessor.type_(), accessor.component_type(), accessor.normalized()) {
-                                    $(
-                                        (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                            accessor.iter_unchecked(buffer_views, buffers,
-                                                case!($method, (
-                                                    $type_,
-                                                    $component,
-                                                    $normalized
-                                                    $(, extend($value))?
-                                                ), accessor, accessor_ctx),
-                                            )
-                                                .with_context(accessor_ctx)
-                                                .with_context(morph_target_ctx)
-                                                .with_context(primitive_ctx)?
-                                        }
-                                    )+
-                                    (accessor_type, component_type, normalized) => {
-                                        let normalized = if normalized {
-                                            "normalized "
-                                        } else {
-                                            ""
-                                        };
-                                        return Err(anyhow!(
-                                            "{accessor_type} of {normalized}{component_type} cannot be used for {}",
-                                            stringify!($attr),
-                                        ))
-                                            .with_context(accessor_ctx)
-                                            .with_context(morph_target_ctx)
-                                            .with_context(primitive_ctx);
-                                    }
-                                };
+                                consume_morph_attribute!(accessor, $ty; $load => $register, accessor_ctx);
                             }
                         };
                     }
 
-                    load_attribute!(
-                        morph_target.position,
-                        morph_target_positions,
-                        [(Vec3, Float, false),]
-                    );
-                    load_attribute!(
-                        morph_target.normal,
-                        morph_target_normals,
-                        [(Vec3, Float, false),]
-                    );
-                    load_attribute!(
-                        morph_target.tangent,
-                        morph_target_tangents,
-                        [(Vec3, Float, false),]
-                    );
-                    load_attribute!(
-                        morph_target.tex_coord_0,
-                        morph_target_tex_coords_0,
-                        [
-                            (Vec2, Float, false),
-                            (Vec2, Byte, true),
-                            (Vec2, Short, true),
-                            (Vec2, UnsignedByte, true),
-                            (Vec2, UnsignedShort, true),
-                        ]
-                    );
-                    load_attribute!(
-                        morph_target.tex_coord_1,
-                        morph_target_tex_coords_1,
-                        [
-                            (Vec2, Float, false),
-                            (Vec2, Byte, true),
-                            (Vec2, Short, true),
-                            (Vec2, UnsignedByte, true),
-                            (Vec2, UnsignedShort, true),
-                        ]
-                    );
-                    load_attribute!(
-                        morph_target.color_0,
-                        morph_target_colors_0,
-                        [
-                            (Vec3, Float, false, extend(0.0)),
-                            (Vec3, Byte, true, extend(0.0)),
-                            (Vec3, Short, true, extend(0.0)),
-                            (Vec3, UnsignedByte, true, extend(0.0)),
-                            (Vec3, UnsignedShort, true, extend(0.0)),
-                            (Vec4, Float, false),
-                            (Vec4, Byte, true),
-                            (Vec4, Short, true),
-                            (Vec4, UnsignedByte, true),
-                            (Vec4, UnsignedShort, true),
-                        ]
-                    );
+                    load_morph_attribute!(position: Vec3; iter_vec3 => morph_target_positions);
+                    load_morph_attribute!(normal: Vec3; iter_vec3 => morph_target_normals);
+                    load_morph_attribute!(tangent: Vec3; iter_vec3 => morph_target_tangents);
+                    load_morph_attribute!(tex_coord_0: Vec2; iter_vec2 => morph_target_tex_coords_0);
+                    load_morph_attribute!(tex_coord_1: Vec2; iter_vec2 => morph_target_tex_coords_1);
+
+                    if let Some(accessor_idx) = morph_target.color_0 {
+                        let accessor = accessors
+                            .get(accessor_idx)
+                            .with_context(|| {
+                                format!(
+                                    "targets[{}].color_0 {} is out of range.",
+                                    target_idx, accessor_idx
+                                )
+                            })
+                            .with_context(morph_target_ctx)
+                            .with_context(primitive_ctx)?;
+
+                        let accessor_ctx = || {
+                            format!(
+                                "Failed to load targets[{}].color_0 {}",
+                                target_idx, accessor_idx
+                            )
+                        };
+
+                        consume_morph_attribute!(accessor, Vec3, |v| v.extend(1.0) ; iter_vec3 => morph_target_colors_0, accessor_ctx);
+                    }
                 }
 
                 if let Some(indices) = primitive.indices {

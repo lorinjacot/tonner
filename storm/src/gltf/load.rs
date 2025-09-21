@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use bytemuck::{bytes_of_mut, cast_slice};
 use data_url::{DataUrl, DataUrlError};
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4};
 use image::{ImageFormat, ImageReader};
 
 use super::transforms::*;
@@ -942,183 +942,93 @@ impl super::Mesh {
                     };
                 }
 
-                macro_rules! case {
-                    ($method:ident, (
-                        $type_:ident,
-                        Float,
-                        false
-                        $(, extend($value:literal))?
-                    ), $accessor:ident, $accessor_ctx:ident) => {{
+                macro_rules! consume_attribute {
+                    ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $($ctx:expr),+) => {{
                         struct Consumer {
                             builder: GeometryBuilder,
                         }
 
-                        impl<'a> IteratorConsumer<'a, &'a [f32; dim!($type_)]> for Consumer {
+                        impl<'a> IteratorConsumer<'a, $ty> for Consumer {
                             type Return = GeometryBuilder;
 
-                            fn consume<I: Iterator<Item = &'a [f32; dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
-                                Ok(self.builder.$method(
-                                    iter
-                                        .cloned()
-                                        .map($type_::from_array)
-                                        $(.map(|v| v.extend($value)))?,
-                                ))
+                            fn consume<I: Iterator<Item = $ty> + 'a>(
+                                self,
+                                iter: I,
+                            ) -> Result<Self::Return> {
+                                Ok(self.builder.$register(iter$(.map($transform))?))
                             }
                         }
 
-                        Consumer {
-                            builder
-                        }
-                    }};
-                    ($method:ident, (
-                        $type_:ident,
-                        $component:ident,
-                        $normalized:ident
-                        $(, extend($value:literal))?
-                    ), $accessor:ident, $accessor_ctx:ident) => {{
-                        struct Consumer {
-                            builder: GeometryBuilder,
-                        }
-
-                        impl<'a> IteratorConsumer<'a, &'a [rust_type!($component); dim!($type_)]> for Consumer {
-                            type Return = GeometryBuilder;
-
-                            fn consume<I: Iterator<Item = &'a [rust_type!($component); dim!($type_)]> + 'a>(self, iter: I) -> Result<Self::Return> {
-                                Ok(self.builder.$method(
-                                    iter
-                                        .map(transform!($type_, $component, $normalized))
-                                        $(.map(|v| v.extend($value)))?,
-                                ))
-                            }
-                        }
-
-                        Consumer {
-                            builder
-                        }
+                        builder = $accessor
+                            .$load(buffer_views, buffers, Consumer { builder })
+                            $(.with_context($ctx))+?;
                     }};
                 }
 
                 macro_rules! load_attribute {
-                    (
-                        $attr:expr,
-                        $method:ident, [
-                            $((
-                                $type_:ident,
-                                $component:ident,
-                                $normalized:ident
-                                $(, extend($value:literal))?
-                            ),)+
-                        ]
-                    ) => {
-                        if let Some(accessor_idx) = $attr {
+                    ($attr:ident: $ty:ty; $load:ident => $register:ident) => {
+                        if let Some(accessor_idx) = primitive.attributes.$attr {
                             let accessor = accessors
-                                            .get(accessor_idx).with_context(|| format!(
-                                                "{} {accessor_idx} is out of range",
-                                                stringify!($attr),
-                                            )).with_context(primitive_ctx)?;
+                                .get(accessor_idx)
+                                .with_context(|| {
+                                    format!(
+                                        concat!(
+                                            "primitive.attributes.",
+                                            stringify!($attr),
+                                            " {} is out of range."
+                                        ),
+                                        accessor_idx
+                                    )
+                                })
+                                .with_context(primitive_ctx)?;
 
-                            let accessor_ctx = || format!(
-                                                        "Failed to load {} {accessor_idx}",
-                                                        stringify!($attr),
-                                                    );
-
-                            builder = match (accessor.type_(), accessor.component_type(), accessor.normalized()) {
-                                $(
-                                    (AccessorType::$type_, AccessorComponentType::$component, $normalized) => {
-                                        accessor.iter_unchecked(buffer_views, buffers,
-                                             case!(
-                                                $method,
-                                                (
-                                                    $type_,
-                                                    $component,
-                                                    $normalized
-                                                    $(, extend($value))?
-                                                ),
-                                                accessor,
-                                                accessor_ctx
-                                            )
-                                        )
-                                            .with_context(accessor_ctx)
-                                            .with_context(primitive_ctx)?
-                                    }
-                                )+
-                                (accessor_type, component_type, normalized) => {
-                                    let normalized = if normalized {
-                                        "normalized "
-                                    } else {
-                                        ""
-                                    };
-                                    return Err(anyhow!(
-                                        "{accessor_type} of {normalized}{component_type} cannot be used for {}",
+                            let ctx = || {
+                                format!(
+                                    concat!(
+                                        "Failed to load primitive.attributes.",
                                         stringify!($attr),
-                                    ))
-                                        .with_context(accessor_ctx)
-                                        .with_context(primitive_ctx);
-                                }
+                                        " {}"
+                                    ),
+                                    accessor_idx
+                                )
                             };
+
+                            consume_attribute!(accessor, $ty; $load => $register, ctx, primitive_ctx)
                         }
                     };
                 }
 
-                load_attribute!(
-                    primitive.attributes.position,
-                    positions,
-                    [(Vec3, Float, false),]
-                );
-                load_attribute!(
-                    primitive.attributes.normal,
-                    normals,
-                    [(Vec3, Float, false),]
-                );
-                load_attribute!(
-                    primitive.attributes.tangent,
-                    tangents,
-                    [(Vec4, Float, false),]
-                );
-                load_attribute!(
-                    primitive.attributes.tex_coord_0,
-                    tex_coords_0,
-                    [
-                        (Vec2, Float, false),
-                        (Vec2, UnsignedByte, true),
-                        (Vec2, UnsignedShort, true),
-                    ]
-                );
-                load_attribute!(
-                    primitive.attributes.tex_coord_1,
-                    tex_coords_1,
-                    [
-                        (Vec2, Float, false),
-                        (Vec2, UnsignedByte, true),
-                        (Vec2, UnsignedShort, true),
-                    ]
-                );
-                load_attribute!(
-                    primitive.attributes.color_0,
-                    colors_0,
-                    [
-                        (Vec3, Float, false, extend(1.0)),
-                        (Vec3, UnsignedByte, true, extend(1.0)),
-                        (Vec3, UnsignedShort, true, extend(1.0)),
-                        (Vec4, Float, false),
-                        (Vec4, UnsignedByte, true),
-                        (Vec4, UnsignedShort, true),
-                    ]
-                );
-                load_attribute!(
-                    primitive.attributes.joints_0,
-                    joints_0,
-                    [(Vec4, UnsignedByte, false), (Vec4, UnsignedShort, false),]
-                );
-                load_attribute!(
-                    primitive.attributes.weights_0,
-                    weights_0,
-                    [
-                        (Vec4, Float, false),
-                        (Vec4, UnsignedByte, true),
-                        (Vec4, UnsignedShort, true),
-                    ]
-                );
+                load_attribute!(position: Vec3 ; iter_vec3 => positions);
+                load_attribute!(normal: Vec3 ; iter_vec3 => normals);
+                load_attribute!(tangent: Vec4 ; iter_vec4 => tangents);
+                load_attribute!(tex_coord_0: Vec2 ; iter_vec2 => tex_coords_0);
+                load_attribute!(tex_coord_1: Vec2 ; iter_vec2 => tex_coords_1);
+                if let Some(accessor_idx) = primitive.attributes.color_0 {
+                    let accessor = accessors
+                        .get(accessor_idx)
+                        .with_context(|| {
+                            format!(
+                                "primitive.attributes.color_0 {} is out of range.",
+                                accessor_idx
+                            )
+                        })
+                        .with_context(primitive_ctx)?;
+
+                    let attribute_ctx = || {
+                        format!(
+                            "Failed to load primitive.attributes.color_0 {}",
+                            accessor_idx
+                        )
+                    };
+
+                    if let AccessorType::Vec3 = accessor.type_() {
+                        consume_attribute!(accessor, Vec3, |v| v.extend(1.0); iter_vec3 => colors_0, attribute_ctx, primitive_ctx);
+                    } else {
+                        consume_attribute!(accessor, Vec4; iter_vec4 => colors_0, attribute_ctx, primitive_ctx);
+                    }
+                }
+                load_attribute!(joints_0: UVec4 ; iter_uvec4 => joints_0);
+                load_attribute!(weights_0: Vec4 ; iter_vec4 => weights_0);
 
                 for (target_idx, morph_target) in primitive.targets.iter().enumerate() {
                     let morph_target_ctx =

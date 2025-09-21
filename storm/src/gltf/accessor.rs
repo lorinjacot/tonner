@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytemuck::{Pod, cast_slice, from_bytes};
-use glam::{I8Vec4, Vec4};
+use glam::{I8Vec4, I16Vec4, U8Vec4, U16Vec4, Vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -95,6 +95,105 @@ pub(super) struct Accessor {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+macro_rules! generate_iter {
+    ($vis:vis $name:ident, item = $target:ty, [$((
+        ($accessor_type:ident, $component_type:ident, $normalized:ident) =>
+        $source:ty $(: $via:ty, $transformation:expr)?
+   ) ),+]) => {
+        /// Iterate over the gtTL accessor entries using the given `IteratorConsumer`.
+        /// Works with both dense and sparse accessors.
+        ///
+        #[doc = concat!(
+            "This method will automatically convert the following types into `", stringify!($target), "`:"
+        )]
+        $(#[doc = concat!("- `&", stringify!($source), "`")])+
+        ///
+        /// If the glTF accessor contains any other type, this method will fail.
+        $vis fn $name<'a, C: IteratorConsumer<'a, $target>>(
+            &'a self,
+            buffer_views: &[BufferView],
+            buffers: &'a [Buffer],
+            consumer: C,
+        ) -> Result<C::Return> {
+            macro_rules! from {
+                ($source2:ty) => {{
+                    struct Consumer<'b, D: IteratorConsumer<'b, $target>> {
+                        consumer: D,
+                        lifetype: PhantomData<&'b ()>,
+                    }
+
+                    impl<'b, D: IteratorConsumer<'b, $target>> IteratorConsumer<'b, &'b $source2>
+                        for Consumer<'b, D>
+                    {
+                        type Return = D::Return;
+
+                        fn consume<I: Iterator<Item = &'b $source2> + 'b>(
+                            self,
+                            iter: I,
+                        ) -> Result<Self::Return> {
+                            self.consumer
+                                .consume(iter.cloned().map(<$target>::from_array))
+                        }
+                    }
+
+                    self.iter_unchecked(
+                        buffer_views,
+                        buffers,
+                        Consumer {
+                            consumer,
+                            lifetype: PhantomData,
+                        },
+                    )
+                }};
+                ($source2:ty : $via2:ty, $transformation2:expr) => {{
+                    struct Consumer<'b, D: IteratorConsumer<'b, $target>> {
+                        consumer: D,
+                        lifetype: PhantomData<&'b ()>,
+                    }
+
+                    impl<'b, D: IteratorConsumer<'b, $target>> IteratorConsumer<'b, &'b $source2> for Consumer<'b, D> {
+                        type Return = D::Return;
+
+                        fn consume<I: Iterator<Item = &'b $source2> + 'b>(
+                            self,
+                            iter: I,
+                        ) -> Result<Self::Return> {
+                            self.consumer.consume(
+                                iter.cloned()
+                                    .map(<$via2>::from_array)
+                                    .map($transformation2),
+                            )
+                        }
+                    }
+
+                    self.iter_unchecked(
+                        buffer_views,
+                        buffers,
+                        Consumer {
+                            consumer,
+                            lifetype: PhantomData,
+                        },
+                    )
+                }};
+            }
+
+            match (self.type_, self.component_type, self.normalized) {
+                $((AccessorType::$accessor_type, AccessorComponentType::$component_type, $normalized) => {
+                    from!($source $(: $via, $transformation)?)
+                })+
+                (type_, component_type, normalized) => {
+                    bail!(
+                        concat!("Cannot create a ", stringify!($target), " from a {} of {} {}"),
+                        type_,
+                        if normalized { "" } else { " normalized" },
+                        component_type
+                    );
+                }
+            }
+        }
+    };
 }
 
 impl Accessor {
@@ -272,90 +371,14 @@ impl Accessor {
             .get(start..end)
             .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
     }
-}
 
-impl Accessor {
-    pub(super) fn iter_vec4<'a, C: IteratorConsumer<'a, Vec4>>(
-        &'a self,
-        buffer_views: &[BufferView],
-        buffers: &'a [Buffer],
-        consumer: C,
-    ) -> Result<C::Return> {
-        macro_rules! from {
-            ($source:ty) => {{
-                struct Consumer<'b, D: IteratorConsumer<'b, Vec4>> {
-                    consumer: D,
-                    lifetype: PhantomData<&'b ()>,
-                }
-
-                impl<'b, D: IteratorConsumer<'b, Vec4>> IteratorConsumer<'b, &'b $source>
-                    for Consumer<'b, D>
-                {
-                    type Return = D::Return;
-
-                    fn consume<I: Iterator<Item = &'b $source> + 'b>(
-                        self,
-                        iter: I,
-                    ) -> Result<Self::Return> {
-                        self.consumer
-                            .consume(iter.cloned().map(Vec4::from_array))
-                    }
-                }
-
-                self.iter_unchecked(
-                    buffer_views,
-                    buffers,
-                    Consumer {
-                        consumer,
-                        lifetype: PhantomData,
-                    },
-                )
-            }};
-            ($source:ty : $via:ty, $transformation:expr) => {{
-                struct Consumer<'b, D: IteratorConsumer<'b, Vec4>> {
-                    consumer: D,
-                    lifetype: PhantomData<&'b ()>,
-                }
-
-                impl<'b, D: IteratorConsumer<'b, Vec4>> IteratorConsumer<'b, &'b $source> for Consumer<'b, D> {
-                    type Return = D::Return;
-
-                    fn consume<I: Iterator<Item = &'b $source> + 'b>(
-                        self,
-                        iter: I,
-                    ) -> Result<Self::Return> {
-                        self.consumer.consume(
-                            iter.cloned()
-                                .map(<$via>::from_array)
-                                .map($transformation),
-                        )
-                    }
-                }
-
-                self.iter_unchecked(
-                    buffer_views,
-                    buffers,
-                    Consumer {
-                        consumer,
-                        lifetype: PhantomData,
-                    },
-                )
-            }};
-        }
-
-        match (self.type_, self.component_type, self.normalized) {
-            (AccessorType::Vec4, AccessorComponentType::Float, false) => {
-                from!([f32; 4])
-            }
-            (AccessorType::Vec4, AccessorComponentType::Byte, true) => {
-                from!([i8; 4] : I8Vec4, |a| a.as_vec4() / 255.0)
-            }
-            (type_, component_type, normalized) => {
-                let normalized = if normalized { "" } else { " normalized" };
-                bail!("Cannot create a Vec4 from a {type_} of {normalized} {component_type}");
-            }
-        }
-    }
+    generate_iter! {pub(super) iter_vec4, item = Vec4, [
+        ((Vec4, Byte, true) => [i8; 4] : I8Vec4, |a| (a.as_vec4() / 127.0).max(-Vec4::ONE)),
+        ((Vec4, UnsignedByte, true) => [u8; 4] : U8Vec4, |a| a.as_vec4() / 255.0),
+        ((Vec4, Short, true) => [i16; 4] : I16Vec4, |a| (a.as_vec4() / 32767.0).max(-Vec4::ONE)),
+        ((Vec4, UnsignedShort, true) => [u16; 4] : U16Vec4, |a| a.as_vec4() / 65535.0),
+        ((Vec4, Float, false) => [f32; 4])
+    ]}
 }
 
 /// The datatype of the accessor’s components. [UnsignedInt](AccessorComponentType::UnsignedInt)

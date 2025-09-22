@@ -10,7 +10,6 @@ use data_url::{DataUrl, DataUrlError};
 use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4};
 use image::{ImageFormat, ImageReader};
 
-use super::transforms::*;
 use crate::{
     DenseEntry, Id, Resources,
     geometry::GeometryBuilder,
@@ -868,7 +867,7 @@ impl super::Mesh {
                 }
 
                 macro_rules! consume_attribute {
-                    ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $($ctx:expr),+) => {{
+                    ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $ctx:expr) => {{
                         struct Consumer {
                             builder: GeometryBuilder,
                         }
@@ -886,7 +885,8 @@ impl super::Mesh {
 
                         builder = $accessor
                             .$load(buffer_views, buffers, Consumer { builder })
-                            $(.with_context($ctx))+?;
+                            .with_context($ctx)
+                            .with_context(primitive_ctx)?;
                     }};
                 }
 
@@ -918,16 +918,19 @@ impl super::Mesh {
                                 )
                             };
 
-                            consume_attribute!(accessor, $ty; $load => $register, ctx, primitive_ctx)
+                            consume_attribute!(accessor, $ty; $load => $register, ctx)
                         }
                     };
                 }
 
-                load_attribute!(position: Vec3 ; iter_vec3 => positions);
+                let position_ctx = || format!("Failed to load attributes.position {}.", position);
+                consume_attribute!(accessor, Vec3; iter_vec3 => positions, position_ctx);
+
                 load_attribute!(normal: Vec3 ; iter_vec3 => normals);
                 load_attribute!(tangent: Vec4 ; iter_vec4 => tangents);
                 load_attribute!(tex_coord_0: Vec2 ; iter_vec2 => tex_coords_0);
                 load_attribute!(tex_coord_1: Vec2 ; iter_vec2 => tex_coords_1);
+
                 if let Some(accessor_idx) = primitive.attributes.color_0 {
                     let accessor = accessors
                         .get(accessor_idx)
@@ -947,11 +950,12 @@ impl super::Mesh {
                     };
 
                     if let AccessorType::Vec3 = accessor.type_() {
-                        consume_attribute!(accessor, Vec3, |v| v.extend(1.0); iter_vec3 => colors_0, attribute_ctx, primitive_ctx);
+                        consume_attribute!(accessor, Vec3, |v| v.extend(1.0); iter_vec3 => colors_0, attribute_ctx);
                     } else {
-                        consume_attribute!(accessor, Vec4; iter_vec4 => colors_0, attribute_ctx, primitive_ctx);
+                        consume_attribute!(accessor, Vec4; iter_vec4 => colors_0, attribute_ctx);
                     }
                 }
+                
                 load_attribute!(joints_0: UVec4 ; iter_uvec4 => joints_0);
                 load_attribute!(weights_0: Vec4 ; iter_vec4 => weights_0);
 
@@ -1039,7 +1043,11 @@ impl super::Mesh {
                             )
                         };
 
-                        consume_morph_attribute!(accessor, Vec3, |v| v.extend(1.0) ; iter_vec3 => morph_target_colors_0, accessor_ctx);
+                        if let AccessorType::Vec3 = accessor.type_() {
+                            consume_morph_attribute!(accessor, Vec3, |v| v.extend(1.0) ; iter_vec3 => morph_target_colors_0, accessor_ctx);
+                        } else {
+                            consume_morph_attribute!(accessor, Vec4 ; iter_vec4 => morph_target_colors_0, accessor_ctx);
+                        }
                     }
                 }
 

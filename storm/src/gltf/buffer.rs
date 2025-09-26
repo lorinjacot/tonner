@@ -93,17 +93,19 @@ pub(super) struct BufferView {
 
 impl BufferView {
     pub(super) fn bytes<'a>(&self, buffers: &'a [super::Buffer]) -> Result<&'a [u8]> {
-        let buffer = buffers
-            .get(self.buffer)
-            .ok_or_else(|| anyhow!("buffer_view.buffer {} is out of range", self.buffer))?;
-
         let start = self.byte_offset;
         let end = start + self.byte_length;
-
-        buffer
+        buffers
+            .get(self.buffer)
+            .ok_or_else(|| anyhow!("buffer_view.buffer {} is out of range.", self.buffer))?
             .bytes
             .get(start..end)
-            .with_context(|| format!("buffer_view.buffer {} is too short", self.buffer))
+            .with_context(|| {
+                format!(
+                    "buffer_view.buffer {} is shorter than the buffer view.",
+                    self.buffer
+                )
+            })
     }
 
     /// The stride, in bytes, between vertex attributes. When this is not

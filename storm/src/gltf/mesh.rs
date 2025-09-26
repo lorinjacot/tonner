@@ -1,13 +1,23 @@
-use std::{fmt::Display, path::Path};
+use std::{
+    fmt::{Display, format},
+    path::Path,
+};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bytemuck::cast_slice;
+use glam::{UVec4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use glam::{Vec2, Vec3, Vec4, UVec4};
 
 use super::accessor::IteratorConsumer;
-use crate::{geometry::GeometryBuilder, gltf::{accessor::{AccessorComponentType, AccessorType}, AccessorUsage, GltfError}, DenseEntry, Id, Resources};
+use crate::{
+    DenseEntry, Id, Resources,
+    geometry::GeometryBuilder,
+    gltf::{
+        AccessorUsage, GltfError,
+        accessor::{AccessorComponentType, AccessorType},
+    },
+};
 
 /// A set of primitives to be rendered. Its global transform is defined by a node that references it.
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,12 +72,12 @@ impl Mesh {
         let mut primitives = Vec::with_capacity(self.primitives.len());
         for (idx, primitive) in self.primitives.iter().enumerate() {
             if let Some(position) = primitive.attributes.position {
-                let primitive_ctx = || format!("Failed to load mesh.primitives[{idx}]");
+                let primitive_ctx = || format!("Failed to load mesh.primitives[{idx}].");
 
                 let material = match primitive.material {
                     Some(index) => materials
                         .get_mut(index)
-                        .ok_or(anyhow!("primitive.material {index} is out of range"))
+                        .with_context(|| format!("primitive.material {index} is out of range."))
                         .with_context(primitive_ctx)?
                         .load(
                             parent,
@@ -79,7 +89,7 @@ impl Mesh {
                             resources,
                             encoder,
                         )
-                        .with_context(|| format!("Failed to load primitive.material {index}"))
+                        .with_context(|| format!("Failed to load primitive.material {index}."))
                         .with_context(primitive_ctx)?,
                     None => match default_material {
                         Some(id) => *id,
@@ -95,7 +105,7 @@ impl Mesh {
                                     resources,
                                     encoder,
                                 )
-                                .context("Failed to load default material")
+                                .context("Failed to load default material.")
                                 .with_context(primitive_ctx)?;
                             *default_material = Some(id);
                             id
@@ -110,14 +120,14 @@ impl Mesh {
                     PrimitiveMode::Triangles => wgpu::PrimitiveTopology::TriangleList,
                     PrimitiveMode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
                     mode => {
-                        return Err(anyhow!("primitive topology type {mode} is not supported"))
+                        return Err(anyhow!("primitive topology type {mode} is not supported."))
                             .with_context(primitive_ctx);
                     }
                 };
                 let accessor = accessors
                     .get(position)
                     .with_context(|| {
-                        format!("primitive.attributes.position {position} is out of range")
+                        format!("primitive.attributes.position {position} is out of range.")
                     })
                     .with_context(primitive_ctx)?;
 
@@ -175,7 +185,7 @@ impl Mesh {
                                     concat!(
                                         "Failed to load primitive.attributes.",
                                         stringify!($attr),
-                                        " {}"
+                                        " {}."
                                     ),
                                     accessor_idx
                                 )
@@ -207,7 +217,7 @@ impl Mesh {
 
                     let attribute_ctx = || {
                         format!(
-                            "Failed to load primitive.attributes.color_0 {}",
+                            "Failed to load primitive.attributes.color_0 {}.",
                             accessor_idx
                         )
                     };
@@ -270,7 +280,7 @@ impl Mesh {
 
                                 let accessor_ctx = || format!(
                                                             concat!(
-                                                                "Failed to load targets[{}].", stringify!($attr), "{}"
+                                                                "Failed to load targets[{}].", stringify!($attr), " {}."
                                                             ),
                                                             target_idx,
                                                             accessor_idx
@@ -301,7 +311,7 @@ impl Mesh {
 
                         let accessor_ctx = || {
                             format!(
-                                "Failed to load targets[{}].color_0 {}",
+                                "Failed to load targets[{}].color_0 {}.",
                                 target_idx, accessor_idx
                             )
                         };
@@ -315,15 +325,17 @@ impl Mesh {
                 }
 
                 if let Some(indices) = primitive.indices {
-                    let accessor = accessors.get(indices).ok_or_else(|| {
-                        anyhow!("mesh.primitives[{idx}].indices {indices} is out of range")
-                    })?;
+                    let accessor = accessors
+                        .get(indices)
+                        .with_context(|| format!("primitive.indices {indices} is out of range."))
+                        .with_context(primitive_ctx)?;
 
-                    let ctx = || format!("Failed to load mesh.primitives[{idx}].indices {indices}");
+                    let ctx = || format!("Failed to load primitive.indices {indices}.");
 
                     let bytes = accessor
                         .bytes_dense_tighly_packed(buffer_views, buffers)
-                        .with_context(ctx)?;
+                        .with_context(ctx)
+                        .with_context(primitive_ctx)?;
                     builder = match (
                         accessor.type_(),
                         accessor.component_type(),

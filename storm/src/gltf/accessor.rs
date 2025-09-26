@@ -366,12 +366,12 @@ impl Accessor {
         ))?;
 
         if let Some(byte_stride) = buffer_view.byte_stride() {
-            ensure!(byte_stride.get() == stride, "data must be tightly packed");
+            ensure!(byte_stride.get() == stride, "accessor data must be tightly packed.");
         }
 
         buffer_view
             .bytes(buffers)
-            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}"))?
+            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}."))?
             .get(start..end)
             .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short."))
     }

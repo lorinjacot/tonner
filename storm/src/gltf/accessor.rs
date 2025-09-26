@@ -352,29 +352,28 @@ impl Accessor {
         buffer_views: &[BufferView],
         buffers: &'a [Buffer],
     ) -> anyhow::Result<&'a [u8]> {
-        ensure!(self.sparse.is_none(), "accessor must not be sparse");
-
-        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
-            "accessor.buffer_view must be defined for dense accessor"
-        ))?;
-        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
-            "accessor.buffer_view {buffer_view_idx} is out of range"
-        ))?;
+        ensure!(self.sparse.is_none(), "accessor must not be sparse.");
 
         let start = self.byte_offset;
         let stride = self.type_.dim() * self.component_type.size();
         let end = start + self.count * stride;
 
-        if let Some(byte_stride) = buffer_view.byte_stride {
+        let buffer_view_idx = self.buffer_view.ok_or(anyhow!(
+            "accessor.buffer_view must be defined for dense accessor."
+        ))?;
+        let buffer_view = buffer_views.get(buffer_view_idx).ok_or(anyhow!(
+            "accessor.buffer_view {buffer_view_idx} is out of range."
+        ))?;
+
+        if let Some(byte_stride) = buffer_view.byte_stride() {
             ensure!(byte_stride.get() == stride, "data must be tightly packed");
         }
-        ensure!(end <= buffer_view.byte_length);
 
         buffer_view
             .bytes(buffers)
-            .with_context(|| format!("Failed to get buffer_view.buffer {}", buffer_view.buffer))?
+            .with_context(|| format!("Failed to load accessor.buffer_view {buffer_view_idx}"))?
             .get(start..end)
-            .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short"))
+            .with_context(|| format!("accessor.buffer_view {buffer_view_idx} is too short."))
     }
 
     generate_iter! {pub(super) iter_vec2, item = Vec2, [
@@ -755,7 +754,7 @@ fn dense_iter_unchecked<'a, V: Value>(
         "accessor.buffer_view {buffer_view} is out of range."
     ))?;
 
-    let byte_stride = view.byte_stride.map_or(size_of::<V>(), NonZeroUsize::get);
+    let byte_stride = view.byte_stride().map_or(size_of::<V>(), NonZeroUsize::get);
     let start = byte_offset;
     let end = start + (count - 1) * byte_stride + size_of::<V>();
 

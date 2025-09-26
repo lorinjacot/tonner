@@ -1,6 +1,6 @@
 use std::{io::Cursor, path::Path};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use data_url::{DataUrl, DataUrlError};
 use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
@@ -95,18 +95,13 @@ impl Image {
                     "image.mime_type must be defined when image.buffer_view is defined"
                 ),
             };
-            let buffer_view = buffer_views
+            let bytes = buffer_views
                 .get(buffer_view)
-                .ok_or(anyhow!("image.buffer_view is out of range"))?;
-            let bytes = match buffers.get(buffer_view.buffer) {
-                Some(buffer) => &buffer.bytes,
-                None => todo!("load buffer into memory"),
-            };
+                .with_context(|| format!("image.buffer_view {buffer_view} is out of range."))?
+                .bytes(buffers)
+                .with_context(|| format!("Failed load image.buffer_view {buffer_view}."))?;
 
-            let start = buffer_view.byte_offset;
-            let end = start + buffer_view.byte_length;
-
-            let reader = Cursor::new(&bytes[start..end]);
+            let reader = Cursor::new(bytes);
 
             ImageReader::with_format(reader, format).decode()?
         };
@@ -197,15 +192,11 @@ impl Sampler {
             MinFilter::LinearMipmapNearest | MinFilter::Linear => {
                 (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
             }
-            MinFilter::LinearMipmapLinear => {
-                (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear)
+            MinFilter::LinearMipmapLinear => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
+            MinFilter::NearestMipmapNearest | MinFilter::Nearest | MinFilter::None => {
+                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
             }
-            MinFilter::NearestMipmapNearest
-            | MinFilter::Nearest
-            | MinFilter::None => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest),
-            MinFilter::NearestMipmapLinear => {
-                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear)
-            }
+            MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
         };
 
         let sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {

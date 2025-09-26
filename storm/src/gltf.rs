@@ -1,18 +1,18 @@
 use data_url::forgiving_base64::InvalidBase64;
 use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::{fmt::Display, num::NonZeroUsize, path::PathBuf};
+use std::{fmt::Display, path::PathBuf};
 use thiserror::Error;
 
 use crate::Id;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
+use buffer::{Buffer, BufferView};
 use material::Material;
 use mesh::Mesh;
 use texture::{Image, Sampler, Texture};
-use transforms::is_0;
 
 mod accessor;
+mod buffer;
 mod load;
 mod material;
 mod mesh;
@@ -348,85 +348,6 @@ impl AnimationInterpolation {
     fn is_default(&self) -> bool {
         match self {
             AnimationInterpolation::Linear => true,
-            _ => false,
-        }
-    }
-}
-
-/// A buffer points to binary geometry, animation, or skins.
-#[derive(Debug, Serialize, Deserialize)]
-struct Buffer {
-    /// The content of the buffer. Empty if unsupported uri.
-    #[serde(skip)]
-    bytes: Vec<u8>,
-
-    /// The URI (or IRI) of the buffer. Relative paths are relative to
-    /// the current glTF asset. Instead of referencing an external file,
-    /// this field **MAY** contain a `data:`-URI.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    uri: Option<String>,
-
-    /// The length of the buffer in bytes.
-    #[serde(rename = "byteLength")]
-    byte_length: usize,
-
-    /// The user-defined name of this object. This is not necessarily unique,
-    /// e.g., an accessor and a buffer could have the same name, or two accessors
-    /// could even have the same name.
-    name: Option<String>,
-}
-
-/// A view into a buffer generally representing a subset of the buffer.
-#[derive(Debug, Serialize, Deserialize)]
-struct BufferView {
-    /// The index of the buffer.
-    buffer: usize,
-
-    /// The offset into the buffer in bytes.
-    #[serde(rename = "byteOffset")]
-    #[serde(default)]
-    #[serde(skip_serializing_if = "is_0")]
-    byte_offset: usize,
-
-    /// The length of the bufferView in bytes.
-    #[serde(rename = "byteLength")]
-    byte_length: usize,
-
-    /// The stride, in bytes, between vertex attributes. When this is not
-    /// defined, data is tightly packed. When two or more accessors use the
-    /// same buffer view, this field **MUST** be defined.
-    #[serde(rename = "byteStride")]
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    byte_stride: Option<NonZeroUsize>,
-
-    /// The hint representing the intended GPU buffer type to use with this buffer view.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "BufferViewTarget::is_none")]
-    target: BufferViewTarget,
-
-    /// The user-defined name of this object. This is not necessarily unique,
-    /// e.g., an accessor and a buffer could have the same name, or two accessors
-    /// could even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-}
-
-#[derive(Debug, Default, Serialize_repr, Deserialize_repr)]
-#[repr(u32)]
-enum BufferViewTarget {
-    #[default]
-    None = 0,
-    ArrayBuffer = 34962,
-    ElementArrayBuffer = 34963,
-}
-
-impl BufferViewTarget {
-    fn is_none(&self) -> bool {
-        match self {
-            BufferViewTarget::None => true,
             _ => false,
         }
     }

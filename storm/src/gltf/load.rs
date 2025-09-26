@@ -53,12 +53,12 @@ impl super::GltfAsset {
             let mut json: super::Gltf = serde_json::from_slice(&json.chunk_data)?;
 
             if let Some(buffer) = json.buffers.first_mut() {
-                if buffer.uri.is_none() {
+                if buffer.uri().is_none() {
                     let bin = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
                     if bin.chunk_type != super::BIN {
                         return Err(GlbError::BinChunkMissing.into());
                     }
-                    buffer.bytes = bin.chunk_data;
+                    *buffer.bytes_mut() = bin.chunk_data;
                 }
             }
             json
@@ -73,14 +73,14 @@ impl super::GltfAsset {
         };
 
         for (idx, buffer) in json.buffers.iter_mut().enumerate() {
-            if let Some(uri) = &buffer.uri {
+            if let Some(uri) = &buffer.uri() {
                 let path = parent.join(uri);
 
                 let read_failed_ctx = || format!("Failed to read binary buffer from {path:?}");
                 let mut file = File::open(&path).with_context(read_failed_ctx)?;
-                file.read_to_end(&mut buffer.bytes)
+                file.read_to_end(buffer.bytes_mut())
                     .with_context(read_failed_ctx)?;
-                if buffer.bytes.len() < buffer.byte_length {
+                if buffer.bytes().len() < buffer.byte_length() {
                     return Err(
                         anyhow!("the byte lenght of the referenced resource must be greater than or equal to the buffer.byte_length property")
                     ).with_context(|| format!("Failed to load buffer {idx}"));
@@ -507,21 +507,5 @@ impl GlbChunk {
             chunk_type,
             chunk_data,
         })
-    }
-}
-
-impl super::BufferView {
-    pub(super) fn bytes<'a>(&self, buffers: &'a [super::Buffer]) -> Result<&'a [u8]> {
-        let buffer = buffers
-            .get(self.buffer)
-            .ok_or_else(|| anyhow!("buffer_view.buffer {} is out of range", self.buffer))?;
-
-        let start = self.byte_offset;
-        let end = start + self.byte_length;
-
-        buffer
-            .bytes
-            .get(start..end)
-            .with_context(|| format!("buffer_view.buffer {} is too short", self.buffer))
     }
 }

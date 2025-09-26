@@ -1,5 +1,3 @@
-use glam::{UVec4, Vec2, Vec3, Vec4, uvec4, vec2, vec3, vec4};
-
 pub fn is_0(value: &usize) -> bool {
     *value == 0
 }

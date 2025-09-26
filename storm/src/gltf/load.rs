@@ -5,18 +5,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use bytemuck::{bytes_of_mut, cast_slice};
+use bytemuck::bytes_of_mut;
 use data_url::{DataUrl, DataUrlError};
-use glam::{Mat4, Quat, UVec4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec3};
 use image::{ImageFormat, ImageReader};
 
 use crate::{
     DenseEntry, Id, Resources,
-    geometry::GeometryBuilder,
-    gltf::{
-        AccessorComponentType, AccessorType, AccessorUsage, GlbChunk, GlbError, GltfEntity,
-        GltfError, accessor::IteratorConsumer,
-    },
+    gltf::{GlbChunk, GlbError, GltfEntity, GltfError, accessor::IteratorConsumer},
     skin::SkinBuilder,
 };
 
@@ -459,7 +455,7 @@ impl super::GltfAsset {
             .weights(
                 node.weights.clone().or(node
                     .mesh
-                    .map(|index| self.json.meshes[index].weights.clone())
+                    .map(|index| self.json.meshes[index].weights().clone())
                     .flatten()),
             )
             .build(resources)
@@ -610,7 +606,7 @@ impl super::Image {
 }
 
 impl super::Material {
-    fn load(
+    pub(super) fn load(
         &mut self,
         parent: &Path,
         textures: &mut [super::Texture],
@@ -772,336 +768,6 @@ impl super::Material {
 
         let id = builder.build(resources).id();
         self.id = Some(id);
-        Ok(id)
-    }
-}
-
-impl super::Mesh {
-    fn load(
-        &mut self,
-        parent: &Path,
-        accessors: &[super::Accessor],
-        materials: &mut [super::Material],
-        default_material: &mut Option<Id<crate::material::Material>>,
-        textures: &mut [super::Texture],
-        samplers: &mut [super::Sampler],
-        images: &mut [super::Image],
-        buffer_views: &[super::BufferView],
-        buffers: &[super::Buffer],
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Id<crate::mesh::Mesh>> {
-        if let Some(id) = self.id {
-            return Ok(id);
-        }
-
-        let name = self.name.clone();
-        let mut primitives = Vec::with_capacity(self.primitives.len());
-        for (idx, primitive) in self.primitives.iter().enumerate() {
-            if let Some(position) = primitive.attributes.position {
-                let primitive_ctx = || format!("Failed to load mesh.primitives[{idx}]");
-
-                let material = match primitive.material {
-                    Some(index) => materials
-                        .get_mut(index)
-                        .ok_or(anyhow!("primitive.material {index} is out of range"))
-                        .with_context(primitive_ctx)?
-                        .load(
-                            parent,
-                            textures,
-                            samplers,
-                            buffer_views,
-                            buffers,
-                            images,
-                            resources,
-                            encoder,
-                        )
-                        .with_context(|| format!("Failed to load primitive.material {index}"))
-                        .with_context(primitive_ctx)?,
-                    None => match default_material {
-                        Some(id) => *id,
-                        None => {
-                            let id = super::Material::default()
-                                .load(
-                                    parent,
-                                    textures,
-                                    samplers,
-                                    buffer_views,
-                                    buffers,
-                                    images,
-                                    resources,
-                                    encoder,
-                                )
-                                .context("Failed to load default material")
-                                .with_context(primitive_ctx)?;
-                            *default_material = Some(id);
-                            id
-                        }
-                    },
-                };
-
-                let topology = match primitive.mode {
-                    super::PrimitiveMode::Points => wgpu::PrimitiveTopology::PointList,
-                    super::PrimitiveMode::LineStrip => wgpu::PrimitiveTopology::LineStrip,
-                    super::PrimitiveMode::Lines => wgpu::PrimitiveTopology::LineList,
-                    super::PrimitiveMode::Triangles => wgpu::PrimitiveTopology::TriangleList,
-                    super::PrimitiveMode::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
-                    mode => {
-                        return Err(anyhow!("primitive topology type {mode} is not supported"))
-                            .with_context(primitive_ctx);
-                    }
-                };
-                let accessor = accessors
-                    .get(position)
-                    .with_context(|| {
-                        format!("primitive.attributes.position {position} is out of range")
-                    })
-                    .with_context(primitive_ctx)?;
-
-                let normal_tex_coord = resources.materials[material].normal_tex_coord();
-                let mut builder = GeometryBuilder::new(accessor.count(), primitive.targets.len())
-                    .topology(topology);
-
-                if let Some(normal_tex_coord) = normal_tex_coord {
-                    builder = builder.normal_tex_coord(normal_tex_coord);
-                }
-
-                macro_rules! consume_attribute {
-                    ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $ctx:expr) => {{
-                        struct Consumer {
-                            builder: GeometryBuilder,
-                        }
-
-                        impl<'a> IteratorConsumer<'a, $ty> for Consumer {
-                            type Return = GeometryBuilder;
-
-                            fn consume<I: Iterator<Item = $ty> + 'a>(
-                                self,
-                                iter: I,
-                            ) -> Result<Self::Return> {
-                                Ok(self.builder.$register(iter$(.map($transform))?))
-                            }
-                        }
-
-                        builder = $accessor
-                            .$load(buffer_views, buffers, Consumer { builder })
-                            .with_context($ctx)
-                            .with_context(primitive_ctx)?;
-                    }};
-                }
-
-                macro_rules! load_attribute {
-                    ($attr:ident: $ty:ty; $load:ident => $register:ident) => {
-                        if let Some(accessor_idx) = primitive.attributes.$attr {
-                            let accessor = accessors
-                                .get(accessor_idx)
-                                .with_context(|| {
-                                    format!(
-                                        concat!(
-                                            "primitive.attributes.",
-                                            stringify!($attr),
-                                            " {} is out of range."
-                                        ),
-                                        accessor_idx
-                                    )
-                                })
-                                .with_context(primitive_ctx)?;
-
-                            let ctx = || {
-                                format!(
-                                    concat!(
-                                        "Failed to load primitive.attributes.",
-                                        stringify!($attr),
-                                        " {}"
-                                    ),
-                                    accessor_idx
-                                )
-                            };
-
-                            consume_attribute!(accessor, $ty; $load => $register, ctx)
-                        }
-                    };
-                }
-
-                let position_ctx = || format!("Failed to load attributes.position {}.", position);
-                consume_attribute!(accessor, Vec3; iter_vec3 => positions, position_ctx);
-
-                load_attribute!(normal: Vec3 ; iter_vec3 => normals);
-                load_attribute!(tangent: Vec4 ; iter_vec4 => tangents);
-                load_attribute!(tex_coord_0: Vec2 ; iter_vec2 => tex_coords_0);
-                load_attribute!(tex_coord_1: Vec2 ; iter_vec2 => tex_coords_1);
-
-                if let Some(accessor_idx) = primitive.attributes.color_0 {
-                    let accessor = accessors
-                        .get(accessor_idx)
-                        .with_context(|| {
-                            format!(
-                                "primitive.attributes.color_0 {} is out of range.",
-                                accessor_idx
-                            )
-                        })
-                        .with_context(primitive_ctx)?;
-
-                    let attribute_ctx = || {
-                        format!(
-                            "Failed to load primitive.attributes.color_0 {}",
-                            accessor_idx
-                        )
-                    };
-
-                    if let AccessorType::Vec3 = accessor.type_() {
-                        consume_attribute!(accessor, Vec3, |v| v.extend(1.0); iter_vec3 => colors_0, attribute_ctx);
-                    } else {
-                        consume_attribute!(accessor, Vec4; iter_vec4 => colors_0, attribute_ctx);
-                    }
-                }
-                
-                load_attribute!(joints_0: UVec4 ; iter_uvec4 => joints_0);
-                load_attribute!(weights_0: Vec4 ; iter_vec4 => weights_0);
-
-                for (target_idx, morph_target) in primitive.targets.iter().enumerate() {
-                    let morph_target_ctx =
-                        || format!("Failed to load primitive.target[{target_idx}].");
-
-                    macro_rules! consume_morph_attribute {
-                        ($accessor:expr, $ty:ty $(, $transform:expr)? ; $load:ident => $register:ident, $ctx:expr) => {{
-                            struct Consumer {
-                                builder: GeometryBuilder,
-                                target_idx: usize,
-                            }
-
-                            impl<'a> IteratorConsumer<'a, $ty> for Consumer {
-                                type Return = GeometryBuilder;
-
-                                fn consume<I: Iterator<Item = $ty> + 'a>(
-                                    self,
-                                    iter: I,
-                                ) -> Result<Self::Return> {
-                                    Ok(self.builder.$register(self.target_idx, iter$(.map($transform))?))
-                                }
-                            }
-
-                            builder = $accessor
-                                .$load(buffer_views, buffers, Consumer { builder, target_idx })
-                                .with_context($ctx)
-                                .with_context(morph_target_ctx)
-                                .with_context(primitive_ctx)?;
-                        }};
-                    }
-
-                    macro_rules! load_morph_attribute {
-                        ($attr:ident: $ty:ty; $load:ident => $register:ident) => {
-                            if let Some(accessor_idx) = morph_target.$attr {
-                                let accessor = accessors
-                                                .get(accessor_idx).with_context(|| format!(
-                                                    concat!(
-                                                        "Morph targets[{}].",
-                                                        stringify!($attr),
-                                                        " {} is out of range."
-                                                    ),
-                                                    target_idx,
-                                                    accessor_idx
-                                                ))
-                                                .with_context(morph_target_ctx)
-                                                .with_context(primitive_ctx)?;
-
-                                let accessor_ctx = || format!(
-                                                            concat!(
-                                                                "Failed to load targets[{}].", stringify!($attr), "{}"
-                                                            ),
-                                                            target_idx,
-                                                            accessor_idx
-                                                        );
-
-                                consume_morph_attribute!(accessor, $ty; $load => $register, accessor_ctx);
-                            }
-                        };
-                    }
-
-                    load_morph_attribute!(position: Vec3; iter_vec3 => morph_target_positions);
-                    load_morph_attribute!(normal: Vec3; iter_vec3 => morph_target_normals);
-                    load_morph_attribute!(tangent: Vec3; iter_vec3 => morph_target_tangents);
-                    load_morph_attribute!(tex_coord_0: Vec2; iter_vec2 => morph_target_tex_coords_0);
-                    load_morph_attribute!(tex_coord_1: Vec2; iter_vec2 => morph_target_tex_coords_1);
-
-                    if let Some(accessor_idx) = morph_target.color_0 {
-                        let accessor = accessors
-                            .get(accessor_idx)
-                            .with_context(|| {
-                                format!(
-                                    "targets[{}].color_0 {} is out of range.",
-                                    target_idx, accessor_idx
-                                )
-                            })
-                            .with_context(morph_target_ctx)
-                            .with_context(primitive_ctx)?;
-
-                        let accessor_ctx = || {
-                            format!(
-                                "Failed to load targets[{}].color_0 {}",
-                                target_idx, accessor_idx
-                            )
-                        };
-
-                        if let AccessorType::Vec3 = accessor.type_() {
-                            consume_morph_attribute!(accessor, Vec3, |v| v.extend(1.0) ; iter_vec3 => morph_target_colors_0, accessor_ctx);
-                        } else {
-                            consume_morph_attribute!(accessor, Vec4 ; iter_vec4 => morph_target_colors_0, accessor_ctx);
-                        }
-                    }
-                }
-
-                if let Some(indices) = primitive.indices {
-                    let accessor = accessors.get(indices).ok_or_else(|| {
-                        anyhow!("mesh.primitives[{idx}].indices {indices} is out of range")
-                    })?;
-
-                    let ctx = || format!("Failed to load mesh.primitives[{idx}].indices {indices}");
-
-                    let bytes = accessor
-                        .bytes_dense_tighly_packed(buffer_views, buffers)
-                        .with_context(ctx)?;
-                    builder = match (
-                        accessor.type_(),
-                        accessor.component_type(),
-                        accessor.normalized(),
-                    ) {
-                        (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
-                            let indices: Vec<_> = bytes.iter().map(|index| *index as u16).collect();
-                            builder.indices_u16(&indices, resources)
-                        }
-                        (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
-                            builder.indices_u16(cast_slice(bytes), resources)
-                        }
-                        (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
-                            builder.indices_u32(cast_slice(bytes), resources)
-                        }
-                        (accessor_type, component_type, normalized) => {
-                            return Err(GltfError::InvalidAccessorDataType {
-                                accessor_type,
-                                component_type,
-                                normalized,
-                                usage: AccessorUsage::Indices,
-                            })
-                            .with_context(ctx);
-                        }
-                    }
-                }
-
-                let geometry = builder.build(resources, encoder).id();
-                primitives.push((geometry, material));
-            }
-        }
-
-        let id = resources
-            .mesh_builder()
-            .name(name)
-            .primitives(primitives)
-            .build()
-            .id();
-
-        self.id = Some(id);
-
         Ok(id)
     }
 }

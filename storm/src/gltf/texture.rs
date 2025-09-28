@@ -1,6 +1,6 @@
 use std::{io::Cursor, path::Path};
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, bail};
 use data_url::{DataUrl, DataUrlError};
 use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
@@ -70,30 +70,30 @@ impl Image {
                             ("image", "png") => ImageFormat::Png,
                             ("image", "jpeg") => ImageFormat::Jpeg,
                             (type_, subtype) => {
-                                anyhow::bail!("Unsupported image format {type_}/{subtype}")
+                                bail!("Unsupported image format {type_}/{subtype}.")
                             }
                         },
                     )
                     .decode()?
                 }
-                Err(DataUrlError::NoComma) => anyhow::bail!("Invalid data url"),
+                Err(DataUrlError::NoComma) => bail!("Invalid data url."),
                 Err(DataUrlError::NotADataUrl) => {
                     let path = parent.join(uri);
                     ImageReader::open(&path)
-                        .with_context(|| format!("Failed to open image at {path:?}"))?
+                        .with_context(|| format!("Failed to open image at {path:?}."))?
                         .decode()?
                 }
             }
         } else {
-            let buffer_view = self.buffer_view.ok_or(anyhow!(
-                "one of image.uri or image.buffer_view must be defined'"
-            ))?;
+            let buffer_view = self.buffer_view.with_context(|| {
+                format!("One of image.uri or image.buffer_view must be defined.'")
+            })?;
             let format = match self.mime_type {
                 ImageMimeType::ImageJpeg => ImageFormat::Jpeg,
                 ImageMimeType::ImagePng => ImageFormat::Png,
-                ImageMimeType::None => anyhow::bail!(
-                    "image.mime_type must be defined when image.buffer_view is defined"
-                ),
+                ImageMimeType::None => {
+                    bail!("image.mime_type must be defined when image.buffer_view is defined.")
+                }
             };
             let bytes = buffer_views
                 .get(buffer_view)
@@ -328,24 +328,24 @@ impl Texture {
 
         let name = self.name.clone();
         let sampler = self.sampler;
-        let source = self.source.ok_or(anyhow!("image.source must be defined"))?;
+        let source = self.source.context("image.source must be defined.")?;
 
         let sampler = match sampler {
             Some(index) => Some(
                 samplers
                     .get_mut(index)
-                    .ok_or(anyhow!("texture.sampler {index} is out of range"))?
+                    .with_context(|| format!("texture.sampler {index} is out of range."))?
                     .load(resources)
-                    .with_context(|| format!("Failed to load texture.sampler {index}"))?,
+                    .with_context(|| format!("Failed to load texture.sampler {index}."))?,
             ),
             None => None,
         };
 
         let source = images
             .get_mut(source)
-            .ok_or(anyhow!("texture.image {source} is out of range"))?
+            .with_context(|| format!("texture.image {source} is out of range."))?
             .load(srgb, parent, buffer_views, buffers, resources, encoder)
-            .with_context(|| format!("Failed to load texture.image {source}"))?;
+            .with_context(|| format!("Failed to load texture.image {source}."))?;
 
         let id = crate::material::TextureBuilder::default()
             .name(name)

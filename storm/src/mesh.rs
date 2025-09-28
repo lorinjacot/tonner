@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Index};
+use std::ops::Index;
 
 use crate::{
     DenseEntry, Id, Resources,
@@ -127,39 +127,33 @@ impl<'r> MeshBuilder<'r> {
                     ),
                 };
 
-                let mut constants = HashMap::with_capacity(3);
-                constants.insert(
-                    "attribute_flags".to_string(),
-                    geometry.attribute_flags().bits() as f64,
-                );
-                constants.insert(
-                    "has_base_color_texture".to_string(),
+                let mut constants = Vec::new();
+                constants.push(("attribute_flags", geometry.attribute_flags().bits() as f64));
+                constants.push((
+                    "has_base_color_texture",
                     bool_to_f64(material.has_base_color_texture()),
-                );
-                constants.insert(
-                    "has_metallic_roughness_texture".to_string(),
+                ));
+                constants.push((
+                    "has_metallic_roughness_texture",
                     bool_to_f64(material.has_metallic_roughness_texture()),
-                );
-                constants.insert(
-                    "has_normal_texture".to_string(),
+                ));
+                constants.push((
+                    "has_normal_texture",
                     bool_to_f64(material.has_normal_texture()),
-                );
-                constants.insert(
-                    "has_occlusion_texture".to_string(),
+                ));
+                constants.push((
+                    "has_occlusion_texture",
                     bool_to_f64(material.has_occlusion_texture()),
-                );
-                constants.insert(
-                    "has_emissive_texture".to_string(),
+                ));
+                constants.push((
+                    "has_emissive_texture",
                     bool_to_f64(material.has_emissive_texture()),
-                );
-                constants.insert(
-                    "alpha_mode".to_string(),
-                    material.alpha_mode() as u32 as f64,
-                );
-                constants.insert(
-                    "max_prefilter_map_mip".to_string(),
+                ));
+                constants.push(("alpha_mode", material.alpha_mode() as u32 as f64));
+                constants.push((
+                    "max_prefilter_map_mip",
                     (PREFILTER_MAP_MIP_COUNT - 1) as f64,
-                );
+                ));
 
                 let pipeline = match manager.primitive_pipelines.iter().find(|pipeline| {
                     pipeline.constants == constants
@@ -306,14 +300,20 @@ pub struct PrimitivePipeline {
     id: Id<Self>,
     pipeline: wgpu::RenderPipeline,
     mirror_pipeline: wgpu::RenderPipeline,
-    constants: HashMap<String, f64>,
+    constants: Vec<(&'static str, f64)>,
     double_sided: bool,
     topology: wgpu::PrimitiveTopology,
 }
 
 impl PrimitivePipeline {
     pub fn alpha_mode(&self) -> AlphaMode {
-        match self.constants["alpha_mode"] {
+        match self
+            .constants
+            .iter()
+            .find(|v| v.0 == "alpha_mode")
+            .expect("contants should contain 'alpha_mode'")
+            .1
+        {
             0.0 => AlphaMode::Opaque,
             1.0 => AlphaMode::Mask,
             2.0 => AlphaMode::Blend,

@@ -1,21 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
+    "lightning",
     "storm",
-    "ui",
-    "web",
-    "desktop",
-    "mobile",
-    "api",
 ]
 
 [workspace.dependencies]
 dioxus = { version = "0.6.0" }
+wgpu = "26.0.1"
 
 # workspace
 storm = { path = "storm" }
-ui = { path = "ui" }
-api = { path = "api" }
 
 [profile]
 

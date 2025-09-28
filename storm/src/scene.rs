@@ -576,6 +576,7 @@ impl Scene {
                         color_attachments: &[
                             Some(wgpu::RenderPassColorAttachment {
                                 view: &self.opaque_attachment,
+                                depth_slice: None,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -675,6 +676,7 @@ impl Scene {
                             None,
                             Some(wgpu::RenderPassColorAttachment {
                                 view: &self.accumulation_attachment,
+                                depth_slice: None,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -683,6 +685,7 @@ impl Scene {
                             }),
                             Some(wgpu::RenderPassColorAttachment {
                                 view: &self.revealage_attachment,
+                                depth_slice: None,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::RED),
@@ -773,6 +776,7 @@ impl Scene {
                         label: Some("Compose render pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &self.opaque_attachment,
+                            depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Load,
@@ -795,6 +799,7 @@ impl Scene {
                         label: Some("Brightness render pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &self.bloom_textures[0].0,
+                            depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -820,6 +825,7 @@ impl Scene {
                     label: Some("Gaussian blur render pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: target,
+                        depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -841,6 +847,7 @@ impl Scene {
                         label: Some("Tone mapping render pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &render_texture,
+                            depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),

@@ -1,5 +1,0 @@
-@import "tailwindcss";
-@source "./desktop/src/**/*.{rs,html,css}";
-@source "./mobile/src/**/*.{rs,html,css}";
-@source "./ui/src/**/*.{rs,html,css}";
-@source "./web/src/**/*.{rs,html,css}";

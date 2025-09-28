@@ -1,6 +1,13 @@
+use anyhow::{Context, Result, anyhow};
+use bytemuck::bytes_of_mut;
 use data_url::forgiving_base64::InvalidBase64;
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, path::PathBuf};
+use std::{
+    fmt::Display,
+    fs::File,
+    io::{BufReader, Read, Seek},
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 
 use crate::Id;
@@ -10,14 +17,15 @@ use animation::Animation;
 use buffer::{Buffer, BufferView};
 use material::Material;
 use mesh::Mesh;
+use scene::{Node, Scene, Skin};
 use texture::{Image, Sampler, Texture};
 
 mod accessor;
 mod animation;
 mod buffer;
-mod load;
 mod material;
 mod mesh;
+mod scene;
 mod texture;
 mod transforms;
 
@@ -27,8 +35,6 @@ pub enum GltfError {
     Glb(#[from] GlbError),
     #[error("Failed to parse json: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("Invalid {entity} index: {index}")]
-    InvalidIndex { entity: GltfEntity, index: usize },
     #[error(
         "{usage} cannot have accessor with {accessor_type} of {component_type} (normalized: {normalized})"
     )]
@@ -44,23 +50,6 @@ pub enum GltfError {
     InvalidBase64(#[from] InvalidBase64),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-}
-
-#[derive(Debug)]
-pub enum GltfEntity {
-    Node,
-    Scene,
-    Skin,
-}
-
-impl Display for GltfEntity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Node => write!(f, "node"),
-            Self::Scene => write!(f, "scene"),
-            Self::Skin => write!(f, "skin"),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -89,9 +78,91 @@ pub enum GlbError {
 }
 
 pub struct GltfAsset {
-    parent: PathBuf,
+    base_path: PathBuf,
     json: Gltf,
     default_material: Option<Id<crate::material::Material>>,
+}
+
+impl GltfAsset {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        let read_failed_ctx = || format!("Failed to read asset from {path:?}");
+
+        let mut file = File::open(path).with_context(read_failed_ctx)?;
+        let base_path = path
+            .parent()
+            .expect("a file should be located in a folder")
+            .to_owned();
+
+        let mut magic: u32 = 0;
+        file.read_exact(bytes_of_mut(&mut magic))
+            .with_context(read_failed_ctx)?;
+        let mut json = if magic == GLTF {
+            let mut reader = BufReader::new(file);
+
+            let mut version: u32 = 0;
+            reader
+                .read_exact(bytes_of_mut(&mut version))
+                .with_context(read_failed_ctx)?;
+            if version != 2 {
+                return Err(GlbError::UnknownVersion.into());
+            }
+
+            let mut length: u32 = 0;
+            reader
+                .read_exact(bytes_of_mut(&mut length))
+                .with_context(read_failed_ctx)?;
+            length -= GLB_HEADER_SIZE;
+            let mut reader = reader.take(length as u64);
+
+            let json = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
+            if json.chunk_type != JSON {
+                return Err(GlbError::JsonChunkMissing.into());
+            }
+            let mut json: Gltf = serde_json::from_slice(&json.chunk_data)?;
+
+            if let Some(buffer) = json.buffers.first_mut() {
+                if buffer.uri().is_none() {
+                    let bin = GlbChunk::from_reader(&mut reader, &read_failed_ctx)?;
+                    if bin.chunk_type != BIN {
+                        return Err(GlbError::BinChunkMissing.into());
+                    }
+                    *buffer.bytes_mut() = bin.chunk_data;
+                }
+            }
+            json
+        } else {
+            file.rewind().with_context(read_failed_ctx)?;
+
+            let mut json = String::new();
+            file.read_to_string(&mut json)
+                .with_context(read_failed_ctx)?;
+
+            serde_json::from_str(&json)?
+        };
+
+        for (idx, buffer) in json.buffers.iter_mut().enumerate() {
+            if let Some(uri) = &buffer.uri() {
+                let path = base_path.join(uri);
+
+                let read_failed_ctx = || format!("Failed to read binary buffer from {path:?}");
+                let mut file = File::open(&path).with_context(read_failed_ctx)?;
+                file.read_to_end(buffer.bytes_mut())
+                    .with_context(read_failed_ctx)?;
+                if buffer.bytes().len() < buffer.byte_length() {
+                    return Err(
+                        anyhow!("the byte lenght of the referenced resource must be greater than or equal to the buffer.byte_length property")
+                    ).with_context(|| format!("Failed to load buffer {idx}"));
+                }
+            }
+        }
+
+        Ok(Self {
+            base_path,
+            json,
+            default_material: None,
+        })
+    }
 }
 
 const GLB_HEADER_SIZE: u32 = 3 * size_of::<u32>() as u32;
@@ -102,6 +173,35 @@ const BIN: u32 = 0x004E4942;
 struct GlbChunk {
     chunk_type: u32,
     chunk_data: Vec<u8>,
+}
+
+impl GlbChunk {
+    fn from_reader<R: Read>(reader: &mut R, read_failed_ctx: &impl Fn() -> String) -> Result<Self> {
+        let mut chunk_length: u32 = 0;
+        reader
+            .read_exact(bytes_of_mut(&mut chunk_length))
+            .with_context(read_failed_ctx)?;
+
+        let mut chunk_type: u32 = 0;
+        reader
+            .read_exact(bytes_of_mut(&mut chunk_type))
+            .with_context(read_failed_ctx)?;
+
+        let mut chunk_data = Vec::with_capacity(chunk_length as usize);
+        reader
+            .take(chunk_length as u64)
+            .read_to_end(&mut chunk_data)
+            .with_context(read_failed_ctx)?;
+
+        if (chunk_data.len() as u32) < chunk_length {
+            return Err(GlbError::InvalidChunkLength.into());
+        }
+
+        Ok(Self {
+            chunk_type,
+            chunk_data,
+        })
+    }
 }
 
 /// The root object for a glTF asset.
@@ -296,128 +396,4 @@ enum CameraType {
 
     #[serde(rename = "orthographic")]
     Orthographic,
-}
-
-/// A node in the node hierarchy. When the node contains [skin](Node::skin),
-/// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
-/// and [WEIGHTS_0](PrimitiveAttributes::weights_0) attributes.
-/// A node **MAY** have either a `matrix` or any combination of
-/// [translation](Node::translation)/[rotation](Node::rotation)/[scale](Node::scale)
-/// (TRS) properties. TRS properties are converted to matrices and postmultiplied in the
-/// `T * R * S` order to compose the transformation matrix; first the scale is applied to
-/// the vertices, then the rotation, and then the translation. If none are provided, the
-/// transform is the identity. When a node is targeted for animation (referenced by an
-/// [animation.channel.target](AnimationChannel::target)), [matrix](Node::matrix)
-/// **MUST NOT** be present.
-#[derive(Debug, Serialize, Deserialize)]
-struct Node {
-    /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
-    #[serde(skip)]
-    id: Option<Id<crate::Node>>,
-
-    /// The index of the camera referenced by this node.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    camera: Option<usize>,
-
-    /// The indices of this node's children.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    children: Vec<usize>,
-
-    /// The index of the skin referenced by this node.
-    /// When a skin is referenced by a node within a scene,
-    /// all joints used by the skin **MUST** belong to the same scene.
-    /// When defined, [mesh](Node::mesh) **MUST** also be defined.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    skin: Option<usize>,
-
-    /// A floating-point 4x4 transformation matrix stored in column-major order.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    matrix: Option<[f32; 16]>,
-
-    /// The index of the mesh in this node.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mesh: Option<usize>,
-
-    /// The node’s unit quaternion rotation in the order (x, y, z, w), where w is the scalar.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rotation: Option<[f32; 4]>,
-
-    /// The node’s non-uniform scale, given as the scaling factors along the x, y, and z axes.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    scale: Option<[f32; 3]>,
-
-    /// The node’s translation along the x, y, and z axes.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    translation: Option<[f32; 3]>,
-
-    /// The weights of the instantiated morph target. The number of array elements
-    /// **MUST** match the number of morph targets of the referenced mesh.
-    /// When defined, [mesh](Node::mesh) **MUST** also be defined.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    weights: Option<Vec<f32>>,
-
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-}
-
-/// The root nodes of a scene.
-#[derive(Debug, Serialize, Deserialize)]
-struct Scene {
-    /// The indices of each root node.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    nodes: Vec<usize>,
-
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-}
-
-// Joints and matrices defining a skin.
-#[derive(Debug, Serialize, Deserialize)]
-struct Skin {
-    /// Nodes using this skin. Cleared once the scene has been loaded.
-    #[serde(skip)]
-    nodes: Vec<Id<crate::Node>>,
-
-    /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
-    /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
-    /// the number of elements of the joints array. When undefined, each matrix is a 4x4
-    /// identity matrix.
-    #[serde(rename = "inverseBindMatrices")]
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    inverse_bind_matrices: Option<usize>,
-
-    /// The index of the node used as a skeleton root. The node **MUST** be the closest common
-    /// root of the joints hierarchy or a direct or indirect parent node of the closest common root.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    skeleton: Option<usize>,
-
-    /// Indices of skeleton nodes, used as joints in this skin.
-    joints: Vec<usize>,
-
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
 }

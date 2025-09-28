@@ -48,7 +48,7 @@ impl Image {
     fn load(
         &mut self,
         srgb: bool,
-        parent: &Path,
+        base_path: &Path,
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
         resources: &mut Resources,
@@ -78,7 +78,7 @@ impl Image {
                 }
                 Err(DataUrlError::NoComma) => bail!("Invalid data url."),
                 Err(DataUrlError::NotADataUrl) => {
-                    let path = parent.join(uri);
+                    let path = base_path.join(uri);
                     ImageReader::open(&path)
                         .with_context(|| format!("Failed to open image at {path:?}."))?
                         .decode()?
@@ -314,7 +314,7 @@ impl Texture {
     pub(super) fn load(
         &mut self,
         srgb: bool,
-        parent: &Path,
+        base_path: &Path,
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
@@ -344,7 +344,7 @@ impl Texture {
         let source = images
             .get_mut(source)
             .with_context(|| format!("texture.image {source} is out of range."))?
-            .load(srgb, parent, buffer_views, buffers, resources, encoder)
+            .load(srgb, base_path, buffer_views, buffers, resources, encoder)
             .with_context(|| format!("Failed to load texture.image {source}."))?;
 
         let id = crate::material::TextureBuilder::default()

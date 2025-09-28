@@ -94,7 +94,7 @@ pub(super) struct Material {
 impl Material {
     pub(super) fn load(
         &mut self,
-        parent: &Path,
+        base_path: &Path,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         buffer_views: &[super::BufferView],
@@ -131,7 +131,7 @@ impl Material {
                 ))?
                 .load(
                     true,
-                    parent,
+                    base_path,
                     samplers,
                     images,
                     buffer_views,
@@ -156,7 +156,7 @@ impl Material {
                 ))?
                 .load(
                     false,
-                    parent,
+                    base_path,
                     samplers,
                     images,
                     buffer_views,
@@ -184,7 +184,7 @@ impl Material {
                 ))?
                 .load(
                     false,
-                    parent,
+                    base_path,
                     samplers,
                     images,
                     buffer_views,
@@ -210,7 +210,7 @@ impl Material {
                 ))?
                 .load(
                     true,
-                    parent,
+                    base_path,
                     samplers,
                     images,
                     buffer_views,
@@ -236,7 +236,7 @@ impl Material {
                 ))?
                 .load(
                     true,
-                    parent,
+                    base_path,
                     samplers,
                     images,
                     buffer_views,

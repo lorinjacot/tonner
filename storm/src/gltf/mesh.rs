@@ -49,7 +49,7 @@ impl Mesh {
 
     pub(super) fn load(
         &mut self,
-        parent: &Path,
+        base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
         default_material: &mut Option<Id<crate::material::Material>>,
@@ -77,7 +77,7 @@ impl Mesh {
                         .with_context(|| format!("primitive.material {index} is out of range."))
                         .with_context(primitive_ctx)?
                         .load(
-                            parent,
+                            base_path,
                             textures,
                             samplers,
                             buffer_views,
@@ -93,7 +93,7 @@ impl Mesh {
                         None => {
                             let id = super::Material::default()
                                 .load(
-                                    parent,
+                                    base_path,
                                     textures,
                                     samplers,
                                     buffer_views,

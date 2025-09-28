@@ -50,7 +50,7 @@ impl Animation {
                 .get(node)
                 .with_context(|| format!("channel.target.node {node} is out of range."))
                 .with_context(channel_ctx)?
-                .id
+                .id()
             {
                 let morph_targets_count = scene[id].weights().len();
                 node_morph_targets_count_channel.push((

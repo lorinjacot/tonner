@@ -1,4 +1,4 @@
-use crate::{gltf::GltfAsset, Resources, Scene};
+use crate::{Resources, Scene, gltf::GltfAsset};
 
 pub fn open_gltf<'r>(
     path: impl AsRef<std::path::Path>,
@@ -8,7 +8,15 @@ pub fn open_gltf<'r>(
     render_height: u32,
 ) -> anyhow::Result<(Vec<Scene>, Option<usize>)> {
     let mut asset = GltfAsset::open(&path)?;
-    let scene = asset.load_scene(0, resources, encoder, render_width, render_height)?;
+
+    let mut scene = Scene::new(
+        path.as_ref().to_str().unwrap_or_default().to_string(),
+        resources,
+        encoder,
+        render_width,
+        render_height,
+    );
+    asset.load_scene_into(0, resources, encoder, &mut scene, None)?;
 
     Ok((vec![scene], Some(0)))
 }

@@ -18,6 +18,7 @@ use crate::{
     material::AlphaMode,
     mesh::{Mesh, PrimitivePipeline},
     storage::{DenseEntry, Id, SparseMap, SparseSet},
+    texture::TextureBuilder,
 };
 
 pub mod animation;
@@ -612,20 +613,22 @@ impl Scene {
                         opaque_render_pass.set_bind_group(1, &primitive.geometry, &[]);
                         opaque_render_pass.set_bind_group(2, &primitive.material, &[]);
                         match &primitive.vertex_indices {
-                            Indices::Some {
+                            Some(Indices {
                                 buffer,
                                 format,
-                                index_count,
-                            } => {
+                                count,
+                            }) => {
                                 opaque_render_pass.set_index_buffer(buffer.slice(..), *format);
                                 opaque_render_pass.draw_indexed(
-                                    0..*index_count,
+                                    0..*count as u32,
                                     0,
                                     0..primitive.instance_count,
                                 );
                             }
-                            Indices::None { vertex_count } => opaque_render_pass
-                                .draw(0..*vertex_count, 0..primitive.instance_count),
+                            None => opaque_render_pass.draw(
+                                0..primitive.vertex_count as u32,
+                                0..primitive.instance_count,
+                            ),
                         }
                     }
 
@@ -637,20 +640,22 @@ impl Scene {
                         opaque_render_pass.set_bind_group(1, &primitive.geometry, &[]);
                         opaque_render_pass.set_bind_group(2, &primitive.material, &[]);
                         match &primitive.vertex_indices {
-                            Indices::Some {
+                            Some(Indices {
                                 buffer,
                                 format,
-                                index_count,
-                            } => {
+                                count,
+                            }) => {
                                 opaque_render_pass.set_index_buffer(buffer.slice(..), *format);
                                 opaque_render_pass.draw_indexed(
-                                    0..*index_count,
+                                    0..*count as u32,
                                     0,
                                     0..primitive.mirror_instance_count,
                                 );
                             }
-                            Indices::None { vertex_count } => opaque_render_pass
-                                .draw(0..*vertex_count, 0..primitive.mirror_instance_count),
+                            None => opaque_render_pass.draw(
+                                0..primitive.vertex_count as u32,
+                                0..primitive.mirror_instance_count,
+                            ),
                         }
                     }
                 }
@@ -714,20 +719,22 @@ impl Scene {
                         transparent_render_pass.set_bind_group(1, &primitive.geometry, &[]);
                         transparent_render_pass.set_bind_group(2, &primitive.material, &[]);
                         match &primitive.vertex_indices {
-                            Indices::Some {
+                            Some(Indices {
                                 buffer,
                                 format,
-                                index_count,
-                            } => {
+                                count,
+                            }) => {
                                 transparent_render_pass.set_index_buffer(buffer.slice(..), *format);
                                 transparent_render_pass.draw_indexed(
-                                    0..*index_count,
+                                    0..*count as u32,
                                     0,
                                     0..primitive.instance_count,
                                 );
                             }
-                            Indices::None { vertex_count } => transparent_render_pass
-                                .draw(0..*vertex_count, 0..primitive.instance_count),
+                            None => transparent_render_pass.draw(
+                                0..primitive.vertex_count as u32,
+                                0..primitive.instance_count,
+                            ),
                         }
                     }
 
@@ -739,20 +746,22 @@ impl Scene {
                         transparent_render_pass.set_bind_group(1, &primitive.geometry, &[]);
                         transparent_render_pass.set_bind_group(2, &primitive.material, &[]);
                         match &primitive.vertex_indices {
-                            Indices::Some {
+                            Some(Indices {
                                 buffer,
                                 format,
-                                index_count,
-                            } => {
+                                count,
+                            }) => {
                                 transparent_render_pass.set_index_buffer(buffer.slice(..), *format);
                                 transparent_render_pass.draw_indexed(
-                                    0..*index_count,
+                                    0..*count as u32,
                                     0,
                                     0..primitive.mirror_instance_count,
                                 );
                             }
-                            Indices::None { vertex_count } => transparent_render_pass
-                                .draw(0..*vertex_count, 0..primitive.mirror_instance_count),
+                            None => transparent_render_pass.draw(
+                                0..primitive.vertex_count as u32,
+                                0..primitive.mirror_instance_count,
+                            ),
                         }
                     }
                 }
@@ -904,6 +913,7 @@ impl Scene {
 
                 let geometry = &resources.geometries[*geometry];
                 let vertex_indices = geometry.indices().clone();
+                let vertex_count = geometry.vertex_count();
                 let geometry = geometry.bind_group().clone();
                 let material = resources.materials[*material].bind_group().clone();
 
@@ -915,6 +925,7 @@ impl Scene {
                     mirror_instance_count: 0,
                     geometry,
                     vertex_indices,
+                    vertex_count,
                     material,
                 });
             }
@@ -965,45 +976,41 @@ fn create_render_attachments(
         depth_or_array_layers: 1,
     };
 
-    let opaque_attachment = resources
-        .texture_builder()
+    let opaque_attachment = TextureBuilder::default()
         .name("Opaque render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Opaque render attachment"),
             ..Default::default()
         });
 
-    let accumulation_attachment = resources
-        .texture_builder()
+    let accumulation_attachment = TextureBuilder::default()
         .name("Accumulation render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Accumulation render attachment"),
             ..Default::default()
         });
 
-    let revealage_attachment = resources
-        .texture_builder()
+    let revealage_attachment = TextureBuilder::default()
         .name("Revealage render attachment")
         .empty(size, wgpu::TextureFormat::R8Unorm)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Revealage render attachment"),
             ..Default::default()
         });
 
-    let depth_attachment = resources
-        .texture_builder()
+    let depth_attachment = TextureBuilder::default()
         .name("Depth render attachment")
         .empty(size, wgpu::TextureFormat::Depth24Plus)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
-        .build(encoder)
+        .build(resources, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Depth render attachment"),
             ..Default::default()
@@ -1039,12 +1046,11 @@ fn create_render_attachments(
 
     let mut horizontal = true;
     let bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2] = repeat_with(|| {
-        let texture = resources
-            .texture_builder()
+        let texture = TextureBuilder::default()
             .name("Bloom texture")
             .empty(size, wgpu::TextureFormat::Rgba16Float)
             .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
-            .build(encoder)
+            .build(resources, encoder)
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("Bloom texture view"),
                 ..Default::default()
@@ -1226,7 +1232,8 @@ struct Primitive {
     mirror_instance_count: u32,
     geometry: wgpu::BindGroup,
     material: wgpu::BindGroup,
-    vertex_indices: Indices,
+    vertex_indices: Option<Indices>,
+    vertex_count: usize,
 }
 
 impl DenseEntry for Primitive {

@@ -77,6 +77,7 @@ impl<'a, 's> SkinBuilder<'a, 's> {
     }
 }
 
+#[derive(Debug)]
 struct Joint {
     node: Id<Node>,
     inverse_bind_matrix: Mat4,

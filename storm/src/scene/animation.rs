@@ -95,8 +95,8 @@ impl<'s> AnimationBuilder<'s> {
         }
     }
 
-    pub fn name(mut self, name: String) -> Self {
-        self.name = Some(name);
+    pub fn name(mut self, name: impl Into<Option<String>>) -> Self {
+        self.name = name.into();
         self
     }
 
@@ -285,7 +285,7 @@ fn interpolate_quat(
                 let a_sin = a.sin();
                 (a * (1.0 - t)).sin() / a_sin * v_previous + s * (a * t).sin() / a_sin * v_next
             };
-            Quat::from_vec4(v_t)
+            Quat::from_vec4(v_t).normalize()
         },
         |t, t_d, v_prev, b_prev, a_next, v_next| {
             let a_next = Vec4::from_slice(a_next);
@@ -303,9 +303,6 @@ fn interpolate_quat(
             Quat::from_vec4(v_t).normalize()
         },
     );
-    if !v.is_normalized() {
-        dbg!(interpolation, v);
-    }
     v
 }
 

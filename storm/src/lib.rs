@@ -9,6 +9,7 @@ pub use storage::{DenseEntry, Id};
 mod asset;
 mod environment;
 pub mod geometry;
+mod gltf;
 pub mod material;
 pub mod math;
 pub mod mesh;
@@ -579,20 +580,8 @@ impl Resources {
         }
     }
 
-    pub fn geometry_builder(&mut self) -> geometry::GeometryBuilder {
-        geometry::GeometryBuilder::new(self)
-    }
-
-    pub fn material_builder(&mut self) -> material::MaterialBuilder {
-        material::MaterialBuilder::new(self)
-    }
-
     pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {
         mesh::MeshBuilder::new(self)
-    }
-
-    fn texture_builder(&mut self) -> texture::TextureBuilder {
-        texture::TextureBuilder::new(self)
     }
 
     pub fn environment_builder<'a, 's>(&'s mut self) -> environment::EnvironmentBuilder<'a, 's> {

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
+// use std::thread;
 use std::time::Instant;
 
 use controls::{Controls, OrbitControls};
@@ -141,7 +141,7 @@ impl Engine {
         let window = create_window(
             &egui_ctx,
             event_loop,
-            &ViewportBuilder::default().with_maximized(true),
+            &ViewportBuilder::default().with_maximized(false),
         )
         .unwrap();
         let window = Arc::new(window);
@@ -164,7 +164,7 @@ impl Engine {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
@@ -209,76 +209,79 @@ impl Engine {
         let thread_data = data.clone();
         let thread_device = device.clone();
         let thread_queue = queue.clone();
-        thread::spawn(move || {
-            let mut encoder =
-                thread_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Engine::new background thread command encoder"),
-                });
-
-            let mut resources = thread_data.resources.lock().unwrap();
-
-            let radiance_image = include_bytes!("../../asset/environments/newport_loft.hdr");
-            // let radiance_image = include_bytes!("../../asset/environments/Cannon_Exterior.hdr");
-            let radiance_image = std::io::Cursor::new(radiance_image);
-            let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
-            let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
-            let environment = resources
-                .environment_builder()
-                .name("newport_loft".to_string())
-                .from_equirectangular_map(&radiance_image)
-                .build(&mut encoder)
-                .id();
-
-            let (mut scenes, active_scene) = load_asset.map_or_else(
-                || (Vec::new(), None),
-                |path| {
-                    open_gltf(path, &mut resources, &mut encoder, size.width, size.height).unwrap()
-                },
-            );
-
-            let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
-                scene.set_environment(environment, &resources);
-
-                let target = scene
-                    .node_builder()
-                    .name("Orbit camera target".to_string().into())
-                    .build(&resources)
-                    .id();
-                let cursor = scene
-                    .node_builder()
-                    .name("Orbit camera cursor".to_string().into())
-                    .build(&resources)
-                    .id();
-                let camera = scene
-                    .node_builder()
-                    .name("Orbit camera node".to_string().into())
-                    .local_position(1.5 * Vec3::Z)
-                    .camera(
-                        storm::camera::CameraDescriptor {
-                            name: Some("Orbit camera".to_string()),
-                            projection: storm::camera::Projection::Perspective {
-                                aspect_ratio: None,
-                                y_fov: f32::to_radians(65.0),
-                                z_far: None,
-                                z_near: 0.01,
-                            },
-                        }
-                        .into(),
-                    )
-                    .build(&resources)
-                    .id();
-                scene.set_active_camera(camera.into());
-
-                OrbitControls::new(index, scene, target, cursor, camera)
-            });
-
-            thread_data.controls.lock().unwrap().extend(controls);
-            let mut engine_scenes = thread_data.scenes.lock().unwrap();
-            engine_scenes.all.extend(scenes);
-            engine_scenes.active = active_scene;
-
-            thread_queue.submit([encoder.finish()]);
+        // thread::spawn(move || {
+        let mut encoder = thread_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Engine::new background thread command encoder"),
         });
+
+        let mut resources = thread_data.resources.lock().unwrap();
+
+        let radiance_image = include_bytes!("../../assets/newport_loft.hdr");
+        // let radiance_image = include_bytes!("../../asset/environments/Cannon_Exterior.hdr");
+        let radiance_image = std::io::Cursor::new(radiance_image);
+        let radiance_image = image::codecs::hdr::HdrDecoder::new(radiance_image).unwrap();
+        let radiance_image = image::DynamicImage::from_decoder(radiance_image).unwrap();
+        let environment = resources
+            .environment_builder()
+            .name("newport_loft".to_string())
+            .from_equirectangular_map(&radiance_image)
+            .build(&mut encoder)
+            .id();
+
+        let (mut scenes, active_scene) = load_asset.map_or_else(
+            || (Vec::new(), None),
+            |path| match open_gltf(path, &mut resources, &mut encoder, size.width, size.height) {
+                Ok(value) => value,
+                Err(err) => {
+                    eprintln!("{err:?}");
+                    panic!()
+                }
+            },
+        );
+
+        let controls = scenes.iter_mut().enumerate().map(|(index, scene)| {
+            scene.set_environment(environment, &resources);
+
+            let target = scene
+                .node_builder()
+                .name("Orbit camera target".to_string())
+                .build(&resources)
+                .id();
+            let cursor = scene
+                .node_builder()
+                .name("Orbit camera cursor".to_string())
+                .build(&resources)
+                .id();
+            let camera = scene
+                .node_builder()
+                .name("Orbit camera node".to_string())
+                .local_position(1.5 * Vec3::Z)
+                .camera(
+                    storm::camera::CameraDescriptor {
+                        name: Some("Orbit camera".to_string()),
+                        projection: storm::camera::Projection::Perspective {
+                            aspect_ratio: None,
+                            y_fov: f32::to_radians(65.0),
+                            z_far: None,
+                            z_near: 0.01,
+                        },
+                    }
+                    .into(),
+                )
+                .build(&resources)
+                .id();
+            scene.set_active_camera(camera.into());
+
+            OrbitControls::new(index, scene, target, cursor, camera)
+        });
+
+        thread_data.controls.lock().unwrap().extend(controls);
+        let mut engine_scenes = thread_data.scenes.lock().unwrap();
+        engine_scenes.all.extend(scenes);
+        engine_scenes.active = active_scene;
+
+        thread_queue.submit([encoder.finish()]);
+        // });
 
         let explorer = Explorer::new();
 

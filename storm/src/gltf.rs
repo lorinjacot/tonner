@@ -6,12 +6,14 @@ use thiserror::Error;
 use crate::Id;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
+use animation::Animation;
 use buffer::{Buffer, BufferView};
 use material::Material;
 use mesh::Mesh;
 use texture::{Image, Sampler, Texture};
 
 mod accessor;
+mod animation;
 mod buffer;
 mod load;
 mod material;
@@ -46,8 +48,6 @@ pub enum GltfError {
 
 #[derive(Debug)]
 pub enum GltfEntity {
-    Accessor,
-    AnimationSampler,
     Node,
     Scene,
     Skin,
@@ -56,8 +56,6 @@ pub enum GltfEntity {
 impl Display for GltfEntity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Accessor => write!(f, "accessor"),
-            Self::AnimationSampler => write!(f, "animation sampler"),
             Self::Node => write!(f, "node"),
             Self::Scene => write!(f, "scene"),
             Self::Skin => write!(f, "skin"),
@@ -68,14 +66,12 @@ impl Display for GltfEntity {
 #[derive(Debug)]
 pub enum AccessorUsage {
     Indices,
-    AnimationOutpus { path: AnimationTargetPath },
 }
 
 impl Display for AccessorUsage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Indices => write!(f, "Primitive indices"),
-            Self::AnimationOutpus { path } => write!(f, "Animation outputs value for {path}"),
         }
     }
 }
@@ -216,141 +212,6 @@ struct Asset {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     min_version: Option<String>,
-}
-
-/// A keyframe animation.
-#[derive(Debug, Serialize, Deserialize)]
-struct Animation {
-    /// An array of animation channels. An animation channel combines an
-    /// animation sampler with a target property being animated. Different
-    /// channels of the same animation **MUST NOT** have the same targets.
-    channels: Vec<AnimationChannel>,
-
-    /// An array of animation samplers. An animation sampler combines timestamps
-    /// with a sequence of output values and defines an interpolation algorithm.
-    samplers: Vec<AnimationSampler>,
-
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-}
-
-/// An animation channel combines an animation sampler with a target property being animated.
-#[derive(Debug, Serialize, Deserialize)]
-struct AnimationChannel {
-    /// The index of a sampler in this animation used to compute the value for the target,
-    /// e.g., a node’s translation, rotation, or scale (TRS).
-    sampler: usize,
-
-    /// The descriptor of the animated property.
-    target: AnimationTarget,
-}
-
-/// The descriptor of the animated property.
-#[derive(Debug, Serialize, Deserialize)]
-struct AnimationTarget {
-    /// The index of the node to animate. When undefined, the animated object
-    /// **MAY** be defined by an extension.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    node: Option<usize>,
-
-    /// The name of the node’s TRS property to animate, or the "weights" of
-    /// the Morph Targets it instantiates. For the [Translation](AnimationTargetPath::Translation)
-    /// property, the values that are provided by the sampler are the translation along
-    /// the X, Y, and Z axes. For the [Rotation](AnimationTargetPath::Rotation) property,
-    /// the values are a quaternion in the order (x, y, z, w), where w is the scalar.
-    /// For the [Scale](AnimationTargetPath::Scale) property, the values are the scaling
-    /// factors along the X, Y, and Z axes.
-    path: AnimationTargetPath,
-}
-
-/// The name of the node’s TRS property to animate, or the "weights" of
-/// the Morph Targets it instantiates. For the [Translation](AnimationTargetPath::Translation)
-/// property, the values that are provided by the sampler are the translation along
-/// the X, Y, and Z axes. For the [Rotation](AnimationTargetPath::Rotation) property,
-/// the values are a quaternion in the order (x, y, z, w), where w is the scalar.
-/// For the [Scale](AnimationTargetPath::Scale) property, the values are the scaling
-/// factors along the X, Y, and Z axes.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum AnimationTargetPath {
-    #[serde(rename = "translation")]
-    Translation,
-
-    #[serde(rename = "rotation")]
-    Rotation,
-
-    #[serde(rename = "scale")]
-    Scale,
-
-    #[serde(rename = "weights")]
-    Weights,
-}
-
-impl Display for AnimationTargetPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Translation => "translation",
-            Self::Rotation => "rotation",
-            Self::Scale => "scale",
-            Self::Weights => "weights",
-        })
-    }
-}
-
-/// An animation sampler combines timestamps with a sequence of output values and defines an interpolation algorithm.
-#[derive(Debug, Serialize, Deserialize)]
-struct AnimationSampler {
-    /// The index of an accessor containing keyframe timestamps. The accessor **MUST** be of scalar type with
-    /// floating-point components. The values represent time in seconds with `time[0] >= 0.0`, and strictly
-    /// increasing values, i.e., `time[n + 1] > time[n]`.
-    input: usize,
-
-    /// Interpolation algorithm.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "AnimationInterpolation::is_default")]
-    interpolation: AnimationInterpolation,
-
-    /// The index of an accessor, containing keyframe output values.
-    output: usize,
-}
-
-/// Interpolation algorithm.
-#[derive(Debug, Default, Serialize, Deserialize)]
-enum AnimationInterpolation {
-    /// The animated values are linearly interpolated between keyframes.
-    /// When targeting a rotation, spherical linear interpolation (slerp)
-    /// **SHOULD** be used to interpolate quaternions. The number of
-    /// output elements **MUST** equal the number of input elements.
-    #[default]
-    #[serde(rename = "LINEAR")]
-    Linear,
-
-    /// The animated values remain constant to the output of the first keyframe,
-    /// until the next keyframe. The number of output elements **MUST** equal the
-    /// number of input elements.
-    #[serde(rename = "STEP")]
-    Step,
-
-    /// The animation’s interpolation is computed using a cubic spline with
-    /// specified tangents. The number of output elements **MUST** equal three
-    /// times the number of input elements. For each input element, the output
-    /// stores three elements, an in-tangent, a spline vertex, and an out-tangent.
-    /// There **MUST** be at least two keyframes when using this interpolation.
-    #[serde(rename = "CUBICSPLINE")]
-    Cubicspline,
-}
-
-impl AnimationInterpolation {
-    fn is_default(&self) -> bool {
-        match self {
-            AnimationInterpolation::Linear => true,
-            _ => false,
-        }
-    }
 }
 
 ///A camera’s projection. A node **MAY** reference a camera to apply a transform to place the camera in the scene.

@@ -84,19 +84,19 @@ impl Animation {
 
                 struct InputsConsumer;
 
-                impl<'a> IteratorConsumer<'a, &'a [f32; 1]> for InputsConsumer {
+                impl<'a> IteratorConsumer<'a, f32> for InputsConsumer {
                     type Return = Vec<f32>;
 
-                    fn consume<I: Iterator<Item = &'a [f32; 1]> + 'a>(
+                    fn consume<I: Iterator<Item = f32> + 'a>(
                         self,
                         iter: I,
                     ) -> Result<Self::Return> {
-                        Ok(iter.map(|v| v[0]).collect())
+                        Ok(iter.collect())
                     }
                 }
 
                 accessor
-                    .iter_unchecked(buffer_views, buffers, InputsConsumer)
+                    .iter_f32(buffer_views, buffers, InputsConsumer)
                     .with_context(|| format!("Failed to load sampler.input {}.", sampler.input))
                     .with_context(sampler_ctx)
                     .with_context(channel_ctx)?
@@ -152,33 +152,31 @@ impl Animation {
                     }
                 }
 
-                let consumer = OutputsConsumer;
-
                 match channel.target.path {
                     AnimationTargetPath::Translation => animation::Outputs::Translations(
                         accessor
-                            .iter_vec3(buffer_views, buffers, consumer)
+                            .iter_vec3(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
                     ),
                     AnimationTargetPath::Rotation => animation::Outputs::Rotations(
                         accessor
-                            .iter_vec4(buffer_views, buffers, consumer)
+                            .iter_vec4(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
                     ),
                     AnimationTargetPath::Scale => animation::Outputs::Scales(
                         accessor
-                            .iter_vec3(buffer_views, buffers, consumer)
+                            .iter_vec3(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
                     ),
                     AnimationTargetPath::Weights => animation::Outputs::Weights(
                         accessor
-                            .iter_f32(buffer_views, buffers, consumer)
+                            .iter_f32(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,

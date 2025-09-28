@@ -9,8 +9,8 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use bytemuck::{Pod, cast_slice, from_bytes};
 use glam::{
-    I8Vec2, I8Vec3, I8Vec4, I16Vec2, I16Vec3, I16Vec4, U8Vec2, U8Vec3, U8Vec4, U16Vec2, U16Vec3,
-    U16Vec4, UVec4, Vec2, Vec3, Vec4,
+    I8Vec2, I8Vec3, I8Vec4, I16Vec2, I16Vec3, I16Vec4, Mat4, U8Vec2, U8Vec3, U8Vec4, U16Vec2,
+    U16Vec3, U16Vec4, UVec4, Vec2, Vec3, Vec4,
 };
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -193,7 +193,7 @@ impl Accessor {
     /// Works with both dense and sparse accessors.
     /// This method will interpret the bytes contained in
     /// the accessor as `V` without doing any checks.
-    pub(super) fn iter_unchecked<'a, V: Value, C: IteratorConsumer<'a, &'a V>>(
+    fn iter_unchecked<'a, V: Value, C: IteratorConsumer<'a, &'a V>>(
         &'a self,
         buffer_views: &[BufferView],
         buffers: &'a [Buffer],
@@ -378,6 +378,10 @@ impl Accessor {
         ((Vec4, UnsignedByte, false) => [u8; 4] : |a| U8Vec4::from_array(*a).as_uvec4()),
         ((Vec4, UnsignedShort, false) => [u16; 4] : |a| U16Vec4::from_array(*a).as_uvec4()),
         ((Vec4, UnsignedInt, false) => [u32; 4]: |a| UVec4::from_array(*a))
+    ]}
+
+    generate_iter! {pub(super) iter_mat4, item = Mat4, [
+        ((Mat4, Float, false) => [f32; 4 * 4] : |a| Mat4::from_cols_array(a))
     ]}
 }
 

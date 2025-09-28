@@ -148,16 +148,14 @@ impl super::GltfAsset {
                     builder: SkinBuilder<'a, 's>,
                 }
 
-                impl<'a, 's> IteratorConsumer<'a, &'a [f32; 4 * 4]> for RegisterBindMatrices<'a, 's> {
+                impl<'a, 's> IteratorConsumer<'a, Mat4> for RegisterBindMatrices<'a, 's> {
                     type Return = SkinBuilder<'a, 's>;
 
-                    fn consume<I: Iterator<Item = &'a [f32; 4 * 4]> + 'a>(
+                    fn consume<I: Iterator<Item = Mat4> + 'a>(
                         self,
                         iter: I,
                     ) -> Result<Self::Return> {
-                        Ok(self
-                            .builder
-                            .inverse_bind_matrices(iter.map(Mat4::from_cols_array)))
+                        Ok(self.builder.inverse_bind_matrices(iter))
                     }
                 }
 
@@ -170,11 +168,8 @@ impl super::GltfAsset {
                         format!("inverse_bind_matrices {inverse_bind_matrices} is out of range")
                     })?;
 
-                builder = accessor.iter_unchecked(
-                    &self.json.buffer_views,
-                    &self.json.buffers,
-                    consumer,
-                )?;
+                builder =
+                    accessor.iter_mat4(&self.json.buffer_views, &self.json.buffers, consumer)?;
             }
 
             let skin = builder.build().id();

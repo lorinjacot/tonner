@@ -1,3 +1,30 @@
 [workspace]
 resolver = "2"
-members = [ "storm", "lightning"]
+members = [
+    "storm",
+    "ui",
+    "web",
+    "desktop",
+    "mobile",
+    "api",
+]
+
+[workspace.dependencies]
+dioxus = { version = "0.6.0" }
+
+# workspace
+storm = { path = "storm" }
+ui = { path = "ui" }
+api = { path = "api" }
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

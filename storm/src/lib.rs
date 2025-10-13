@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -21,9 +22,18 @@ mod scene;
 mod storage;
 mod texture;
 
+/// A unique identifier for an instance of `T`.
 pub struct Id<T> {
     uuid: Uuid,
     target: PhantomData<T>,
+}
+
+impl<T> Id<T> {
+    /// An unique UUID for this id.
+    /// This method will always return the same value for a given instance.
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
+    }
 }
 
 impl<T> Clone for Id<T> {
@@ -83,6 +93,55 @@ impl<T> PartialEq for Id<T> {
 }
 
 impl<T> Eq for Id<T> {}
+
+/// This is the entry point of the crate.
+/// To get started, create a new `Engine`.
+/// The engine can then be used to create a `Scene`.
+/// The engine is also responsible to manage the resources shared between `Scene`.
+pub struct Engine {
+    scenes: HashMap<Id<Scene>, Scene>,
+    resources: Resources,
+}
+
+#[must_use]
+pub struct EngineBuilder {
+    device_queue: Option<(wgpu::Device, wgpu::Queue)>,
+    target_format: wgpu::TextureFormat,
+}
+
+impl EngineBuilder {
+    pub fn new() -> Self {
+        Self {
+            device_queue: None,
+            target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        }
+    }
+
+    pub fn build(self) -> Engine {
+        let (device, queue) = self.device_queue.unwrap_or_else(|| {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+            let adapter = pollster::block_on(
+                instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+            )
+            .expect("Failed to get wgpu adapter");
+            pollster::block_on(adapter.request_device(&wgpu::wgt::DeviceDescriptor::default()))
+                .expect("Failed to get wgpu device")
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+            label: Some("Engine builder command encoder"),
+        });
+
+        let engine = Engine {
+            scenes: HashMap::new(),
+            resources: Resources::new(self.target_format, device, queue, &mut encoder),
+        };
+
+        engine.resources.queue.submit([encoder.finish()]);
+
+        engine
+    }
+}
 
 pub struct Resources {
     device: wgpu::Device,

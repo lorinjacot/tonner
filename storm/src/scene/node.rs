@@ -4,7 +4,8 @@ use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
+use crate::storage::{DenseEntry, Id};
+use crate::{Resources, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
 
 use super::{Camera, PointLight, Scene, camera::CameraDescriptor, skin::Skin};
 

@@ -6,7 +6,8 @@ use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{DenseEntry, Id, Resources};
+use crate::Resources;
+use crate::storage::{DenseEntry, Id};
 
 /// Image data used to create a texture. Image **MAY** be referenced by an URI (or IRI) or a buffer view index.
 #[derive(Debug, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use glam::Mat4;
 
-use crate::{DenseEntry, Id};
+use crate::storage::{DenseEntry, Id};
 
 use super::Node;
 

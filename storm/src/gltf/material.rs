@@ -1,13 +1,14 @@
 use std::path::Path;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
 
 use super::transforms::{
     default_4x10, default_05, default_10, is_0, is_3x00, is_4x10, is_05, is_10, is_false,
 };
 
-use crate::{DenseEntry, Id, Resources};
+use crate::Resources;
+use crate::storage::{DenseEntry, Id};
 
 /// The material appearance of a primitive.
 #[derive(Debug, Serialize, Deserialize)]

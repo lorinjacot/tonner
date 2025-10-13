@@ -1,10 +1,14 @@
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
+use std::marker::PhantomData;
+
 pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
 pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
 pub use scene::{camera, skin};
 use storage::SparseSet;
-pub use storage::{DenseEntry, Id};
+use uuid::Uuid;
 
 mod asset;
 mod environment;
@@ -17,17 +21,80 @@ mod scene;
 mod storage;
 mod texture;
 
+pub struct Id<T> {
+    uuid: Uuid,
+    target: PhantomData<T>,
+}
+
+impl<T> Clone for Id<T> {
+    fn clone(&self) -> Self {
+        Self {
+            uuid: self.uuid,
+            target: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for Id<T> {}
+
+impl<T> Debug for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.uuid)
+    }
+}
+
+impl<T> Default for Id<T> {
+    fn default() -> Self {
+        Self {
+            uuid: Uuid::default(),
+            target: PhantomData,
+        }
+    }
+}
+
+impl<T> Display for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.uuid)
+    }
+}
+
+impl<T> Hash for Id<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.uuid.hash(state);
+    }
+}
+
+impl<T> PartialOrd for Id<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.uuid.partial_cmp(&other.uuid)
+    }
+}
+
+impl<T> Ord for Id<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.uuid.cmp(&other.uuid)
+    }
+}
+
+impl<T> PartialEq for Id<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.uuid.eq(&other.uuid)
+    }
+}
+
+impl<T> Eq for Id<T> {}
+
 pub struct Resources {
     device: wgpu::Device,
     queue: wgpu::Queue,
     geometry_builder_data: geometry::GeometryBuilderData,
-    geometries: SparseSet<geometry::Geometry>,
+    geometries: storage::SparseSet<geometry::Geometry>,
     texture_builder_data: texture::TextureBuilderData,
     materials: material::MaterialManager,
     meshes: mesh::MeshManager,
-    environments: SparseSet<Environment>,
+    environments: storage::SparseSet<Environment>,
     environment_builder_data: environment::EnvironmentBuilderData,
-    default_environmnent: Option<Id<Environment>>,
+    default_environmnent: Option<storage::Id<Environment>>,
     render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,

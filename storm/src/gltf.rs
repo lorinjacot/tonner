@@ -10,7 +10,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::Id;
+use crate::storage::Id;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
 use animation::Animation;

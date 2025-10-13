@@ -4,7 +4,8 @@ use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, cast_slice};
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, storage::SparseSet};
+use crate::storage::{DenseEntry, Id};
+use crate::{Resources, storage::SparseSet};
 
 pub struct Texture {
     id: Id<Self>,

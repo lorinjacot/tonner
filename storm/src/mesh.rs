@@ -1,7 +1,8 @@
 use std::{collections::HashMap, ops::Index};
 
+use crate::storage::{DenseEntry, Id};
 use crate::{
-    DenseEntry, Id, Resources,
+    Resources,
     environment::PREFILTER_MAP_MIP_COUNT,
     geometry::Geometry,
     material::{AlphaMode, Material},

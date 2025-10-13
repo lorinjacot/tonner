@@ -3,7 +3,7 @@ use std::iter::{once, repeat};
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::Mat4;
 
-use crate::{DenseEntry, Id, storage::SparseSet};
+use crate::storage::{SparseSet, DenseEntry, Id};
 
 use super::{Node, Scene};
 

@@ -5,7 +5,8 @@ use glam::{Mat4, Vec3, vec3};
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::{DenseEntry, Id, Resources, texture::TextureBuilder};
+use crate::storage::{DenseEntry, Id};
+use crate::{Resources, texture::TextureBuilder};
 
 pub const CUBE_VERTICES: &[Vec3] = &[
     // front face

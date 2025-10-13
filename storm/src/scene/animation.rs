@@ -3,7 +3,7 @@ use std::time::Duration;
 use approx::abs_diff_eq;
 use glam::{Quat, Vec3, Vec4};
 
-use crate::{DenseEntry, Id, storage::SparseSet};
+use crate::storage::{DenseEntry, Id, SparseSet};
 
 use super::{Node, Scene};
 

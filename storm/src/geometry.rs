@@ -5,7 +5,8 @@ use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::{UVec4, Vec2, Vec3, Vec4, vec2, vec3, vec4};
 use mikktspace_sys::{MikkTSpaceInterface, gen_tang_space_default};
 
-use crate::{DenseEntry, Id, Resources};
+use crate::Resources;
+use crate::storage::{DenseEntry, Id};
 
 pub const MAX_MORPH_TARGET_COUNT: usize = 8;
 

@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
-use crate::{DenseEntry, Id, Resources, gltf::accessor::IteratorConsumer, skin::SkinBuilder};
+use crate::storage::{DenseEntry, Id};
+use crate::{Resources, gltf::accessor::IteratorConsumer, skin::SkinBuilder};
 
 /// A node in the node hierarchy. When the node contains [skin](Node::skin),
 /// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)

@@ -95,30 +95,54 @@ impl<T> PartialEq for Id<T> {
 impl<T> Eq for Id<T> {}
 
 /// This is the entry point of the crate.
-/// To get started, create a new `Engine`.
-/// The engine can then be used to create a `Scene`.
-/// The engine is also responsible to manage the resources shared between `Scene`.
+/// To get started, create a new [Engine] using [EngineBuilder].
+/// Once created, an engine can be used to create a [Scene].
+/// The engine is also responsible to manage the resources shared between [Scene]s.
 pub struct Engine {
     scenes: HashMap<Id<Scene>, Scene>,
     resources: Resources,
 }
 
+impl Engine {
+    /// Create an [EngineBuilder] with default values.
+    pub fn builder() -> EngineBuilder {
+        EngineBuilder::default()
+    }
+}
+
+/// A builder for [Engine].
 #[must_use]
 pub struct EngineBuilder {
-    device_queue: Option<(wgpu::Device, wgpu::Queue)>,
+    device: Option<(wgpu::Device, wgpu::Queue)>,
     target_format: wgpu::TextureFormat,
 }
 
-impl EngineBuilder {
-    pub fn new() -> Self {
+impl Default for EngineBuilder {
+    fn default() -> Self {
         Self {
-            device_queue: None,
+            device: None,
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
         }
     }
+}
 
+impl EngineBuilder {
+    /// Use an existing [wgpu::Device] and [wgpu::Queue].
+    pub fn device(mut self, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        self.device = Some((device, queue));
+        self
+    }
+
+    /// Change the [wgpu::TextureFormat] of the rendering target.
+    /// This setting controls the encoding of the rendered [Scene]s.
+    pub fn target_format(mut self, target_format: wgpu::TextureFormat) -> Self {
+        self.target_format = target_format;
+        self
+    }
+
+    /// Build the [Engine].
     pub fn build(self) -> Engine {
-        let (device, queue) = self.device_queue.unwrap_or_else(|| {
+        let (device, queue) = self.device.unwrap_or_else(|| {
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
             let adapter = pollster::block_on(
                 instance.request_adapter(&wgpu::RequestAdapterOptions::default()),

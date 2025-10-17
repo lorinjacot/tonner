@@ -2,8 +2,7 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use glam::{UVec4, Vec2, Vec3, Vec4, vec2, vec3, vec4};
-use mikktspace_sys::{MikkTSpaceInterface, gen_tang_space_default};
+use glam::{UVec4, Vec2, Vec3, Vec4, vec2, vec3};
 
 use crate::Resources;
 use crate::storage::{DenseEntry, Id};
@@ -491,12 +490,13 @@ impl GeometryBuilder {
                 let end = start + self.vertex_count;
                 let attributes = &mut self.attributes[start..end];
 
-                let mut mikk_t_space = MikkTSpace {
+                let mut mikk_tspace = MikkTSpace {
                     attributes,
                     normal_tex_coord,
                 };
-                gen_tang_space_default(&mut mikk_t_space);
+                mikktspace::generate_tangents(&mut mikk_tspace);
             }
+            self.attribute_flags.insert(AttributeFlags::TANGENT);
         }
 
         let header = GeometryStorageHeader {
@@ -643,24 +643,24 @@ impl<'a> MikkTSpace<'a> {
     }
 }
 
-impl<'a> MikkTSpaceInterface for MikkTSpace<'a> {
-    fn get_num_faces(&self) -> usize {
+impl<'a> mikktspace::Geometry for MikkTSpace<'a> {
+    fn num_faces(&self) -> usize {
         self.attributes.len() / 3
     }
 
-    fn get_num_vertices_of_face(&self, _face: usize) -> usize {
+    fn num_vertices_of_face(&self, _face: usize) -> usize {
         3
     }
 
-    fn get_position(&self, face: usize, vert: usize) -> [f32; 3] {
+    fn position(&self, face: usize, vert: usize) -> [f32; 3] {
         self.attribute(face, vert).position.to_array()
     }
 
-    fn get_normal(&self, face: usize, vert: usize) -> [f32; 3] {
+    fn normal(&self, face: usize, vert: usize) -> [f32; 3] {
         self.attribute(face, vert).normal.to_array()
     }
 
-    fn get_tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
+    fn tex_coord(&self, face: usize, vert: usize) -> [f32; 2] {
         match self.normal_tex_coord {
             0 => self.attribute(face, vert).tex_coord_0.to_array(),
             1 => self.attribute(face, vert).tex_coord_1.to_array(),
@@ -668,8 +668,8 @@ impl<'a> MikkTSpaceInterface for MikkTSpace<'a> {
         }
     }
 
-    fn set_tspace_basic(&mut self, tangent: [f32; 3], sign: f32, face: usize, vert: usize) {
-        self.attribute_mut(face, vert).tangent = vec4(tangent[0], tangent[1], tangent[2], -sign);
+    fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
+        self.attribute_mut(face, vert).tangent = Vec4::from_array(tangent);
     }
 }
 

@@ -6,9 +6,11 @@ members = [
 ]
 
 [workspace.dependencies]
+cfg_aliases = "0.2.1"
 egui = "0.33.0"
 egui-wgpu = "0.33.0"
 storm = { path = "storm" }
+wasm-bindgen = "0.2.104"
 wgpu = "27.0.1"
 
 [profile.release]

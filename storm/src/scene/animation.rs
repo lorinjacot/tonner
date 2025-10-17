@@ -130,7 +130,7 @@ impl<'s> AnimationBuilder<'s> {
 }
 
 impl Scene {
-    pub fn animation_builder(&mut self) -> AnimationBuilder {
+    pub fn animation_builder(&mut self) -> AnimationBuilder<'_> {
         AnimationBuilder::new(self)
     }
 

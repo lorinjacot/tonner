@@ -180,11 +180,11 @@ impl Scene {
         }
     }
 
-    pub fn node_handle(&mut self, id: Id<Node>) -> NodeHandle {
+    pub fn node_handle(&mut self, id: Id<Node>) -> NodeHandle<'_> {
         NodeHandle { id, scene: self }
     }
 
-    pub fn node_builder(&mut self) -> NodeBuilder {
+    pub fn node_builder(&mut self) -> NodeBuilder<'_> {
         NodeBuilder::new(self)
     }
 

@@ -3,6 +3,13 @@ name = "storm"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["web"]
+web = ["dep:wasm-bindgen"]
+
 [dependencies]
 anyhow = "1.0.98"
 approx = "0.5.1"
@@ -13,7 +20,7 @@ glam = { version = "0.30.2", features = ["bytemuck"] }
 gltf = "1.4.1"
 gltf-json = { version = "1.4.1", features = ["names"] }
 image = { version = "0.25.6", default-features = false, features = ["hdr"] }
-mikktspace-sys = "0.1.1"
+mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
 pollster = "0.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
@@ -21,3 +28,9 @@ serde_repr = "0.1.20"
 thiserror = "2.0.12"
 uuid = { version = "1.18.1", features = ["js", "v4"] }
 wgpu = { workspace = true }
+
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))'.dependencies]
+wasm-bindgen = { workspace = true, optional = true }
+
+[build-dependencies]
+cfg_aliases = { workspace = true }

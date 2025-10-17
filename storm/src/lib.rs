@@ -99,7 +99,7 @@ impl<T> Eq for Id<T> {}
 /// Once created, an engine can be used to create a [Scene].
 /// The engine is also responsible to manage the resources shared between [Scene]s.
 pub struct Engine {
-    scenes: HashMap<Id<Scene>, Scene>,
+    _scenes: HashMap<Id<Scene>, Scene>,
     resources: Resources,
 }
 
@@ -157,7 +157,7 @@ impl EngineBuilder {
         });
 
         let engine = Engine {
-            scenes: HashMap::new(),
+            _scenes: HashMap::new(),
             resources: Resources::new(self.target_format, device, queue, &mut encoder),
         };
 
@@ -730,7 +730,7 @@ impl Resources {
         }
     }
 
-    pub fn mesh_builder(&mut self) -> mesh::MeshBuilder {
+    pub fn mesh_builder(&mut self) -> mesh::MeshBuilder<'_> {
         mesh::MeshBuilder::new(self)
     }
 

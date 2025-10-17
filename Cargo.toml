@@ -1,8 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["storm"]
+members = [
+    "storm",
+    "storm-wasm",
+]
 
 [workspace.dependencies]
 egui = "0.33.0"
 egui-wgpu = "0.33.0"
+storm = { path = "storm" }
 wgpu = "27.0.1"
+
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"

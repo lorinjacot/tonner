@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
-pub use scene::{Node, NodeBuilder, NodeHandle, Scene};
+pub use scene::{Node, NodeBuilder, NodeHandle, Scene, SceneBuilder};
 pub use scene::{camera, skin};
 use storage::SparseSet;
 use uuid::Uuid;
@@ -118,7 +118,7 @@ pub struct Engine {
 
 #[cfg_attr(web, wasm_bindgen)]
 impl Engine {
-    /// Create an [EngineBuilder] with default values.
+    /// Create an engine builder with default values.
     pub fn builder() -> EngineBuilder {
         EngineBuilder::default()
     }

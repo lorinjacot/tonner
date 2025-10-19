@@ -13,13 +13,16 @@ use skin::init_skins_buffer;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Environment, Resources,
+    Engine, Environment, Resources,
     geometry::Indices,
     material::AlphaMode,
     mesh::{Mesh, PrimitivePipeline},
     storage::{DenseEntry, Id, SparseMap, SparseSet},
     texture::TextureBuilder,
 };
+
+#[cfg(web)]
+use wasm_bindgen::prelude::*;
 
 pub mod animation;
 pub mod camera;
@@ -28,7 +31,9 @@ pub mod skin;
 
 const NODE_INDEX_SIZE: usize = size_of::<u32>();
 
+#[cfg_attr(web, wasm_bindgen)]
 pub struct Scene {
+    #[cfg_attr(web, wasm_bindgen(skip))]
     pub name: String,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -677,7 +682,7 @@ impl Scene {
                             Some(wgpu::RenderPassColorAttachment {
                                 view: &self.accumulation_attachment,
                                 depth_slice: None,
-resolve_target: None,
+                                resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                     store: wgpu::StoreOp::Store,
@@ -686,7 +691,7 @@ resolve_target: None,
                             Some(wgpu::RenderPassColorAttachment {
                                 view: &self.revealage_attachment,
                                 depth_slice: None,
-resolve_target: None,
+                                resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::RED),
                                     store: wgpu::StoreOp::Store,
@@ -777,7 +782,7 @@ resolve_target: None,
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &self.opaque_attachment,
                             depth_slice: None,
-resolve_target: None,
+                            resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Load,
                                 store: wgpu::StoreOp::Store,
@@ -800,7 +805,7 @@ resolve_target: None,
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &self.bloom_textures[0].0,
                             depth_slice: None,
-resolve_target: None,
+                            resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
@@ -848,7 +853,7 @@ resolve_target: None,
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &render_texture,
                             depth_slice: None,
-resolve_target: None,
+                            resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
@@ -952,6 +957,14 @@ resolve_target: None,
     }
 }
 
+#[cfg_attr(web, wasm_bindgen)]
+impl Scene {
+    /// Create an scene builder with default values.
+    pub fn builder() -> SceneBuilder {
+        SceneBuilder::default()
+    }
+}
+
 impl Index<Id<Node>> for Scene {
     type Output = Node;
 
@@ -963,6 +976,25 @@ impl Index<Id<Node>> for Scene {
 impl IndexMut<Id<Node>> for Scene {
     fn index_mut(&mut self, index: Id<Node>) -> &mut Self::Output {
         &mut self.nodes[index]
+    }
+}
+
+/// A builder for [Scene].
+#[must_use]
+#[cfg_attr(web, wasm_bindgen)]
+pub struct SceneBuilder {}
+
+impl Default for SceneBuilder {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
+#[cfg_attr(web, wasm_bindgen)]
+impl SceneBuilder {
+    /// Build the scene using the provided engine.
+    pub fn build(self, _engine: &mut Engine) -> Scene {
+        todo!()
     }
 }
 

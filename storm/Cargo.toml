@@ -3,12 +3,23 @@ name = "storm"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.wasm-pack.profile.dev.wasm-bindgen]
+dwarf-debug-info = true
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["web"]
-web = ["dep:wasm-bindgen"]
+web = [
+    "wgpu/web",
+    "dep:console_error_panic_hook",
+    "dep:console_log",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+]
+web-sys = ["dep:web-sys"]
 
 [dependencies]
 anyhow = "1.0.98"
@@ -20,6 +31,7 @@ glam = { version = "0.30.2", features = ["bytemuck"] }
 gltf = "1.4.1"
 gltf-json = { version = "1.4.1", features = ["names"] }
 image = { version = "0.25.6", default-features = false, features = ["hdr"] }
+log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
 pollster = "0.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
@@ -29,8 +41,12 @@ thiserror = "2.0.12"
 uuid = { version = "1.18.1", features = ["js", "v4"] }
 wgpu = { workspace = true }
 
-[target.'cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))'.dependencies]
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = { workspace = true, optional = true }
+console_log = { workspace = true, optional = true, features = ["color"] }
 wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+web-sys = { workspace = true, features = [], optional = true }
 
 [build-dependencies]
 cfg_aliases = { workspace = true }

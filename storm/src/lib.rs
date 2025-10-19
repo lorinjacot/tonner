@@ -11,6 +11,18 @@ pub use scene::{camera, skin};
 use storage::SparseSet;
 use uuid::Uuid;
 
+#[cfg(web)]
+use wasm_bindgen::prelude::*;
+
+#[cfg(web)]
+#[wasm_bindgen(start)]
+fn start() {
+    use log::Level;
+
+    console_error_panic_hook::set_once();
+    console_log::init_with_level(Level::Debug).expect("error initializing logger");
+}
+
 mod asset;
 mod environment;
 pub mod geometry;
@@ -98,11 +110,13 @@ impl<T> Eq for Id<T> {}
 /// To get started, create a new [Engine] using [EngineBuilder].
 /// Once created, an engine can be used to create a [Scene].
 /// The engine is also responsible to manage the resources shared between [Scene]s.
+#[cfg_attr(web, wasm_bindgen)]
 pub struct Engine {
     _scenes: HashMap<Id<Scene>, Scene>,
     resources: Resources,
 }
 
+#[cfg_attr(web, wasm_bindgen)]
 impl Engine {
     /// Create an [EngineBuilder] with default values.
     pub fn builder() -> EngineBuilder {
@@ -112,6 +126,7 @@ impl Engine {
 
 /// A builder for [Engine].
 #[must_use]
+#[cfg_attr(web, wasm_bindgen)]
 pub struct EngineBuilder {
     device: Option<(wgpu::Device, wgpu::Queue)>,
     target_format: wgpu::TextureFormat,
@@ -139,18 +154,27 @@ impl EngineBuilder {
         self.target_format = target_format;
         self
     }
+}
 
+#[cfg_attr(web, wasm_bindgen)]
+impl EngineBuilder {
     /// Build the [Engine].
-    pub fn build(self) -> Engine {
-        let (device, queue) = self.device.unwrap_or_else(|| {
-            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
-            let adapter = pollster::block_on(
-                instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
-            )
-            .expect("Failed to get wgpu adapter");
-            pollster::block_on(adapter.request_device(&wgpu::wgt::DeviceDescriptor::default()))
-                .expect("Failed to get wgpu device")
-        });
+    pub async fn build(self) -> Engine {
+        let (device, queue) = match self.device {
+            Some(device) => device,
+            None => {
+                let instance =
+                    wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+                let adapter = instance
+                    .request_adapter(&wgpu::RequestAdapterOptions::default())
+                    .await
+                    .expect("Failed to get wgpu adapter");
+                adapter
+                    .request_device(&wgpu::wgt::DeviceDescriptor::default())
+                    .await
+                    .expect("Failed to get wgpu device")
+            }
+        };
 
         let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
             label: Some("Engine builder command encoder"),

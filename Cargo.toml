@@ -13,6 +13,7 @@ egui = "0.33.0"
 egui-wgpu = "0.33.0"
 log = "0.4.28"
 storm = { path = "storm" }
+thiserror = "2.0.17"
 wasm-bindgen = "0.2.104"
 wasm-bindgen-futures = "0.4.54"
 web-sys = "0.3.81"

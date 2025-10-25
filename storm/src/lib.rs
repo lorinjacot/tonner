@@ -105,31 +105,39 @@ pub struct Engine {
 
 impl Engine {
     /// Create an engine builder with default values.
-    pub fn builder() -> EngineBuilder {
+    pub fn builder<'a>() -> EngineBuilder<'a> {
         EngineBuilder::default()
     }
 }
 
 /// A builder for [Engine].
 #[must_use]
-pub struct EngineBuilder {
+pub struct EngineBuilder<'a> {
     device: Option<(wgpu::Device, wgpu::Queue)>,
+    compatible_surface: Option<&'a wgpu::Surface<'a>>,
     target_format: wgpu::TextureFormat,
 }
 
-impl Default for EngineBuilder {
+impl<'a> Default for EngineBuilder<'a> {
     fn default() -> Self {
         Self {
             device: None,
+            compatible_surface: None,
             target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
         }
     }
 }
 
-impl EngineBuilder {
+impl<'a> EngineBuilder<'a> {
     /// Use an existing [wgpu::Device] and [wgpu::Queue].
     pub fn device(mut self, device: wgpu::Device, queue: wgpu::Queue) -> Self {
         self.device = Some((device, queue));
+        self
+    }
+
+    /// Ensure the engine is compatible with this surface.
+    pub fn compatible_surface(mut self, surface: &'a wgpu::Surface<'a>) -> Self {
+        self.compatible_surface = Some(surface);
         self
     }
 
@@ -139,9 +147,7 @@ impl EngineBuilder {
         self.target_format = target_format;
         self
     }
-}
 
-impl EngineBuilder {
     /// Build the [Engine].
     pub async fn build(self) -> Engine {
         let (device, queue) = match self.device {

@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use crate::Engine;
+use crate::{Engine, Surface};
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered to a screen or a texture.
 /// 
@@ -21,6 +21,11 @@ impl Scene {
     pub fn builder() -> SceneBuilder {
         SceneBuilder(storm::Scene::builder())
     }
+
+    /// Render the scene to the surface.
+    pub fn render(&self, surface: &Surface) {
+        todo!()
+    }
 }
 
 /// A builder for `Scene`.
@@ -31,6 +36,6 @@ pub struct SceneBuilder(storm::SceneBuilder);
 impl SceneBuilder {
     /// Build the scene.
     pub async fn build(self, engine: &mut Engine) -> Scene {
-        Scene(self.0.build(&mut engine.0))
+        Scene(self.0.build(&mut engine.inner))
     }
 }

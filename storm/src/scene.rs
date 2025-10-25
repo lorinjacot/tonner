@@ -21,23 +21,23 @@ use crate::{
     texture::TextureBuilder,
 };
 
-
 pub mod animation;
 pub mod camera;
 mod node;
+mod renderer;
 pub mod skin;
 
 const NODE_INDEX_SIZE: usize = size_of::<u32>();
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered
 /// to a screen or a texture.
-/// 
+///
 /// A scene is made up of [Node]s. Nodes are organized in a parent-child hierachy, known as the
 /// node-hierarchy or the scene graph. A node is called a root node when it doesn't have a parent.
 /// Each node defines a local space. The local transform is used to get from the parent node local
 /// space (parent space for short) to the local space. The global transform is used to get from the
 /// scene space (or global space) to the local space. Both transforms are equal for root nodes.
-/// 
+///
 /// To add an object to the scene, attach it to a node. For example, each node can have a mesh. During
 /// rendering, the attached mesh will be rendered at the local space origin.
 pub struct Scene {

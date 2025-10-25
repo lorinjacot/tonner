@@ -1,0 +1,22 @@
+[package]
+name = "storm-js"
+version = "0.1.0"
+authors = ["Lorin Jacot <71598369+lorinjacot@users.noreply.github.com>"]
+edition = "2024"
+
+[package.metadata.wasm-pack.profile.dev.wasm-bindgen]
+dwarf-debug-info = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_error_panic_hook.workspace = true
+console_log.workspace = true
+log.workspace = true
+storm.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.34"

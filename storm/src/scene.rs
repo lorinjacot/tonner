@@ -21,8 +21,6 @@ use crate::{
     texture::TextureBuilder,
 };
 
-#[cfg(web)]
-use wasm_bindgen::prelude::*;
 
 pub mod animation;
 pub mod camera;
@@ -31,9 +29,18 @@ pub mod skin;
 
 const NODE_INDEX_SIZE: usize = size_of::<u32>();
 
-#[cfg_attr(web, wasm_bindgen)]
+/// A scene describes a world. A scene can be evolve over time and can be rendered
+/// to a screen or a texture.
+/// 
+/// A scene is made up of [Node]s. Nodes are organized in a parent-child hierachy, known as the
+/// node-hierarchy or the scene graph. A node is called a root node when it doesn't have a parent.
+/// Each node defines a local space. The local transform is used to get from the parent node local
+/// space (parent space for short) to the local space. The global transform is used to get from the
+/// scene space (or global space) to the local space. Both transforms are equal for root nodes.
+/// 
+/// To add an object to the scene, attach it to a node. For example, each node can have a mesh. During
+/// rendering, the attached mesh will be rendered at the local space origin.
 pub struct Scene {
-    #[cfg_attr(web, wasm_bindgen(skip))]
     pub name: String,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -957,7 +964,6 @@ impl Scene {
     }
 }
 
-#[cfg_attr(web, wasm_bindgen)]
 impl Scene {
     /// Create an scene builder with default values.
     pub fn builder() -> SceneBuilder {
@@ -981,7 +987,6 @@ impl IndexMut<Id<Node>> for Scene {
 
 /// A builder for [Scene].
 #[must_use]
-#[cfg_attr(web, wasm_bindgen)]
 pub struct SceneBuilder {}
 
 impl Default for SceneBuilder {
@@ -990,7 +995,6 @@ impl Default for SceneBuilder {
     }
 }
 
-#[cfg_attr(web, wasm_bindgen)]
 impl SceneBuilder {
     /// Build the scene using the provided engine.
     pub fn build(self, _engine: &mut Engine) -> Scene {

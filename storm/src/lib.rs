@@ -11,18 +11,6 @@ pub use scene::{camera, skin};
 use storage::SparseSet;
 use uuid::Uuid;
 
-#[cfg(web)]
-use wasm_bindgen::prelude::*;
-
-#[cfg(web)]
-#[wasm_bindgen(start)]
-fn start() {
-    use log::Level;
-
-    console_error_panic_hook::set_once();
-    console_log::init_with_level(Level::Debug).expect("error initializing logger");
-}
-
 mod asset;
 mod environment;
 pub mod geometry;
@@ -110,13 +98,11 @@ impl<T> Eq for Id<T> {}
 /// To get started, create a new [Engine] using [EngineBuilder].
 /// Once created, an engine can be used to create a [Scene].
 /// The engine is also responsible to manage the resources shared between [Scene]s.
-#[cfg_attr(web, wasm_bindgen)]
 pub struct Engine {
     _scenes: HashMap<Id<Scene>, Scene>,
     resources: Resources,
 }
 
-#[cfg_attr(web, wasm_bindgen)]
 impl Engine {
     /// Create an engine builder with default values.
     pub fn builder() -> EngineBuilder {
@@ -126,7 +112,6 @@ impl Engine {
 
 /// A builder for [Engine].
 #[must_use]
-#[cfg_attr(web, wasm_bindgen)]
 pub struct EngineBuilder {
     device: Option<(wgpu::Device, wgpu::Queue)>,
     target_format: wgpu::TextureFormat,
@@ -156,7 +141,6 @@ impl EngineBuilder {
     }
 }
 
-#[cfg_attr(web, wasm_bindgen)]
 impl EngineBuilder {
     /// Build the [Engine].
     pub async fn build(self) -> Engine {

@@ -341,11 +341,21 @@ checksum = "3abb554f8ee44336b72d522e0a7fe86a29e09f839a36022fa869a7dfe941a54b"
 
 [[package]]
 name = "glam"
-version = "0.30.3"
+version = "0.30.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b46b9ca4690308844c644e7c634d68792467260e051c8543e0c7871662b3ba7"
+checksum = "e12d847aeb25f41be4c0ec9587d624e9cd631bc007a8fd7ce3f5851e064c6460"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "glam-js"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.8",
+ "paste",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -834,9 +844,9 @@ checksum = "afbdc74edc00b6f6a218ca6a5364d6226a259d4b8ea1af4a0ea063f27e179f4d"
 
 [[package]]
 name = "quote"
-version = "1.0.40"
+version = "1.0.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
+checksum = "ce25767e7b499d1b604768e7cde645d14cc8584231ea6b295e9c9eb22c02e1d1"
 dependencies = [
  "proc-macro2",
 ]
@@ -1011,7 +1021,7 @@ dependencies = [
  "bitflags 2.9.1",
  "bytemuck",
  "data-url",
- "glam 0.30.3",
+ "glam 0.30.8",
  "gltf",
  "gltf-json",
  "image",
@@ -1044,9 +1054,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.101"
+version = "2.0.108"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ce2b7fc941b3a24138a0a7cf8e858bfc6a992e7978a068a5c760deb0ed43caf"
+checksum = "da58917d35242480a05c2897064da0a80589a2a0476c9a3f2fdc83b53502e917"
 dependencies = [
  "proc-macro2",
  "quote",

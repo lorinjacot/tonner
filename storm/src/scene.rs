@@ -997,8 +997,23 @@ impl Default for SceneBuilder {
 
 impl SceneBuilder {
     /// Build the scene using the provided engine.
-    pub fn build(self, _engine: &mut Engine) -> Scene {
-        todo!()
+    pub fn build(self, engine: &mut Engine) -> Scene {
+        let mut encoder =
+            engine
+                .resources
+                .device
+                .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+                    label: Some("Scene builder command encoder"),
+                });
+        let scene = Scene::new(
+            "".to_string(),
+            &mut engine.resources,
+            &mut encoder,
+            600,
+            400,
+        );
+        engine.resources.queue.submit([encoder.finish()]);
+        scene
     }
 }
 

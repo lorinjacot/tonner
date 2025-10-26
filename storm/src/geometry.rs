@@ -496,6 +496,7 @@ impl GeometryBuilder {
                 };
                 gen_tang_space_default(&mut mikk_t_space);
             }
+            self.attribute_flags.insert(AttributeFlags::TANGENT);
         }
 
         let header = GeometryStorageHeader {

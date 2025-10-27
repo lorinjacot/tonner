@@ -1,4 +1,4 @@
-mod f32;
+mod vec3;
 
 #[macro_export]
 macro_rules! wrapper {

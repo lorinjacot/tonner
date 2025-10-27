@@ -73,6 +73,7 @@ impl Vec3 {
     ///
     /// # Panics
     /// Panics if slice is less than 3 elements long.
+    #[wasm_bindgen(js_name = "fromSlice")]
     pub fn from_slice(slice: &[f32]) -> Self {
         Self(glam::Vec3::from_slice(slice))
     }
@@ -81,21 +82,25 @@ impl Vec3 {
     ///
     /// # Panics
     /// Panics if slice is less than 3 elements long.
+    #[wasm_bindgen(js_name = "writetoSlice")]
     pub fn write_to_slice(self, slice: &mut [f32]) {
         self.0.write_to_slice(slice);
     }
 
     /// Creates a 3D vector from `this` with the given value of x.
+    #[wasm_bindgen(js_name = "withX")]
     pub fn with_x(self, x: f32) -> Self {
         Self(self.0.with_x(x))
     }
 
     /// Creates a 3D vector from `this` with the given value of y.
+    #[wasm_bindgen(js_name = "withY")]
     pub fn with_y(self, y: f32) -> Self {
         Self(self.0.with_y(y))
     }
 
     /// Creates a 3D vector from `this` with the given value of z.
+    #[wasm_bindgen(js_name = "withZ")]
     pub fn with_z(self, z: f32) -> Self {
         Self(self.0.with_z(z))
     }
@@ -105,6 +110,7 @@ impl Vec3 {
     }
 
     /// Computes the cross product of `this` and rhs.
+    #[wasm_bindgen(js_name = "dotIntoVec")]
     pub fn dot_into_vec(self, rhs: Self) -> Self {
         Self(self.0.dot_into_vec(rhs.0))
     }
@@ -141,6 +147,7 @@ impl Vec3 {
     /// In other words this computes `min(x, y, ..)`.
     ///
     /// NaN propogation does not follow IEEE 754-2008 semantics and may differ on different SIMD architectures.
+    #[wasm_bindgen(js_name = "minElement")]
     pub fn min_element(self) -> f32 {
         self.0.min_element()
     }
@@ -150,16 +157,19 @@ impl Vec3 {
     /// In other words this computes `max(x, y, ..)`.
     ///
     /// NaN propogation does not follow IEEE 754-2008 semantics and may differ on different SIMD architectures.
+    #[wasm_bindgen(js_name = "maxElement")]
     pub fn max_element(self) -> f32 {
         self.0.max_element()
     }
 
     /// Returns the index of the first minimum element of `this`.
+    #[wasm_bindgen(js_name = "minPosition")]
     pub fn min_position(self) -> usize {
         self.0.min_position()
     }
 
     /// Returns the index of the first maximum element of `this`.
+    #[wasm_bindgen(js_name = "maxPosition")]
     pub fn max_position(self) -> usize {
         self.0.max_position()
     }
@@ -167,6 +177,7 @@ impl Vec3 {
     /// Returns the sum of all elements of `this`.
     ///
     /// In other words, this computes `this.x + this.y + ..`.
+    #[wasm_bindgen(js_name = "elementSum")]
     pub fn element_sum(self) -> f32 {
         self.0.element_sum()
     }
@@ -174,6 +185,7 @@ impl Vec3 {
     /// Returns the product of all elements of `this`.
     ///
     /// In other words, this computes `this.x * this.y * ..`.
+    #[wasm_bindgen(js_name = "elementProduct")]
     pub fn element_product(self) -> f32 {
         self.0.element_product()
     }
@@ -202,16 +214,19 @@ impl Vec3 {
     /// into the first lowest bit, element `y` into the second, etc.
     ///
     /// An element is negative if it has a negative sign, including -0.0, NaNs with negative sign bit and negative infinity.
+    #[wasm_bindgen(js_name = "isNegativeBitmask")]
     pub fn is_negative_bitmask(self) -> u32 {
         self.0.is_negative_bitmask()
     }
 
     /// Returns true if, and only if, all elements are finite. If any element is either NaN, positive or negative infinity, this will return false.
+    #[wasm_bindgen(js_name = "isFinite")]
     pub fn is_finite(self) -> bool {
         self.0.is_finite()
     }
 
     /// Returns true if any elements are NaN.
+    #[wasm_bindgen(js_name = "isNaN")]
     pub fn is_nan(self) -> bool {
         self.0.is_nan()
     }
@@ -224,6 +239,7 @@ impl Vec3 {
     /// Computes the squared length of self.
     ///
     /// This is faster than `length()` as it avoids a square root operation.
+    #[wasm_bindgen(js_name = "lengthSquared")]
     pub fn length_squared(self) -> f32 {
         self.0.length_squared()
     }
@@ -231,6 +247,7 @@ impl Vec3 {
     /// Computes `1.0 / length()`.
     ///
     /// For valid results, `this` must not be of length zero.
+    #[wasm_bindgen(js_name = "lengthRecip")]
     pub fn length_recip(self) -> f32 {
         self.0.length_recip()
     }
@@ -241,16 +258,19 @@ impl Vec3 {
     }
 
     /// Compute the squared euclidean distance between two points in space.
+    #[wasm_bindgen(js_name = "distanceSquared")]
     pub fn distance_squared(self, rhs: Self) -> f32 {
         self.0.distance_squared(rhs.0)
     }
 
     /// Returns the element-wise quotient of [Euclidean division] of `this` by `rhs`.
+    #[wasm_bindgen(js_name = "divEuclid")]
     pub fn div_euclid(self, rhs: Self) -> Self {
         Self(self.0.div_euclid(rhs.0))
     }
 
     /// Returns the element-wise remainder of Euclidean division of `self` by `rhs`.
+    #[wasm_bindgen(js_name = "remEuclid")]
     pub fn rem_euclid(self, rhs: Self) -> Self {
         Self(self.0.rem_euclid(rhs.0))
     }
@@ -269,6 +289,7 @@ impl Vec3 {
     /// In particular, if the input is zero (or very close to zero), or non-finite, the result of this operation will be None.
     ///
     /// See also {@link Vec::normalize_or_zero()}.
+    #[wasm_bindgen(js_name = "TryNormalize")]
     pub fn try_normalize(self) -> Option<Self> {
         self.0.try_normalize().map(Self)
     }
@@ -278,6 +299,7 @@ impl Vec3 {
     /// In particular, if the input is zero (or very close to zero), or non-finite, the result of this operation will be the fallback value.
     ///
     /// See also {@link Vec3::try_normalize()}.
+    #[wasm_bindgen(js_name = "normalizeOr")]
     pub fn normalize_or(self, fallback: Self) -> Self {
         Self(self.0.normalize_or(fallback.0))
     }
@@ -287,6 +309,7 @@ impl Vec3 {
     /// In particular, if the input is zero (or very close to zero), or non-finite, the result of this operation will be zero.
     ///
     /// See also {@link Vec3::try_normalize()}.
+    #[wasm_bindgen(js_name = "normalizeOrZero")]
     pub fn normalize_or_zero(self) -> Self {
         Self(self.0.normalize_or_zero())
     }
@@ -294,6 +317,7 @@ impl Vec3 {
     /// Returns whether `this` is length `1.0` or not.
     ///
     /// Uses a precision threshold of approximately `1e-4`.
+    #[wasm_bindgen(js_name = "isNormalized")]
     pub fn is_normalized(self) -> bool {
         self.0.is_normalized()
     }
@@ -301,6 +325,7 @@ impl Vec3 {
     /// Returns the vector projection of `this` onto `rhs`.
     ///
     /// `rhs` must be of non-zero length.
+    #[wasm_bindgen(js_name = "projectOnto")]
     pub fn project_onto(self, rhs: Self) -> Self {
         Self(self.0.project_onto(rhs.0))
     }
@@ -309,6 +334,7 @@ impl Vec3 {
     ///
     /// The vector rejection is the vector perpendicular to theprojection of `this` onto `rhs`,
     /// in rhs words the result of `this - this.project_onto(rhs)`.
+    #[wasm_bindgen(js_name = "rejectFrom")]
     pub fn reject_from(self, rhs: Self) -> Self {
         Self(self.0.reject_from(rhs.0))
     }
@@ -316,6 +342,7 @@ impl Vec3 {
     /// Returns the vector projection of `this` onto `rhs`.
     ///
     /// `rhs` must be normalized.
+    #[wasm_bindgen(js_name = "projectOntoNormalized")]
     pub fn project_onto_normalized(self, rhs: Self) -> Self {
         Self(self.0.project_onto_normalized(rhs.0))
     }
@@ -326,6 +353,7 @@ impl Vec3 {
     /// in rhs words the result of `this - this.project_onto(rhs)`.
     ///
     /// `rhs` must be normalized.
+    #[wasm_bindgen(js_name = "rejectFromNormalized")]
     pub fn reject_from_normalized(self, rhs: Self) -> Self {
         Self(self.0.reject_from_normalized(rhs.0))
     }
@@ -365,6 +393,7 @@ impl Vec3 {
     /// Note that this differs from the Rust implementation of `fract` which returns `this - this.trunc()`.
     ///
     /// Note that this is fast but not precise for large numbers.
+    #[wasm_bindgen(js_name = "fractGL")]
     pub fn fract_gl(self) -> Self {
         Self(self.0.fract_gl())
     }
@@ -397,6 +426,7 @@ impl Vec3 {
     ///
     /// When `d` is `0.0`, the result will be equal to `this`. When `d` is equal to
     /// `this.distance(rhs)`, the result will be equal to `rhs`. Will not go past `rhs`.
+    #[wasm_bindgen(js_name = "moveTowards")]
     pub fn move_towards(&self, rhs: Self, d: f32) -> Self {
         Self(self.0.move_towards(rhs.0, d))
     }
@@ -416,21 +446,25 @@ impl Vec3 {
     /// This can be used to compare if two vectors contain similar elements. It works best when
     /// comparing with a known value. The `max_abs_diff` that should be used used depends on the
     /// values being compared against.
+    #[wasm_bindgen(js_name = "absDiffEq")]
     pub fn abs_diff_eq(self, rhs: Self, max_abs_diff: f32) -> bool {
         self.0.abs_diff_eq(rhs.0, max_abs_diff)
     }
 
     /// Returns a vector with a length no less than `min` and no more than `max`.
+    #[wasm_bindgen(js_name = "clampLength")]
     pub fn clamp_length(self, min: f32, max: f32) -> Self {
         Self(self.0.clamp_length(min, max))
     }
 
     /// Returns a vector with a length no more than `max`.
+    #[wasm_bindgen(js_name = "clampLengthMax")]
     pub fn clamp_length_max(self, max: f32) -> Self {
         Self(self.0.clamp_length_max(max))
     }
 
     /// Returns a vector with a length no less than `min`.
+    #[wasm_bindgen(js_name = "clampLengthMin")]
     pub fn clamp_length_min(self, min: f32) -> Self {
         Self(self.0.clamp_length_min(min))
     }
@@ -442,6 +476,7 @@ impl Vec3 {
     /// architecture has a dedicated fma CPU instruction. However, this is not always true,
     /// and will be heavily dependant on designing algorithms with specific target hardware
     /// in mind.
+    #[wasm_bindgen(js_name = "mulAdd")]
     pub fn mul_add(self, a: Self, b: Self) -> Self {
         Self(self.0.mul_add(a.0, b.0))
     }
@@ -465,6 +500,7 @@ impl Vec3 {
     /// Returns the angle (in radians) between two vectors in the range `[0, +π]`.
     ///
     /// The inputs do not need to be unit vectors however they must be non-zero.
+    #[wasm_bindgen(js_name = "angleBetween")]
     pub fn angle_between(self, rhs: Self) -> f32 {
         self.0.angle_between(rhs.0)
     }
@@ -474,6 +510,7 @@ impl Vec3 {
     /// When `max_angle` is `0.0`, the result will be equal to `this`. When `max_angle` is equal to
     /// `this.angle_between(rhs)`, the result will be parallel to `rhs`. If `max_angle` is negative,
     /// rotates towards the exact opposite of `rhs`. Will not go past the target.
+    #[wasm_bindgen(js_name = "rotateTowards")]
     pub fn rotate_towards(self, rhs: Self, max_angle: f32) -> Self {
         Self(self.0.rotate_towards(rhs.0, max_angle))
     }
@@ -484,6 +521,7 @@ impl Vec3 {
     ///
     /// The output vector is not necessarily unit length. For that use
     /// {@link Vec.any_orthonormal_vector()} instead.
+    #[wasm_bindgen(js_name = "anyOrthogonalVector")]
     pub fn any_orthogonal_vector(&self) -> Self {
         Self(self.0.any_orthogonal_vector())
     }
@@ -491,6 +529,7 @@ impl Vec3 {
     /// Returns any unit vector that is orthogonal to the given one.
     ///
     /// The input vector must be unit length.
+    #[wasm_bindgen(js_name = "anyOrthonormalVector")]
     pub fn any_orthonormal_vector(&self) -> Self {
         Self(self.0.any_orthonormal_vector())
     }
@@ -509,16 +548,19 @@ impl Vec3 {
     }
 
     /// Returns `this + Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "addFloat")]
     pub fn add_float(&self, rhs: f32) -> Self {
         Self(self.0 + rhs)
     }
 
     /// Performs `this += rhs` component-wise.
+    #[wasm_bindgen(js_name = "addAssign")]
     pub fn add_assign(&mut self, rhs: &Self) {
         self.0 += rhs.0;
     }
 
     /// Performs `this += Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "addAssignFloat")]
     pub fn add_assign_float(&mut self, rhs: f32) {
         self.0 += rhs;
     }
@@ -534,16 +576,19 @@ impl Vec3 {
     }
 
     /// Returns `this / Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "divFloat")]
     pub fn div_float(&self, rhs: f32) -> Self {
         Self(self.0 / rhs)
     }
 
     /// Performs `this /= rhs` component-wise.
+    #[wasm_bindgen(js_name = "divAssign")]
     pub fn div_assign(&mut self, rhs: &Self) {
         self.0 /= rhs.0;
     }
 
     /// Performs `this /= Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "divAssignFloat")]
     pub fn div_assign_float(&mut self, rhs: f32) {
         self.0 /= rhs;
     }
@@ -557,7 +602,8 @@ impl Vec3 {
 
     /// Set the component corresponding to `index` to `value`.
     ///
-    /// For example, `this.set_index(0, 0.5)` is the same as `this.x = 0.5`.
+    /// For example, `this.setIndex(0, 0.5)` is the same as `this.x = 0.5`.
+    #[wasm_bindgen(js_name = "setIndex")]
     pub fn set_index(&mut self, index: usize, value: f32) {
         self.0[index] = value
     }
@@ -568,16 +614,19 @@ impl Vec3 {
     }
 
     /// Returns `this * Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "mutFloat")]
     pub fn mul_float(&self, rhs: f32) -> Self {
         Self(self.0 * rhs)
     }
 
     /// Performs `this *= rhs` component-wise.
+    #[wasm_bindgen(js_name = "mutAssign")]
     pub fn mul_assign(&mut self, rhs: &Self) {
         self.0 *= rhs.0;
     }
 
     /// Performs `this *= Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "mulAssignFloat")]
     pub fn mul_assign_float(&mut self, rhs: f32) {
         self.0 *= rhs;
     }
@@ -607,16 +656,19 @@ impl Vec3 {
     }
 
     /// Returns `this % Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "remFloat")]
     pub fn rem_float(&self, rhs: f32) -> Self {
         Self(self.0 % rhs)
     }
 
     /// Performs `this %= rhs` component-wise.
+    #[wasm_bindgen(js_name = "remAssign")]
     pub fn rem_assign(&mut self, rhs: &Self) {
         self.0 %= rhs.0;
     }
 
     /// Performs `this %= Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "remAssignFloat")]
     pub fn rem_assign_float(&mut self, rhs: f32) {
         self.0 %= rhs;
     }
@@ -627,16 +679,19 @@ impl Vec3 {
     }
 
     /// Returns `this - Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "subFloat")]
     pub fn sub_float(&self, rhs: f32) -> Self {
         Self(self.0 - rhs)
     }
 
     /// Performs `this -= rhs` component-wise.
+    #[wasm_bindgen(js_name = "subAssign")]
     pub fn sub_assign(&mut self, rhs: &Self) {
         self.0 -= rhs.0;
     }
 
     /// Performs `this -= Vec3.splat(rhs)`.
+    #[wasm_bindgen(js_name = "subAssignFloat")]
     pub fn sub_assign_float(&mut self, rhs: f32) {
         self.0 -= rhs;
     }

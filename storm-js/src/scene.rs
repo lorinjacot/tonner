@@ -23,11 +23,6 @@ pub struct Scene(storm::Scene);
 
 #[wasm_bindgen]
 impl Scene {
-    /// Create an scene builder with default values.
-    pub fn builder() -> SceneBuilder {
-        SceneBuilder(storm::Scene::builder())
-    }
-
     /// Simulate the scene for a given duration (in seconds).
     ///
     /// This is where most computations are happening:
@@ -60,10 +55,17 @@ impl From<storm::Scene> for Scene {
 
 /// A builder for `Scene`.
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct SceneBuilder(storm::SceneBuilder);
 
 #[wasm_bindgen]
 impl SceneBuilder {
+    /// Create a new scene builder with default values.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        SceneBuilder::default()
+    }
+
     /// Build the scene.
     pub async fn build(self, engine: &mut Engine) -> Scene {
         Scene(self.0.build(&mut engine.inner))

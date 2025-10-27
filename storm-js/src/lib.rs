@@ -14,16 +14,6 @@ fn start() {
     console_log::init_with_level(Level::Debug).expect("error initializing logger");
 }
 
-#[wasm_bindgen]
-extern "C" {
-    fn alert(s: &str);
-}
-
-#[wasm_bindgen]
-pub fn greet() {
-    alert("Hello, storm-js!");
-}
-
 /// This is the entry point of the package. To get started, create a new Engine using {@link EngineBuilder}.
 /// Once created, an engine can be used to create a {@link Scene}. The engine is also responsible to manage
 /// the resources shared between scenes.
@@ -36,11 +26,6 @@ pub struct Engine {
 
 #[wasm_bindgen]
 impl Engine {
-    /// Create an engine builder with default values.
-    pub fn builder() -> EngineBuilder {
-        EngineBuilder(storm::Engine::builder())
-    }
-
     /// Create a surface. A surface is needed to render a {@link Scene}.
     #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
     #[wasm_bindgen(js_name = createSurfaceFromCanvasElement)]
@@ -72,10 +57,17 @@ impl Engine {
 
 /// A builder for {@link Engine}.
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct EngineBuilder(storm::EngineBuilder<'static>);
 
 #[wasm_bindgen]
 impl EngineBuilder {
+    /// Create an engine builder with default values.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Build the engine.
     pub async fn build(self) -> Result<Engine, BuildEngineError> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {

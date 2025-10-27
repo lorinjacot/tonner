@@ -46,6 +46,18 @@ impl Scene {
     }
 }
 
+impl From<Scene> for storm::Scene {
+    fn from(value: Scene) -> Self {
+        value.0
+    }
+}
+
+impl From<storm::Scene> for Scene {
+    fn from(value: storm::Scene) -> Self {
+        Self(value)
+    }
+}
+
 /// A builder for `Scene`.
 #[wasm_bindgen]
 pub struct SceneBuilder(storm::SceneBuilder);

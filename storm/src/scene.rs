@@ -8,7 +8,7 @@ use std::{
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 pub use camera::Camera;
 use glam::{Mat4, Vec3, usize};
-pub use node::{Node, NodeBuilder, NodeHandle};
+pub use node::{Node, NodeBuilder, NodeHandle, NodeId};
 use skin::init_skins_buffer;
 use wgpu::util::DeviceExt;
 
@@ -194,10 +194,6 @@ impl Scene {
 
     pub fn node_handle(&mut self, id: Id<Node>) -> NodeHandle<'_> {
         NodeHandle { id, scene: self }
-    }
-
-    pub fn node_builder(&mut self) -> NodeBuilder<'_> {
-        NodeBuilder::new(self)
     }
 
     pub fn contains_node(&self, node: Id<Node>) -> bool {

@@ -1042,6 +1042,8 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
+ "glam 0.30.8",
+ "glam-js",
  "log",
  "storm",
  "thiserror 2.0.17",

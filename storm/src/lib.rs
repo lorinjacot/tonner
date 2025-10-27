@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
-pub use scene::{Node, NodeBuilder, NodeHandle, Scene, SceneBuilder};
+pub use scene::{Node, NodeBuilder, NodeHandle, NodeId, Scene, SceneBuilder};
 pub use scene::{camera, skin};
 use storage::SparseSet;
 use uuid::Uuid;

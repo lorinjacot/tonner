@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 console_error_panic_hook.workspace = true
 console_log.workspace = true
+glam.workspace = true
+glam-js.workspace = true
 log.workspace = true
 storm.workspace = true
 thiserror.workspace = true

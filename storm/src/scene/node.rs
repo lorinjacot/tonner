@@ -9,6 +9,8 @@ use crate::{Resources, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
 
 use super::{Camera, PointLight, Scene, camera::CameraDescriptor, skin::Skin};
 
+pub type NodeId = Id<Node>;
+
 pub struct Node {
     id: Id<Node>,
     pub name: String,
@@ -130,126 +132,70 @@ impl<'a> Deref for NodeHandle<'a> {
     }
 }
 
-pub struct NodeBuilder<'s> {
-    scene: &'s mut Scene,
+/// A builder for scene graph nodes.
+#[derive(Default)]
+pub struct NodeBuilder {
     name: Option<String>,
     parent: Option<Id<Node>>,
-    local_transform: Transform,
-    world_matrix: Mat4,
-    mesh: Option<Id<Mesh>>,
-    camera: Option<CameraDescriptor>,
-    point_light: Option<Vec3>,
-    weights: Option<Vec<f32>>,
+    translation: Option<Vec3>,
 }
 
-impl<'s> NodeBuilder<'s> {
-    pub fn new(scene: &'s mut Scene) -> Self {
+impl NodeBuilder {
+    /// Set the node name.
+    pub fn name(self, name: impl Into<Option<String>>) -> Self {
         Self {
-            scene,
-            parent: None,
-            name: None,
-            local_transform: Transform::IDENTITY,
-            world_matrix: Mat4::IDENTITY,
-            mesh: None,
-            camera: None,
-            point_light: None,
-            weights: None,
+            name: name.into(),
+            ..self
         }
     }
 
-    pub fn name(mut self, name: impl Into<Option<String>>) -> Self {
-        self.name = name.into();
-        self
+    /// Set the node parent. A node without any parent will be added as a root node.
+    pub fn parent(self, parent: impl Into<Option<NodeId>>) -> Self {
+        Self {
+            parent: parent.into(),
+            ..self
+        }
     }
 
-    pub fn parent(mut self, parent: impl Into<Option<Id<Node>>>) -> Self {
-        self.parent = parent.into();
-        self
+    pub fn translation(self, translation: impl Into<Option<Vec3>>) -> Self {
+        Self {
+            translation: translation.into(),
+            ..self
+        }
     }
 
-    pub fn translation_rotation_scale(
-        mut self,
-        translation: Vec3,
-        rotation: Quat,
-        scale: Vec3,
-    ) -> Self {
-        self.local_transform
-            .translation_rotation_scale(translation, rotation, scale);
-        self
-    }
-
-    pub fn local_position(mut self, position: Vec3) -> Self {
-        self.local_transform.set_translation(position);
-        self
-    }
-
-    pub fn local_matrix(mut self, matrix: impl Into<Option<Mat4>>) -> Self {
-        self.local_transform
-            .set_matrix(matrix.into().unwrap_or(Mat4::IDENTITY));
-        self
-    }
-
-    pub fn mesh(mut self, mesh: impl Into<Option<Id<Mesh>>>) -> Self {
-        self.mesh = mesh.into();
-        self
-    }
-
-    pub fn camera(mut self, camera: Option<CameraDescriptor>) -> Self {
-        self.camera = camera;
-        self
-    }
-
-    pub fn point_light(mut self, color: Vec3) -> Self {
-        self.point_light = Some(color);
-        self
-    }
-
-    pub fn weights(mut self, weight: impl Into<Option<Vec<f32>>>) -> Self {
-        self.weights = weight.into();
-        self
-    }
-
-    pub fn build(mut self, resources: &Resources) -> &'s mut Node {
-        let id = self.scene.nodes.next_id();
-        match self.parent {
+    pub fn build(self, scene: &mut Scene) -> NodeId {
+        let id = scene.nodes.next_id();
+        let local_matrix = Mat4::from_translation(self.translation.unwrap_or(Vec3::ZERO));
+        let world_matrix = match self.parent {
             Some(parent) => {
-                let parent = &mut self.scene.nodes[parent];
+                let parent = &mut scene.nodes[parent];
                 parent.children.push(id);
-                self.world_matrix = parent.world_matrix * self.local_transform.matrix();
+                parent.world_matrix * local_matrix
             }
             None => {
-                self.scene.root_nodes.push(id);
-                self.world_matrix = self.local_transform.matrix()
+                scene.root_nodes.push(id);
+                local_matrix
             }
-        }
-        self.scene.nodes_buffer = None;
-        let id = self.scene.nodes.next_id();
+        };
+        scene.nodes_buffer = None;
+        let id = scene.nodes.next_id();
+        let mut local_transform = Transform::IDENTITY;
+        local_transform.set_matrix(local_matrix);
         let node = Node {
             id,
             name: self.name.unwrap_or_else(|| format!("Node {id}")),
             parent: self.parent,
             children: Vec::new(),
-            local_transform: self.local_transform,
-            world_matrix: self.world_matrix,
-            mesh: self.mesh.map(|mesh| mesh.id()),
-            weights: self.weights.unwrap_or_default(),
+            local_transform,
+            world_matrix,
+            mesh: None,
+            weights: Vec::new(),
             skin: None,
         };
-        let node = self.scene.nodes.insert(node).id();
+        scene.nodes.insert(node);
 
-        if let Some(mesh) = self.mesh {
-            self.scene.add_mesh_to_node_unchecked(mesh, node, resources);
-        }
-
-        if let Some(camera) = self.camera {
-            self.scene.cameras.insert(Camera::new(node, camera));
-        }
-
-        if let Some(color) = self.point_light {
-            self.scene.point_lights.insert(PointLight { node, color });
-        }
-
-        &mut self.scene.nodes[node]
+        id
     }
 }
 

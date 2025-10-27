@@ -1,3 +1,5 @@
+pub use vec3::*;
+
 mod vec3;
 
 #[macro_export]
@@ -14,6 +16,7 @@ macro_rules! wrapper {
     ) => {
         #[doc = $doc]
         #[wasm_bindgen]
+        #[derive(Clone, Copy)]
         pub struct $wrapper($inner);
 
         paste::paste! {

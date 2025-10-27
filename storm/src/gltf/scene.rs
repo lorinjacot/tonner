@@ -293,42 +293,43 @@ impl super::GltfAsset {
         };
 
         let node = &mut self.json.nodes[index];
-        let mut builder = scene.node_builder().name(node.name.clone()).parent(parent);
-        builder = match &node.matrix {
-            Some(matrix) => builder.local_matrix(Mat4::from_cols_array(matrix)),
-            None => builder.translation_rotation_scale(
-                node.translation.map_or(Vec3::ZERO, Vec3::from_array),
-                node.rotation.map_or(Quat::IDENTITY, Quat::from_array),
-                node.scale.map_or(Vec3::ONE, Vec3::from_array),
-            ),
-        };
-        let id = builder
-            .mesh(mesh)
-            .weights(
-                node.weights.clone().or(node
-                    .mesh
-                    .map(|index| self.json.meshes[index].weights().clone())
-                    .flatten()),
-            )
-            .build(resources)
-            .id();
+        // let mut builder = scene.node_builder().name(node.name.clone()).parent(parent);
+        // builder = match &node.matrix {
+        //     Some(matrix) => builder.local_matrix(Mat4::from_cols_array(matrix)),
+        //     None => builder.translation_rotation_scale(
+        //         node.translation.map_or(Vec3::ZERO, Vec3::from_array),
+        //         node.rotation.map_or(Quat::IDENTITY, Quat::from_array),
+        //         node.scale.map_or(Vec3::ONE, Vec3::from_array),
+        //     ),
+        // };
+        // let id = builder
+        //     .mesh(mesh)
+        //     .weights(
+        //         node.weights.clone().or(node
+        //             .mesh
+        //             .map(|index| self.json.meshes[index].weights().clone())
+        //             .flatten()),
+        //     )
+        //     .build(resources)
+        //     .id();
 
-        node.id = Some(id);
-        if let Some(index) = node.skin {
-            self.json
-                .skins
-                .get_mut(index)
-                .with_context(|| format!("node.skin {index} is out of range."))
-                .with_context(node_ctx)?
-                .nodes
-                .push(id);
-        }
+        // node.id = Some(id);
+        // if let Some(index) = node.skin {
+        //     self.json
+        //         .skins
+        //         .get_mut(index)
+        //         .with_context(|| format!("node.skin {index} is out of range."))
+        //         .with_context(node_ctx)?
+        //         .nodes
+        //         .push(id);
+        // }
 
-        let children = node.children.clone();
-        for child in children {
-            self.load_node(child, Some(id), scene, resources, encoder)?;
-        }
+        // let children = node.children.clone();
+        // for child in children {
+        //     self.load_node(child, Some(id), scene, resources, encoder)?;
+        // }
 
-        Ok(id)
+        // Ok(id)
+        todo!()
     }
 }

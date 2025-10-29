@@ -7,14 +7,10 @@ members = [
 ]
 
 [workspace.dependencies]
-cfg_aliases = "0.2.1"
 console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
-egui = "0.33.0"
-egui-wgpu = "0.33.0"
 glam = "0.30.8"
 glam-js = { path = "glam-js" }
-js-sys = "0.3.81"
 log = "0.4.28"
 serde = "1.0.228"
 storm = { path = "storm" }

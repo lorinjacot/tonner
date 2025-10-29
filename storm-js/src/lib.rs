@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
 use web_sys::{HtmlCanvasElement, OffscreenCanvas};
 
+mod asset;
 mod scene;
 
 #[wasm_bindgen(start)]

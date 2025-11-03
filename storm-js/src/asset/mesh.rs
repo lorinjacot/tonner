@@ -1,7 +1,7 @@
 use thiserror::Error;
 use wasm_bindgen::prelude::*;
 
-use crate::Engine;
+use crate::{Engine, asset::{geometry::Geometry, material::Material}};
 
 /// A mesh is a model of a 3D object. It wraps a {@link Geometry} and a {@link Material}.
 #[wasm_bindgen]
@@ -18,6 +18,14 @@ impl MeshBuilder {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn geometry(self, _geometry: Geometry) -> Self {
+        todo!()
+    }
+
+    pub fn material(self, _material: Material) -> Self {
+        todo!()
     }
 
     /// Build the mesh.

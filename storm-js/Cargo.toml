@@ -16,6 +16,8 @@ console_log.workspace = true
 glam.workspace = true
 glam-js.workspace = true
 log.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde-wasm-bindgen.workspace = true
 storm.workspace = true
 thiserror.workspace = true
 wasm-bindgen.workspace = true

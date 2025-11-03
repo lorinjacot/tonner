@@ -11,8 +11,10 @@ console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
 glam = "0.30.8"
 glam-js = { path = "glam-js" }
+js-sys = "0.3.82"
 log = "0.4.28"
 serde = "1.0.228"
+serde-wasm-bindgen = "0.6.5"
 storm = { path = "storm" }
 thiserror = "2.0.17"
 wasm-bindgen = "0.2.104"

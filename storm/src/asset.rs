@@ -1,5 +1,7 @@
 use crate::{Resources, Scene, gltf::GltfAsset};
 
+pub mod mesh;
+
 pub fn open_gltf<'r>(
     path: impl AsRef<std::path::Path>,
     resources: &'r mut Resources,

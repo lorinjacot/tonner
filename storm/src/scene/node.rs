@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::{array::from_fn, ops::Deref};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
@@ -9,7 +10,15 @@ use crate::{Resources, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
 
 use super::{Camera, PointLight, Scene, camera::CameraDescriptor, skin::Skin};
 
-pub type NodeId = Id<Node>;
+/// A unique id for a node. A node can only have one id.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct NodeId(Id<Node>);
+
+impl Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NodeId{}", self.0)
+    }
+}
 
 pub struct Node {
     id: Id<Node>,

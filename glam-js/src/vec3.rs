@@ -60,6 +60,7 @@ wrapper!(
 #[wasm_bindgen]
 impl Vec3 {
     /// Creates a new vector.
+    #[wasm_bindgen(constructor)]
     pub fn new(x: f32, y: f32, z: f32) -> Self {
         Self(glam::Vec3::new(x, y, z))
     }

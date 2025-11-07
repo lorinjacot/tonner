@@ -7,18 +7,12 @@ use std::{
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::{Mat4, Vec3, usize};
-pub use node::{Node, NodeBuilder, NodeHandle, NodeId};
 use skin::init_skins_buffer;
+use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Engine, Environment, Resources,
-    camera::CameraManager,
-    geometry::Indices,
-    material::AlphaMode,
-    mesh::{Mesh, PrimitivePipeline},
-    storage::{DenseEntry, Id, SparseMap, SparseSet},
-    texture::TextureBuilder,
+    Engine, Environment, Resources, camera::{CameraId, CameraManager}, geometry::Indices, material::AlphaMode, mesh::{Mesh, PrimitivePipeline}, scene::node::NodeManager, storage::{DenseEntry, Id, SparseMap, SparseSet}, texture::TextureBuilder
 };
 
 pub mod animation;
@@ -42,18 +36,15 @@ const NODE_INDEX_SIZE: usize = size_of::<u32>();
 /// rendering, the attached mesh will be rendered at the local space origin.
 pub struct Scene {
     pub name: String,
+    node_manager: NodeManager,
+    camera_manager: CameraManager,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    nodes: SparseSet<Node>,
-    nodes_buffer: Option<wgpu::Buffer>,
-    root_nodes: Vec<Id<Node>>,
     skins: SparseSet<skin::Skin>,
     skins_buffer: wgpu::Buffer,
     meshes: SparseMap<MeshInstances>,
     opaque_pipeline_primitives: SparseMap<PipelinePrimitives>,
     transparent_pipeline_primitives: SparseMap<PipelinePrimitives>,
-    camera_manager: CameraManager,
-    active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
     animations: SparseSet<animation::Animation>,
     playing_animations: SparseMap<Id<animation::Animation>>,
@@ -263,8 +254,8 @@ impl Scene {
         self.brdf_lut_sampler = environment.brdf_lut_sampler().clone();
     }
 
-    pub fn update(&mut self, delta_time: Duration, viewport_aspect_ration: f32) {
-        self.update_animations(delta_time);
+    pub fn simulate(&mut self, duration: Duration) -> Result<(), SimulateError> {
+        self.update_animations(duration);
 
         let root_nodes = self.root_nodes.clone();
         for node in root_nodes {
@@ -331,6 +322,29 @@ impl Scene {
             }
         };
 
+        Ok(())
+    }
+
+    pub fn render(&self, target: &wgpu::TextureView, camera: CameraId) -> Result<(), RenderError> {
+        let viewport_aspect_ratio =
+            target.texture().width() as f32 / target.texture().height() as f32;
+
+        let projection = self
+            .camera_manager
+            .projection_matrix(camera, viewport_aspect_ratio)
+            .ok_or(RenderError::InvalidCamera(camera))?;
+
+        let camera_node = self
+            .camera_manager
+            .node(camera)
+            .ok_or(RenderError::InvalidCamera(camera))?;
+
+        // let camera_position = 
+
+        todo!()
+    }
+
+    pub fn update(&mut self, delta_time: Duration, viewport_aspect_ration: f32) {
         if let Some(camera) = self.active_camera {
             let projection = self.cameras[camera]
                 .projection
@@ -1265,4 +1279,13 @@ impl DenseEntry for Primitive {
     fn id(&self) -> Id<Self::Key> {
         self.id
     }
+}
+
+#[derive(Debug, Error)]
+pub enum SimulateError {}
+
+#[derive(Debug, Error)]
+pub enum RenderError {
+    #[error("invalid camera: {0}")]
+    InvalidCamera(CameraId),
 }

@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{NodeId, Scene};
 
 /// A unique id for a camera. A camera can only have one id.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CameraId(Uuid);
 
 impl Display for CameraId {

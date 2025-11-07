@@ -6,7 +6,6 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-pub use camera::Camera;
 use glam::{Mat4, Vec3, usize};
 pub use node::{Node, NodeBuilder, NodeHandle, NodeId};
 use skin::init_skins_buffer;
@@ -14,6 +13,7 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Engine, Environment, Resources,
+    camera::CameraManager,
     geometry::Indices,
     material::AlphaMode,
     mesh::{Mesh, PrimitivePipeline},
@@ -52,7 +52,7 @@ pub struct Scene {
     meshes: SparseMap<MeshInstances>,
     opaque_pipeline_primitives: SparseMap<PipelinePrimitives>,
     transparent_pipeline_primitives: SparseMap<PipelinePrimitives>,
-    cameras: SparseMap<Camera>,
+    camera_manager: CameraManager,
     active_camera: Option<Id<Node>>,
     camera_buffer: wgpu::Buffer,
     animations: SparseSet<animation::Animation>,
@@ -98,6 +98,8 @@ impl Scene {
 
         let mut skins = SparseSet::new();
         let skins_buffer = init_skins_buffer(&mut skins, &nodes, &resources.device);
+
+        let camera_manager = CameraManager::new();
 
         let camera_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Camera buffer"),
@@ -157,7 +159,7 @@ impl Scene {
             meshes: SparseMap::new(),
             opaque_pipeline_primitives: SparseMap::new(),
             transparent_pipeline_primitives: SparseMap::new(),
-            cameras: SparseMap::new(),
+            camera_manager,
             active_camera: None,
             camera_buffer,
             point_lights: SparseMap::new(),
@@ -208,28 +210,6 @@ impl Scene {
         skin::SkinBuilder::new(self)
     }
 
-    pub fn camera(&self, id: Id<Node>) -> Option<&Camera> {
-        self.cameras.get(id)
-    }
-
-    pub fn camera_mut(&mut self, id: Id<Node>) -> Option<&mut Camera> {
-        self.cameras.get_mut(id)
-    }
-
-    pub fn active_camera(&self) -> Option<Id<Node>> {
-        self.active_camera
-    }
-
-    pub fn set_active_camera(&mut self, camera: Option<Id<Node>>) {
-        if let Some(camera) = camera {
-            assert!(
-                self.cameras.contains(camera),
-                "no camera associated with node {camera}"
-            )
-        }
-        self.active_camera = camera;
-    }
-
     pub fn set_render_dimension(
         &mut self,
         width: u32,
@@ -270,17 +250,6 @@ impl Scene {
             &self.bloom_textures,
             bloom_amount,
         );
-    }
-
-    pub fn cameras(&self) -> std::slice::Iter<'_, Camera> {
-        self.cameras.iter()
-    }
-
-    pub fn aspect_ratio(&self) -> Option<f32> {
-        match self.cameras[self.active_camera?].projection {
-            camera::Projection::Perspective { aspect_ratio, .. } => aspect_ratio,
-            camera::Projection::Orthographic { x_mag, y_mag, .. } => Some(x_mag / y_mag),
-        }
     }
 
     pub fn set_environment(&mut self, environment: Id<Environment>, resources: &Resources) {

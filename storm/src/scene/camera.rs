@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 use glam::Mat4;
 use thiserror::Error;
@@ -14,13 +14,6 @@ impl Display for CameraId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "CameraId({})", self.0)
     }
-}
-
-struct CameraData {
-    id: CameraId,
-    name: String,
-    node: NodeId,
-    projection: Projection,
 }
 
 /// A builder for camera.
@@ -144,13 +137,50 @@ impl Default for PerspectiveProjection {
     }
 }
 
+struct CameraData {
+    id: CameraId,
+    name: String,
+    node: NodeId,
+    projection: Projection,
+}
+
+pub(super) struct CameraManager {
+    cameras: HashMap<CameraId, CameraData>,
+}
+
+impl CameraManager {
+    pub(super) fn new() -> Self {
+        Self {
+            cameras: HashMap::new(),
+        }
+    }
+
+    /// Returns the node associated with the camera. The global transform of that node
+    /// should be used as the camera view matrix. `None` if not camera is associated with the id.
+    pub(super) fn node(&self, id: CameraId) -> Option<NodeId> {
+        self.cameras.get(&id).map(|data| data.node)
+    }
+
+    /// Returns the projection matrix of the camera. `viewport_aspect_ration` should be the width over the height
+    /// of the render target. Returns `None` if no camera is associated with the id.
+    pub(super) fn projection_matrix(
+        &self,
+        id: CameraId,
+        viewport_aspect_ratio: f32,
+    ) -> Option<Mat4> {
+        self.cameras
+            .get(&id)
+            .map(|data| data.projection.matrix(viewport_aspect_ratio))
+    }
+}
+
 enum Projection {
     Orthographic(OrthographicProjection),
     Perspective(PerspectiveProjection),
 }
 
 impl Projection {
-    pub fn matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
+    fn matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
         match self {
             Projection::Orthographic(OrthographicProjection {
                 x_mag,

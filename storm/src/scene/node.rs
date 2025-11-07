@@ -11,7 +11,7 @@ use crate::{Resources, Transform, geometry::MAX_MORPH_TARGET_COUNT, mesh::Mesh};
 use super::{Camera, PointLight, Scene, camera::CameraDescriptor, skin::Skin};
 
 /// A unique id for a node. A node can only have one id.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(Id<Node>);
 
 impl Display for NodeId {

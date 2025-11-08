@@ -12,7 +12,14 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Engine, Environment, Resources, camera::{CameraId, CameraManager}, geometry::Indices, material::AlphaMode, mesh::{Mesh, PrimitivePipeline}, scene::node::NodeManager, storage::{DenseEntry, Id, SparseMap, SparseSet}, texture::TextureBuilder
+    Engine, Environment, Resources,
+    camera::{CameraId, CameraManager},
+    geometry::Indices,
+    material::AlphaMode,
+    mesh::{Mesh, PrimitivePipeline},
+    scene::{mesh_instance::MeshInstanceManager, node::NodeManager},
+    storage::{DenseEntry, Id, SparseMap, SparseSet},
+    texture::TextureBuilder,
 };
 
 pub mod animation;
@@ -20,6 +27,7 @@ pub mod camera;
 mod node;
 mod renderer;
 pub mod skin;
+mod mesh_instance;
 
 const NODE_INDEX_SIZE: usize = size_of::<u32>();
 
@@ -36,10 +44,11 @@ const NODE_INDEX_SIZE: usize = size_of::<u32>();
 /// rendering, the attached mesh will be rendered at the local space origin.
 pub struct Scene {
     pub name: String,
-    node_manager: NodeManager,
-    camera_manager: CameraManager,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    node_manager: NodeManager,
+    camera_manager: CameraManager,
+    mesh_instance_manager: MeshInstanceManager,
     skins: SparseSet<skin::Skin>,
     skins_buffer: wgpu::Buffer,
     meshes: SparseMap<MeshInstances>,
@@ -255,72 +264,72 @@ impl Scene {
     }
 
     pub fn simulate(&mut self, duration: Duration) -> Result<(), SimulateError> {
-        self.update_animations(duration);
+        // self.update_animations(duration);
 
-        let root_nodes = self.root_nodes.clone();
-        for node in root_nodes {
-            self.node_handle(node)
-                .update_world_matrices_parent(Mat4::IDENTITY);
-        }
+        // let root_nodes = self.root_nodes.clone();
+        // for node in root_nodes {
+        //     self.node_handle(node)
+        //         .update_world_matrices_parent(Mat4::IDENTITY);
+        // }
 
-        self.update_nodes_buffer();
+        // self.update_nodes_buffer();
 
-        self.update_skins_buffer();
+        // self.update_skins_buffer();
 
-        let lights_buffer = {
-            let mut point_lights: Vec<_> = self
-                .point_lights
-                .iter()
-                .map(|light| {
-                    let position = self.nodes[light.node].world_position();
-                    PointLightUniform {
-                        position: position.to_array(),
-                        _pad0: 0,
-                        color: light.color.to_array(),
-                        _pad1: 0,
-                    }
-                })
-                .collect();
-            let point_light_count = point_lights.len() as u32;
-            if point_light_count == 0 {
-                point_lights.push(PointLightUniform {
-                    position: [0.0; 3],
-                    _pad0: 0,
-                    color: [0.0; 3],
-                    _pad1: 0,
-                });
-            }
+        // let lights_buffer = {
+        //     let mut point_lights: Vec<_> = self
+        //         .point_lights
+        //         .iter()
+        //         .map(|light| {
+        //             let position = self.nodes[light.node].world_position();
+        //             PointLightUniform {
+        //                 position: position.to_array(),
+        //                 _pad0: 0,
+        //                 color: light.color.to_array(),
+        //                 _pad1: 0,
+        //             }
+        //         })
+        //         .collect();
+        //     let point_light_count = point_lights.len() as u32;
+        //     if point_light_count == 0 {
+        //         point_lights.push(PointLightUniform {
+        //             position: [0.0; 3],
+        //             _pad0: 0,
+        //             color: [0.0; 3],
+        //             _pad1: 0,
+        //         });
+        //     }
 
-            let light_storage = LightStorage {
-                point_light_count,
-                _pad: [0; 3],
-            };
-            let light_storage_size =
-                size_of::<LightStorage>() + point_lights.len() * size_of::<PointLightUniform>();
+        //     let light_storage = LightStorage {
+        //         point_light_count,
+        //         _pad: [0; 3],
+        //     };
+        //     let light_storage_size =
+        //         size_of::<LightStorage>() + point_lights.len() * size_of::<PointLightUniform>();
 
-            let data = &mut Vec::with_capacity(light_storage_size);
-            data.extend_from_slice(bytes_of(&light_storage));
-            data.extend_from_slice(cast_slice(&point_lights));
-            assert_eq!(data.len(), light_storage_size);
+        //     let data = &mut Vec::with_capacity(light_storage_size);
+        //     data.extend_from_slice(bytes_of(&light_storage));
+        //     data.extend_from_slice(cast_slice(&point_lights));
+        //     assert_eq!(data.len(), light_storage_size);
 
-            match &self.lights_buffer {
-                Some(buffer) if buffer.size() as usize >= light_storage_size => {
-                    self.queue.write_buffer(&buffer, 0, data);
-                    buffer
-                }
-                _ => {
-                    self.render_bind_group = None;
-                    let buffer =
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("Lights buffer"),
-                                contents: data,
-                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                            });
-                    self.lights_buffer.insert(buffer)
-                }
-            }
-        };
+        //     match &self.lights_buffer {
+        //         Some(buffer) if buffer.size() as usize >= light_storage_size => {
+        //             self.queue.write_buffer(&buffer, 0, data);
+        //             buffer
+        //         }
+        //         _ => {
+        //             self.render_bind_group = None;
+        //             let buffer =
+        //                 self.device
+        //                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        //                         label: Some("Lights buffer"),
+        //                         contents: data,
+        //                         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        //                     });
+        //             self.lights_buffer.insert(buffer)
+        //         }
+        //     }
+        // };
 
         Ok(())
     }
@@ -329,17 +338,89 @@ impl Scene {
         let viewport_aspect_ratio =
             target.texture().width() as f32 / target.texture().height() as f32;
 
-        let projection = self
+        let projection_matrix = self
             .camera_manager
             .projection_matrix(camera, viewport_aspect_ratio)
             .ok_or(RenderError::InvalidCamera(camera))?;
-
-        let camera_node = self
-            .camera_manager
-            .node(camera)
+        let camera_node = self.camera_manager.node(camera).unwrap();
+        let camera_matrix = self
+            .node_manager
+            .global_matrix(camera_node)
             .ok_or(RenderError::InvalidCamera(camera))?;
+        let camera_position = camera_matrix.transform_point3(Vec3::ZERO);
 
-        // let camera_position = 
+        let view_matrix = Mat4::look_to_rh(
+            camera_position,
+            camera_matrix.transform_vector3(-Vec3::Z),
+            camera_matrix.transform_vector3(Vec3::Y),
+        );
+        let view_projection = projection_matrix * view_matrix;
+        let camera_uniform = CameraUniform {
+            view_projection,
+            view: view_matrix,
+            projection_inverse: projection_matrix.inverse(),
+            position: camera_position,
+            _pad: 0,
+        };
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, cast_slice(&[camera_uniform]));
+
+        if self.render_bind_group.is_none() {
+            self.render_bind_group =
+                Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("{} render bind group", self.name)),
+                    layout: &self.render_bind_group_layout,
+                    entries: &[
+                        // nodes
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.nodes_buffer.as_ref().unwrap().as_entire_binding(),
+                        },
+                        // skins
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: self.skins_buffer.as_entire_binding(),
+                        },
+                        // camera
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: self.camera_buffer.as_entire_binding(),
+                        },
+                        // lights
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: lights_buffer.as_entire_binding(),
+                        },
+                        // irradiance map
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&self.irradiance_map_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(&self.irradiance_map_sampler),
+                        },
+                        // prefilter map
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: wgpu::BindingResource::TextureView(&self.prefilter_map_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: wgpu::BindingResource::Sampler(&self.prefilter_map_sampler),
+                        },
+                        // BRDF LUT
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: wgpu::BindingResource::TextureView(&self.brdf_lut_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: wgpu::BindingResource::Sampler(&self.brdf_lut_sampler),
+                        },
+                    ],
+                }))
+        }
 
         todo!()
     }

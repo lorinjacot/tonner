@@ -1,0 +1,174 @@
+use std::collections::HashMap;
+
+use thiserror::Error;
+use uuid::Uuid;
+
+use crate::{
+    Scene,
+    asset::mesh::{Mesh, MeshPrimitive},
+    geometry::Indices,
+    scene::node::NodeId,
+};
+
+/// A unique id for a mesh attached to a node. A mesh instance will always have the same id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MeshInstanceId(Uuid);
+
+/// A mesh instance builder. This is used to add a mesh to a scene.
+#[must_use]
+pub struct MeshInstanceBuilder {
+    mesh: Mesh,
+    node: NodeId,
+    weights: Option<Vec<f32>>,
+}
+
+impl MeshInstanceBuilder {
+    /// Create a new mesh instance builder. This is used to add `mesh` to a scene.
+    /// The global transform of `node` will be used as the mesh model transform.
+    pub fn new(mesh: Mesh, node: NodeId) -> Self {
+        Self {
+            mesh,
+            node,
+            weights: None,
+        }
+    }
+
+    /// Sets the morph targets initial weights. `weights` len must match the number of morph target.
+    pub fn weights(self, weights: impl Into<Vec<f32>>) -> Self {
+        Self {
+            weights: Some(weights.into()),
+            ..self
+        }
+    }
+
+    /// Add the mesh to the scene.
+    pub fn build(self, scene: &mut Scene) -> Result<MeshInstanceId, MeshInstanceBuilderError> {
+        if !scene.node_manager.contains(self.node) {
+            return Err(MeshInstanceBuilderError::InvalidNode(self.node));
+        }
+        let morph_target_count = self.mesh.morph_target_count();
+        let weights = match self.weights {
+            Some(weights) => {
+                if weights.len() == morph_target_count {
+                    weights
+                } else {
+                    return Err(MeshInstanceBuilderError::InvalidWeightsCount {
+                        expected: morph_target_count,
+                        actual: weights.len(),
+                    });
+                }
+            }
+            None => vec![0.0; morph_target_count],
+        };
+        let id = MeshInstanceId(Uuid::new_v4());
+        let data = MeshInstanceData {
+            id,
+            node: self.node,
+            mesh: self.mesh,
+            weights,
+        };
+
+        let manager = &mut scene.mesh_instance_manager;
+        manager.meshes.insert(id, data);
+
+        Ok(id)
+    }
+}
+
+/// Error when [`MeshInstanceBuilder::build`] fails.
+#[derive(Debug, Error)]
+pub enum MeshInstanceBuilderError {
+    #[error("invalid node {0}")]
+    InvalidNode(NodeId),
+    #[error("invalid weights count: exptected {expected} but found {actual}")]
+    InvalidWeightsCount { expected: usize, actual: usize },
+}
+
+pub(super) struct MeshInstanceManager {
+    meshes: HashMap<MeshInstanceId, MeshInstanceData>,
+    opaque_primitives: PrimitivesByPipeline,
+    transparent_primitives: PrimitivesByPipeline,
+}
+
+impl MeshInstanceManager {
+    /// Render all opaque primitives using the provided render pass. The render pass must have a 3 colors attachments:
+    /// - `vec4<f32>`-compatible;
+    /// - not used;
+    /// - not used.
+    pub(super) fn render_opaque_primitives(&self, opaque_render_pass: &mut wgpu::RenderPass) {
+        self.render_primitives(&self.opaque_primitives, opaque_render_pass);
+    }
+
+    /// Render all transparent primitives using the provided render pass. The render pass must have a 3 colors attachments:
+    /// - not used;
+    /// - `vec4<f32>`-compatible;
+    /// - `f32`-compatible.
+    pub(super) fn render_transparent_primitives(
+        &self,
+        transparent_render_pass: &mut wgpu::RenderPass,
+    ) {
+        self.render_primitives(&self.transparent_primitives, transparent_render_pass);
+    }
+
+    /// Primitive rendering logic. Used by [`Self::render_opaque_primitives`] and
+    /// [`Self::render_transparent_primitives`].
+    fn render_primitives(
+        &self,
+        primitives: &PrimitivesByPipeline,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
+        for (pipeline, primitives) in &primitives.0 {
+            render_pass.set_pipeline(pipeline);
+
+            for (primitive, instances) in primitives {
+                render_pass.set_vertex_buffer(0, instances.nodes_indices_buffer.slice(..));
+                render_pass.set_bind_group(1, primitive.geomery_bind_group(), &[]);
+                render_pass.set_bind_group(2, primitive.material_bind_group(), &[]);
+                let instances = 0..instances.nodes_indices.len() as u32;
+                match primitive.indices() {
+                    Some(Indices {
+                        buffer,
+                        format,
+                        count,
+                    }) => {
+                        render_pass.set_index_buffer(buffer.slice(..), *format);
+                        render_pass.draw_indexed(0..*count as u32, 0, instances);
+                    }
+                    None => {
+                        render_pass.draw(0..primitive.vertex_count() as u32, instances);
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct MeshInstanceData {
+    id: MeshInstanceId,
+    node: NodeId,
+    mesh: Mesh,
+    weights: Vec<f32>,
+}
+
+struct PrimitiveInstances {
+    nodes_indices: Vec<u32>,
+    nodes_indices_buffer: wgpu::Buffer,
+}
+
+impl PrimitiveInstances {
+    fn new(device: &wgpu::Device) -> Self {
+        Self {
+            nodes_indices: Vec::new(),
+            nodes_indices_buffer: device.create_buffer(&wgpu::wgt::BufferDescriptor {
+                label: Some("Primitive instance node indices buffer"),
+                size: size_of::<u32>() as u64,
+                usage: wgpu::BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            }),
+        }
+    }
+}
+
+struct PrimitivesByPipeline(
+    HashMap<wgpu::RenderPipeline, Vec<(MeshPrimitive, PrimitiveInstances)>>,
+);

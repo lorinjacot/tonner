@@ -107,6 +107,11 @@ impl NodeManager {
         }
     }
 
+    /// `true` if `node` is a valid id. `false` otherwise.
+    pub(super) fn contains(&self, node: NodeId) -> bool {
+        self.nodes.contains_key(&node)
+    }
+
     /// Returns the node local matrix, or `None` if the node does not exists.
     ///
     /// The local matrix describe the transform between the node local coordinate system

@@ -1,11 +1,12 @@
 use std::{collections::HashMap, fmt::Display};
 
-use bytemuck::{Pod, Zeroable};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Vec3};
 use thiserror::Error;
 use uuid::Uuid;
+use wgpu::util::DeviceExt;
 
-use crate::{Scene, geometry::MAX_MORPH_TARGET_COUNT};
+use crate::Scene;
 
 /// A unique id for a node. A node can only have one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,6 +74,7 @@ impl NodeBuilder {
             id,
             NodeData {
                 id,
+                index: None,
                 name: self.name,
                 parent: self.parent,
                 children: Vec::new(),
@@ -80,7 +82,6 @@ impl NodeBuilder {
                 global_matrix,
             },
         );
-        scene.node_manager.buffer = None;
 
         Ok(id)
     }
@@ -95,16 +96,31 @@ pub enum NodeBuilderError {
 pub(super) struct NodeManager {
     nodes: HashMap<NodeId, NodeData>,
     root_nodes: Vec<NodeId>,
-    buffer: Option<wgpu::Buffer>,
+    buffer: wgpu::Buffer,
 }
 
 impl NodeManager {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
+        let buffer = Self::create_buffer(&[], device);
         Self {
             nodes: HashMap::new(),
             root_nodes: Vec::new(),
-            buffer: None,
+            buffer,
         }
+    }
+
+    fn create_buffer(contents: &[u8], device: &wgpu::Device) -> wgpu::Buffer {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Node manager buffer"),
+            contents,
+            usage: wgpu::BufferUsages::STORAGE,
+        })
+    }
+
+    /// Index of the node in [`NodeManager::buffer`]. [`None`] if invalid id or if the node
+    /// is not in the buffer yet.
+    pub(super) fn index(&self, node: NodeId) -> Option<u32> {
+        self.nodes.get(&node).and_then(|data| data.index)
     }
 
     /// `true` if `node` is a valid id. `false` otherwise.
@@ -129,10 +145,38 @@ impl NodeManager {
     pub(super) fn global_matrix(&self, node: NodeId) -> Option<Mat4> {
         self.nodes.get(&node).map(|data| data.global_matrix)
     }
+
+    /// Buffer containing the node data. This is used when a gpu shader need node access. The return
+    /// buffer should not be keep as this method could return another buffer on another call.
+    pub(super) fn buffer(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
+
+    /// Update the node buffer with the current state of the nodes.
+    pub(super) fn update_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let size = (self.nodes.len() * size_of::<NodeUniform>()) as u64;
+        let uniforms: Vec<_> = self
+            .nodes
+            .values_mut()
+            .enumerate()
+            .map(|(i, data)| {
+                data.index = Some(i as u32);
+                NodeUniform::from(&*data)
+            })
+            .collect();
+        let content = cast_slice(&uniforms);
+        if self.buffer.size() < size {
+            self.buffer = Self::create_buffer(content, device);
+        } else {
+            queue.write_buffer(&self.buffer, 0, content);
+        }
+    }
 }
 
 struct NodeData {
     id: NodeId,
+    /// Index of the node in [`NodeManager::buffer`] or [`None`] if not in there.
+    index: Option<u32>,
     name: Option<String>,
     parent: Option<NodeId>,
     children: Vec<NodeId>,
@@ -144,7 +188,12 @@ struct NodeData {
 #[repr(C)]
 struct NodeUniform {
     matrix: Mat4,
-    weights: [f32; MAX_MORPH_TARGET_COUNT],
-    joint_offset: u32,
-    _pad: [u32; 3],
+}
+
+impl From<&NodeData> for NodeUniform {
+    fn from(value: &NodeData) -> Self {
+        Self {
+            matrix: value.global_matrix,
+        }
+    }
 }

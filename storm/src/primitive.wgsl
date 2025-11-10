@@ -24,8 +24,6 @@ const weights_0_flag: u32   = 1 << 7;
 
 struct NodeUniform {
     matrix: mat4x4<f32>,
-    weights: array<f32, max_weight_count>,
-    joint_offset: u32,
 }
 
 struct SkinStorage {

@@ -12,14 +12,7 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Engine, Environment, Resources,
-    camera::{CameraId, CameraManager},
-    geometry::Indices,
-    material::AlphaMode,
-    mesh::{Mesh, PrimitivePipeline},
-    scene::{mesh_instance::MeshInstanceManager, node::NodeManager},
-    storage::{DenseEntry, Id, SparseMap, SparseSet},
-    texture::TextureBuilder,
+    Engine, Environment, Resources, camera::{CameraId, CameraManager}, geometry::Indices, material::AlphaMode, mesh::{Mesh, PrimitivePipeline}, scene::{mesh_instance::MeshInstanceManager, node::NodeManager}, skin::SkinManager, storage::{DenseEntry, Id, SparseMap, SparseSet}, texture::TextureBuilder
 };
 
 pub mod animation;
@@ -47,14 +40,9 @@ pub struct Scene {
     device: wgpu::Device,
     queue: wgpu::Queue,
     node_manager: NodeManager,
+    skin_manager: SkinManager,
     camera_manager: CameraManager,
     mesh_instance_manager: MeshInstanceManager,
-    skins: SparseSet<skin::Skin>,
-    skins_buffer: wgpu::Buffer,
-    meshes: SparseMap<MeshInstances>,
-    opaque_pipeline_primitives: SparseMap<PipelinePrimitives>,
-    transparent_pipeline_primitives: SparseMap<PipelinePrimitives>,
-    camera_buffer: wgpu::Buffer,
     animations: SparseSet<animation::Animation>,
     playing_animations: SparseMap<Id<animation::Animation>>,
     point_lights: SparseMap<PointLight>,

@@ -12,7 +12,7 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Engine, Environment, Resources, camera::{CameraId, CameraManager}, geometry::Indices, material::AlphaMode, mesh::{Mesh, PrimitivePipeline}, scene::{mesh_instance::MeshInstanceManager, node::NodeManager}, skin::SkinManager, storage::{DenseEntry, Id, SparseMap, SparseSet}, texture::TextureBuilder
+    Engine, Environment, Resources, camera::{CameraId, CameraManager}, geometry::Indices, material::AlphaMode, mesh::{Mesh, PrimitivePipeline}, scene::{animation::AnimationManager, mesh_instance::MeshInstanceManager, node::NodeManager}, skin::SkinManager, storage::{DenseEntry, Id, SparseMap, SparseSet}, texture::TextureBuilder
 };
 
 pub mod animation;
@@ -43,6 +43,7 @@ pub struct Scene {
     skin_manager: SkinManager,
     camera_manager: CameraManager,
     mesh_instance_manager: MeshInstanceManager,
+    animation_manager: AnimationManager,
     animations: SparseSet<animation::Animation>,
     playing_animations: SparseMap<Id<animation::Animation>>,
     point_lights: SparseMap<PointLight>,

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
@@ -135,6 +135,37 @@ impl NodeManager {
     /// If the node has no parent, the local transform is equal to the global transform.
     pub(super) fn local_matrix(&self, node: NodeId) -> Option<Mat4> {
         self.nodes.get(&node).map(|data| data.local_matrix)
+    }
+
+    /// Modifies the scale part of the local transform. The local transform is expected
+    /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
+    pub(super) fn set_local_scale(&mut self, node: NodeId, scale: Vec3) -> Result<(), ()> {
+        let node = self.nodes.get_mut(&node).ok_or(())?;
+        let (_, rotation, translation) = node.local_matrix.to_scale_rotation_translation();
+        node.local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        Ok(())
+    }
+
+    /// Modifies the rotation part of the local transform. The local transform is expected
+    /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
+    pub(super) fn set_local_rotation(&mut self, node: NodeId, rotation: Quat) -> Result<(), ()> {
+        let node = self.nodes.get_mut(&node).ok_or(())?;
+        let (scale, _, translation) = node.local_matrix.to_scale_rotation_translation();
+        node.local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        Ok(())
+    }
+
+    /// Modifies the translation part of the local transform. The local transform is expected
+    /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
+    pub(super) fn set_local_translation(
+        &mut self,
+        node: NodeId,
+        translation: Vec3,
+    ) -> Result<(), ()> {
+        let node = self.nodes.get_mut(&node).ok_or(())?;
+        let (scale, rotation, _) = node.local_matrix.to_scale_rotation_translation();
+        node.local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        Ok(())
     }
 
     /// Returns the node global matrix, or `None` if the node does not exists.

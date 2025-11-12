@@ -1,93 +1,99 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use approx::abs_diff_eq;
 use glam::{Quat, Vec3, Vec4};
+use thiserror::Error;
+use uuid::Uuid;
 
-use crate::storage::{DenseEntry, Id, SparseSet};
+use crate::scene::{NodeManager, node::NodeId};
 
-use super::{Node, Scene};
+use super::Scene;
 
-pub struct Animation {
-    id: Id<Self>,
+/// A unique id for an animation. An animation have one and only one id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AnimationId(Uuid);
+
+struct AnimationData {
+    id: AnimationId,
     name: String,
     channels: Vec<Channel>,
     duration: f32,
     current_timestamp: f32,
     repeat: bool,
+    playing: bool,
 }
 
-impl DenseEntry for Animation {
-    type Key = Self;
-
-    fn id(&self) -> Id<Self::Key> {
-        self.id
-    }
-}
-
-impl Animation {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn current_timestamp(&self) -> f32 {
-        self.current_timestamp
-    }
-
-    pub fn repeat(&self) -> bool {
-        self.repeat
-    }
-
-    fn update(&self, nodes: &mut SparseSet<Node>) {
-        self.channels.iter().for_each(|channel| {
-            let node = &mut nodes[channel.node];
+impl AnimationData {
+    fn update(&self, node_manager: &mut NodeManager) -> Result<(), SimulateAnimationError> {
+        for channel in &self.channels {
             match &channel.outputs {
                 Outputs::Translations(slice) => {
-                    node.local_transform.set_translation(interpolate_vec3(
-                        self.current_timestamp,
-                        &channel.inputs,
-                        channel.interpolation,
-                        &slice,
-                    ))
+                    node_manager
+                        .set_local_translation(
+                            channel.node,
+                            interpolate_vec3(
+                                self.current_timestamp,
+                                &channel.inputs,
+                                channel.interpolation,
+                                &slice,
+                            ),
+                        )
+                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node));
                 }
-                Outputs::Rotations(slice) => node.local_transform.set_rotation(interpolate_quat(
-                    self.current_timestamp,
-                    &channel.inputs,
-                    channel.interpolation,
-                    &slice,
-                )),
-                Outputs::Scales(slice) => node.local_transform.set_scale(interpolate_vec3(
-                    self.current_timestamp,
-                    &channel.inputs,
-                    channel.interpolation,
-                    &slice,
-                )),
-                Outputs::Weights(slice, count) => {
-                    node.weights = interpolate_weights(
-                        self.current_timestamp,
-                        &channel.inputs,
-                        channel.interpolation,
-                        &slice,
-                        *count,
-                    )
+                Outputs::Rotations(slice) => {
+                    node_manager
+                        .set_local_rotation(
+                            channel.node,
+                            interpolate_quat(
+                                self.current_timestamp,
+                                &channel.inputs,
+                                channel.interpolation,
+                                &slice,
+                            ),
+                        )
+                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node));
+                }
+                Outputs::Scales(slice) => {
+                    node_manager
+                        .set_local_scale(
+                            channel.node,
+                            interpolate_vec3(
+                                self.current_timestamp,
+                                &channel.inputs,
+                                channel.interpolation,
+                                &slice,
+                            ),
+                        )
+                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node));
+                }
+                Outputs::Weights(_slice, _count) => {
+                    // node.weights = interpolate_weights(
+                    //     self.current_timestamp,
+                    //     &channel.inputs,
+                    //     channel.interpolation,
+                    //     &slice,
+                    //     *count,
+                    // )
+                    todo!()
                 }
             }
-        })
+        }
+        Ok(())
     }
 }
 
+/// A builder for animations.
 #[must_use]
-pub struct AnimationBuilder<'s> {
-    scene: &'s mut Scene,
+pub struct AnimationBuilder {
     name: Option<String>,
     channels: Vec<Channel>,
     duration: f32,
     repeat: bool,
 }
 
-impl<'s> AnimationBuilder<'s> {
-    pub fn new(scene: &'s mut Scene) -> Self {
+impl AnimationBuilder {
+    pub fn new() -> Self {
         Self {
-            scene,
             name: None,
             channels: Vec::new(),
             duration: 0.0,
@@ -95,14 +101,18 @@ impl<'s> AnimationBuilder<'s> {
         }
     }
 
-    pub fn name(mut self, name: impl Into<Option<String>>) -> Self {
-        self.name = name.into();
-        self
+    pub fn name(self, name: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..self
+        }
     }
 
-    pub fn repeat(mut self) -> Self {
-        self.repeat = true;
-        self
+    pub fn repeat(self) -> Self {
+        Self {
+            repeat: true,
+            ..self
+        }
     }
 
     pub fn channels(mut self, channels: impl IntoIterator<Item = Channel>) -> Self {
@@ -116,96 +126,113 @@ impl<'s> AnimationBuilder<'s> {
         self
     }
 
-    pub fn build(self) -> &'s mut Animation {
-        let id = self.scene.animations.next_id();
-        self.scene.animations.insert(Animation {
+    pub fn build(self, scene: &mut Scene) -> Result<AnimationId, AnimationBuilderError> {
+        for channel in &self.channels {
+            if !scene.node_manager.contains(channel.node) {
+                return Err(AnimationBuilderError::InvalidNode(channel.node));
+            }
+        }
+
+        let id = AnimationId(Uuid::new_v4());
+        let data = AnimationData {
             id,
-            name: self.name.unwrap_or_else(|| format!("Animation {id}")),
+            name: self.name.unwrap_or_default(),
             channels: self.channels,
             duration: self.duration,
             current_timestamp: 0.0,
             repeat: self.repeat,
-        })
+            playing: false,
+        };
+        scene.animation_manager.animations.insert(id, data);
+        Ok(id)
     }
 }
 
-impl Scene {
-    pub fn animation_builder(&mut self) -> AnimationBuilder<'_> {
-        AnimationBuilder::new(self)
-    }
+#[derive(Debug, Error)]
+pub enum AnimationBuilderError {
+    #[error("invalid node {0}")]
+    InvalidNode(NodeId),
+}
 
-    pub fn animations(&self) -> std::slice::Iter<'_, Animation> {
-        self.animations.iter()
-    }
+/// Manages all animations, their shared data as well as their update logic.
+pub(super) struct AnimationManager {
+    animations: HashMap<AnimationId, AnimationData>,
+}
 
-    pub fn play_animation(&mut self, animation: Id<Animation>) {
-        self.animations[animation].current_timestamp = 0.0;
-        self.playing_animations.insert(animation);
-    }
-
-    pub fn resume_animation(&mut self, animation: Id<Animation>) {
-        self.playing_animations.insert(animation);
-    }
-
-    pub fn animation_is_playing(&self, animation: Id<Animation>) -> bool {
-        self.playing_animations.contains(animation)
-    }
-
-    pub fn pause_animation(&mut self, animation: Id<Animation>) {
-        self.playing_animations.remove(animation);
-    }
-
-    pub fn stop_animation(&mut self, animation: Id<Animation>) {
-        let animation = &mut self.animations[animation];
-        animation.current_timestamp = 0.0;
-        animation.update(&mut self.nodes);
-        let nodes: Vec<Id<Node>> = animation
-            .channels
-            .iter()
-            .map(|channel| channel.node)
-            .collect();
-        let animation = animation.id();
-        for node in nodes {
-            self.node_handle(node).update_world_matrices();
+impl AnimationManager {
+    pub(super) fn new() -> Self {
+        Self {
+            animations: HashMap::new(),
         }
-        self.playing_animations.remove(animation);
     }
 
-    pub fn repeat_animation(&mut self, animation: Id<Animation>, repeat: bool) {
-        self.animations[animation].repeat = repeat;
+    /// Start the animation. This will reset the animation if paused or if it is already playing.
+    /// This function will fails if the animation does not exist.
+    pub(super) fn start(&mut self, animation: AnimationId) -> Result<(), ()> {
+        let data = self.animations.get_mut(&animation).ok_or(())?;
+        data.current_timestamp = 0.0;
+        data.playing = true;
+        Ok(())
     }
 
-    pub(super) fn update_animations(&mut self, delta_time: Duration) {
-        let delta_time = delta_time.as_secs_f32();
-        let ended: Vec<Id<Animation>> = self
-            .playing_animations
-            .iter_mut()
-            .filter_map(|animation| {
-                let animation = &mut self.animations[*animation];
-                animation.current_timestamp += delta_time;
-                let ended = if animation.current_timestamp > animation.duration {
-                    if animation.repeat {
-                        animation.current_timestamp -= animation.duration;
-                        None
-                    } else {
-                        animation.current_timestamp = 0.0;
-                        Some(animation.id)
-                    }
+    /// Resume the animation. If the animation never run, this is the same as [`AnimationManager::start`].
+    /// This function will fails if the animation does not exist.
+    pub(super) fn resume(&mut self, animation: AnimationId) -> Result<(), ()> {
+        self.animations.get_mut(&animation).ok_or(())?.playing = true;
+        Ok(())
+    }
+
+    /// Pause the animation and leave the nodes in their current states.
+    /// This function will fails if the animation does not exist.
+    pub(super) fn pause(&mut self, animation: AnimationId) -> Result<(), ()> {
+        self.animations.get_mut(&animation).ok_or(())?.playing = false;
+        Ok(())
+    }
+
+    /// Stops the animation and reset the nodes to their initial states.
+    /// This function will fails if the animation does not exist.
+    pub(super) fn stop(
+        &mut self,
+        animation: AnimationId,
+        node_manager: &mut NodeManager,
+    ) -> Result<(), ()> {
+        let data = self.animations.get_mut(&animation).ok_or(())?;
+        data.playing = false;
+        data.current_timestamp = 0.0;
+        data.update(node_manager);
+        Ok(())
+    }
+
+    pub(super) fn simulate(
+        &mut self,
+        duration: Duration,
+        node_manager: &mut NodeManager,
+    ) -> Result<(), SimulateAnimationError> {
+        let delta_time = duration.as_secs_f32();
+        for animation in self.animations.values_mut().filter(|data| data.playing) {
+            animation.current_timestamp += delta_time;
+            if animation.current_timestamp > animation.duration {
+                if animation.repeat {
+                    animation.current_timestamp -= animation.duration
                 } else {
-                    None
-                };
-                animation.update(&mut self.nodes);
-                ended
-            })
-            .collect();
-        for id in ended {
-            self.playing_animations.remove(id);
+                    animation.current_timestamp = 0.0;
+                    animation.playing = false;
+                }
+            }
+            animation.update(node_manager)?;
         }
+        Ok(())
     }
 }
 
-pub struct Channel {
-    pub node: Id<Node>,
+#[derive(Debug, Error)]
+pub(super) enum SimulateAnimationError {
+    #[error("invalid node: {0}")]
+    InvalidNode(NodeId),
+}
+
+struct Channel {
+    pub node: NodeId,
     pub inputs: Vec<f32>,
     pub interpolation: Interpolation,
     pub outputs: Outputs,

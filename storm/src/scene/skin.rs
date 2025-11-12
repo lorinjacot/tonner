@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, iter::once};
+use std::{collections::HashMap, fmt::Display};
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::Mat4;
@@ -6,10 +6,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
-use crate::{
-    scene::{NodeManager, node::NodeId},
-    storage::{DenseEntry, Id, SparseSet},
-};
+use crate::scene::{NodeManager, node::NodeId};
 
 use super::Scene;
 
@@ -75,7 +72,11 @@ impl SkinBuilder {
             .collect();
 
         let id = SkinId(Uuid::new_v4());
-        let data = SkinData { id, joints };
+        let data = SkinData {
+            id,
+            index: None,
+            joints,
+        };
 
         scene.skin_manager.skins.insert(id, data);
 
@@ -101,19 +102,18 @@ pub(super) struct SkinManager {
 impl SkinManager {
     /// Create a new empty skin manager.
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let buffer = Self::create_buffer(&[], device);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Skin manager buffer"),
+            contents: bytes_of(&SkinStorageHeader {
+                joint_count: 0,
+                _pad: [0; 3],
+            }),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         Self {
             skins: HashMap::new(),
             buffer,
         }
-    }
-
-    fn create_buffer(contents: &[u8], device: &wgpu::Device) -> wgpu::Buffer {
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Skin manager buffer"),
-            contents,
-            usage: wgpu::BufferUsages::STORAGE,
-        })
     }
 
     /// Buffer inddx of the first joint matrix part of the skin,
@@ -122,21 +122,74 @@ impl SkinManager {
         self.skins.get(&skin).and_then(|data| data.index)
     }
 
+    /// Buffer containing the skin joint. This is used when a gpu shader need the skin joint matrices. The returned
+    /// buffer should not be keep as this method could return another buffer on another call.
     pub(super) fn buffer(&self) -> &wgpu::Buffer {
         &self.buffer
     }
 
-    pub(super) fn update_skin_buffer(
+    /// Update the skin buffer with the current state of the skins.
+    pub(super) fn update_buffer(
         &mut self,
         node_manager: &NodeManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) {
-        todo!()
+    ) -> Result<(), UpdateSkinBufferError> {
+        let mut joint_matrices =
+            Vec::with_capacity(self.skins.values_mut().map(|data| data.joints.len()).sum());
+        for (index, skin) in self.skins.values_mut().enumerate() {
+            skin.index = Some(index as u32);
+            for &Joint {
+                node,
+                inverse_bind_matrix,
+            } in &skin.joints
+            {
+                joint_matrices.push(
+                    node_manager
+                        .global_matrix(node)
+                        .ok_or(UpdateSkinBufferError::InvalidNode(node))?
+                        * inverse_bind_matrix,
+                );
+            }
+        }
+
+        let header = SkinStorageHeader {
+            joint_count: joint_matrices.len() as u32,
+            _pad: [0; 3],
+        };
+
+        let header_size = size_of::<SkinStorageHeader>();
+        let size = header_size + joint_matrices.len() * size_of::<Mat4>();
+        let header = bytes_of(&header);
+        let joint_matrices = cast_slice(&joint_matrices);
+
+        if self.buffer.size() >= size as u64 {
+            queue.write_buffer(&self.buffer, 0, header);
+            queue.write_buffer(&self.buffer, header_size as u64, joint_matrices);
+        } else {
+            self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Skin manager buffer"),
+                size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: true,
+            });
+            let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
+            buffer_view[..header_size].copy_from_slice(header);
+            buffer_view[header_size..size].copy_from_slice(joint_matrices);
+            self.buffer.unmap();
+        }
+
+        Ok(())
     }
 }
 
-pub struct SkinData {
+#[derive(Debug, Error)]
+pub enum UpdateSkinBufferError {
+    #[error("invalid node: {0}")]
+    InvalidNode(NodeId),
+}
+
+struct SkinData {
     id: SkinId,
     /// Buffer inddx of the first joint matrix part of the skin,
     /// or `None` if the skin is not in the buffer yet.
@@ -148,100 +201,6 @@ pub struct SkinData {
 struct Joint {
     node: NodeId,
     inverse_bind_matrix: Mat4,
-}
-
-impl Scene {
-    pub(super) fn update_skins_buffer(&mut self) {
-        let (header, joint_matrices) = skins_buffer_data(&mut self.skins, &self.nodes);
-        let (header, header_size, joint_matrices, size) =
-            skins_buffer_bytes(&header, &joint_matrices);
-
-        if self.skins_buffer.size() >= size {
-            self.queue.write_buffer(&self.skins_buffer, 0, header);
-            self.queue
-                .write_buffer(&self.skins_buffer, header_size as u64, joint_matrices);
-        } else {
-            self.render_bind_group = None;
-
-            self.skins_buffer =
-                create_skins_buffer(header, header_size, joint_matrices, size, &self.device);
-        }
-    }
-}
-
-fn skins_buffer_data(
-    skins: &mut SparseSet<Skin>,
-    nodes: &SparseSet<Node>,
-) -> (SkinStorageHeader, Vec<Mat4>) {
-    let joint_matrices =
-        Vec::from_iter(once(Mat4::IDENTITY).chain(skins.iter().flat_map(|skin| {
-            skin.joints.iter().map(
-                |Joint {
-                     node,
-                     inverse_bind_matrix,
-                 }| {
-                    let node = &nodes[*node];
-                    node.world_matrix() * *inverse_bind_matrix
-                },
-            )
-        })));
-
-    let mut offset = 1;
-    skins.iter_mut().for_each(|skin| {
-        skin.joint_offset = offset;
-        offset += skin.joints.len() as u32;
-    });
-    let header = SkinStorageHeader {
-        joint_count: joint_matrices.len() as u32,
-        _pad: [0; 3],
-    };
-
-    (header, joint_matrices)
-}
-
-fn skins_buffer_bytes<'a>(
-    header: &'a SkinStorageHeader,
-    joint_matrices: &'a [Mat4],
-) -> (&'a [u8], usize, &'a [u8], u64) {
-    let header_size = size_of::<SkinStorageHeader>();
-    let size = header_size + joint_matrices.len() * size_of::<Mat4>();
-
-    let header = bytes_of(header);
-    let joint_matrices = cast_slice(&joint_matrices);
-
-    (header, header_size, joint_matrices, size as u64)
-}
-
-fn create_skins_buffer(
-    header: &[u8],
-    header_size: usize,
-    joint_matrices: &[u8],
-    size: u64,
-    device: &wgpu::Device,
-) -> wgpu::Buffer {
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Skins buffer"),
-        size: size as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: true,
-    });
-    {
-        let mut view = buffer.slice(..).get_mapped_range_mut();
-        view[..header_size].copy_from_slice(header);
-        view[header_size..].copy_from_slice(joint_matrices);
-    }
-    buffer.unmap();
-    buffer
-}
-
-pub(super) fn init_skins_buffer(
-    skins: &mut SparseSet<Skin>,
-    nodes: &SparseSet<Node>,
-    device: &wgpu::Device,
-) -> wgpu::Buffer {
-    let (header, joint_matrices) = skins_buffer_data(skins, nodes);
-    let (header, header_size, joint_matrices, size) = skins_buffer_bytes(&header, &joint_matrices);
-    create_skins_buffer(header, header_size, joint_matrices, size, device)
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

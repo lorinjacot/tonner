@@ -7,20 +7,28 @@ use std::{
 
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::{Mat4, Vec3, usize};
-use skin::init_skins_buffer;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    Engine, Environment, Resources, camera::{CameraId, CameraManager}, geometry::Indices, material::AlphaMode, mesh::{Mesh, PrimitivePipeline}, scene::{animation::AnimationManager, mesh_instance::MeshInstanceManager, node::NodeManager}, skin::SkinManager, storage::{DenseEntry, Id, SparseMap, SparseSet}, texture::TextureBuilder
+    Engine, Environment, Resources,
+    camera::{CameraId, CameraManager},
+    geometry::Indices,
+    material::AlphaMode,
+    mesh::{Mesh, PrimitivePipeline},
+    scene::{animation::AnimationManager, light::LightManager, mesh_instance::MeshInstanceManager, node::NodeManager},
+    skin::SkinManager,
+    storage::{DenseEntry, Id, SparseMap, SparseSet},
+    texture::TextureBuilder,
 };
 
 pub mod animation;
 pub mod camera;
+mod light;
+mod mesh_instance;
 mod node;
 mod renderer;
 pub mod skin;
-mod mesh_instance;
 
 const NODE_INDEX_SIZE: usize = size_of::<u32>();
 
@@ -44,10 +52,7 @@ pub struct Scene {
     camera_manager: CameraManager,
     mesh_instance_manager: MeshInstanceManager,
     animation_manager: AnimationManager,
-    animations: SparseSet<animation::Animation>,
-    playing_animations: SparseMap<Id<animation::Animation>>,
-    point_lights: SparseMap<PointLight>,
-    lights_buffer: Option<wgpu::Buffer>,
+    light_manager: LightManager, 
     irradiance_map_view: wgpu::TextureView,
     irradiance_map_sampler: wgpu::Sampler,
     prefilter_map_view: wgpu::TextureView,
@@ -76,13 +81,7 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn new(
-        name: String,
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-        render_width: u32,
-        render_height: u32,
-    ) -> Self {
+    pub fn new(name: String, engine: &mut Engine, encoder: &mut wgpu::CommandEncoder) -> Self {
         let nodes = SparseSet::new();
 
         let mut skins = SparseSet::new();

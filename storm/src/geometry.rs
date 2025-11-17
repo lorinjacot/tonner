@@ -80,13 +80,6 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct Indices {
-    pub(super) buffer: wgpu::Buffer,
-    pub(super) format: wgpu::IndexFormat,
-    pub(super) count: usize,
-}
-
 #[must_use]
 pub struct GeometryBuilder {
     vertex_count: usize,
@@ -603,7 +596,7 @@ impl Default for SphereDescriptor {
             width_segments: 32,
             height_segments: 16,
             phi_start: 0.0,
-            phi_length: 2.0 * PI,
+            phi_length: PI,
             theta_start: 0.0,
             theta_length: PI,
         }

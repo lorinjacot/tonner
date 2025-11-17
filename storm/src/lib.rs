@@ -11,6 +11,9 @@ pub use scene::{camera, skin};
 use storage::SparseSet;
 use uuid::Uuid;
 
+use crate::asset::geometry::GeometryManager;
+use crate::asset::mesh::MeshManager;
+
 mod asset;
 mod environment;
 pub mod geometry;
@@ -100,6 +103,9 @@ impl<T> Eq for Id<T> {}
 /// The engine is also responsible to manage the resources shared between [Scene]s.
 pub struct Engine {
     _scenes: HashMap<Id<Scene>, Scene>,
+    device: wgpu::Device,
+    geometry_manager: GeometryManager,
+    mesh_manager: MeshManager,
     resources: Resources,
 }
 

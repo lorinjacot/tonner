@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::Resources;
+use crate::Engine;
 
 pub(super) struct TextureBuilderData {
     generate_mips_bind_group_layout: wgpu::BindGroupLayout,
@@ -110,9 +110,9 @@ impl<'a> TextureBuilder<'a> {
 
     pub fn build_callback(
         mut self,
-        resources: &mut Resources,
+        engine: &mut Engine,
         encoder: &mut wgpu::CommandEncoder,
-        callback: impl FnOnce(&wgpu::Texture, &mut Resources, &mut wgpu::CommandEncoder),
+        callback: impl FnOnce(&wgpu::Texture, &mut Engine, &mut wgpu::CommandEncoder),
     ) -> wgpu::Texture {
         let size = match self.source {
             Source::Empty { size, .. } => size,
@@ -133,7 +133,7 @@ impl<'a> TextureBuilder<'a> {
 
         let (texture, format) = match self.source {
             Source::Empty { format, .. } => {
-                let texture = resources.device.create_texture(&wgpu::TextureDescriptor {
+                let texture = engine.device.create_texture(&wgpu::TextureDescriptor {
                     label: self.name,
                     size,
                     mip_level_count: self.mip_level_count,
@@ -171,8 +171,8 @@ impl<'a> TextureBuilder<'a> {
                 if srgb {
                     format = format.add_srgb_suffix();
                 }
-                let texture = resources.device.create_texture_with_data(
-                    &resources.queue,
+                let texture = engine.device.create_texture_with_data(
+                    &engine.queue,
                     &wgpu::TextureDescriptor {
                         label: self.name,
                         size,
@@ -190,23 +190,23 @@ impl<'a> TextureBuilder<'a> {
             }
         };
 
-        callback(&texture, resources, encoder);
+        callback(&texture, engine, encoder);
 
         if self.generate_mips {
-            let pipeline = resources
+            let pipeline = engine
                 .texture_builder_data
                 .generate_mips_pipelines
                 .entry(format)
                 .or_insert_with(|| {
-                    resources
+                    engine
                         .device
                         .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                             label: Some("Generate mips pipeline"),
                             layout: Some(
-                                &resources.texture_builder_data.generate_mips_pipeline_layout,
+                                &engine.texture_builder_data.generate_mips_pipeline_layout,
                             ),
                             vertex: wgpu::VertexState {
-                                module: &resources.texture_builder_data.shader_module,
+                                module: &engine.texture_builder_data.shader_module,
                                 entry_point: Some("vs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 buffers: &[],
@@ -227,7 +227,7 @@ impl<'a> TextureBuilder<'a> {
                                 alpha_to_coverage_enabled: false,
                             },
                             fragment: Some(wgpu::FragmentState {
-                                module: &resources.texture_builder_data.shader_module,
+                                module: &engine.texture_builder_data.shader_module,
                                 entry_point: Some("fs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 targets: &[Some(format.into())],
@@ -249,27 +249,22 @@ impl<'a> TextureBuilder<'a> {
                         ..Default::default()
                     });
 
-                    let bind_group =
-                        resources
-                            .device
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("Generate mips bind group"),
-                                layout: &resources
-                                    .texture_builder_data
-                                    .generate_mips_bind_group_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: wgpu::BindingResource::TextureView(&sample_view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: wgpu::BindingResource::Sampler(
-                                            &resources.texture_builder_data.generate_mips_sampler,
-                                        ),
-                                    },
-                                ],
-                            });
+                    let bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Generate mips bind group"),
+                        layout: &engine.texture_builder_data.generate_mips_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&sample_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &engine.texture_builder_data.generate_mips_sampler,
+                                ),
+                            },
+                        ],
+                    });
 
                     let render_view = texture.create_view(&wgpu::TextureViewDescriptor {
                         label: Some("Generate mips render view"),
@@ -305,12 +300,8 @@ impl<'a> TextureBuilder<'a> {
         texture
     }
 
-    pub fn build(
-        self,
-        resources: &mut Resources,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> wgpu::Texture {
-        self.build_callback(resources, encoder, |_, _, _| ())
+    pub fn build(self, engine: &mut Engine, encoder: &mut wgpu::CommandEncoder) -> wgpu::Texture {
+        self.build_callback(engine, encoder, |_, _, _| ())
     }
 }
 

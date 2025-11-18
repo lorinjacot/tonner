@@ -10,6 +10,7 @@ pub use asset::geometry;
 
 use crate::asset::geometry::GeometryManager;
 use crate::asset::mesh::MeshManager;
+use crate::texture::TextureBuilderData;
 
 mod asset;
 mod environment;
@@ -27,9 +28,10 @@ mod texture;
 /// The engine is also responsible to manage the resources shared between [Scene]s.
 pub struct Engine {
     device: wgpu::Device,
+    queue: wgpu::Queue,
     geometry_manager: GeometryManager,
     mesh_manager: MeshManager,
-    resources: Resources,
+    texture_builder_data: TextureBuilderData,
 }
 
 impl Engine {

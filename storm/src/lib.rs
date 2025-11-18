@@ -1,22 +1,18 @@
 use std::collections::HashMap;
-use std::fmt::{Debug, Display};
-use std::hash::Hash;
-use std::marker::PhantomData;
 
-pub use asset::open_gltf;
 pub use environment::Environment;
 pub use math::Transform;
-pub use scene::{Node, NodeBuilder, NodeHandle, NodeId, Scene, SceneBuilder};
+pub use scene::{Scene, SceneBuilder};
 pub use scene::{camera, skin};
 use storage::SparseSet;
-use uuid::Uuid;
+
+pub use asset::geometry;
 
 use crate::asset::geometry::GeometryManager;
 use crate::asset::mesh::MeshManager;
 
 mod asset;
 mod environment;
-pub mod geometry;
 mod gltf;
 pub mod material;
 pub mod math;
@@ -25,84 +21,11 @@ mod scene;
 mod storage;
 mod texture;
 
-/// A unique identifier for an instance of `T`.
-pub struct Id<T> {
-    uuid: Uuid,
-    target: PhantomData<T>,
-}
-
-impl<T> Id<T> {
-    /// An unique UUID for this id.
-    /// This method will always return the same value for a given instance.
-    pub fn uuid(&self) -> Uuid {
-        self.uuid
-    }
-}
-
-impl<T> Clone for Id<T> {
-    fn clone(&self) -> Self {
-        Self {
-            uuid: self.uuid,
-            target: PhantomData,
-        }
-    }
-}
-
-impl<T> Copy for Id<T> {}
-
-impl<T> Debug for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.uuid)
-    }
-}
-
-impl<T> Default for Id<T> {
-    fn default() -> Self {
-        Self {
-            uuid: Uuid::default(),
-            target: PhantomData,
-        }
-    }
-}
-
-impl<T> Display for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.uuid)
-    }
-}
-
-impl<T> Hash for Id<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.uuid.hash(state);
-    }
-}
-
-impl<T> PartialOrd for Id<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.uuid.partial_cmp(&other.uuid)
-    }
-}
-
-impl<T> Ord for Id<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.uuid.cmp(&other.uuid)
-    }
-}
-
-impl<T> PartialEq for Id<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.uuid.eq(&other.uuid)
-    }
-}
-
-impl<T> Eq for Id<T> {}
-
 /// This is the entry point of the crate.
 /// To get started, create a new [Engine] using [EngineBuilder].
 /// Once created, an engine can be used to create a [Scene].
 /// The engine is also responsible to manage the resources shared between [Scene]s.
 pub struct Engine {
-    _scenes: HashMap<Id<Scene>, Scene>,
     device: wgpu::Device,
     geometry_manager: GeometryManager,
     mesh_manager: MeshManager,

@@ -13,6 +13,10 @@ use wgpu::util::DeviceExt;
 
 use crate::Engine;
 
+pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
+
+mod sphere;
+
 /// A unique id for a geometry. A geometry has one and only one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeometryId(Uuid);

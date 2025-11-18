@@ -77,10 +77,9 @@ impl MeshPrimitive {
         todo!()
     }
 
-    /// Returns the geometry bind group. [`Self::render_pipeline`] expects this bind group
-    /// at index 1.
-    pub fn geomery_bind_group(&self) -> &wgpu::BindGroup {
-        self.geometry.bind_group()
+    /// Returns the geometry vertex buffer.
+    pub fn geomery_vertex_buffer(&self) -> &wgpu::Buffer {
+        self.geometry.vertex_buffer()
     }
 
     /// Returns the material bind group. [`Self::render_pipeline`] expects this bind group

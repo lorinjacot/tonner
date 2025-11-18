@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-pub use environment::Environment;
 pub use math::Transform;
 pub use scene::{Scene, SceneBuilder};
 pub use scene::{camera, skin};
@@ -8,12 +7,16 @@ use storage::SparseSet;
 
 pub use asset::geometry;
 
+use crate::asset::environment::EnvironmentManager;
 use crate::asset::geometry::GeometryManager;
 use crate::asset::mesh::MeshManager;
 use crate::texture::TextureBuilderData;
 
-mod asset;
-mod environment;
+mod asset {
+    pub mod environment;
+    pub mod geometry;
+    pub mod mesh;
+}
 mod gltf;
 pub mod material;
 pub mod math;
@@ -32,6 +35,7 @@ pub struct Engine {
     geometry_manager: GeometryManager,
     mesh_manager: MeshManager,
     texture_builder_data: TextureBuilderData,
+    environment_manager: EnvironmentManager,
 }
 
 impl Engine {

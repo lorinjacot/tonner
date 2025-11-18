@@ -5,22 +5,25 @@ pub use scene::{Scene, SceneBuilder};
 pub use scene::{camera, skin};
 use storage::SparseSet;
 
+pub use asset::environment;
 pub use asset::geometry;
+pub use asset::material;
+pub use asset::mesh;
 
 use crate::asset::environment::EnvironmentManager;
 use crate::asset::geometry::GeometryManager;
+use crate::asset::material::MaterialManager;
 use crate::asset::mesh::MeshManager;
 use crate::texture::TextureBuilderData;
 
 mod asset {
     pub mod environment;
     pub mod geometry;
+    pub mod material;
     pub mod mesh;
 }
 mod gltf;
-pub mod material;
 pub mod math;
-pub mod mesh;
 mod scene;
 mod storage;
 mod texture;
@@ -33,6 +36,7 @@ pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
     geometry_manager: GeometryManager,
+    material_manager: MaterialManager,
     mesh_manager: MeshManager,
     texture_builder_data: TextureBuilderData,
     environment_manager: EnvironmentManager,

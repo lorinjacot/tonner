@@ -9,9 +9,9 @@ use wgpu::util::DeviceExt;
 
 use crate::Engine;
 
-pub struct Texture {
-    pub view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler,
+struct Texture {
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
 }
 
 /// A unique id for [`Material`]. A `Material` has one and only one id.

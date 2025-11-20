@@ -80,6 +80,21 @@ struct Attribute {
     weights_0: vec4<f32>,
 }
 
+struct MaterialUniform {
+    base_color_factor: vec4<f32>,
+    base_color_tex_coord: u32,
+    metallic_factor: f32,
+    roughness_factor: f32,
+    metallic_roughness_tex_coord: u32,
+    normal_scale: f32,
+    normal_tex_coord: u32,
+    occlusion_strength: f32,
+    occlusion_tex_coord: u32,
+    emissive_factor: vec3<f32>,
+    emissive_tex_coord: u32,
+    alpha_cutoff: f32,
+}
+
 struct GeometryStorage {
     vertex_count: u32,
     target_count: u32,
@@ -87,6 +102,17 @@ struct GeometryStorage {
 }
 
 @group(1) @binding(0) var<storage, read> geometry: GeometryStorage;
+@group(1) @binding(1) var<uniform> material_uniform: MaterialUniform;
+@group(1) @binding(2) var base_color_texture: texture_2d<f32>;
+@group(1) @binding(3) var base_color_sampler: sampler;
+@group(1) @binding(4) var metallic_roughness_texture: texture_2d<f32>;
+@group(1) @binding(5) var metallic_roughness_sampler: sampler;
+@group(1) @binding(6) var normal_texture: texture_2d<f32>;
+@group(1) @binding(7) var normal_sampler: sampler;
+@group(1) @binding(8) var occlusion_texture: texture_2d<f32>;
+@group(1) @binding(9) var occlusion_sampler: sampler;
+@group(1) @binding(10) var emissive_texture: texture_2d<f32>;
+@group(1) @binding(11) var emissive_sampler: sampler;
 
 @vertex
 fn vs_main(
@@ -173,33 +199,6 @@ struct FragmentOutput {
     @location(2) revealage: f32,
 }
 
-struct MaterialUniform {
-    base_color_factor: vec4<f32>,
-    base_color_tex_coord: u32,
-    metallic_factor: f32,
-    roughness_factor: f32,
-    metallic_roughness_tex_coord: u32,
-    normal_scale: f32,
-    normal_tex_coord: u32,
-    occlusion_strength: f32,
-    occlusion_tex_coord: u32,
-    emissive_factor: vec3<f32>,
-    emissive_tex_coord: u32,
-    alpha_cutoff: f32,
-}
-
-@group(2) @binding(0) var base_color_texture: texture_2d<f32>;
-@group(2) @binding(1) var base_color_sampler: sampler;
-@group(2) @binding(2) var metallic_roughness_texture: texture_2d<f32>;
-@group(2) @binding(3) var metallic_roughness_sampler: sampler;
-@group(2) @binding(4) var normal_texture: texture_2d<f32>;
-@group(2) @binding(5) var normal_sampler: sampler;
-@group(2) @binding(6) var occlusion_texture: texture_2d<f32>;
-@group(2) @binding(7) var occlusion_sampler: sampler;
-@group(2) @binding(8) var emissive_texture: texture_2d<f32>;
-@group(2) @binding(9) var emissive_sampler: sampler;
-@group(2) @binding(10) var<uniform> material: MaterialUniform;
-
 @fragment
 fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> FragmentOutput {
     var tex_coords: array<vec2<f32>, 2>;
@@ -210,7 +209,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
         tex_coords[1] = vertex.tex_coord_1;
     }
 
-    var base_color = material.base_color_factor;
+    var base_color = material_uniform.base_color_factor;
     if contains(attribute_flags, color_0_flag) {
         base_color *= vertex.color_0;
     }
@@ -218,7 +217,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
         base_color *= textureSample(
             base_color_texture,
             base_color_sampler,
-            tex_coords[material.base_color_tex_coord],
+            tex_coords[material_uniform.base_color_tex_coord],
         );
     }
 
@@ -228,7 +227,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
         alpha = 1.0;
     } else if alpha_mode == 1 {
         // MASK
-        if base_color.a >= material.alpha_cutoff {
+        if base_color.a >= material_uniform.alpha_cutoff {
             alpha = 1.0;
         } else {
             discard;
@@ -238,12 +237,12 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
         alpha = base_color.a;
     }
 
-    var emissive = material.emissive_factor;
+    var emissive = material_uniform.emissive_factor;
     if has_emissive_texture {
         emissive *= textureSample(
             emissive_texture,
             emissive_sampler,
-            tex_coords[material.emissive_tex_coord],
+            tex_coords[material_uniform.emissive_tex_coord],
         ).rgb;
     }
 
@@ -251,13 +250,13 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
     if contains(attribute_flags, normal_flag) {
         let albedo = base_color.rgb;
 
-        var metallic = material.metallic_factor;
-        var roughness = material.roughness_factor;
+        var metallic = material_uniform.metallic_factor;
+        var roughness = material_uniform.roughness_factor;
         if has_metallic_roughness_texture {
             let metallic_roughness = textureSample(
                 metallic_roughness_texture,
                 metallic_roughness_sampler,
-                tex_coords[material.metallic_roughness_tex_coord],
+                tex_coords[material_uniform.metallic_roughness_tex_coord],
             );
             roughness *= metallic_roughness.g;
             metallic *= metallic_roughness.b;
@@ -268,9 +267,9 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
             ambiance_occlusion = textureSample(
                 occlusion_texture,
                 occlusion_sampler,
-                tex_coords[material.occlusion_tex_coord],
+                tex_coords[material_uniform.occlusion_tex_coord],
             ).r;
-            ambiance_occlusion = 1.0 + material.occlusion_strength * (ambiance_occlusion - 1.0);
+            ambiance_occlusion = 1.0 + material_uniform.occlusion_strength * (ambiance_occlusion - 1.0);
         }
 
         var normal = normalize(vertex.world_normal);
@@ -281,7 +280,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
             normal = textureSample(
                 normal_texture,
                 normal_sampler,
-                tex_coords[material.normal_tex_coord],
+                tex_coords[material_uniform.normal_tex_coord],
             ).rgb;
             normal = normal * 2.0 - 1.0;
             normal = normalize(tbn * normal);

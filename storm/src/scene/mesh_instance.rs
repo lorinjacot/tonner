@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::repeat};
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -6,8 +6,9 @@ use uuid::Uuid;
 use crate::{
     Scene,
     asset::mesh::{Mesh, MeshPrimitive},
-    geometry::Indices,
+    geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
     scene::node::NodeId,
+    skin::SkinId,
 };
 
 /// A unique id for a mesh attached to a node. A mesh instance will always have the same id.
@@ -20,6 +21,7 @@ pub struct MeshInstanceBuilder {
     mesh: Mesh,
     node: NodeId,
     weights: Option<Vec<f32>>,
+    skin: Option<SkinId>,
 }
 
 impl MeshInstanceBuilder {
@@ -30,6 +32,7 @@ impl MeshInstanceBuilder {
             mesh,
             node,
             weights: None,
+            skin: None,
         }
     }
 
@@ -37,6 +40,14 @@ impl MeshInstanceBuilder {
     pub fn weights(self, weights: impl Into<Vec<f32>>) -> Self {
         Self {
             weights: Some(weights.into()),
+            ..self
+        }
+    }
+
+    /// Enables skinning on the mesh. `skin` will be used for the skeleton.
+    pub fn skin(self, skin: SkinId) -> Self {
+        Self {
+            skin: Some(skin),
             ..self
         }
     }
@@ -51,6 +62,11 @@ impl MeshInstanceBuilder {
             Some(weights) => {
                 if weights.len() == morph_target_count {
                     weights
+                        .into_iter()
+                        .take(MAX_MORPH_TARGET_COUNT)
+                        .chain(repeat(0.0))
+                        .try_into()
+                        .unwrap()
                 } else {
                     return Err(MeshInstanceBuilderError::InvalidWeightsCount {
                         expected: morph_target_count,
@@ -66,6 +82,7 @@ impl MeshInstanceBuilder {
             node: self.node,
             mesh: self.mesh,
             weights,
+            skin: self.skin,
         };
 
         let manager = &mut scene.mesh_instance_manager;
@@ -126,7 +143,7 @@ impl MeshInstanceManager {
                 render_pass.set_bind_group(2, primitive.material_bind_group(), &[]);
                 let instances = 0..instances.nodes_indices.len() as u32;
                 match primitive.indices() {
-                    Some(Indices {
+                    Some(GeometryIndices {
                         buffer,
                         format,
                         count,
@@ -147,7 +164,8 @@ struct MeshInstanceData {
     id: MeshInstanceId,
     node: NodeId,
     mesh: Mesh,
-    weights: Vec<f32>,
+    weights: [f32; MAX_MORPH_TARGET_COUNT],
+    skin: Option<SkinId>,
 }
 
 struct PrimitiveInstances {

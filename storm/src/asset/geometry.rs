@@ -17,6 +17,8 @@ pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
 
 mod sphere;
 
+pub const MAX_MORPH_TARGET_COUNT: usize = 8;
+
 /// A unique id for a geometry. A geometry has one and only one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeometryId(Uuid);
@@ -277,6 +279,9 @@ impl GeometryBuilder {
     }
 
     pub fn build(mut self, engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
+        if self.morph_target_count > MAX_MORPH_TARGET_COUNT {
+            return Err(GeometryBuilderError::TooManyMorphTarget);
+        }
         if !self.attribute_flags.contains(GeometryFlags::POSITION) {
             return Err(GeometryBuilderError::PositionsNotSet);
         }
@@ -474,6 +479,8 @@ pub enum MorphTargetAttributeError {
 
 #[derive(Debug, Error)]
 pub enum GeometryBuilderError {
+    #[error("cannot have more than {MAX_MORPH_TARGET_COUNT} morph targets")]
+    TooManyMorphTarget,
     #[error("position attribute is not set")]
     PositionsNotSet,
 }
@@ -636,6 +643,14 @@ pub struct GeometryIndices {
 
 pub(crate) struct GeometryManager {
     geometries: HashMap<GeometryId, Geometry>,
+}
+
+impl GeometryManager {
+    pub(crate) fn new() -> Self {
+        Self {
+            geometries: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Pod, Zeroable)]

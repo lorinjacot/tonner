@@ -325,7 +325,7 @@ pub(crate) struct MeshManager {
 }
 
 impl MeshManager {
-    pub(super) fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 

@@ -69,6 +69,12 @@ struct VertexOutput {
 @group(0) @binding(8) var brdf_lut_texture: texture_2d<f32>;
 @group(0) @binding(9) var brdf_lut_sampler: sampler;
 
+struct GeometryStorage {
+    vertex_count: u32,
+    target_count: u32,
+    attributes: array<Attribute>,
+}
+
 struct Attribute {
     position: vec3<f32>,
     normal: vec3<f32>,
@@ -93,12 +99,6 @@ struct MaterialUniform {
     emissive_factor: vec3<f32>,
     emissive_tex_coord: u32,
     alpha_cutoff: f32,
-}
-
-struct GeometryStorage {
-    vertex_count: u32,
-    target_count: u32,
-    attributes: array<Attribute>,
 }
 
 @group(1) @binding(0) var<storage, read> geometry: GeometryStorage;

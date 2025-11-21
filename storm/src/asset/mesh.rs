@@ -7,6 +7,7 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
+    Engine,
     geometry::{Geometry, GeometryIndices},
     material::{AlphaMode, Material},
 };
@@ -61,6 +62,137 @@ struct MeshData {
 
     /// User-provided name.
     name: Mutex<String>,
+
+    primitives: Vec<MeshPrimitive>,
+}
+
+/// A builder for [`Mesh`].
+#[must_use]
+#[derive(Default)]
+pub struct MeshBuilder {
+    name: String,
+    primitives: Vec<(Geometry, Material)>,
+}
+
+impl MeshBuilder {
+    /// Gives a name to the mesh. Used for GUI and debugging.
+    pub fn name(self, name: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..self
+        }
+    }
+
+    /// Add a new [Geometry] [Material] to the mesh. This function must be called at least once.
+    pub fn primitive(
+        mut self,
+        geometry: impl Into<Geometry>,
+        material: impl Into<Material>,
+    ) -> Self {
+        self.primitives.push((geometry.into(), material.into()));
+        self
+    }
+
+    /// Create the mesh.
+    pub fn build(self, engine: &mut Engine) -> Mesh {
+        let primitives = self
+            .primitives
+            .into_iter()
+            .map(|(geometry, material)| {
+                let bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Mesh primitive bind group"),
+                    layout: &engine.mesh_manager.primitive_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: geometry.vertex_buffer().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: material.buffer().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(
+                                material.base_color_texture_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::Sampler(
+                                material.base_color_texture_sampler(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(
+                                material.metallic_roughness_texture_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(
+                                material.metallic_roughness_texture_sampler(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: wgpu::BindingResource::TextureView(
+                                material.normal_texture_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: wgpu::BindingResource::Sampler(
+                                material.normal_texture_sampler(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: wgpu::BindingResource::TextureView(
+                                material.occlusion_texture_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: wgpu::BindingResource::Sampler(
+                                material.occlusion_texture_sampler(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 10,
+                            resource: wgpu::BindingResource::TextureView(
+                                material.emissive_texture_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 11,
+                            resource: wgpu::BindingResource::Sampler(
+                                material.emissive_texture_sampler(),
+                            ),
+                        },
+                    ],
+                });
+
+                MeshPrimitive {
+                    geometry,
+                    material,
+                    bind_group,
+                }
+            })
+            .collect();
+
+        let id = MeshId(Uuid::new_v4());
+        let data = MeshData {
+            id,
+            name: Mutex::new(self.name),
+            primitives,
+        };
+        let mesh = Mesh(Arc::new(data));
+        engine.mesh_manager.meshes.insert(id, mesh.clone());
+
+        mesh
+    }
 }
 
 /// A primitive is a [`Geometry`], [`Material`] pair. A [`Mesh`] is described as a list of primitives.
@@ -79,13 +211,53 @@ impl MeshPrimitive {
         todo!()
     }
 
-    /// Returns the geometry vertex buffer.
-    pub fn geomery_vertex_buffer(&self) -> &wgpu::Buffer {
-        self.geometry.vertex_buffer()
-    }
-
-    /// Returns the primitive bind group. [`Self::render_pipeline`] expects this bind group
-    /// at index 1.
+    /// Returns the primitive bind group:
+    /// ```wgsl
+    /// @group(1) @binding(0) var<storage, read> geometry: GeometryStorage;
+    /// @group(1) @binding(1) var<uniform> material_uniform: MaterialUniform;
+    /// @group(1) @binding(2) var base_color_texture: texture_2d<f32>;
+    /// @group(1) @binding(3) var base_color_sampler: sampler;
+    /// @group(1) @binding(4) var metallic_roughness_texture: texture_2d<f32>;
+    /// @group(1) @binding(5) var metallic_roughness_sampler: sampler;
+    /// @group(1) @binding(6) var normal_texture: texture_2d<f32>;
+    /// @group(1) @binding(7) var normal_sampler: sampler;
+    /// @group(1) @binding(8) var occlusion_texture: texture_2d<f32>;
+    /// @group(1) @binding(9) var occlusion_sampler: sampler;
+    /// @group(1) @binding(10) var emissive_texture: texture_2d<f32>;
+    /// @group(1) @binding(11) var emissive_sampler: sampler;
+    ///
+    /// struct GeometryStorage {
+    ///     vertex_count: u32,
+    ///     target_count: u32,
+    ///     attributes: array<Attribute>,
+    /// }
+    ///
+    /// struct Attribute {
+    ///     position: vec3<f32>,
+    ///     normal: vec3<f32>,
+    ///     tangent: vec4<f32>,
+    ///     tex_coord_0: vec2<f32>,
+    ///     tex_coord_1: vec2<f32>,
+    ///     color_0: vec4<f32>,
+    ///     joints_0: vec4<u32>,
+    ///     weights_0: vec4<f32>,
+    /// }
+    ///
+    /// struct MaterialUniform {
+    ///     base_color_factor: vec4<f32>,
+    ///     base_color_tex_coord: u32,
+    ///     metallic_factor: f32,
+    ///     roughness_factor: f32,
+    ///     metallic_roughness_tex_coord: u32,
+    ///     normal_scale: f32,
+    ///     normal_tex_coord: u32,
+    ///     occlusion_strength: f32,
+    ///     occlusion_tex_coord: u32,
+    ///     emissive_factor: vec3<f32>,
+    ///     emissive_tex_coord: u32,
+    ///     alpha_cutoff: f32,
+    /// }
+    /// ```
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }

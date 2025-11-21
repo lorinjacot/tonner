@@ -555,6 +555,25 @@ impl Geometry {
         todo!()
     }
 
+    /// A Buffer containing all vertices:
+    /// ```wgsl
+    /// struct GeometryStorage {
+    ///     vertex_count: u32,
+    ///     target_count: u32,
+    ///     attributes: array<Attribute>,
+    /// }
+    ///
+    /// struct Attribute {
+    ///     position: vec3<f32>,
+    ///     normal: vec3<f32>,
+    ///     tangent: vec4<f32>,
+    ///     tex_coord_0: vec2<f32>,
+    ///     tex_coord_1: vec2<f32>,
+    ///     color_0: vec4<f32>,
+    ///     joints_0: vec4<u32>,
+    ///     weights_0: vec4<f32>,
+    /// }
+    /// ```
     pub fn vertex_buffer(&self) -> &wgpu::Buffer {
         &self.0.vertex_buffer
     }

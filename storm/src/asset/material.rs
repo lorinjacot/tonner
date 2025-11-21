@@ -27,7 +27,7 @@ struct MaterialData {
     alpha_mode: AlphaMode,
     double_sided: bool,
     textures_flags: TextureFlags,
-    uniform_buffer: wgpu::Buffer,
+    buffer: wgpu::Buffer,
     normal_tex_coord: Option<u32>,
     base_color_texture: Texture,
     metallic_roughness_texture: Texture,
@@ -37,8 +37,37 @@ struct MaterialData {
 }
 
 impl Material {
+    /// Buffer containing the material data:
+    /// ```wgsl
+    /// struct MaterialUniform {
+    ///     base_color_factor: vec4<f32>,
+    ///     base_color_tex_coord: u32,
+    ///     metallic_factor: f32,
+    ///     roughness_factor: f32,
+    ///     metallic_roughness_tex_coord: u32,
+    ///     normal_scale: f32,
+    ///     normal_tex_coord: u32,
+    ///     occlusion_strength: f32,
+    ///     occlusion_tex_coord: u32,
+    ///     emissive_factor: vec3<f32>,
+    ///     emissive_tex_coord: u32,
+    ///     alpha_cutoff: f32,
+    /// }
+    /// ```
+    pub fn buffer(&self) -> &wgpu::Buffer {
+        &self.0.buffer
+    }
+
     pub fn has_base_color_texture(&self) -> bool {
         self.0.textures_flags.contains(TextureFlags::BASE_COLOR)
+    }
+
+    pub fn base_color_texture_view(&self) -> &wgpu::TextureView {
+        &self.0.base_color_texture.view
+    }
+
+    pub fn base_color_texture_sampler(&self) -> &wgpu::Sampler {
+        &self.0.base_color_texture.sampler
     }
 
     pub fn has_metallic_roughness_texture(&self) -> bool {
@@ -47,20 +76,52 @@ impl Material {
             .contains(TextureFlags::METALLIC_ROUGHNESS)
     }
 
-    pub fn has_occlusion_texture(&self) -> bool {
-        self.0.textures_flags.contains(TextureFlags::OCCLUSION)
+    pub fn metallic_roughness_texture_view(&self) -> &wgpu::TextureView {
+        &self.0.metallic_roughness_texture.view
     }
 
-    pub fn has_emissive_texture(&self) -> bool {
-        self.0.textures_flags.contains(TextureFlags::EMISSIVE)
+    pub fn metallic_roughness_texture_sampler(&self) -> &wgpu::Sampler {
+        &self.0.metallic_roughness_texture.sampler
     }
 
     pub fn has_normal_texture(&self) -> bool {
         self.0.textures_flags.contains(TextureFlags::NORMAL)
     }
 
+    pub fn normal_texture_view(&self) -> &wgpu::TextureView {
+        &self.0.normal_texture.view
+    }
+
+    pub fn normal_texture_sampler(&self) -> &wgpu::Sampler {
+        &self.0.normal_texture.sampler
+    }
+
     pub fn normal_tex_coord(&self) -> Option<u32> {
         self.0.normal_tex_coord
+    }
+
+    pub fn has_occlusion_texture(&self) -> bool {
+        self.0.textures_flags.contains(TextureFlags::OCCLUSION)
+    }
+
+    pub fn occlusion_texture_view(&self) -> &wgpu::TextureView {
+        &self.0.occlusion_texture.view
+    }
+
+    pub fn occlusion_texture_sampler(&self) -> &wgpu::Sampler {
+        &self.0.occlusion_texture.sampler
+    }
+
+    pub fn has_emissive_texture(&self) -> bool {
+        self.0.textures_flags.contains(TextureFlags::EMISSIVE)
+    }
+
+    pub fn emissive_texture_view(&self) -> &wgpu::TextureView {
+        &self.0.emissive_texture.view
+    }
+
+    pub fn emissive_texture_sampler(&self) -> &wgpu::Sampler {
+        &self.0.emissive_texture.sampler
     }
 
     pub fn alpha_mode(&self) -> AlphaMode {
@@ -290,10 +351,10 @@ impl MaterialBuilder {
     }
 
     pub fn build(self, engine: &mut Engine) -> Material {
-        let uniform_buffer = engine
+        let buffer = engine
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Material uniform buffer"),
+                label: Some("Material buffer"),
                 contents: cast_slice(&[self.uniform]),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
@@ -360,7 +421,7 @@ impl MaterialBuilder {
             alpha_mode: self.alpha_mode,
             double_sided: self.double_sided,
             textures_flags: self.textures_flags,
-            uniform_buffer,
+            buffer,
             normal_tex_coord,
             base_color_texture,
             metallic_roughness_texture,

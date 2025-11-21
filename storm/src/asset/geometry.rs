@@ -28,7 +28,7 @@ pub struct GeometryBuilder {
     vertex_count: usize,
     morph_target_count: usize,
     attributes: Vec<Attribute>,
-    attribute_flags: AttributeFlags,
+    attribute_flags: GeometryFlags,
     indices: Option<Indices>,
     normal_tex_coord: Option<u32>,
     topology: wgpu::PrimitiveTopology,
@@ -44,7 +44,7 @@ impl GeometryBuilder {
             vertex_count,
             morph_target_count,
             attributes,
-            attribute_flags: AttributeFlags::empty(),
+            attribute_flags: GeometryFlags::empty(),
             indices: None,
             normal_tex_coord: None,
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -101,7 +101,7 @@ impl GeometryBuilder {
         mut self,
         positions: impl IntoIterator<Item = Vec3>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::POSITION);
+        self.attribute_flags.insert(GeometryFlags::POSITION);
         self.update_attributes(|attr, pos| attr.position = pos, positions, 0)
     }
 
@@ -110,7 +110,7 @@ impl GeometryBuilder {
         mut self,
         normals: impl IntoIterator<Item = Vec3>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::NORMAL);
+        self.attribute_flags.insert(GeometryFlags::NORMAL);
         self.update_attributes(|attr, normal| attr.normal = normal, normals, 0)
     }
 
@@ -119,7 +119,7 @@ impl GeometryBuilder {
         mut self,
         tangents: impl IntoIterator<Item = Vec4>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::TANGENT);
+        self.attribute_flags.insert(GeometryFlags::TANGENT);
         self.update_attributes(|attr, tangent| attr.tangent = tangent, tangents, 0)
     }
 
@@ -128,7 +128,7 @@ impl GeometryBuilder {
         mut self,
         tex_coords_0: impl IntoIterator<Item = Vec2>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::TEX_COORD_0);
+        self.attribute_flags.insert(GeometryFlags::TEX_COORD_0);
         self.update_attributes(|attr, tc| attr.tex_coord_0 = tc, tex_coords_0, 0)
     }
 
@@ -137,7 +137,7 @@ impl GeometryBuilder {
         mut self,
         tex_coords_1: impl IntoIterator<Item = Vec2>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::TEX_COORD_1);
+        self.attribute_flags.insert(GeometryFlags::TEX_COORD_1);
         self.update_attributes(|attr, tc| attr.tex_coord_1 = tc, tex_coords_1, 0)
     }
 
@@ -146,7 +146,7 @@ impl GeometryBuilder {
         mut self,
         colors_0: impl IntoIterator<Item = Vec4>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::COLOR_0);
+        self.attribute_flags.insert(GeometryFlags::COLOR_0);
         self.update_attributes(|attr, color| attr.color_0 = color, colors_0, 0)
     }
 
@@ -155,7 +155,7 @@ impl GeometryBuilder {
         mut self,
         joints_0: impl IntoIterator<Item = UVec4>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::JOINTS_0);
+        self.attribute_flags.insert(GeometryFlags::JOINTS_0);
         self.update_attributes(|attr, joints| attr.joints_0 = joints, joints_0, 0)
     }
 
@@ -164,7 +164,7 @@ impl GeometryBuilder {
         mut self,
         weights_0: impl IntoIterator<Item = Vec4>,
     ) -> Result<Self, InvalidAttributeIterLenError> {
-        self.attribute_flags.insert(AttributeFlags::WEIGHTS_0);
+        self.attribute_flags.insert(GeometryFlags::WEIGHTS_0);
         self.update_attributes(|attr, weights| attr.weights_0 = weights, weights_0, 0)
     }
 
@@ -277,7 +277,7 @@ impl GeometryBuilder {
     }
 
     pub fn build(mut self, engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
-        if !self.attribute_flags.contains(AttributeFlags::POSITION) {
+        if !self.attribute_flags.contains(GeometryFlags::POSITION) {
             return Err(GeometryBuilderError::PositionsNotSet);
         }
 
@@ -289,15 +289,15 @@ impl GeometryBuilder {
                 false
             }
             _ => {
-                let generate = !self.attribute_flags.contains(AttributeFlags::NORMAL);
-                self.attribute_flags.insert(AttributeFlags::NORMAL);
+                let generate = !self.attribute_flags.contains(GeometryFlags::NORMAL);
+                self.attribute_flags.insert(GeometryFlags::NORMAL);
                 generate
             }
         };
         if generate_normals {
             // ignore provided tangents
-            self.attribute_flags.remove(AttributeFlags::TANGENT);
-        } else if self.attribute_flags.contains(AttributeFlags::TANGENT) {
+            self.attribute_flags.remove(GeometryFlags::TANGENT);
+        } else if self.attribute_flags.contains(GeometryFlags::TANGENT) {
             // use provided tangents.
             self.normal_tex_coord = None;
         }
@@ -364,7 +364,7 @@ impl GeometryBuilder {
                     };
                     mikktspace::generate_tangents(&mut mikk_tspace);
                 }
-                self.attribute_flags.insert(AttributeFlags::TANGENT);
+                self.attribute_flags.insert(GeometryFlags::TANGENT);
             }
         }
 
@@ -427,6 +427,7 @@ impl GeometryBuilder {
             vertex_buffer,
             indices,
             vertex_count: self.vertex_count,
+            topology: self.topology,
         };
         let geometry = Geometry(Arc::new(data));
 
@@ -549,6 +550,16 @@ impl Geometry {
         })
     }
 
+    pub(super) fn flags() -> GeometryFlags {
+        todo!()
+    }
+
+    /// Returns `true` if and only if the geometry has tangent attribute. This must be `true` if normal
+    /// mapping is needed.
+    pub fn has_tangent(&self) -> bool {
+        todo!()
+    }
+
     /// Returns the number of morph target. A morph target is used to deform the geometry based on some
     /// scalar coefficients, called `weights`.
     pub fn morph_target_count(&self) -> usize {
@@ -589,6 +600,12 @@ impl Geometry {
     pub fn vertex_count(&self) -> usize {
         self.0.vertex_count
     }
+
+    /// Topology (point, line, triangle etc). Dictates how to go from
+    /// the list of vertices to an actual 3D object.
+    pub fn topology(&self) -> wgpu::PrimitiveTopology {
+        self.0.topology
+    }
 }
 
 struct GeometryData {
@@ -601,6 +618,7 @@ struct GeometryData {
     vertex_buffer: wgpu::Buffer,
     indices: Option<GeometryIndices>,
     vertex_count: usize,
+    topology: wgpu::PrimitiveTopology,
 }
 
 /// Holds geometry indices data.
@@ -661,7 +679,7 @@ impl Attribute {
 
 bitflags! {
     #[derive(Debug, Clone, Copy)]
-    pub struct AttributeFlags: u8 {
+    pub(super) struct GeometryFlags: u8 {
         const POSITION    = 1 << 0;
         const NORMAL      = 1 << 1;
         const TANGENT     = 1 << 2;

@@ -4,12 +4,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
     Engine,
-    geometry::{Geometry, GeometryIndices},
-    material::{AlphaMode, Material},
+    environment::PREFILTER_MAP_MIP_COUNT,
+    geometry::{Geometry, GeometryFlags, GeometryIndices},
+    material::{AlphaMode, Material, MaterialFlags},
 };
 
 /// A unique id for a [mesh][Mesh]. A mesh will always have the same id.
@@ -94,93 +96,115 @@ impl MeshBuilder {
     }
 
     /// Create the mesh.
-    pub fn build(self, engine: &mut Engine) -> Mesh {
-        let primitives = self
+    pub fn build(self, engine: &mut Engine) -> Result<Mesh, MeshBuilderError> {
+        let mut primitives = Vec::with_capacity(self.primitives.len());
+        let morph_target_count = self
             .primitives
-            .into_iter()
-            .map(|(geometry, material)| {
-                let bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Mesh primitive bind group"),
-                    layout: &engine.mesh_manager.primitive_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: geometry.vertex_buffer().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: material.buffer().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(
-                                material.base_color_texture_view(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: wgpu::BindingResource::Sampler(
-                                material.base_color_texture_sampler(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: wgpu::BindingResource::TextureView(
-                                material.metallic_roughness_texture_view(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: wgpu::BindingResource::Sampler(
-                                material.metallic_roughness_texture_sampler(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: wgpu::BindingResource::TextureView(
-                                material.normal_texture_view(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 7,
-                            resource: wgpu::BindingResource::Sampler(
-                                material.normal_texture_sampler(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 8,
-                            resource: wgpu::BindingResource::TextureView(
-                                material.occlusion_texture_view(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 9,
-                            resource: wgpu::BindingResource::Sampler(
-                                material.occlusion_texture_sampler(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 10,
-                            resource: wgpu::BindingResource::TextureView(
-                                material.emissive_texture_view(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 11,
-                            resource: wgpu::BindingResource::Sampler(
-                                material.emissive_texture_sampler(),
-                            ),
-                        },
-                    ],
-                });
+            .first()
+            .ok_or(MeshBuilderError::NoPrimitive)?
+            .0
+            .morph_target_count();
+        for (geometry, material) in self.primitives {
+            if morph_target_count != geometry.morph_target_count() {
+                return Err(MeshBuilderError::InvalidMorphTargetCount);
+            }
+            if material.has_normal_texture() && !geometry.has_tangent() {
+                return Err(MeshBuilderError::NormalTextureWithoutTangent);
+            }
 
-                MeshPrimitive {
-                    geometry,
-                    material,
-                    bind_group,
-                }
-            })
-            .collect();
+            let parameters = PrimitivePipelineParameters {
+                geometry_flags: geometry.flags(),
+                topology: geometry.topology(),
+                material_flags: material.flags(),
+                alpha_mode: material.alpha_mode(),
+                double_sided: material.double_sided(),
+            };
+
+            let render_pipelines = engine
+                .mesh_manager
+                .get_or_create_render_pipeline(parameters, &engine.device)
+                .clone();
+
+            let bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Mesh primitive bind group"),
+                layout: &engine.mesh_manager.primitive_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: geometry.vertex_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: material.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(
+                            material.base_color_texture_view(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(
+                            material.base_color_texture_sampler(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(
+                            material.metallic_roughness_texture_view(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Sampler(
+                            material.metallic_roughness_texture_sampler(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(
+                            material.normal_texture_view(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Sampler(material.normal_texture_sampler()),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::TextureView(
+                            material.occlusion_texture_view(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: wgpu::BindingResource::Sampler(
+                            material.occlusion_texture_sampler(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: wgpu::BindingResource::TextureView(
+                            material.emissive_texture_view(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: wgpu::BindingResource::Sampler(
+                            material.emissive_texture_sampler(),
+                        ),
+                    },
+                ],
+            });
+
+            primitives.push(MeshPrimitive {
+                geometry,
+                material,
+                render_pipelines,
+                bind_group,
+            });
+        }
 
         let id = MeshId(Uuid::new_v4());
         let data = MeshData {
@@ -191,14 +215,26 @@ impl MeshBuilder {
         let mesh = Mesh(Arc::new(data));
         engine.mesh_manager.meshes.insert(id, mesh.clone());
 
-        mesh
+        Ok(mesh)
     }
+}
+
+/// Error when [`MeshBuilder::build`] fails.
+#[derive(Debug, Error)]
+pub enum MeshBuilderError {
+    #[error("cannot create a mesh with no primitive")]
+    NoPrimitive,
+    #[error("primitive geometries with different morph target count")]
+    InvalidMorphTargetCount,
+    #[error("cannot use a material containing a normal texture with a geometry without tangents")]
+    NormalTextureWithoutTangent,
 }
 
 /// A primitive is a [`Geometry`], [`Material`] pair. A [`Mesh`] is described as a list of primitives.
 pub struct MeshPrimitive {
     geometry: Geometry,
     material: Material,
+    render_pipelines: [wgpu::RenderPipeline; 2],
     bind_group: wgpu::BindGroup,
 }
 
@@ -207,8 +243,8 @@ impl MeshPrimitive {
     /// and the second one is for negative determinant.
     ///
     /// TODO: add expected buffer & bind groups & render attachments.
-    pub fn render_pipeline(&self) -> (&wgpu::RenderPipeline, &wgpu::RenderPipeline) {
-        todo!()
+    pub fn render_pipelines(&self) -> &[wgpu::RenderPipeline; 2] {
+        &self.render_pipeline
     }
 
     /// Returns the primitive bind group:
@@ -283,11 +319,16 @@ impl MeshPrimitive {
 /// A container for all [meshes][Mesh]. This type is used to create, query and delete meshes.
 pub(crate) struct MeshManager {
     meshes: HashMap<MeshId, Mesh>,
+    primitive_shader_module: wgpu::ShaderModule,
     primitive_bind_group_layout: wgpu::BindGroupLayout,
+    primitive_pipelines: HashMap<PrimitivePipelineParameters, wgpu::RenderPipeline>,
 }
 
 impl MeshManager {
     pub(super) fn new(device: &wgpu::Device) -> Self {
+        let primitive_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
+
         let primitive_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Primitive bind group layout"),
@@ -409,7 +450,145 @@ impl MeshManager {
 
         Self {
             meshes: HashMap::new(),
+            primitive_shader_module,
             primitive_bind_group_layout,
+            primitive_pipelines: HashMap::new(),
         }
     }
+
+    const ACCUMULATION_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    };
+    const REVEALAGE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::OneMinusSrc,
+        operation: wgpu::BlendOperation::Add,
+    };
+
+    fn get_or_create_render_pipeline(
+        &mut self,
+        parameters: PrimitivePipelineParameters,
+        device: &wgpu::Device,
+    ) -> &wgpu::RenderPipeline {
+        self.primitive_pipelines
+            .entry(parameters)
+            .or_insert_with(|| {
+                let module = &self.primitive_shader_module;
+
+                let constants = &[
+                    ("geometry_flags", parameters.geometry_flags.bits() as f64),
+                    ("geometry_flags", parameters.material_flags.bits() as f64),
+                    ("alpha_mode", parameters.alpha_mode as u32 as f64),
+                    (
+                        "max_prefilter_map_mip",
+                        (PREFILTER_MAP_MIP_COUNT - 1) as f64,
+                    ),
+                ];
+
+                let cull_mode = if parameters.double_sided {
+                    None
+                } else {
+                    Some(wgpu::Face::Back)
+                };
+
+                let (targets, depth_write_enabled) = match parameters.alpha_mode {
+                    AlphaMode::Opaque | AlphaMode::Mask => (
+                        &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
+                        true,
+                    ),
+                    AlphaMode::Blend => (
+                        &[
+                            None,
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(wgpu::BlendState {
+                                    color: Self::ACCUMULATION_BLEND,
+                                    alpha: Self::ACCUMULATION_BLEND,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R8Unorm,
+                                blend: Some(wgpu::BlendState {
+                                    color: Self::REVEALAGE_BLEND,
+                                    alpha: Self::REVEALAGE_BLEND,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
+                        false,
+                    ),
+                };
+
+                let mut desc = wgpu::RenderPipelineDescriptor {
+                    label: Some("Primitive (normal) render pass"),
+                    layout: Some(self.primitive_bind_group_layout),
+                    vertex: wgpu::VertexState {
+                        module,
+                        entry_point: Some("vs_main"),
+                        compilation_options: wgpu::PipelineCompilationOptions {
+                            constants,
+                            zero_initialize_workgroup_memory: true,
+                        },
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: 4,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &wgpu::vertex_attr_array![0 => Uint32],
+                        }],
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: parameters.topology,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode,
+                        unclipped_depth: false,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth24Plus,
+                        depth_write_enabled,
+                        depth_compare: wgpu::CompareFunction::Less,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState {
+                        count: 1,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module,
+                        entry_point: Some("fs_main"),
+                        compilation_options: wgpu::PipelineCompilationOptions {
+                            constants,
+                            zero_initialize_workgroup_memory: true,
+                        },
+                        targets,
+                    }),
+                    multiview: None,
+                    cache: None,
+                };
+
+                let normal = device.create_render_pipeline(&desc);
+
+                desc.primitive.front_face = wgpu::FrontFace::Cw;
+                let mirrored = device.create_render_pipeline(&desc);
+
+                [normal, mirrored]
+            })
+    }
+}
+
+const PRIMITIVE_OVERRIDE_COUNT: usize = 8;
+
+#[derive(PartialEq, Eq, Hash)]
+struct PrimitivePipelineParameters {
+    geometry_flags: GeometryFlags,
+    topology: wgpu::PrimitiveTopology,
+    material_flags: MaterialFlags,
+    alpha_mode: AlphaMode,
+    double_sided: bool,
 }

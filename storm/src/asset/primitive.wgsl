@@ -1,11 +1,5 @@
-override attribute_flags: u32;
-
-override has_base_color_texture: bool;
-override has_metallic_roughness_texture: bool;
-override has_normal_texture: bool;
-override has_occlusion_texture: bool;
-override has_emissive_texture: bool;
-
+override geometry_flags: u32;
+override material_flags: u32;
 override alpha_mode: u32;
 
 override max_prefilter_map_mip: f32;
@@ -13,14 +7,20 @@ override max_prefilter_map_mip: f32;
 const pi = 3.14159265359;
 const max_weight_count = 8;
 
-const position_flag: u32    = 1 << 0;
-const normal_flag: u32      = 1 << 1;
-const tangent_flag: u32     = 1 << 2;
-const tex_coord_0_flag: u32 = 1 << 3;
-const tex_coord_1_flag: u32 = 1 << 4;
-const color_0_flag: u32     = 1 << 5;
-const joints_0_flag: u32    = 1 << 6;
-const weights_0_flag: u32   = 1 << 7;
+const geometry_position_flag: u32    = 1 << 0;
+const geometry_normal_flag: u32      = 1 << 1;
+const geometry_tangent_flag: u32     = 1 << 2;
+const geometry_tex_coord_0_flag: u32 = 1 << 3;
+const geometry_tex_coord_1_flag: u32 = 1 << 4;
+const geometry_color_0_flag: u32     = 1 << 5;
+const geometry_joints_0_flag: u32    = 1 << 6;
+const geometry_weights_0_flag: u32   = 1 << 7;
+
+const material_base_color_texture_flag: u32         = 1 << 0;
+const material_metallic_roughness_texture_flag: u32 = 1 << 1;
+const material_normal_texture_flag: u32             = 1 << 2;
+const material_occlusion_texture_flag: u32          = 1 << 3;
+const material_emissive_texture_flag: u32           = 1 << 4;
 
 struct NodeUniform {
     matrix: mat4x4<f32>,
@@ -127,29 +127,29 @@ fn vs_main(
         let morph_attributes = geometry.attributes[(i + 1) * geometry.vertex_count + vertex_index];
         attributes.position += weight * morph_attributes.position;
 
-        if contains(attribute_flags, normal_flag) {
+        if contains(geometry_flags, geometry_normal_flag) {
             attributes.normal += weight * morph_attributes.normal;
-            if has_normal_texture {
+            if contains(material_flags, material_normal_texture_flag) {
                 attributes.tangent += vec4(weight * morph_attributes.tangent.xyz, 0.0);
             }
         }
 
-        if contains(attribute_flags, tex_coord_0_flag) {
+        if contains(geometry_flags, geometry_tex_coord_0_flag) {
             attributes.tex_coord_0 += weight * morph_attributes.tex_coord_0;
         }
-        if contains(attribute_flags, tex_coord_1_flag) {
+        if contains(geometry_flags, geometry_tex_coord_1_flag) {
             attributes.tex_coord_1 += weight * morph_attributes.tex_coord_1;
         }
-        if contains(attribute_flags, color_0_flag) {
+        if contains(geometry_flags, geometry_color_0_flag) {
             attributes.color_0 += weight * morph_attributes.color_0;
         }
     }
-    if contains(attribute_flags, color_0_flag) {
+    if contains(geometry_flags, geometry_color_0_flag) {
         attributes.color_0 = clamp(attributes.color_0, vec4(0.0), vec4(1.0));
     }
 
     var model_matrix: mat4x4<f32>;
-    if contains(attribute_flags, weights_0_flag | joints_0_flag) && node.joint_offset != 0 {
+    if contains(geometry_flags, geometry_weights_0_flag | geometry_joints_0_flag) && node.joint_offset != 0 {
         model_matrix = 
             attributes.weights_0.x * skins.joint_matrices[node.joint_offset + attributes.joints_0.x] +
             attributes.weights_0.y * skins.joint_matrices[node.joint_offset + attributes.joints_0.y] +
@@ -165,7 +165,7 @@ fn vs_main(
     result.position = camera.view_projection * world_position;
     result.world_position = world_position.xyz;
 
-    if contains(attribute_flags, normal_flag) {
+    if contains(geometry_flags, geometry_normal_flag) {
         let mat_x = model_matrix[0].xyz;
         let mat_y = model_matrix[1].xyz;
         let mat_z = model_matrix[2].xyz;
@@ -176,18 +176,18 @@ fn vs_main(
         );
 
         result.world_normal = normal_matrix * determinant(model_matrix) * attributes.normal;
-        if has_normal_texture {
+        if contains(material_flags, material_normal_texture_flag) {
             result.world_tangent = vec4(normal_matrix * attributes.tangent.xyz, attributes.tangent.w);
         }
     }
     
-    if contains(attribute_flags, tex_coord_0_flag) {
+    if contains(geometry_flags, geometry_tex_coord_0_flag) {
         result.tex_coord_0 = attributes.tex_coord_0;
     }
-    if contains(attribute_flags, tex_coord_1_flag) {
+    if contains(geometry_flags, geometry_tex_coord_1_flag) {
         result.tex_coord_1 = attributes.tex_coord_1;
     }
-    if contains(attribute_flags, color_0_flag) {
+    if contains(geometry_flags, geometry_color_0_flag) {
         result.color_0 = attributes.color_0;
     }
     return result;
@@ -202,18 +202,18 @@ struct FragmentOutput {
 @fragment
 fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> FragmentOutput {
     var tex_coords: array<vec2<f32>, 2>;
-    if contains(attribute_flags, tex_coord_0_flag) {
+    if contains(geometry_flags, geometry_tex_coord_0_flag) {
         tex_coords[0] = vertex.tex_coord_0;
     }
-    if contains(attribute_flags, tex_coord_1_flag) {
+    if contains(geometry_flags, geometry_tex_coord_1_flag) {
         tex_coords[1] = vertex.tex_coord_1;
     }
 
     var base_color = material_uniform.base_color_factor;
-    if contains(attribute_flags, color_0_flag) {
+    if contains(geometry_flags, geometry_color_0_flag) {
         base_color *= vertex.color_0;
     }
-    if has_base_color_texture {
+    if contains(material_flags, material_base_color_texture_flag) {
         base_color *= textureSample(
             base_color_texture,
             base_color_sampler,
@@ -238,7 +238,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
     }
 
     var emissive = material_uniform.emissive_factor;
-    if has_emissive_texture {
+    if contains(material_flags, material_emissive_texture_flag) {
         emissive *= textureSample(
             emissive_texture,
             emissive_sampler,
@@ -247,12 +247,12 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
     }
 
     var color: vec4<f32>;
-    if contains(attribute_flags, normal_flag) {
+    if contains(geometry_flags, geometry_normal_flag) {
         let albedo = base_color.rgb;
 
         var metallic = material_uniform.metallic_factor;
         var roughness = material_uniform.roughness_factor;
-        if has_metallic_roughness_texture {
+        if contains(material_flags, material_metallic_roughness_texture_flag) {
             let metallic_roughness = textureSample(
                 metallic_roughness_texture,
                 metallic_roughness_sampler,
@@ -263,7 +263,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
         }
 
         var ambiance_occlusion = 1.0;
-        if has_occlusion_texture {
+        if contains(material_flags, material_occlusion_texture_flag) {
             ambiance_occlusion = textureSample(
                 occlusion_texture,
                 occlusion_sampler,
@@ -273,7 +273,7 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
         }
 
         var normal = normalize(vertex.world_normal);
-        if has_normal_texture {
+        if contains(material_flags, material_normal_texture_flag) {
             let tangent = normalize(vertex.world_tangent.xyz);
             let bitangent = cross(normal, tangent) * vertex.world_tangent.w;
             let tbn = mat3x3(tangent, bitangent, normal);

@@ -26,7 +26,7 @@ struct MaterialData {
     name: Mutex<String>,
     alpha_mode: AlphaMode,
     double_sided: bool,
-    textures_flags: TextureFlags,
+    flags: MaterialFlags,
     buffer: wgpu::Buffer,
     normal_tex_coord: Option<u32>,
     base_color_texture: Texture,
@@ -54,88 +54,74 @@ impl Material {
     ///     alpha_cutoff: f32,
     /// }
     /// ```
-    pub fn buffer(&self) -> &wgpu::Buffer {
+    pub(super) fn buffer(&self) -> &wgpu::Buffer {
         &self.0.buffer
     }
 
-    pub fn has_base_color_texture(&self) -> bool {
-        self.0.textures_flags.contains(TextureFlags::BASE_COLOR)
+    pub(super) fn flags(&self) -> MaterialFlags {
+        self.0.flags
     }
 
-    pub fn base_color_texture_view(&self) -> &wgpu::TextureView {
+    pub(super) fn base_color_texture_view(&self) -> &wgpu::TextureView {
         &self.0.base_color_texture.view
     }
 
-    pub fn base_color_texture_sampler(&self) -> &wgpu::Sampler {
+    pub(super) fn base_color_texture_sampler(&self) -> &wgpu::Sampler {
         &self.0.base_color_texture.sampler
     }
 
-    pub fn has_metallic_roughness_texture(&self) -> bool {
-        self.0
-            .textures_flags
-            .contains(TextureFlags::METALLIC_ROUGHNESS)
-    }
-
-    pub fn metallic_roughness_texture_view(&self) -> &wgpu::TextureView {
+    pub(super) fn metallic_roughness_texture_view(&self) -> &wgpu::TextureView {
         &self.0.metallic_roughness_texture.view
     }
 
-    pub fn metallic_roughness_texture_sampler(&self) -> &wgpu::Sampler {
+    pub(super) fn metallic_roughness_texture_sampler(&self) -> &wgpu::Sampler {
         &self.0.metallic_roughness_texture.sampler
     }
 
-    pub fn has_normal_texture(&self) -> bool {
-        self.0.textures_flags.contains(TextureFlags::NORMAL)
+    pub(super) fn has_normal_texture(&self) -> bool {
+        self.0.flags.contains(MaterialFlags::NORMAL)
     }
 
-    pub fn normal_texture_view(&self) -> &wgpu::TextureView {
+    pub(super) fn normal_texture_view(&self) -> &wgpu::TextureView {
         &self.0.normal_texture.view
     }
 
-    pub fn normal_texture_sampler(&self) -> &wgpu::Sampler {
+    pub(super) fn normal_texture_sampler(&self) -> &wgpu::Sampler {
         &self.0.normal_texture.sampler
     }
 
-    pub fn normal_tex_coord(&self) -> Option<u32> {
+    pub(super) fn normal_tex_coord(&self) -> Option<u32> {
         self.0.normal_tex_coord
     }
 
-    pub fn has_occlusion_texture(&self) -> bool {
-        self.0.textures_flags.contains(TextureFlags::OCCLUSION)
-    }
-
-    pub fn occlusion_texture_view(&self) -> &wgpu::TextureView {
+    pub(super) fn occlusion_texture_view(&self) -> &wgpu::TextureView {
         &self.0.occlusion_texture.view
     }
 
-    pub fn occlusion_texture_sampler(&self) -> &wgpu::Sampler {
+    pub(super) fn occlusion_texture_sampler(&self) -> &wgpu::Sampler {
         &self.0.occlusion_texture.sampler
     }
 
-    pub fn has_emissive_texture(&self) -> bool {
-        self.0.textures_flags.contains(TextureFlags::EMISSIVE)
-    }
-
-    pub fn emissive_texture_view(&self) -> &wgpu::TextureView {
+    pub(super) fn emissive_texture_view(&self) -> &wgpu::TextureView {
         &self.0.emissive_texture.view
     }
 
-    pub fn emissive_texture_sampler(&self) -> &wgpu::Sampler {
+    pub(super) fn emissive_texture_sampler(&self) -> &wgpu::Sampler {
         &self.0.emissive_texture.sampler
     }
 
-    pub fn alpha_mode(&self) -> AlphaMode {
+    pub(super) fn alpha_mode(&self) -> AlphaMode {
         self.0.alpha_mode
     }
 
-    pub fn double_sided(&self) -> bool {
+    pub(super) fn double_sided(&self) -> bool {
         self.0.double_sided
     }
 }
 
 bitflags! {
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    struct TextureFlags: u8 {
+    pub(super) struct MaterialFlags: u8 {
         const BASE_COLOR = 1 << 0;
         const METALLIC_ROUGHNESS = 1 << 1;
         const NORMAL = 1 << 2;
@@ -151,7 +137,7 @@ pub struct MaterialBuilder {
     alpha_mode: AlphaMode,
     double_sided: bool,
     uniform: MaterialUniform,
-    textures_flags: TextureFlags,
+    flags: MaterialFlags,
     base_color_texture: Option<wgpu::TextureView>,
     base_color_sampler: Option<wgpu::Sampler>,
     metallic_roughness_texture: Option<wgpu::TextureView>,
@@ -171,7 +157,7 @@ impl Default for MaterialBuilder {
             alpha_mode: AlphaMode::Opaque,
             double_sided: false,
             uniform: MaterialUniform::default(),
-            textures_flags: TextureFlags::empty(),
+            flags: MaterialFlags::empty(),
             base_color_texture: None,
             base_color_sampler: None,
             metallic_roughness_texture: None,
@@ -202,7 +188,7 @@ impl MaterialBuilder {
     /// Sample the base color from the texture. Default to uniform base color.
     pub fn base_color_texture(mut self, texture: impl Into<wgpu::TextureView>) -> Self {
         self.base_color_texture = Some(texture.into());
-        self.textures_flags.insert(TextureFlags::BASE_COLOR);
+        self.flags.insert(MaterialFlags::BASE_COLOR);
         self
     }
 
@@ -234,7 +220,7 @@ impl MaterialBuilder {
     /// Sample the metallic and roughness factors from the texture. Default to uniform factors.
     pub fn metallic_roughness_texture(mut self, texture: impl Into<wgpu::TextureView>) -> Self {
         self.metallic_roughness_texture = Some(texture.into());
-        self.textures_flags.insert(TextureFlags::METALLIC_ROUGHNESS);
+        self.flags.insert(MaterialFlags::METALLIC_ROUGHNESS);
         self
     }
 
@@ -261,7 +247,7 @@ impl MaterialBuilder {
     /// Sample the normals from the texture. Default to normal interpolated from geometry vertices.
     pub fn normal_texture(mut self, texture: impl Into<wgpu::TextureView>) -> Self {
         self.normal_texture = Some(texture.into());
-        self.textures_flags.insert(TextureFlags::NORMAL);
+        self.flags.insert(MaterialFlags::NORMAL);
         self
     }
 
@@ -288,7 +274,7 @@ impl MaterialBuilder {
     /// Sample the ambiance occlusion factor from the texture. Default to no ambiance occlusion.
     pub fn occlusion_texture(mut self, texture: impl Into<wgpu::TextureView>) -> Self {
         self.occlusion_texture = Some(texture.into());
-        self.textures_flags.insert(TextureFlags::OCCLUSION);
+        self.flags.insert(MaterialFlags::OCCLUSION);
         self
     }
 
@@ -314,7 +300,7 @@ impl MaterialBuilder {
     /// Sample the emissive color from the texture. Default to uniform emissive factor.
     pub fn emissive_texture(mut self, texture: impl Into<wgpu::TextureView>) -> Self {
         self.emissive_texture = Some(texture.into());
-        self.textures_flags.insert(TextureFlags::EMISSIVE);
+        self.flags.insert(MaterialFlags::EMISSIVE);
         self
     }
 
@@ -420,7 +406,7 @@ impl MaterialBuilder {
             name: Mutex::new(self.name),
             alpha_mode: self.alpha_mode,
             double_sided: self.double_sided,
-            textures_flags: self.textures_flags,
+            flags: self.flags,
             buffer,
             normal_tex_coord,
             base_color_texture,

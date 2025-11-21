@@ -1,7 +1,3 @@
-pub use math::Transform;
-pub use scene::{Scene, SceneBuilder};
-pub use scene::{camera, skin};
-
 pub use asset::{environment, geometry, material, mesh};
 
 use environment::EnvironmentManager;
@@ -18,7 +14,7 @@ mod asset {
 }
 // mod gltf;
 pub mod math;
-mod scene;
+// mod scene;
 mod texture;
 
 /// This is the entry point of the crate.

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 
 use bytemuck::{bytes_of, cast_slice};
@@ -76,8 +77,25 @@ pub struct EnvironmentId(Uuid);
 pub struct Environment(Arc<EnvironmentData>);
 
 impl Environment {
+    /// Returns the mesh id. The id will never change.
     pub fn id(&self) -> EnvironmentId {
         self.0.id
+    }
+
+    /// User-provided name.
+    ///
+    /// This method will block the current thread until it is able to acquire the name.
+    /// When the returned value goes out of scope, the name is released, allowing other
+    /// threads to aquire it.
+    ///
+    /// # Panics
+    /// This function might panic when called if the name is already acquired by the current thread.
+    pub fn name(&self) -> impl DerefMut<Target = String> {
+        self.0.name.lock().unwrap_or_else(|err| {
+            let mut inner = err.into_inner();
+            *inner = String::new();
+            inner
+        })
     }
 
     pub fn skybox_bind_group(&self) -> &wgpu::BindGroup {

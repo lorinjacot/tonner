@@ -541,6 +541,11 @@ impl<'a> mikktspace::Geometry for MikkTSpace<'a> {
 pub struct Geometry(Arc<GeometryData>);
 
 impl Geometry {
+    /// Returns the mesh id. The id will never change.
+    pub fn id(&self) -> GeometryId {
+        self.0.id
+    }
+
     /// User-provided name.
     ///
     /// This method will block the current thread until it is able to acquire the name.
@@ -557,7 +562,7 @@ impl Geometry {
         })
     }
 
-    pub(super) fn flags() -> GeometryFlags {
+    pub(super) fn flags(&self) -> GeometryFlags {
         todo!()
     }
 
@@ -693,7 +698,7 @@ impl Attribute {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub(super) struct GeometryFlags: u8 {
         const POSITION    = 1 << 0;
         const NORMAL      = 1 << 1;

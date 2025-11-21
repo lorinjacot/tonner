@@ -53,7 +53,7 @@ impl Mesh {
     /// The primitives that are part of this mesh. A primitive is a [`Geometry`] and [`Material`] pair and
     /// describe the shape and material (part) of the mesh.
     pub fn primitives(&self) -> &[MeshPrimitive] {
-        todo!()
+        &self.0.primitives
     }
 }
 
@@ -80,7 +80,7 @@ impl MeshBuilder {
     /// Gives a name to the mesh. Used for GUI and debugging.
     pub fn name(self, name: impl Into<String>) -> Self {
         Self {
-            name: Some(name.into()),
+            name: name.into(),
             ..self
         }
     }
@@ -244,7 +244,7 @@ impl MeshPrimitive {
     ///
     /// TODO: add expected buffer & bind groups & render attachments.
     pub fn render_pipelines(&self) -> &[wgpu::RenderPipeline; 2] {
-        &self.render_pipeline
+        &self.render_pipelines
     }
 
     /// Returns the primitive bind group:
@@ -300,7 +300,7 @@ impl MeshPrimitive {
 
     /// Describe how to interpret the `alpha` channel of the rendered primitive.
     pub fn alpha_mode(&self) -> AlphaMode {
-        todo!()
+        self.material.alpha_mode()
     }
 
     /// Return indices data if the primitive has some. Indices are a way to use the same
@@ -320,8 +320,9 @@ impl MeshPrimitive {
 pub(crate) struct MeshManager {
     meshes: HashMap<MeshId, Mesh>,
     primitive_shader_module: wgpu::ShaderModule,
+    primitive_pipeline_layout: wgpu::PipelineLayout,
     primitive_bind_group_layout: wgpu::BindGroupLayout,
-    primitive_pipelines: HashMap<PrimitivePipelineParameters, wgpu::RenderPipeline>,
+    primitive_pipelines: HashMap<PrimitivePipelineParameters, [wgpu::RenderPipeline; 2]>,
 }
 
 impl MeshManager {
@@ -448,9 +449,17 @@ impl MeshManager {
                 ],
             });
 
+        let primitive_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Primitive render pipeline layout"),
+                bind_group_layouts: &[&primitive_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
         Self {
             meshes: HashMap::new(),
             primitive_shader_module,
+            primitive_pipeline_layout,
             primitive_bind_group_layout,
             primitive_pipelines: HashMap::new(),
         }
@@ -471,9 +480,9 @@ impl MeshManager {
         &mut self,
         parameters: PrimitivePipelineParameters,
         device: &wgpu::Device,
-    ) -> &wgpu::RenderPipeline {
+    ) -> &[wgpu::RenderPipeline; 2] {
         self.primitive_pipelines
-            .entry(parameters)
+            .entry(parameters.clone())
             .or_insert_with(|| {
                 let module = &self.primitive_shader_module;
 
@@ -524,7 +533,7 @@ impl MeshManager {
 
                 let mut desc = wgpu::RenderPipelineDescriptor {
                     label: Some("Primitive (normal) render pass"),
-                    layout: Some(self.primitive_bind_group_layout),
+                    layout: Some(&self.primitive_pipeline_layout),
                     vertex: wgpu::VertexState {
                         module,
                         entry_point: Some("vs_main"),
@@ -582,9 +591,7 @@ impl MeshManager {
     }
 }
 
-const PRIMITIVE_OVERRIDE_COUNT: usize = 8;
-
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct PrimitivePipelineParameters {
     geometry_flags: GeometryFlags,
     topology: wgpu::PrimitiveTopology,

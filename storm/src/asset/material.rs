@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::Mutex};
 
@@ -28,7 +29,6 @@ struct MaterialData {
     double_sided: bool,
     flags: MaterialFlags,
     buffer: wgpu::Buffer,
-    normal_tex_coord: Option<u32>,
     base_color_texture: Texture,
     metallic_roughness_texture: Texture,
     occlusion_texture: Texture,
@@ -37,6 +37,27 @@ struct MaterialData {
 }
 
 impl Material {
+    /// Returns the mesh id. The id will never change.
+    pub fn id(&self) -> MaterialId {
+        self.0.id
+    }
+
+    /// User-provided name.
+    ///
+    /// This method will block the current thread until it is able to acquire the name.
+    /// When the returned value goes out of scope, the name is released, allowing other
+    /// threads to aquire it.
+    ///
+    /// # Panics
+    /// This function might panic when called if the name is already acquired by the current thread.
+    pub fn name(&self) -> impl DerefMut<Target = String> {
+        self.0.name.lock().unwrap_or_else(|err| {
+            let mut inner = err.into_inner();
+            *inner = String::new();
+            inner
+        })
+    }
+
     /// Buffer containing the material data:
     /// ```wgsl
     /// struct MaterialUniform {
@@ -88,10 +109,6 @@ impl Material {
 
     pub(super) fn normal_texture_sampler(&self) -> &wgpu::Sampler {
         &self.0.normal_texture.sampler
-    }
-
-    pub(super) fn normal_tex_coord(&self) -> Option<u32> {
-        self.0.normal_tex_coord
     }
 
     pub(super) fn occlusion_texture_view(&self) -> &wgpu::TextureView {
@@ -345,12 +362,6 @@ impl MaterialBuilder {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        let normal_tex_coord = if self.normal_texture.is_some() {
-            Some(self.uniform.normal_tex_coord)
-        } else {
-            None
-        };
-
         let manager = &mut engine.material_manager;
         let default_texture = &manager.dummy_texture;
         let default_sampler = &manager.default_sampler;
@@ -408,7 +419,6 @@ impl MaterialBuilder {
             double_sided: self.double_sided,
             flags: self.flags,
             buffer,
-            normal_tex_coord,
             base_color_texture,
             metallic_roughness_texture,
             normal_texture,

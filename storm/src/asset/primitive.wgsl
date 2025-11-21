@@ -117,13 +117,26 @@ struct MaterialUniform {
 @vertex
 fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
-    @location(0) node_index: u32,
+    @location(0) weights_0: vec4<f32>,
+    @location(1) weights_1: vec4<f32>,
+    @location(2) joint_offset: u32,
+    @location(3) node_index: u32,
 ) -> VertexOutput {
     let node = nodes[node_index];
 
+    var weights = array(
+        weights_0.x,
+        weights_0.y,
+        weights_0.z,
+        weights_0.w,
+        weights_1.x,
+        weights_1.y,
+        weights_1.z,
+        weights_1.w,
+    );
     var attributes = geometry.attributes[vertex_index];
     for (var i = 0u; i < geometry.target_count; i++) {
-        let weight = node.weights[i];
+        let weight = weights[i];
         let morph_attributes = geometry.attributes[(i + 1) * geometry.vertex_count + vertex_index];
         attributes.position += weight * morph_attributes.position;
 
@@ -149,12 +162,12 @@ fn vs_main(
     }
 
     var model_matrix: mat4x4<f32>;
-    if contains(geometry_flags, geometry_weights_0_flag | geometry_joints_0_flag) && node.joint_offset != 0 {
+    if contains(geometry_flags, geometry_weights_0_flag | geometry_joints_0_flag) && joint_offset != 0 {
         model_matrix = 
-            attributes.weights_0.x * skins.joint_matrices[node.joint_offset + attributes.joints_0.x] +
-            attributes.weights_0.y * skins.joint_matrices[node.joint_offset + attributes.joints_0.y] +
-            attributes.weights_0.z * skins.joint_matrices[node.joint_offset + attributes.joints_0.z] +
-            attributes.weights_0.w * skins.joint_matrices[node.joint_offset + attributes.joints_0.w];
+            attributes.weights_0.x * skins.joint_matrices[joint_offset + attributes.joints_0.x] +
+            attributes.weights_0.y * skins.joint_matrices[joint_offset + attributes.joints_0.y] +
+            attributes.weights_0.z * skins.joint_matrices[joint_offset + attributes.joints_0.z] +
+            attributes.weights_0.w * skins.joint_matrices[joint_offset + attributes.joints_0.w];
     } else {
         model_matrix = node.matrix;
     }
@@ -201,13 +214,10 @@ struct FragmentOutput {
 
 @fragment
 fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> FragmentOutput {
-    var tex_coords: array<vec2<f32>, 2>;
-    if contains(geometry_flags, geometry_tex_coord_0_flag) {
-        tex_coords[0] = vertex.tex_coord_0;
-    }
-    if contains(geometry_flags, geometry_tex_coord_1_flag) {
-        tex_coords[1] = vertex.tex_coord_1;
-    }
+    var tex_coords = array(
+        vertex.tex_coord_0,
+        vertex.tex_coord_1,
+    );
 
     var base_color = material_uniform.base_color_factor;
     if contains(geometry_flags, geometry_color_0_flag) {

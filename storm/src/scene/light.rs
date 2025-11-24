@@ -6,12 +6,9 @@ use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
-use crate::{
-    Scene,
-    scene::{
-        NodeManager,
-        node::{NodeBuilder, NodeId},
-    },
+use crate::scene::{
+    NodeManager, Scene,
+    node::{NodeBuilder, NodeId},
 };
 
 /// A unique id for a point light. A point light has one and only one id.

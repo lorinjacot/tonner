@@ -4,7 +4,7 @@ use glam::Mat4;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{Scene, scene::node::NodeId};
+use crate::scene::{Scene, node::NodeId};
 
 /// A unique id for a camera. A camera can only have one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

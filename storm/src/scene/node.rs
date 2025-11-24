@@ -6,7 +6,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
-use crate::Scene;
+use crate::scene::Scene;
 
 /// A unique id for a node. A node can only have one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -1,14 +1,12 @@
-use std::{collections::HashMap, iter::repeat};
+use std::collections::HashMap;
 
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    Scene,
     asset::mesh::{Mesh, MeshPrimitive},
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
-    scene::node::NodeId,
-    skin::SkinId,
+    scene::{Scene, node::NodeId, skin::SkinId},
 };
 
 /// A unique id for a mesh attached to a node. A mesh instance will always have the same id.
@@ -20,7 +18,7 @@ pub struct MeshInstanceId(Uuid);
 pub struct MeshInstanceBuilder {
     mesh: Mesh,
     node: NodeId,
-    weights: Option<Vec<f32>>,
+    weights: Vec<f32>,
     skin: Option<SkinId>,
 }
 
@@ -31,17 +29,15 @@ impl MeshInstanceBuilder {
         Self {
             mesh,
             node,
-            weights: None,
+            weights: Vec::new(),
             skin: None,
         }
     }
 
     /// Sets the morph targets initial weights. `weights` len must match the number of morph target.
-    pub fn weights(self, weights: impl Into<Vec<f32>>) -> Self {
-        Self {
-            weights: Some(weights.into()),
-            ..self
-        }
+    pub fn weights(mut self, weights: impl IntoIterator<Item = f32>) -> Self {
+        self.weights.extend(weights);
+        self
     }
 
     /// Enables skinning on the mesh. `skin` will be used for the skeleton.
@@ -58,24 +54,13 @@ impl MeshInstanceBuilder {
             return Err(MeshInstanceBuilderError::InvalidNode(self.node));
         }
         let morph_target_count = self.mesh.morph_target_count();
-        let weights = match self.weights {
-            Some(weights) => {
-                if weights.len() == morph_target_count {
-                    weights
-                        .into_iter()
-                        .take(MAX_MORPH_TARGET_COUNT)
-                        .chain(repeat(0.0))
-                        .try_into()
-                        .unwrap()
-                } else {
-                    return Err(MeshInstanceBuilderError::InvalidWeightsCount {
-                        expected: morph_target_count,
-                        actual: weights.len(),
-                    });
-                }
-            }
-            None => vec![0.0; morph_target_count],
-        };
+        if self.weights.len() != morph_target_count {
+            return Err(MeshInstanceBuilderError::InvalidWeightsCount {
+                expected: morph_target_count,
+                actual: self.weights.len(),
+            });
+        }
+        let weights = std::array::from_fn(|i| self.weights.get(i).copied().unwrap_or(0.0));
         let id = MeshInstanceId(Uuid::new_v4());
         let data = MeshInstanceData {
             id,
@@ -139,8 +124,7 @@ impl MeshInstanceManager {
 
             for (primitive, instances) in primitives {
                 render_pass.set_vertex_buffer(0, instances.nodes_indices_buffer.slice(..));
-                render_pass.set_bind_group(1, primitive.geomery_bind_group(), &[]);
-                render_pass.set_bind_group(2, primitive.material_bind_group(), &[]);
+                render_pass.set_bind_group(1, primitive.bind_group(), &[]);
                 let instances = 0..instances.nodes_indices.len() as u32;
                 match primitive.indices() {
                     Some(GeometryIndices {

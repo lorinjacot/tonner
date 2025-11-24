@@ -14,7 +14,7 @@ mod asset {
 }
 // mod gltf;
 pub mod math;
-// mod scene;
+mod scene;
 mod texture;
 
 /// This is the entry point of the crate.

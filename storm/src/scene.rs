@@ -6,6 +6,7 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 use crate::{
+    Engine,
     environment::Environment,
     scene::{
         animation::AnimationManager,
@@ -23,8 +24,6 @@ mod light;
 mod mesh_instance;
 mod node;
 pub mod skin;
-
-const NODE_INDEX_SIZE: usize = size_of::<u32>();
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered
 /// to a screen or a texture.
@@ -49,11 +48,10 @@ pub struct Scene {
     light_manager: LightManager,
     environment: Environment,
     render_bind_group_layout: wgpu::BindGroupLayout,
-    skybox_bind_group: Option<wgpu::BindGroup>,
+    skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
-    tone_mapping_pipeline: wgpu::RenderPipeline,
     bloom_amount: usize,
 }
 
@@ -272,11 +270,67 @@ impl Scene {
             occlusion_query_set: None,
         });
 
-        tone_mapping_render_pass.set_pipeline(&self.tone_mapping_pipeline);
+        tone_mapping_render_pass.set_pipeline(&target.tone_mapping_pipeline);
         tone_mapping_render_pass.set_bind_group(0, &target.tone_mapping_bind_group, &[]);
         tone_mapping_render_pass.draw(0..3, 0..1);
 
         Ok(())
+    }
+}
+
+/// A builder for [Scene].
+#[must_use]
+#[derive(Default)]
+pub struct SceneBuilder {
+    name: String,
+}
+
+impl SceneBuilder {
+    pub fn name(self, name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..self
+        }
+    }
+
+    pub fn build(self, engine: &mut Engine) -> Scene {
+        let device = engine.device.clone();
+        let queue = engine.queue.clone();
+
+        let node_manager = NodeManager::new(&device);
+        let skin_manager = SkinManager::new(&device);
+        let camera_manager = CameraManager::new();
+        let mesh_instance_manager = MeshInstanceManager::new(&device);
+        let animation_manager = AnimationManager::new();
+        let light_manager = LightManager::new(&device);
+
+        let environment = engine.environment_manager.default();
+
+        let render_bind_group_layout = engine.render_bind_group_layout.clone();
+        let skybox_bind_group_layout = engine.skybox_bind_group_layout.clone();
+
+        let skybox_pipeline = engine.skybox_pipeline.clone();
+        let brightness_pipeline = engine.brightness_pipeline.clone();
+        let gaussian_blur_pipeline = engine.gaussian_blur_pipeline.clone();
+
+        Scene {
+            name: self.name,
+            device,
+            queue,
+            node_manager,
+            skin_manager,
+            camera_manager,
+            mesh_instance_manager,
+            animation_manager,
+            light_manager,
+            environment,
+            render_bind_group_layout,
+            skybox_bind_group_layout,
+            skybox_pipeline,
+            brightness_pipeline,
+            gaussian_blur_pipeline,
+            bloom_amount: 10,
+        }
     }
 }
 
@@ -290,6 +344,7 @@ pub struct RenderTarget {
     brightness_bind_group: wgpu::BindGroup,
     bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
     tone_mapping_bind_group: wgpu::BindGroup,
+    tone_mapping_pipeline: wgpu::RenderPipeline,
 }
 
 #[derive(Clone, Copy, Pod, Zeroable)]

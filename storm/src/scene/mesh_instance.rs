@@ -93,6 +93,10 @@ pub(super) struct MeshInstanceManager {
 }
 
 impl MeshInstanceManager {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
+        todo!()
+    }
+
     /// Render all opaque primitives using the provided render pass. The render pass must have a 3 colors attachments:
     /// - `vec4<f32>`-compatible;
     /// - not used;

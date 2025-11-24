@@ -294,7 +294,7 @@ impl EnvironmentBuilder {
         let environment_map_bind_group =
             engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Environment map bind group"),
-                layout: &engine.environment_manager.skybox_bind_group_layout,
+                layout: &engine.skybox_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -489,7 +489,6 @@ pub(crate) struct EnvironmentManager {
     environments: HashMap<EnvironmentId, Environment>,
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
-    skybox_bind_group_layout: wgpu::BindGroupLayout,
     radiance_sampler: wgpu::Sampler,
     brdf_lut_view: wgpu::TextureView,
     brdf_lut_sampler: wgpu::Sampler,
@@ -503,7 +502,7 @@ pub(crate) struct EnvironmentManager {
 }
 
 impl EnvironmentManager {
-    pub fn new(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> Self {
+    pub fn new(skybox_bind_group_layout: &wgpu::BindGroupLayout, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> Self {
         let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Environment builder cube vertex buffer"),
             contents: cast_slice(CUBE_VERTICES),
@@ -524,29 +523,6 @@ impl EnvironmentManager {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-
-        let skybox_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Skybox bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::Cube,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
 
         let radiance_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -916,7 +892,6 @@ impl EnvironmentManager {
             environments: HashMap::new(),
             cube_vertex_buffer,
             cube_index_buffer,
-            skybox_bind_group_layout,
             radiance_sampler,
             brdf_lut_view,
             brdf_lut_sampler,
@@ -928,5 +903,9 @@ impl EnvironmentManager {
             irradiance_pipeline,
             prefilter_pipeline,
         }
+    }
+
+    pub fn default(&self) -> Environment {
+        todo!()
     }
 }

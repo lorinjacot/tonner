@@ -4,7 +4,10 @@ use glam::Mat4;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::scene::{Scene, node::NodeId};
+use crate::{
+    node::NodeBuilder,
+    scene::{Scene, node::NodeId},
+};
 
 /// A unique id for a camera. A camera can only have one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,7 +23,7 @@ impl Display for CameraId {
 #[must_use]
 #[derive(Default)]
 pub struct CameraBuilder {
-    name: Option<String>,
+    name: String,
     node: Option<NodeId>,
     projection: Option<Projection>,
 }
@@ -29,7 +32,7 @@ impl CameraBuilder {
     /// Gives a name to the camera. The name is only used for UI and debugging.
     pub fn name(self, name: impl Into<String>) -> Self {
         Self {
-            name: Some(name.into()),
+            name: name.into(),
             ..self
         }
     }
@@ -63,8 +66,28 @@ impl CameraBuilder {
     }
 
     /// Build the camera.
-    pub fn build(self, _scene: &mut Scene) -> CameraId {
-        todo!()
+    pub fn build(self, scene: &mut Scene) -> CameraId {
+        let node = self.node.unwrap_or_else(|| {
+            NodeBuilder::default()
+                .name(&self.name)
+                .build(scene)
+                .unwrap()
+        });
+
+        let projection = self
+            .projection
+            .unwrap_or_else(|| Projection::Perspective(PerspectiveProjection::default()));
+
+        let id = CameraId(Uuid::new_v4());
+        let data = CameraData {
+            id,
+            name: self.name,
+            node,
+            projection,
+        };
+        scene.camera_manager.cameras.insert(id, data);
+
+        id
     }
 }
 

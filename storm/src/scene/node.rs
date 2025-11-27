@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use bytemuck::{Pod, Zeroable, cast_slice};
+use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 use uuid::Uuid;
@@ -101,20 +101,20 @@ pub(super) struct NodeManager {
 
 impl NodeManager {
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let buffer = Self::create_buffer(&[], device);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Node manager buffer"),
+            contents: bytes_of(&NodeStorageHeader {
+                count: 0,
+                _pad: [0; 3],
+            }),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
         Self {
             nodes: HashMap::new(),
             root_nodes: Vec::new(),
             buffer,
         }
-    }
-
-    fn create_buffer(contents: &[u8], device: &wgpu::Device) -> wgpu::Buffer {
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Node manager buffer"),
-            contents,
-            usage: wgpu::BufferUsages::STORAGE,
-        })
     }
 
     /// Index of the node in [`NodeManager::buffer`]. [`None`] if invalid id or if the node
@@ -186,7 +186,7 @@ impl NodeManager {
     /// Update the node buffer with the current state of the nodes.
     pub(super) fn update_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let size = (self.nodes.len() * size_of::<NodeUniform>()) as u64;
-        let uniforms: Vec<_> = self
+        let data: Vec<_> = self
             .nodes
             .values_mut()
             .enumerate()
@@ -195,11 +195,31 @@ impl NodeManager {
                 NodeUniform::from(&*data)
             })
             .collect();
-        let content = cast_slice(&uniforms);
-        if self.buffer.size() < size {
-            self.buffer = Self::create_buffer(content, device);
+
+        let header = NodeStorageHeader {
+            count: self.nodes.len() as u32,
+            _pad: [0; 3],
+        };
+
+        let header_size = size_of::<NodeStorageHeader>();
+        let size = header_size + self.nodes.len() * size_of::<NodeUniform>();
+        let header = bytes_of(&header);
+        let data = cast_slice(&data);
+
+        if self.buffer.size() >= size as u64 {
+            queue.write_buffer(&self.buffer, 0, header);
+            queue.write_buffer(&self.buffer, header_size as u64, data);
         } else {
-            queue.write_buffer(&self.buffer, 0, content);
+            self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Node storage buffer"),
+                size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: true,
+            });
+            let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
+            buffer_view[..header_size].copy_from_slice(header);
+            buffer_view[header_size..size].copy_from_slice(data);
+            self.buffer.unmap();
         }
     }
 }
@@ -213,6 +233,13 @@ struct NodeData {
     children: Vec<NodeId>,
     local_matrix: Mat4,
     global_matrix: Mat4,
+}
+
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct NodeStorageHeader {
+    count: u32,
+    _pad: [u32; 3],
 }
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]

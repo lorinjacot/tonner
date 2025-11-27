@@ -1,4 +1,6 @@
 pub use asset::{environment, geometry, material, mesh};
+pub use scene::{Scene, SceneBuilder};
+pub use scene::{animation, camera, light, mesh_instance, node, skin};
 
 use environment::EnvironmentManager;
 use geometry::GeometryManager;
@@ -14,6 +16,7 @@ mod asset {
 }
 // mod gltf;
 pub mod math;
+pub mod render_target;
 mod scene;
 mod texture;
 
@@ -31,9 +34,29 @@ pub struct Engine {
     environment_manager: EnvironmentManager,
     render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
+    compose_bind_group_layout: wgpu::BindGroupLayout,
+    brightness_bind_group_layout: wgpu::BindGroupLayout,
+    gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
+    tone_mapping_bind_group_layout: wgpu::BindGroupLayout,
+    tone_mapping_shader_module: wgpu::ShaderModule,
+    tone_mapping_pipeline_layout: wgpu::PipelineLayout,
+    bloom_sampler: wgpu::Sampler,
     skybox_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
+}
+
+impl Engine {
+    /// Convenience function to create a command encoder.
+    pub fn encoder(&self, label: Option<&str>) -> wgpu::CommandEncoder {
+        self.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label })
+    }
+
+    /// At the end of the frame, call this function to submit commands.
+    pub fn submit_commands(&self, command_buffer: wgpu::CommandBuffer) {
+        self.queue.submit([command_buffer]);
+    }
 }
 
 /// A builder for [Engine].
@@ -141,9 +164,20 @@ impl<'a> EngineBuilder<'a> {
                         },
                         count: None,
                     },
-                    // camera
+                    // skins
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // camera
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
                         visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
@@ -154,7 +188,7 @@ impl<'a> EngineBuilder<'a> {
                     },
                     // lights
                     wgpu::BindGroupLayoutEntry {
-                        binding: 2,
+                        binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -165,7 +199,7 @@ impl<'a> EngineBuilder<'a> {
                     },
                     // irradiance map
                     wgpu::BindGroupLayoutEntry {
-                        binding: 3,
+                        binding: 4,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -175,14 +209,14 @@ impl<'a> EngineBuilder<'a> {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 4,
+                        binding: 5,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                     // prefilter map
                     wgpu::BindGroupLayoutEntry {
-                        binding: 5,
+                        binding: 6,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -192,14 +226,14 @@ impl<'a> EngineBuilder<'a> {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 6,
+                        binding: 7,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                     // BRDF LUT
                     wgpu::BindGroupLayoutEntry {
-                        binding: 7,
+                        binding: 8,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -209,7 +243,7 @@ impl<'a> EngineBuilder<'a> {
                         count: None,
                     },
                     wgpu::BindGroupLayoutEntry {
-                        binding: 8,
+                        binding: 9,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
@@ -217,7 +251,7 @@ impl<'a> EngineBuilder<'a> {
                 ],
             });
 
-        let module = &device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
+        let skybox_shader_module = device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
         let skybox_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Skybox pipeline layout"),
@@ -228,7 +262,7 @@ impl<'a> EngineBuilder<'a> {
             label: Some("Skybox pipeline"),
             layout: Some(&skybox_pipeline_layout),
             vertex: wgpu::VertexState {
-                module,
+                module: &skybox_shader_module,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[],
@@ -255,7 +289,7 @@ impl<'a> EngineBuilder<'a> {
                 alpha_to_coverage_enabled: false,
             },
             fragment: Some(wgpu::FragmentState {
-                module,
+                module: &skybox_shader_module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[
@@ -266,6 +300,35 @@ impl<'a> EngineBuilder<'a> {
             multiview: None,
             cache: None,
         });
+
+        let compose_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Compose bind group layout"),
+                entries: &[
+                    // accumulation texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // revealage texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
 
         let brightness_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("brightness.wgsl"));
@@ -362,39 +425,6 @@ impl<'a> EngineBuilder<'a> {
                 ],
             });
 
-        let gaussian_blur_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Gaussian blur bind group layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
         let gaussian_blur_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Gaussian blur pipeline layout"),
@@ -402,14 +432,15 @@ impl<'a> EngineBuilder<'a> {
                 push_constant_ranges: &[],
             });
 
-        let module = &device.create_shader_module(wgpu::include_wgsl!("gaussian_blur.wgsl"));
+        let gaussian_blur_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("gaussian_blur.wgsl"));
 
         let gaussian_blur_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Gaussian blur pipeline"),
                 layout: Some(&gaussian_blur_pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module,
+                    module: &gaussian_blur_shader_module,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[],
@@ -430,7 +461,7 @@ impl<'a> EngineBuilder<'a> {
                     alpha_to_coverage_enabled: false,
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module,
+                    module: &gaussian_blur_shader_module,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
@@ -447,6 +478,9 @@ impl<'a> EngineBuilder<'a> {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
+
+        let tone_mapping_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("tone_mapping.wgsl"));
 
         let tone_mapping_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -494,8 +528,6 @@ impl<'a> EngineBuilder<'a> {
                 push_constant_ranges: &[],
             });
 
-        let module = &device.create_shader_module(wgpu::include_wgsl!("tone_mapping.wgsl"));
-
         let engine = Engine {
             device,
             queue,
@@ -506,6 +538,13 @@ impl<'a> EngineBuilder<'a> {
             environment_manager,
             render_bind_group_layout,
             skybox_bind_group_layout,
+            compose_bind_group_layout,
+            brightness_bind_group_layout,
+            gaussian_blur_bind_group_layout,
+            tone_mapping_bind_group_layout,
+            tone_mapping_shader_module,
+            tone_mapping_pipeline_layout,
+            bloom_sampler,
             skybox_pipeline,
             brightness_pipeline,
             gaussian_blur_pipeline,

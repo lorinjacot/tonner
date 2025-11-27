@@ -7,7 +7,8 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Engine,
-    environment::Environment,
+    environment::{Environment, EnvironmentBuilder},
+    render_target::RenderTarget,
     scene::{
         animation::AnimationManager,
         camera::{CameraId, CameraManager},
@@ -20,9 +21,9 @@ use crate::{
 
 pub mod animation;
 pub mod camera;
-mod light;
-mod mesh_instance;
-mod node;
+pub mod light;
+pub mod mesh_instance;
+pub mod node;
 pub mod skin;
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered
@@ -297,14 +298,18 @@ impl SceneBuilder {
         let device = engine.device.clone();
         let queue = engine.queue.clone();
 
+        let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+            label: Some("Engine builder encoder"),
+        });
+
         let node_manager = NodeManager::new(&device);
         let skin_manager = SkinManager::new(&device);
         let camera_manager = CameraManager::new();
-        let mesh_instance_manager = MeshInstanceManager::new(&device);
+        let mesh_instance_manager = MeshInstanceManager::new();
         let animation_manager = AnimationManager::new();
         let light_manager = LightManager::new(&device);
 
-        let environment = engine.environment_manager.default();
+        let environment = EnvironmentBuilder::default().build(engine, &mut encoder);
 
         let render_bind_group_layout = engine.render_bind_group_layout.clone();
         let skybox_bind_group_layout = engine.skybox_bind_group_layout.clone();
@@ -312,6 +317,8 @@ impl SceneBuilder {
         let skybox_pipeline = engine.skybox_pipeline.clone();
         let brightness_pipeline = engine.brightness_pipeline.clone();
         let gaussian_blur_pipeline = engine.gaussian_blur_pipeline.clone();
+
+        queue.submit([encoder.finish()]);
 
         Scene {
             name: self.name,
@@ -334,19 +341,6 @@ impl SceneBuilder {
     }
 }
 
-pub struct RenderTarget {
-    render_texture_view: wgpu::TextureView,
-    opaque_attachment: wgpu::TextureView,
-    accumulation_attachment: wgpu::TextureView,
-    revealage_attachment: wgpu::TextureView,
-    depth_attachment: wgpu::TextureView,
-    compose_bind_group: wgpu::BindGroup,
-    brightness_bind_group: wgpu::BindGroup,
-    bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
-    tone_mapping_bind_group: wgpu::BindGroup,
-    tone_mapping_pipeline: wgpu::RenderPipeline,
-}
-
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct CameraUniform {
@@ -355,13 +349,6 @@ struct CameraUniform {
     projection_inverse: Mat4,
     position: Vec3,
     _pad: u32,
-}
-
-impl RenderTarget {
-    fn aspect_ratio(&self) -> f32 {
-        self.render_texture_view.texture().width() as f32
-            / self.render_texture_view.texture().height() as f32
-    }
 }
 
 #[derive(Debug, Error)]

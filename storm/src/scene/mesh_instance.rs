@@ -93,8 +93,12 @@ pub(super) struct MeshInstanceManager {
 }
 
 impl MeshInstanceManager {
-    pub(super) fn new(device: &wgpu::Device) -> Self {
-        todo!()
+    pub(super) fn new() -> Self {
+        Self {
+            meshes: HashMap::new(),
+            opaque_primitives: PrimitivesByPipeline(HashMap::new()),
+            transparent_primitives: PrimitivesByPipeline(HashMap::new()),
+        }
     }
 
     /// Render all opaque primitives using the provided render pass. The render pass must have a 3 colors attachments:

@@ -22,6 +22,11 @@ const material_normal_texture_flag: u32             = 1 << 2;
 const material_occlusion_texture_flag: u32          = 1 << 3;
 const material_emissive_texture_flag: u32           = 1 << 4;
 
+struct NodeStorage {
+    count: u32,
+    data: array<NodeUniform>,
+}
+
 struct NodeUniform {
     matrix: mat4x4<f32>,
 }
@@ -58,7 +63,7 @@ struct VertexOutput {
     @location(5) color_0: vec4<f32>,
 }
 
-@group(0) @binding(0) var<storage, read> nodes: array<NodeUniform>;
+@group(0) @binding(0) var<storage, read> nodes: NodeStorage;
 @group(0) @binding(1) var<storage, read> skins: SkinStorage;
 @group(0) @binding(2) var<uniform> camera: CameraUniform;
 @group(0) @binding(3) var<storage, read> lights: LightStorage;
@@ -122,7 +127,7 @@ fn vs_main(
     @location(2) joint_offset: u32,
     @location(3) node_index: u32,
 ) -> VertexOutput {
-    let node = nodes[node_index];
+    let node = nodes.data[node_index];
 
     var weights = array(
         weights_0.x,

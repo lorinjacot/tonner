@@ -904,8 +904,4 @@ impl EnvironmentManager {
             prefilter_pipeline,
         }
     }
-
-    pub fn default(&self) -> Environment {
-        todo!()
-    }
 }

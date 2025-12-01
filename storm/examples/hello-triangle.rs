@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
+use glam::{vec3, vec4};
 use pollster::block_on;
 use storm::camera::{CameraBuilder, CameraId};
+use storm::geometry::GeometryBuilder;
+use storm::material::MaterialBuilder;
+use storm::mesh::MeshBuilder;
 use storm::render_target::RenderTargetBuilder;
 use storm::{Engine, EngineBuilder, Scene, SceneBuilder};
 use winit::application::ApplicationHandler;
@@ -58,6 +62,28 @@ impl ApplicationHandler for App {
                 .target_format(wgpu::TextureFormat::Rgba8UnormSrgb)
                 .build(),
         );
+
+        let triangle = GeometryBuilder::new(3, 0)
+            .name("Triangle")
+            .positions([
+                vec3(0.5, 0.5, 0.5),
+                vec3(0.0, -0.5, 0.0),
+                vec3(-0.5, 0.5, 0.5),
+            ])
+            .unwrap()
+            .build(&mut engine)
+            .unwrap();
+
+        let red = MaterialBuilder::default()
+            .name("red")
+            .base_color_factor(vec4(1.0, 0.0, 0.0, 1.0))
+            .build(&mut engine);
+
+        let red_triangle = MeshBuilder::default()
+            .name("Triangle")
+            .primitive(triangle, red)
+            .build(&mut engine)
+            .unwrap();
 
         let mut scene = SceneBuilder::default().build(&mut engine);
 

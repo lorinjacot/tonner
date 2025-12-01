@@ -432,7 +432,9 @@ impl GeometryBuilder {
             vertex_buffer,
             indices,
             vertex_count: self.vertex_count,
+            morph_target_count: self.morph_target_count,
             topology: self.topology,
+            flags: self.attribute_flags,
         };
         let geometry = Geometry(Arc::new(data));
 
@@ -563,7 +565,7 @@ impl Geometry {
     }
 
     pub(super) fn flags(&self) -> GeometryFlags {
-        todo!()
+        self.0.flags
     }
 
     /// Returns `true` if and only if the geometry has tangent attribute. This must be `true` if normal
@@ -575,7 +577,7 @@ impl Geometry {
     /// Returns the number of morph target. A morph target is used to deform the geometry based on some
     /// scalar coefficients, called `weights`.
     pub fn morph_target_count(&self) -> usize {
-        todo!()
+        self.0.morph_target_count
     }
 
     /// A Buffer containing all vertices:
@@ -630,7 +632,9 @@ struct GeometryData {
     vertex_buffer: wgpu::Buffer,
     indices: Option<GeometryIndices>,
     vertex_count: usize,
+    morph_target_count: usize,
     topology: wgpu::PrimitiveTopology,
+    flags: GeometryFlags,
 }
 
 /// Holds geometry indices data.

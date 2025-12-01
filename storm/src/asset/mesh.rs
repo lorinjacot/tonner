@@ -326,7 +326,10 @@ pub(crate) struct MeshManager {
 }
 
 impl MeshManager {
-    pub(crate) fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(
+        render_bind_group_layout: &wgpu::BindGroupLayout,
+        device: &wgpu::Device,
+    ) -> Self {
         let primitive_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
@@ -452,7 +455,7 @@ impl MeshManager {
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Primitive render pipeline layout"),
-                bind_group_layouts: &[&primitive_bind_group_layout],
+                bind_group_layouts: &[render_bind_group_layout, &primitive_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -488,7 +491,7 @@ impl MeshManager {
 
                 let constants = &[
                     ("geometry_flags", parameters.geometry_flags.bits() as f64),
-                    ("geometry_flags", parameters.material_flags.bits() as f64),
+                    ("material_flags", parameters.material_flags.bits() as f64),
                     ("alpha_mode", parameters.alpha_mode as u32 as f64),
                     (
                         "max_prefilter_map_mip",
@@ -542,9 +545,15 @@ impl MeshManager {
                             zero_initialize_workgroup_memory: true,
                         },
                         buffers: &[wgpu::VertexBufferLayout {
-                            array_stride: 4,
+                            array_stride: 2 * wgpu::VertexFormat::Float32x4.size()
+                                + 2 * wgpu::VertexFormat::Uint32.size(),
                             step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &wgpu::vertex_attr_array![0 => Uint32],
+                            attributes: &wgpu::vertex_attr_array![
+                                0 => Float32x4,
+                                1 => Float32x4,
+                                2 => Uint32,
+                                3 => Uint32,
+                            ],
                         }],
                     },
                     primitive: wgpu::PrimitiveState {

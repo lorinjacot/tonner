@@ -142,13 +142,6 @@ impl<'a> EngineBuilder<'a> {
                 ],
             });
 
-        let geometry_manager = GeometryManager::new();
-        let material_manager = MaterialManager::new(&device);
-        let mesh_manager = MeshManager::new(&device);
-        let texture_builder_data = TextureBuilderData::new(&device);
-        let environment_manager =
-            EnvironmentManager::new(&skybox_bind_group_layout, &device, &mut encoder);
-
         let render_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("render bind group layout"),
@@ -250,6 +243,13 @@ impl<'a> EngineBuilder<'a> {
                     },
                 ],
             });
+
+        let geometry_manager = GeometryManager::new();
+        let material_manager = MaterialManager::new(&device);
+        let mesh_manager = MeshManager::new(&render_bind_group_layout, &device);
+        let texture_builder_data = TextureBuilderData::new(&device);
+        let environment_manager =
+            EnvironmentManager::new(&skybox_bind_group_layout, &device, &mut encoder);
 
         let skybox_shader_module = device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
         let skybox_pipeline_layout =

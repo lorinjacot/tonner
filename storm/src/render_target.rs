@@ -1,6 +1,7 @@
 use std::iter::repeat_with;
 
-use bytemuck::bytes_of;
+use bytemuck::{Pod, Zeroable, bytes_of};
+use glam::Vec4;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -104,7 +105,10 @@ impl RenderTargetBuilder {
     }
 
     /// Create a render target from a texture view.
-    pub fn build<'a>(self, target: &'a wgpu::TextureView) -> Result<RenderTarget<'a>, IncompatibleTarget> {
+    pub fn build<'a>(
+        self,
+        target: &'a wgpu::TextureView,
+    ) -> Result<RenderTarget<'a>, IncompatibleTarget> {
         if target.texture().width() != self.width {
             return Err(IncompatibleTarget::Width {
                 builder: self.width,

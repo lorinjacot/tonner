@@ -1,4 +1,4 @@
-use std::u32;
+use std::{time::Duration, u32};
 
 use bytemuck::{Pod, Zeroable, bytes_of};
 use glam::{Mat4, Vec3, usize};
@@ -57,6 +57,37 @@ pub struct Scene {
 }
 
 impl Scene {
+    pub fn simulate(
+        &mut self,
+        duration: Duration,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<(), SimulateError> {
+        self.animation_manager
+            .simulate(duration, &mut self.node_manager)
+            .unwrap();
+
+        self.node_manager.update_buffer(&self.device, &self.queue);
+
+        self.light_manager
+            .update_point_light_buffer(&self.node_manager, &self.device, &self.queue)
+            .unwrap();
+
+        self.skin_manager
+            .update_buffer(&self.node_manager, &self.device, &self.queue)
+            .unwrap();
+
+        self.mesh_instance_manager
+            .update_buffer(
+                &self.node_manager,
+                &self.skin_manager,
+                &self.device,
+                encoder,
+            )
+            .unwrap();
+
+        Ok(())
+    }
+
     pub fn render(
         &self,
         target: &RenderTarget,
@@ -305,7 +336,7 @@ impl SceneBuilder {
         let node_manager = NodeManager::new(&device);
         let skin_manager = SkinManager::new(&device);
         let camera_manager = CameraManager::new();
-        let mesh_instance_manager = MeshInstanceManager::new();
+        let mesh_instance_manager = MeshInstanceManager::new(&device);
         let animation_manager = AnimationManager::new();
         let light_manager = LightManager::new(&device);
 

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use glam::{vec3, vec4};
 use pollster::block_on;
@@ -6,6 +7,7 @@ use storm::camera::{CameraBuilder, CameraId};
 use storm::geometry::GeometryBuilder;
 use storm::material::MaterialBuilder;
 use storm::mesh::MeshBuilder;
+use storm::mesh_instance::MeshInstanceBuilder;
 use storm::render_target::RenderTargetBuilder;
 use storm::{Engine, EngineBuilder, Scene, SceneBuilder};
 use winit::application::ApplicationHandler;
@@ -20,6 +22,7 @@ struct App {
     surface: Option<wgpu::Surface<'static>>,
     render_target_builder: Option<RenderTargetBuilder>,
     camera: Option<CameraId>,
+    last_redraw: Option<Instant>,
     window: Option<Arc<Window>>,
 }
 
@@ -87,6 +90,11 @@ impl ApplicationHandler for App {
 
         let mut scene = SceneBuilder::default().build(&mut engine);
 
+        MeshInstanceBuilder::new(red_triangle)
+            .name("first triangle")
+            .build(&mut scene)
+            .unwrap();
+
         let render_target_builder = RenderTargetBuilder::new(
             size.width,
             size.height,
@@ -102,6 +110,7 @@ impl ApplicationHandler for App {
         self.surface = Some(surface);
         self.render_target_builder = Some(render_target_builder);
         self.camera = Some(camera);
+        self.last_redraw = Some(Instant::now());
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -143,10 +152,14 @@ impl ApplicationHandler for App {
 
                 let mut encoder = engine.encoder(None);
                 let scene = self.scene.as_mut().unwrap();
+                let now = Instant::now();
+                let duration = now.duration_since(self.last_redraw.replace(now).unwrap());
+                scene.simulate(duration, &mut encoder).unwrap();
                 scene
                     .render(&render_target, self.camera.unwrap(), &mut encoder)
                     .unwrap();
                 engine.submit_commands(encoder.finish());
+                panic!();
                 surface_texture.present();
 
                 // Queue a RedrawRequested event.

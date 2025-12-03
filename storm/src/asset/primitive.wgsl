@@ -122,13 +122,14 @@ struct MaterialUniform {
 @vertex
 fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
-    @location(0) weights_0: vec4<f32>,
-    @location(1) weights_1: vec4<f32>,
-    @location(2) joint_offset: u32,
-    @location(3) node_index: u32,
+    @location(0) model_col_0: vec4<f32>,
+    @location(1) model_col_1: vec4<f32>,
+    @location(2) model_col_2: vec4<f32>,
+    @location(3) model_col_3: vec4<f32>,
+    @location(4) weights_0: vec4<f32>,
+    @location(5) weights_1: vec4<f32>,
+    @location(6) joint_offset: u32,
 ) -> VertexOutput {
-    let node = nodes.data[node_index];
-
     var weights = array(
         weights_0.x,
         weights_0.y,
@@ -167,14 +168,19 @@ fn vs_main(
     }
 
     var model_matrix: mat4x4<f32>;
-    if contains(geometry_flags, geometry_weights_0_flag | geometry_joints_0_flag) && joint_offset != 0 {
+    if joint_offset != 0 && contains(geometry_flags, geometry_weights_0_flag | geometry_joints_0_flag) {
         model_matrix = 
             attributes.weights_0.x * skins.joint_matrices[joint_offset + attributes.joints_0.x] +
             attributes.weights_0.y * skins.joint_matrices[joint_offset + attributes.joints_0.y] +
             attributes.weights_0.z * skins.joint_matrices[joint_offset + attributes.joints_0.z] +
             attributes.weights_0.w * skins.joint_matrices[joint_offset + attributes.joints_0.w];
     } else {
-        model_matrix = node.matrix;
+        model_matrix = mat4x4(
+            model_col_0,
+            model_col_1,
+            model_col_2,
+            model_col_3,
+        );
     }
 
     let world_position = model_matrix * vec4(attributes.position, 1.0);

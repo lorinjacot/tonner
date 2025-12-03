@@ -12,6 +12,7 @@ use crate::{
     environment::PREFILTER_MAP_MIP_COUNT,
     geometry::{Geometry, GeometryFlags, GeometryIndices},
     material::{AlphaMode, Material, MaterialFlags},
+    mesh_instance::PrimitiveInstanceVertex,
 };
 
 /// A unique id for a [mesh][Mesh]. A mesh will always have the same id.
@@ -44,10 +45,15 @@ impl Mesh {
         })
     }
 
-    /// Returns the number of morph target. A morph target is used to deform the mesh based on some
+    /// Returns the number of morph target. A morphfis used to deform the mesh based on some
     /// scalar coefficients, called `weights`.
     pub fn morph_target_count(&self) -> usize {
-        todo!()
+        self.0
+            .primitives
+            .first()
+            .unwrap()
+            .geometry
+            .morph_target_count()
     }
 
     /// The primitives that are part of this mesh. A primitive is a [`Geometry`] and [`Material`] pair and
@@ -199,6 +205,7 @@ impl MeshBuilder {
             });
 
             primitives.push(MeshPrimitive {
+                id: MeshPrimitiveId(Uuid::new_v4()),
                 geometry,
                 material,
                 render_pipelines,
@@ -231,14 +238,25 @@ pub enum MeshBuilderError {
 }
 
 /// A primitive is a [`Geometry`], [`Material`] pair. A [`Mesh`] is described as a list of primitives.
+#[derive(Clone)]
 pub struct MeshPrimitive {
+    id: MeshPrimitiveId,
     geometry: Geometry,
     material: Material,
     render_pipelines: [wgpu::RenderPipeline; 2],
     bind_group: wgpu::BindGroup,
 }
 
+/// A unique id for [MeshPrimitive]. A mesh primitive has one and only one id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeshPrimitiveId(Uuid);
+
 impl MeshPrimitive {
+    /// A mesh primitive has one and only one id.
+    pub fn id(&self) -> MeshPrimitiveId {
+        self.id
+    }
+
     /// Returns the render pipelines. The first should be used when the model matrix has a positive determinant,
     /// and the second one is for negative determinant.
     ///
@@ -505,33 +523,9 @@ impl MeshManager {
                     Some(wgpu::Face::Back)
                 };
 
-                let (targets, depth_write_enabled) = match parameters.alpha_mode {
-                    AlphaMode::Opaque | AlphaMode::Mask => (
-                        &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
-                        true,
-                    ),
-                    AlphaMode::Blend => (
-                        &[
-                            None,
-                            Some(wgpu::ColorTargetState {
-                                format: wgpu::TextureFormat::Rgba16Float,
-                                blend: Some(wgpu::BlendState {
-                                    color: Self::ACCUMULATION_BLEND,
-                                    alpha: Self::ACCUMULATION_BLEND,
-                                }),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            }),
-                            Some(wgpu::ColorTargetState {
-                                format: wgpu::TextureFormat::R8Unorm,
-                                blend: Some(wgpu::BlendState {
-                                    color: Self::REVEALAGE_BLEND,
-                                    alpha: Self::REVEALAGE_BLEND,
-                                }),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            }),
-                        ],
-                        false,
-                    ),
+                let depth_write_enabled = match parameters.alpha_mode {
+                    AlphaMode::Opaque | AlphaMode::Mask => true,
+                    AlphaMode::Blend => false,
                 };
 
                 let mut desc = wgpu::RenderPipelineDescriptor {
@@ -545,14 +539,16 @@ impl MeshManager {
                             zero_initialize_workgroup_memory: true,
                         },
                         buffers: &[wgpu::VertexBufferLayout {
-                            array_stride: 2 * wgpu::VertexFormat::Float32x4.size()
-                                + 2 * wgpu::VertexFormat::Uint32.size(),
+                            array_stride: size_of::<PrimitiveInstanceVertex>() as u64,
                             step_mode: wgpu::VertexStepMode::Instance,
                             attributes: &wgpu::vertex_attr_array![
                                 0 => Float32x4,
                                 1 => Float32x4,
-                                2 => Uint32,
-                                3 => Uint32,
+                                2 => Float32x4,
+                                3 => Float32x4,
+                                4 => Float32x4,
+                                5 => Float32x4,
+                                6 => Uint32,
                             ],
                         }],
                     },
@@ -584,7 +580,29 @@ impl MeshManager {
                             constants,
                             zero_initialize_workgroup_memory: true,
                         },
-                        targets,
+                        targets: &[
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::all(),
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(wgpu::BlendState {
+                                    color: Self::ACCUMULATION_BLEND,
+                                    alpha: Self::ACCUMULATION_BLEND,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R8Unorm,
+                                blend: Some(wgpu::BlendState {
+                                    color: Self::REVEALAGE_BLEND,
+                                    alpha: Self::REVEALAGE_BLEND,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
                     }),
                     multiview: None,
                     cache: None,

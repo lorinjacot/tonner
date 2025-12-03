@@ -185,7 +185,6 @@ impl NodeManager {
 
     /// Update the node buffer with the current state of the nodes.
     pub(super) fn update_buffer(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        let size = (self.nodes.len() * size_of::<NodeUniform>()) as u64;
         let data: Vec<_> = self
             .nodes
             .values_mut()
@@ -219,6 +218,7 @@ impl NodeManager {
             let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
             buffer_view[..header_size].copy_from_slice(header);
             buffer_view[header_size..size].copy_from_slice(data);
+            drop(buffer_view);
             self.buffer.unmap();
         }
     }

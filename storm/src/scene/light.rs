@@ -107,7 +107,7 @@ impl LightManager {
                 point_light_count: 0,
                 _pad: [0; 3],
             }),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
         Self {
@@ -154,12 +154,14 @@ impl LightManager {
             self.point_light_buffer = device.create_buffer(&wgpu::wgt::BufferDescriptor {
                 label: Some("Point light uniform"),
                 size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: true,
             });
             let mut view = self.point_light_buffer.get_mapped_range_mut(..);
             view[0..header_size].copy_from_slice(bytes_of(&header));
             view[header_size..size].copy_from_slice(cast_slice(&uniforms));
+            drop(view);
+            self.point_light_buffer.unmap();
         } else {
             queue.write_buffer(&self.point_light_buffer, 0, bytes_of(&header));
             queue.write_buffer(

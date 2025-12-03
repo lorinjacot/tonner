@@ -108,7 +108,7 @@ impl SkinManager {
                 joint_count: 0,
                 _pad: [0; 3],
             }),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
         Self {
             skins: HashMap::new(),
@@ -116,7 +116,7 @@ impl SkinManager {
         }
     }
 
-    /// Buffer inddx of the first joint matrix part of the skin,
+    /// Buffer index of the first joint matrix part of the skin,
     /// or `None` if the skin is not in the buffer yet.
     pub(super) fn index(&self, skin: SkinId) -> Option<u32> {
         self.skins.get(&skin).and_then(|data| data.index)
@@ -170,12 +170,13 @@ impl SkinManager {
             self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Skin manager buffer"),
                 size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: true,
             });
             let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
             buffer_view[..header_size].copy_from_slice(header);
             buffer_view[header_size..size].copy_from_slice(joint_matrices);
+            drop(buffer_view);
             self.buffer.unmap();
         }
 

@@ -38,9 +38,9 @@ struct CameraUniform {
     position: vec3<f32>,
 }
 
-struct LightStorage {
-    point_light_count: u32,
-    point_lights: array<PointLight>,
+struct PointLightStorage {
+    count: u32,
+    data: array<PointLight>,
 }
 
 struct PointLight {
@@ -61,7 +61,7 @@ struct VertexOutput {
 @group(0) @binding(0) var<storage, read> nodes: NodeStorage;
 @group(0) @binding(1) var<storage, read> joint_matrices: array<mat4x4<f32>>;
 @group(0) @binding(2) var<uniform> camera: CameraUniform;
-@group(0) @binding(3) var<storage, read> lights: LightStorage;
+@group(0) @binding(3) var<storage, read> point_lights: PointLightStorage;
 @group(0) @binding(4) var irradiance_map_texture: texture_cube<f32>;
 @group(0) @binding(5) var irradiance_map_sampler: sampler;
 @group(0) @binding(6) var prefilter_map_texture: texture_cube<f32>;
@@ -313,9 +313,9 @@ fn fs_main(vertex: VertexOutput, @builtin(front_facing) front_facing: bool) -> F
 
         // reflectance equation
         var lo = vec3(0.0);
-        for (var i = 0u; i < lights.point_light_count; i++) {
+        for (var i = 0u; i < point_lights.count; i++) {
             // calculate per-light radiance
-            let point_light = lights.point_lights[i];
+            let point_light = point_lights.data[i];
             let light   = normalize(point_light.position - vertex.world_position);
             let halfway = normalize(view + light);
             let distance    = length(point_light.position - vertex.world_position);

@@ -4,7 +4,6 @@ use bytemuck::{Pod, Zeroable, bytes_of, checked::cast_slice};
 use glam::Vec3;
 use thiserror::Error;
 use uuid::Uuid;
-use wgpu::util::DeviceExt;
 
 use crate::scene::{
     NodeManager, Scene,
@@ -101,19 +100,49 @@ pub(super) struct LightManager {
 impl LightManager {
     /// Creates an empty light manager.
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let point_light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Point light uniform"),
-            contents: bytes_of(&PointLightStorage {
-                point_light_count: 0,
-                _pad: [0; 3],
-            }),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        let point_light_buffer = Self::create_point_light_buffer(&[], device);
 
         Self {
             point_lights: HashMap::new(),
             point_light_buffer,
         }
+    }
+
+    fn point_light_buffer_size(data: &[PointLightUniform]) -> (usize, usize) {
+        let header_size = size_of::<PointLightStorageHeader>();
+        let size = header_size + data.len() * size_of::<PointLightUniform>();
+        (header_size, size)
+    }
+
+    fn create_point_light_buffer(
+        data: &[PointLightUniform],
+        device: &wgpu::Device,
+    ) -> wgpu::Buffer {
+        let count = data.len() as u32;
+        let header = PointLightStorageHeader {
+            count,
+            _pad: [0; 3],
+        };
+
+        let (header_size, size) = Self::point_light_buffer_size(data);
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Point light buffer"),
+            size: wgpu::util::align_to(
+                size.max(header_size + size_of::<PointLightUniform>()) as u64,
+                wgpu::COPY_BUFFER_ALIGNMENT,
+            ),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+
+        let mut view = buffer.get_mapped_range_mut(..);
+        view[0..header_size].copy_from_slice(bytes_of(&header));
+        view[header_size..size].copy_from_slice(cast_slice(data));
+        drop(view);
+        buffer.unmap();
+
+        buffer
     }
 
     /// Buffer containing the point light data. This is used when a gpu shader need point light access. The return
@@ -129,12 +158,6 @@ impl LightManager {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), UpdatePointLightBufferError> {
-        let header = PointLightStorage {
-            point_light_count: self.point_lights.len() as u32,
-            _pad: [0; 3],
-        };
-        let header_size = size_of::<PointLightStorage>();
-
         let mut uniforms = Vec::with_capacity(self.point_lights.len());
         for (i, data) in self.point_lights.values_mut().enumerate() {
             data.index = Some(i as u32);
@@ -149,20 +172,16 @@ impl LightManager {
                 _pad1: 0,
             });
         }
-        let size = header_size + self.point_lights.len() * size_of::<PointLightUniform>();
+
+        let (header_size, size) = Self::point_light_buffer_size(&uniforms);
+
         if self.point_light_buffer.size() < size as u64 {
-            self.point_light_buffer = device.create_buffer(&wgpu::wgt::BufferDescriptor {
-                label: Some("Point light uniform"),
-                size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: true,
-            });
-            let mut view = self.point_light_buffer.get_mapped_range_mut(..);
-            view[0..header_size].copy_from_slice(bytes_of(&header));
-            view[header_size..size].copy_from_slice(cast_slice(&uniforms));
-            drop(view);
-            self.point_light_buffer.unmap();
+            self.point_light_buffer = Self::create_point_light_buffer(&uniforms, device);
         } else {
+            let header = PointLightStorageHeader {
+                count: self.point_lights.len() as u32,
+                _pad: [0; 3],
+            };
             queue.write_buffer(&self.point_light_buffer, 0, bytes_of(&header));
             queue.write_buffer(
                 &self.point_light_buffer,
@@ -190,8 +209,8 @@ struct PointLightData {
 
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
-struct PointLightStorage {
-    point_light_count: u32,
+struct PointLightStorageHeader {
+    count: u32,
     _pad: [u32; 3],
 }
 

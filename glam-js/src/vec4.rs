@@ -1,18 +1,19 @@
 #![allow(non_snake_case)]
 
-use glam::Vec3Swizzles;
+use glam::Vec4Swizzles;
 use wasm_bindgen::prelude::*;
 
-use crate::{Vec4, wrapper};
+use crate::{Vec3, wrapper};
 
 wrapper!(
-    "A 3-dimensional vector.",
-    Vec3,
-    glam::Vec3,
+    "A 4-dimensional vector.",
+    Vec4,
+    glam::Vec4,
     fields: [
         x: f32,
         y: f32,
-        z: f32
+        z: f32,
+        w: f32
     ],
     consts: [
         "All zeroes."
@@ -48,6 +49,9 @@ wrapper!(
         "A unit vector pointing along the positive Z axis."
         Z,
 
+        "A unit vector pointing along the positive W axis."
+        W,
+
         "A unit vector pointing along the negative X axis."
         NEG_X,
 
@@ -55,21 +59,24 @@ wrapper!(
         NEG_Y,
 
         "A unit vector pointing along the negative Z axis."
-        NEG_Z
+        NEG_Z,
+
+        "A unit vector pointing along the negative W axis."
+        NEG_W
     ]
 );
 
 #[wasm_bindgen]
-impl Vec3 {
+impl Vec4 {
     /// Creates a new vector.
     #[wasm_bindgen(constructor)]
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
-        Self(glam::Vec3::new(x, y, z))
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
+        Self(glam::Vec4::new(x, y, z, w))
     }
 
     /// Creates a vector with all elements set to v.
     pub fn splat(v: f32) -> Self {
-        Self(glam::Vec3::splat(v))
+        Self(glam::Vec4::splat(v))
     }
 
     /// Creates a vector from the first 3 values in slice.
@@ -77,7 +84,7 @@ impl Vec3 {
     /// # Panics
     /// Panics if slice is less than 3 elements long.
     pub fn fromSlice(slice: &[f32]) -> Self {
-        Self(glam::Vec3::from_slice(slice))
+        Self(glam::Vec4::from_slice(slice))
     }
 
     /// Writes the elements of `this` to the first 3 elements in slice.
@@ -88,9 +95,11 @@ impl Vec3 {
         self.0.write_to_slice(slice);
     }
 
-    /// Creates a 4D vector from `this` and the given `w` value.
-    pub fn extend(self, w: f32) -> Vec4 {
-        Vec4(self.0.extend(w))
+    /// Creates a 3D vector from the `x`, `y` and `z` elements of `this`, discarding `w`.
+    /// 
+    /// Truncation to {@link Vec3} may also be performed by using {@link Vec3.xyz()}.
+    pub fn truncate(self) -> Vec3 {
+        Vec3(self.0.truncate())
     }
 
     /// Creates a 3D vector from `this` with the given value of x.
@@ -106,6 +115,11 @@ impl Vec3 {
     /// Creates a 3D vector from `this` with the given value of z.
     pub fn withZ(self, z: f32) -> Self {
         Self(self.0.with_z(z))
+    }
+
+    /// Creates a 3D vector from `this` with the given value of w.
+    pub fn withW(self, w: f32) -> Self {
+        Self(self.0.with_w(w))
     }
 
     /// Computes the dot product of `this` and `rhs`.
@@ -159,7 +173,7 @@ impl Vec3 {
     /// In other words this computes `max(x, y, ..)`.
     ///
     /// NaN propogation does not follow IEEE 754-2008 semantics and may differ on different SIMD architectures.
-    pub fn maxElement(self) -> f32 {
+    pub fn max_element(self) -> f32 {
         self.0.max_element()
     }
 
@@ -215,12 +229,12 @@ impl Vec3 {
         self.0.is_negative_bitmask()
     }
 
-    /// Returns true if, and only if, all elements are finite. If any element is either NaN, positive or negative infinity, this will return false.
+    /// Returns true if, and only if, all elements are finite. If any element is either `NaN`, positive or negative infinity, this will return false.
     pub fn isFinite(self) -> bool {
         self.0.is_finite()
     }
 
-    /// Returns true if any elements are NaN.
+    /// Returns true if any elements are `NaN`.
     pub fn isNaN(self) -> bool {
         self.0.is_nan()
     }
@@ -268,7 +282,7 @@ impl Vec3 {
     ///
     /// For valid results, `this` must be finite and not of length zero, nor very close to zero.
     ///
-    /// See also {@link Vec3::try_normalize()} and {@link Vec3::normalize_or_zero()}.
+    /// See also {@link Vec4::try_normalize()} and {@link Vec4::normalize_or_zero()}.
     pub fn normalize(self) -> Self {
         Self(self.0.normalize())
     }
@@ -286,7 +300,7 @@ impl Vec3 {
     ///
     /// In particular, if the input is zero (or very close to zero), or non-finite, the result of this operation will be the fallback value.
     ///
-    /// See also {@link Vec3::try_normalize()}.
+    /// See also {@link Vec4::try_normalize()}.
     pub fn normalizeOr(self, fallback: Self) -> Self {
         Self(self.0.normalize_or(fallback.0))
     }
@@ -295,7 +309,7 @@ impl Vec3 {
     ///
     /// In particular, if the input is zero (or very close to zero), or non-finite, the result of this operation will be zero.
     ///
-    /// See also {@link Vec3::try_normalize()}.
+    /// See also {@link Vec4::try_normalize()}.
     pub fn normalizeOrZero(self) -> Self {
         Self(self.0.normalize_or_zero())
     }
@@ -471,64 +485,26 @@ impl Vec3 {
         Self(self.0.refract(normal.0, eta))
     }
 
-    /// Returns the angle (in radians) between two vectors in the range `[0, +π]`.
-    ///
-    /// The inputs do not need to be unit vectors however they must be non-zero.
-    pub fn angleBetween(self, rhs: Self) -> f32 {
-        self.0.angle_between(rhs.0)
-    }
-
-    /// Rotates towards `rhs` up to `max_angle` (in radians).
-    ///
-    /// When `max_angle` is `0.0`, the result will be equal to `this`. When `max_angle` is equal to
-    /// `this.angle_between(rhs)`, the result will be parallel to `rhs`. If `max_angle` is negative,
-    /// rotates towards the exact opposite of `rhs`. Will not go past the target.
-    pub fn rotateTowards(self, rhs: Self, max_angle: f32) -> Self {
-        Self(self.0.rotate_towards(rhs.0, max_angle))
-    }
-
-    /// Returns some vector that is orthogonal to the given one.
-    ///
-    /// The input vector must be finite and non-zero.
-    ///
-    /// The output vector is not necessarily unit length. For that use
-    /// {@link Vec.any_orthonormal_vector()} instead.
-    pub fn anyOrthogonalVector(&self) -> Self {
-        Self(self.0.any_orthogonal_vector())
-    }
-
-    /// Returns any unit vector that is orthogonal to the given one.
-    ///
-    /// The input vector must be unit length.
-    pub fn anyOrthonormalVector(&self) -> Self {
-        Self(self.0.any_orthonormal_vector())
-    }
-
-    /// Performs a spherical linear interpolation between `this` and `rhs` based on the value `s`.
-    ///
-    /// When `s` is `0.0`, the result will be equal to `this`. When `s` is `1.0`, the result will
-    /// be equal to `rhs`. When `s` is outside of range `[0, 1]`, the result is linearly extrapolated.
-    pub fn slerp(self, rhs: Self, s: f32) -> Self {
-        Self(self.0.slerp(rhs.0, s))
-    }
-
     /// Returns `this + rhs` component-wise.
     pub fn add(&self, rhs: &Self) -> Self {
         Self(self.0 + rhs.0)
     }
 
-    /// Returns `this + Vec3.splat(rhs)`.
-    pub fn addFloat(&self, rhs: f32) -> Self {
+    /// Returns `this + Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "addFloat")]
+    pub fn add_float(&self, rhs: f32) -> Self {
         Self(self.0 + rhs)
     }
 
     /// Performs `this += rhs` component-wise.
-    pub fn addAssign(&mut self, rhs: &Self) {
+    #[wasm_bindgen(js_name = "addAssign")]
+    pub fn add_assign(&mut self, rhs: &Self) {
         self.0 += rhs.0;
     }
 
-    /// Performs `this += Vec3.splat(rhs)`.
-    pub fn addAssignFloat(&mut self, rhs: f32) {
+    /// Performs `this += Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "addAssignFloat")]
+    pub fn add_assign_float(&mut self, rhs: f32) {
         self.0 += rhs;
     }
 
@@ -542,18 +518,21 @@ impl Vec3 {
         Self(self.0 / rhs.0)
     }
 
-    /// Returns `this / Vec3.splat(rhs)`.
-    pub fn divFloat(&self, rhs: f32) -> Self {
+    /// Returns `this / Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "divFloat")]
+    pub fn div_float(&self, rhs: f32) -> Self {
         Self(self.0 / rhs)
     }
 
     /// Performs `this /= rhs` component-wise.
-    pub fn divAssign(&mut self, rhs: &Self) {
+    #[wasm_bindgen(js_name = "divAssign")]
+    pub fn div_assign(&mut self, rhs: &Self) {
         self.0 /= rhs.0;
     }
 
-    /// Performs `this /= Vec3.splat(rhs)`.
-    pub fn divAssignFloat(&mut self, rhs: f32) {
+    /// Performs `this /= Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "divAssignFloat")]
+    pub fn div_assign_float(&mut self, rhs: f32) {
         self.0 /= rhs;
     }
 
@@ -567,7 +546,8 @@ impl Vec3 {
     /// Set the component corresponding to `index` to `value`.
     ///
     /// For example, `this.setIndex(0, 0.5)` is the same as `this.x = 0.5`.
-    pub fn setIndex(&mut self, index: usize, value: f32) {
+    #[wasm_bindgen(js_name = "setIndex")]
+    pub fn set_index(&mut self, index: usize, value: f32) {
         self.0[index] = value
     }
 
@@ -576,18 +556,21 @@ impl Vec3 {
         Self(self.0 * rhs.0)
     }
 
-    /// Returns `this * Vec3.splat(rhs)`.
-    pub fn mutFloat(&self, rhs: f32) -> Self {
+    /// Returns `this * Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "mutFloat")]
+    pub fn mul_float(&self, rhs: f32) -> Self {
         Self(self.0 * rhs)
     }
 
     /// Performs `this *= rhs` component-wise.
-    pub fn mutAssign(&mut self, rhs: &Self) {
+    #[wasm_bindgen(js_name = "mutAssign")]
+    pub fn mul_assign(&mut self, rhs: &Self) {
         self.0 *= rhs.0;
     }
 
-    /// Performs `this *= Vec3.splat(rhs)`.
-    pub fn mulAssignFloat(&mut self, rhs: f32) {
+    /// Performs `this *= Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "mulAssignFloat")]
+    pub fn mul_assign_float(&mut self, rhs: f32) {
         self.0 *= rhs;
     }
 
@@ -615,18 +598,21 @@ impl Vec3 {
         Self(self.0 % rhs.0)
     }
 
-    /// Returns `this % Vec3.splat(rhs)`.
-    pub fn remFloat(&self, rhs: f32) -> Self {
+    /// Returns `this % Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "remFloat")]
+    pub fn rem_float(&self, rhs: f32) -> Self {
         Self(self.0 % rhs)
     }
 
     /// Performs `this %= rhs` component-wise.
-    pub fn remAssign(&mut self, rhs: &Self) {
+    #[wasm_bindgen(js_name = "remAssign")]
+    pub fn rem_assign(&mut self, rhs: &Self) {
         self.0 %= rhs.0;
     }
 
-    /// Performs `this %= Vec3.splat(rhs)`.
-    pub fn remAssignFloat(&mut self, rhs: f32) {
+    /// Performs `this %= Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "remAssignFloat")]
+    pub fn rem_assign_float(&mut self, rhs: f32) {
         self.0 %= rhs;
     }
 
@@ -635,18 +621,21 @@ impl Vec3 {
         Self(self.0 - rhs.0)
     }
 
-    /// Returns `this - Vec3.splat(rhs)`.
-    pub fn subFloat(&self, rhs: f32) -> Self {
+    /// Returns `this - Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "subFloat")]
+    pub fn sub_float(&self, rhs: f32) -> Self {
         Self(self.0 - rhs)
     }
 
     /// Performs `this -= rhs` component-wise.
-    pub fn subAssign(&mut self, rhs: &Self) {
+    #[wasm_bindgen(js_name = "subAssign")]
+    pub fn sub_assign(&mut self, rhs: &Self) {
         self.0 -= rhs.0;
     }
 
-    /// Performs `this -= Vec3.splat(rhs)`.
-    pub fn subAssignFloat(&mut self, rhs: f32) {
+    /// Performs `this -= Vec4.splat(rhs)`.
+    #[wasm_bindgen(js_name = "subAssignFloat")]
+    pub fn sub_assign_float(&mut self, rhs: f32) {
         self.0 -= rhs;
     }
 }
@@ -656,18 +645,20 @@ macro_rules! swizzles {
         swizzles! {$c1 x}
         swizzles! {$c1 y}
         swizzles! {$c1 z}
+        swizzles! {$c1 w}
     };
 
     ($c1:ident $c2:ident) => {
         swizzles! {$c1 $c2 x}
         swizzles! {$c1 $c2 y}
         swizzles! {$c1 $c2 z}
+        swizzles! {$c1 $c2 w}
     };
 
     ($c1:ident $c2:ident $c3:ident) => {
         paste::paste! {
             #[wasm_bindgen]
-            impl Vec3 {
+            impl Vec4 {
                 #[wasm_bindgen(getter)]
                 pub fn [<$c1 $c2 $c3>](self) -> Vec3 {
                     Vec3(self.0.[<$c1 $c2 $c3>]())
@@ -677,12 +668,13 @@ macro_rules! swizzles {
         swizzles! {$c1 $c2 $c3 x}
         swizzles! {$c1 $c2 $c3 y}
         swizzles! {$c1 $c2 $c3 z}
+        swizzles! {$c1 $c2 $c3 w}
     };
 
     ($c1:ident $c2:ident $c3:ident $c4:ident) => {
         paste::paste! {
             #[wasm_bindgen]
-            impl Vec3 {
+            impl Vec4 {
                 #[wasm_bindgen(getter)]
                 pub fn [<$c1 $c2 $c3 $c4>](self) -> Vec4 {
                     Vec4(self.0.[<$c1 $c2 $c3 $c4>]())
@@ -695,15 +687,16 @@ macro_rules! swizzles {
 swizzles!(x);
 swizzles!(y);
 swizzles!(z);
+swizzles!(w);
 
-impl From<glam::Vec3> for Vec3 {
-    fn from(value: glam::Vec3) -> Self {
+impl From<glam::Vec4> for Vec4 {
+    fn from(value: glam::Vec4) -> Self {
         Self(value)
     }
 }
 
-impl From<Vec3> for glam::Vec3 {
-    fn from(value: Vec3) -> Self {
+impl From<Vec4> for glam::Vec4 {
+    fn from(value: Vec4) -> Self {
         value.0
     }
 }

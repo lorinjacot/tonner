@@ -8,7 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 glam.workspace = true
-paste = "1.0.15"
+paste.workspace = true
 wasm-bindgen.workspace = true
 
 [dev-dependencies]

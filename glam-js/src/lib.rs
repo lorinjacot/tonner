@@ -1,13 +1,16 @@
 pub use vec3::*;
+pub use vec4::*;
 
 mod vec3;
+mod vec4;
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! wrapper {
     (
         $doc:literal,
         $wrapper:ident,
-        $inner:ty, 
+        $inner:ty,
         fields: [$($field:ident: $field_type:ty),*],
         consts: [$(
             $const_doc:literal
@@ -17,7 +20,7 @@ macro_rules! wrapper {
         #[doc = $doc]
         #[wasm_bindgen]
         #[derive(Clone, Copy)]
-        pub struct $wrapper($inner);
+        pub struct $wrapper(pub(crate) $inner);
 
         paste::paste! {
             #[wasm_bindgen]

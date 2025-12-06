@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use serde::Deserialize;
-use thiserror::Error;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
@@ -9,13 +8,14 @@ use crate::scene::{Scene, node::NodeId};
 
 /// A unique id for a camera. A camera will always have the same id.
 #[wasm_bindgen]
-pub struct CameraId;
+#[derive(Clone, Copy)]
+pub struct CameraId(pub(crate) storm::camera::CameraId);
 
 #[wasm_bindgen]
 #[derive(Default)]
 pub struct CameraBuilder {
     node: Option<NodeId>,
-    camera_type: CameraType,
+    camera_type: Option<CameraType>,
 }
 
 #[wasm_bindgen]
@@ -38,7 +38,7 @@ impl CameraBuilder {
     /// or {@link CameraBuilder.perspective()} is required.
     pub fn orthographic(self, orthographic: OrthographicCamera) -> Self {
         Self {
-            camera_type: CameraType::Orthographic(orthographic),
+            camera_type: Some(CameraType::Orthographic(orthographic)),
             ..self
         }
     }
@@ -47,21 +47,52 @@ impl CameraBuilder {
     /// or {@link CameraBuilder.perspective()} is required.
     pub fn perspective(self, perspective: PerspectiveCamera) -> Self {
         Self {
-            camera_type: CameraType::Perspective(perspective),
+            camera_type: Some(CameraType::Perspective(perspective)),
             ..self
         }
     }
 
     /// Build the camera or throws a {@link CameraBuilderError}.
-    pub fn build(self, _scene: &mut Scene) -> Result<CameraId, CameraBuilderError> {
-        todo!()
+    pub fn build(self, scene: &mut Scene) -> CameraId {
+        let mut builder = storm::camera::CameraBuilder::default();
+        if let Some(node) = self.node {
+            builder = builder.node(node)
+        }
+        match self.camera_type {
+            Some(CameraType::Perspective(PerspectiveCamera {
+                aspectRatio,
+                yfov,
+                zfar,
+                znear,
+            })) => {
+                builder = builder.perspective_projection(storm::camera::PerspectiveProjection {
+                    aspect_ratio: aspectRatio,
+                    y_fov: yfov,
+                    z_near: znear,
+                    z_far: zfar,
+                });
+            }
+            Some(CameraType::Orthographic(OrthographicCamera {
+                xmag,
+                ymag,
+                zfar,
+                znear,
+            })) => {
+                builder = builder.orthographic_projection(storm::camera::OrthographicProjection {
+                    x_mag: xmag,
+                    y_mag: ymag,
+                    z_far: zfar,
+                    z_near: znear,
+                });
+            }
+            None => (),
+        }
+
+        CameraId(builder.build(&mut scene.0))
     }
 }
 
-#[derive(Default)]
 enum CameraType {
-    #[default]
-    None,
     Orthographic(OrthographicCamera),
     Perspective(PerspectiveCamera),
 }
@@ -84,16 +115,4 @@ pub struct PerspectiveCamera {
     pub yfov: f32,
     pub zfar: Option<f32>,
     pub znear: f32,
-}
-
-/// Error when {@link CameraBuilder.build()} fails.
-#[wasm_bindgen]
-#[derive(Debug, Error)]
-pub enum CameraBuilderError {
-    #[error("node is not set")]
-    NodeNotSet,
-    #[error("invalid node")]
-    InvalidNode,
-    #[error("camera type is not set")]
-    CameraTypeNodSet,
 }

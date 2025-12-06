@@ -1,9 +1,11 @@
+#![allow(non_snake_case)]
+
 use std::time::Duration;
 
 use thiserror::Error;
 use wasm_bindgen::prelude::*;
 
-use crate::{Engine, Surface};
+use crate::{Engine, RenderTarget};
 
 mod camera;
 mod node;
@@ -28,28 +30,30 @@ impl Scene {
     /// This is where most computations are happening:
     /// - animations
     pub fn simulate(&mut self, duration: f64) -> Result<(), SimulateError> {
-        let _duration =
+        let duration =
             Duration::try_from_secs_f64(duration).or(Err(SimulateError::InvalidDuration))?;
+
+        let mut encoder = self.0.create_command_encoder();
+        self.0.simulate(duration, &mut encoder).unwrap();
+        self.0.sumbit_command_encoder(encoder);
 
         Ok(())
     }
 
     /// Render the current state of the scene to the surface as seen by the camera.
     /// This does not modify the scene. To update the scene, see {@link Scene.simulate()}.
-    pub fn render(&self, _surface: &Surface, _camera: camera::CameraId) {
-        todo!()
-    }
-}
-
-impl From<Scene> for storm::Scene {
-    fn from(value: Scene) -> Self {
-        value.0
-    }
-}
-
-impl From<storm::Scene> for Scene {
-    fn from(value: storm::Scene) -> Self {
-        Self(value)
+    pub fn render(&self, renderTarget: &RenderTarget, camera: &camera::CameraId) {
+        let mut encoder = self.0.create_command_encoder();
+        let texture = renderTarget.surface.get_current_texture().unwrap();
+        let view = texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let render_target = renderTarget.builder.clone().build(&view).unwrap();
+        self.0
+            .render(&render_target, camera.0, &mut encoder)
+            .unwrap();
+        self.0.sumbit_command_encoder(encoder);
+        texture.present();
     }
 }
 

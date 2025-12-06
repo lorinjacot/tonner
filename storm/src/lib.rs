@@ -57,6 +57,10 @@ impl Engine {
     pub fn submit_commands(&self, command_buffer: wgpu::CommandBuffer) {
         self.queue.submit([command_buffer]);
     }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
 }
 
 /// A builder for [Engine].

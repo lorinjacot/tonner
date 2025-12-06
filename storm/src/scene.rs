@@ -57,6 +57,17 @@ pub struct Scene {
 }
 
 impl Scene {
+    pub fn create_command_encoder(&self) -> wgpu::CommandEncoder {
+        self.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Scene::create_command_encoder() command encoder"),
+            })
+    }
+
+    pub fn sumbit_command_encoder(&self, command_encoder: wgpu::CommandEncoder) {
+        self.queue.submit([command_encoder.finish()]);
+    }
+
     pub fn simulate(
         &mut self,
         duration: Duration,

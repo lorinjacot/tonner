@@ -9,15 +9,15 @@ use crate::{asset::mesh::Mesh, scene::Scene};
 /// A unique identifier for a node.
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
-pub struct NodeId(storm::NodeId);
+pub struct NodeId(storm::node::NodeId);
 
-impl From<storm::NodeId> for NodeId {
-    fn from(value: storm::NodeId) -> Self {
+impl From<storm::node::NodeId> for NodeId {
+    fn from(value: storm::node::NodeId) -> Self {
         Self(value)
     }
 }
 
-impl From<NodeId> for storm::NodeId {
+impl From<NodeId> for storm::node::NodeId {
     fn from(value: NodeId) -> Self {
         value.0
     }
@@ -25,11 +25,10 @@ impl From<NodeId> for storm::NodeId {
 
 /// A builder for scene graphs node.
 #[wasm_bindgen]
-#[derive(Default)]
 pub struct NodeBuilder {
-    name: Option<String>,
-    parent: Option<storm::NodeId>,
-    translation: Option<glam::Vec3>,
+    name: String,
+    parent: Option<NodeId>,
+    translation: Vec3,
 }
 
 #[wasm_bindgen]
@@ -40,39 +39,46 @@ impl NodeBuilder {
     /// - No translation.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            name: String::new(),
+            parent: None,
+            translation: Vec3::ZERO(),
+        }
     }
 
     pub fn name(self, name: String) -> Self {
-        Self {
-            name: Some(name),
-            ..self
-        }
+        Self { name, ..self }
     }
 
     pub fn parent(self, parent: NodeId) -> Self {
         Self {
-            parent: Some(parent.into()),
+            parent: Some(parent),
             ..self
         }
     }
 
     pub fn translation(self, translation: Vec3) -> Self {
         Self {
-            translation: Some(translation.into()),
+            translation,
             ..self
         }
     }
 
     /// Build the node.
     pub fn build(self, scene: &mut Scene) -> Result<NodeId, NodeBuilderError> {
-        Ok(NodeId(
-            storm::NodeBuilder::default()
-                .name(self.name)
-                .parent(self.parent)
-                .translation(self.translation)
-                .build(&mut scene.0),
-        ))
+        let mut builder = storm::node::NodeBuilder::default()
+            .name(self.name)
+            .translation(self.translation);
+        if let Some(parent) = self.parent {
+            builder = builder.parent(parent);
+        }
+        Ok(NodeId(builder.build(&mut scene.0).map_err(
+            |e| match e {
+                storm::node::NodeBuilderError::InvalidParentNode(_) => {
+                    NodeBuilderError::InvalidParent
+                }
+            },
+        )?))
     }
 }
 

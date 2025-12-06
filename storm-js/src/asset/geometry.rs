@@ -30,14 +30,25 @@ impl GeometryBuilder {
 
     /// Set the `position` attribute of the geometry vertices. `positions.length` must be equal
     /// to the constructor argument `vertexCount`.
-    pub fn positions(self, positions: Vec<Vec3>) -> Self {
-        Self(self.0.positions(positions.into_iter().map(|v| v.into())))
+    pub fn positions(self, positions: Vec<Vec3>) -> Result<Self, InvalidAttributeIterLenError> {
+        Ok(Self(
+            self.0
+                .positions(positions.into_iter().map(|v| v.into()))
+                .map_err(|e| InvalidAttributeIterLenError { min: e.min })?,
+        ))
     }
 
     /// Build the geometry.
     pub fn build(self, _engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
         todo!()
     }
+}
+
+#[wasm_bindgen]
+#[derive(Debug, Error)]
+#[error("attribute must contain at least {min} elements")]
+pub struct InvalidAttributeIterLenError {
+    pub min: usize,
 }
 
 /// Error when {@link GeometryBuilder.build()} fails.

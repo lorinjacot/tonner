@@ -23,36 +23,65 @@ pub struct Engine {
     inner: storm::Engine,
     #[allow(dead_code)]
     instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
 }
 
 #[wasm_bindgen]
 impl Engine {
-    /// Create a surface. A surface is needed to render a {@link Scene}.
+    /// Create a render target. A render target is needed to render a {@link Scene}.
     #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
     #[wasm_bindgen(js_name = createSurfaceFromCanvasElement)]
-    pub fn create_surface_from_canvas_element(
-        &self,
+    pub fn create_render_target_from_canvas_element(
+        &mut self,
         canvas: HtmlCanvasElement,
-    ) -> Result<Surface, CreateSurfaceError> {
-        Ok(Surface(
-            self.instance
-                .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-                .or(Err(CreateSurfaceError))?,
-        ))
+    ) -> Result<RenderTarget, CreateSurfaceError> {
+        let width = canvas.width();
+        let height = canvas.height();
+        let surface = self
+            .instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .or(Err(CreateSurfaceError))?;
+        Ok(self.create_render_target(width, height, surface))
     }
 
     /// Create a surface. A surface is needed to render a {@link Scene}.
     #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
     #[wasm_bindgen(js_name = createSurfaceFromOffscreenCanvas)]
-    pub fn create_surface_from_offscreen_canvas(
-        &self,
+    pub fn create_render_target_from_offscreen_canvas(
+        &mut self,
         canvas: OffscreenCanvas,
-    ) -> Result<Surface, CreateSurfaceError> {
-        Ok(Surface(
-            self.instance
-                .create_surface(wgpu::SurfaceTarget::OffscreenCanvas(canvas))
-                .or(Err(CreateSurfaceError))?,
-        ))
+    ) -> Result<RenderTarget, CreateSurfaceError> {
+        let width = canvas.width();
+        let height = canvas.height();
+        let surface = self
+            .instance
+            .create_surface(wgpu::SurfaceTarget::OffscreenCanvas(canvas))
+            .or(Err(CreateSurfaceError))?;
+        Ok(self.create_render_target(width, height, surface))
+    }
+
+    #[allow(dead_code)]
+    fn create_render_target(
+        &mut self,
+        width: u32,
+        height: u32,
+        surface: wgpu::Surface<'static>,
+    ) -> RenderTarget {
+        let config = surface
+            .get_default_config(&self.adapter, width, height)
+            .unwrap();
+        surface.configure(self.inner.device(), &config);
+        let builder = storm::render_target::RenderTargetBuilder::new(
+            width,
+            height,
+            config.format,
+            &mut self.inner,
+        );
+        RenderTarget {
+            surface,
+            config,
+            builder,
+        }
     }
 }
 
@@ -99,7 +128,11 @@ impl EngineBuilder {
 
         let inner = self.0.device(device, queue).build().await;
 
-        Ok(Engine { inner, instance })
+        Ok(Engine {
+            inner,
+            instance,
+            adapter,
+        })
     }
 }
 
@@ -119,7 +152,11 @@ pub enum BuildEngineError {
 /// To create one, use {@link Engine.createSurfaceFromCanvasElement()} with a
 /// {@link HTMLCanvasElement} or {@link Engine.createSurfaceFromOffscreenCanvas()} with {@link OffscreenCanvas}.
 #[wasm_bindgen]
-pub struct Surface(wgpu::Surface<'static>);
+pub struct RenderTarget {
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    builder: storm::render_target::RenderTargetBuilder,
+}
 
 /// Error when {@link} Engine.createSurfaceFromCanvasElement() or Engine.createSurfaceFromOffscreenCanvas() fail.
 #[wasm_bindgen]

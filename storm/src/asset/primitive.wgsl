@@ -31,11 +31,6 @@ struct NodeUniform {
     matrix: mat4x4<f32>,
 }
 
-struct SkinStorage {
-    joint_count: u32,
-    joint_matrices: array<mat4x4<f32>>,
-}
-
 struct CameraUniform {
     view_projection: mat4x4<f32>,
     view: mat4x4<f32>,
@@ -64,7 +59,7 @@ struct VertexOutput {
 }
 
 @group(0) @binding(0) var<storage, read> nodes: NodeStorage;
-@group(0) @binding(1) var<storage, read> skins: SkinStorage;
+@group(0) @binding(1) var<storage, read> joint_matrices: array<mat4x4<f32>>;
 @group(0) @binding(2) var<uniform> camera: CameraUniform;
 @group(0) @binding(3) var<storage, read> lights: LightStorage;
 @group(0) @binding(4) var irradiance_map_texture: texture_cube<f32>;
@@ -170,10 +165,10 @@ fn vs_main(
     var model_matrix: mat4x4<f32>;
     if joint_offset != 0 && contains(geometry_flags, geometry_weights_0_flag | geometry_joints_0_flag) {
         model_matrix = 
-            attributes.weights_0.x * skins.joint_matrices[joint_offset + attributes.joints_0.x] +
-            attributes.weights_0.y * skins.joint_matrices[joint_offset + attributes.joints_0.y] +
-            attributes.weights_0.z * skins.joint_matrices[joint_offset + attributes.joints_0.z] +
-            attributes.weights_0.w * skins.joint_matrices[joint_offset + attributes.joints_0.w];
+            attributes.weights_0.x * joint_matrices[joint_offset + attributes.joints_0.x] +
+            attributes.weights_0.y * joint_matrices[joint_offset + attributes.joints_0.y] +
+            attributes.weights_0.z * joint_matrices[joint_offset + attributes.joints_0.z] +
+            attributes.weights_0.w * joint_matrices[joint_offset + attributes.joints_0.w];
     } else {
         model_matrix = mat4x4(
             model_col_0,

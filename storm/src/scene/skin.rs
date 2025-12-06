@@ -1,10 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
-use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
+use bytemuck::cast_slice;
 use glam::Mat4;
 use thiserror::Error;
 use uuid::Uuid;
-use wgpu::util::DeviceExt;
 
 use crate::scene::{NodeManager, node::NodeId};
 
@@ -102,18 +101,24 @@ pub(super) struct SkinManager {
 impl SkinManager {
     /// Create a new empty skin manager.
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Skin manager buffer"),
-            contents: bytes_of(&SkinStorageHeader {
-                joint_count: 0,
-                _pad: [0; 3],
-            }),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        let buffer = Self::create_buffer(
+            wgpu::util::align_to(size_of::<Mat4>() as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+            false,
+            device,
+        );
         Self {
             skins: HashMap::new(),
             buffer,
         }
+    }
+
+    fn create_buffer(size: u64, mapped_at_creation: bool, device: &wgpu::Device) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Joint matrices buffer"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation,
+        })
     }
 
     /// Buffer index of the first joint matrix part of the skin,
@@ -153,29 +158,19 @@ impl SkinManager {
             }
         }
 
-        let header = SkinStorageHeader {
-            joint_count: joint_matrices.len() as u32,
-            _pad: [0; 3],
-        };
-
-        let header_size = size_of::<SkinStorageHeader>();
-        let size = header_size + joint_matrices.len() * size_of::<Mat4>();
-        let header = bytes_of(&header);
+        let size = joint_matrices.len() * size_of::<Mat4>();
         let joint_matrices = cast_slice(&joint_matrices);
 
         if self.buffer.size() >= size as u64 {
-            queue.write_buffer(&self.buffer, 0, header);
-            queue.write_buffer(&self.buffer, header_size as u64, joint_matrices);
+            queue.write_buffer(&self.buffer, 0, joint_matrices);
         } else {
-            self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Skin manager buffer"),
-                size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: true,
-            });
+            self.buffer = Self::create_buffer(
+                wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+                true,
+                device,
+            );
             let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
-            buffer_view[..header_size].copy_from_slice(header);
-            buffer_view[header_size..size].copy_from_slice(joint_matrices);
+            buffer_view[..size].copy_from_slice(joint_matrices);
             drop(buffer_view);
             self.buffer.unmap();
         }
@@ -202,11 +197,4 @@ struct SkinData {
 struct Joint {
     node: NodeId,
     inverse_bind_matrix: Mat4,
-}
-
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-struct SkinStorageHeader {
-    joint_count: u32,
-    _pad: [u32; 3],
 }

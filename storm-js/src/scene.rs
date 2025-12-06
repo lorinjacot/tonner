@@ -9,6 +9,7 @@ use crate::{Engine, RenderTarget};
 
 mod camera;
 mod node;
+mod mesh_instance;
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered to a screen or a texture.
 ///

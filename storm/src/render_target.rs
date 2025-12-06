@@ -1,7 +1,6 @@
 use std::iter::repeat_with;
 
-use bytemuck::{Pod, Zeroable, bytes_of};
-use glam::Vec4;
+use bytemuck::bytes_of;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -19,7 +18,6 @@ pub struct RenderTargetBuilder {
     accumulation_attachment: wgpu::TextureView,
     revealage_attachment: wgpu::TextureView,
     depth_attachment: wgpu::TextureView,
-    compose_bind_group: wgpu::BindGroup,
     brightness_bind_group: wgpu::BindGroup,
     bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
     tone_mapping_bind_group: wgpu::BindGroup,
@@ -44,11 +42,7 @@ impl RenderTargetBuilder {
                 depth_attachment,
             ],
             bloom_textures,
-            [
-                compose_bind_group,
-                brightness_bind_group,
-                tone_mapping_bind_group,
-            ],
+            [brightness_bind_group, tone_mapping_bind_group],
         ) = create_render_attachments(width, height, 10, engine, &mut encoder);
 
         let tone_mapping_pipeline =
@@ -96,7 +90,6 @@ impl RenderTargetBuilder {
             accumulation_attachment,
             revealage_attachment,
             depth_attachment,
-            compose_bind_group,
             brightness_bind_group,
             bloom_textures,
             tone_mapping_bind_group,
@@ -134,7 +127,6 @@ impl RenderTargetBuilder {
             accumulation_attachment: self.accumulation_attachment,
             revealage_attachment: self.revealage_attachment,
             depth_attachment: self.depth_attachment,
-            compose_bind_group: self.compose_bind_group,
             brightness_bind_group: self.brightness_bind_group,
             bloom_textures: self.bloom_textures,
             tone_mapping_bind_group: self.tone_mapping_bind_group,
@@ -164,7 +156,6 @@ pub struct RenderTarget<'a> {
     pub(crate) accumulation_attachment: wgpu::TextureView,
     pub(crate) revealage_attachment: wgpu::TextureView,
     pub(crate) depth_attachment: wgpu::TextureView,
-    pub(crate) compose_bind_group: wgpu::BindGroup,
     pub(crate) brightness_bind_group: wgpu::BindGroup,
     pub(crate) bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
     pub(crate) tone_mapping_bind_group: wgpu::BindGroup,
@@ -187,7 +178,7 @@ fn create_render_attachments(
 ) -> (
     [wgpu::TextureView; 4],
     [(wgpu::TextureView, wgpu::BindGroup); 2],
-    [wgpu::BindGroup; 3],
+    [wgpu::BindGroup; 2],
 ) {
     let size = wgpu::Extent3d {
         width,
@@ -234,21 +225,6 @@ fn create_render_attachments(
             label: Some("Depth render attachment"),
             ..Default::default()
         });
-
-    let compose_bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Compose bind group"),
-        layout: &engine.compose_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&accumulation_attachment),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&revealage_attachment),
-            },
-        ],
-    });
 
     let brightness_bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Brightness bind group"),
@@ -316,11 +292,7 @@ fn create_render_attachments(
             depth_attachment,
         ],
         bloom_textures,
-        [
-            compose_bind_group,
-            brightness_bind_group,
-            tone_mapping_bind_group,
-        ],
+        [brightness_bind_group, tone_mapping_bind_group],
     )
 }
 

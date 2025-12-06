@@ -91,7 +91,7 @@ impl MeshBuilder {
         }
     }
 
-    /// Add a new [Geometry] [Material] to the mesh. This function must be called at least once.
+    /// Add a new [Geometry]-[Material] pair to the mesh. This function must be called at least once.
     pub fn primitive(
         mut self,
         geometry: impl Into<Geometry>,

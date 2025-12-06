@@ -11,7 +11,19 @@ use crate::Engine;
 /// A 3D does not contain any information about the material. For that, see {@link Mesh}.
 /// A `Mesh` wrap a `Geometry` with a {@link Material}.
 #[wasm_bindgen]
-pub struct Geometry();
+pub struct Geometry(storm::geometry::Geometry);
+
+impl From<storm::geometry::Geometry> for Geometry {
+    fn from(value: storm::geometry::Geometry) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Geometry> for storm::geometry::Geometry {
+    fn from(value: Geometry) -> Self {
+        value.0
+    }
+}
 
 /// A builder for {@link Geometry}.
 #[wasm_bindgen]
@@ -28,6 +40,12 @@ impl GeometryBuilder {
         ))
     }
 
+    /// Gives a name to the geometry. Used for GUI and debugging.
+    pub fn name(mut self, name: String) -> Self {
+        self.0 = self.0.name(name);
+        self
+    }
+
     /// Set the `position` attribute of the geometry vertices. `positions.length` must be equal
     /// to the constructor argument `vertexCount`.
     pub fn positions(self, positions: Vec<Vec3>) -> Result<Self, InvalidAttributeIterLenError> {
@@ -39,8 +57,9 @@ impl GeometryBuilder {
     }
 
     /// Build the geometry.
-    pub fn build(self, _engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
-        todo!()
+    pub fn build(self, engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
+        let geometry = self.0.build(&mut engine.inner)?;
+        Ok(Geometry(geometry))
     }
 }
 
@@ -54,5 +73,5 @@ pub struct InvalidAttributeIterLenError {
 /// Error when {@link GeometryBuilder.build()} fails.
 #[wasm_bindgen]
 #[derive(Debug, Error)]
-#[error("build failed")]
-pub struct GeometryBuilderError;
+#[error(transparent)]
+pub struct GeometryBuilderError(#[from] storm::geometry::GeometryBuilderError);

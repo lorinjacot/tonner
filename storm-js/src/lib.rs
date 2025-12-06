@@ -77,11 +77,7 @@ impl Engine {
             config.format,
             &mut self.inner,
         );
-        RenderTarget {
-            surface,
-            config,
-            builder,
-        }
+        RenderTarget { surface, builder }
     }
 }
 
@@ -154,7 +150,6 @@ pub enum BuildEngineError {
 #[wasm_bindgen]
 pub struct RenderTarget {
     surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
     builder: storm::render_target::RenderTargetBuilder,
 }
 

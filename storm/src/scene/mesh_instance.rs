@@ -31,9 +31,9 @@ pub struct MeshInstanceBuilder {
 
 impl MeshInstanceBuilder {
     /// Create a new mesh instance builder. This is used to add `mesh` to a scene.
-    pub fn new(mesh: Mesh) -> Self {
+    pub fn new(mesh: impl Into<Mesh>) -> Self {
         Self {
-            mesh,
+            mesh: mesh.into(),
             node: None,
             name: String::new(),
             weights: Vec::new(),

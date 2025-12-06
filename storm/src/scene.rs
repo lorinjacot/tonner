@@ -49,8 +49,6 @@ pub struct Scene {
     light_manager: LightManager,
     environment: Environment,
     render_bind_group_layout: wgpu::BindGroupLayout,
-    skybox_bind_group_layout: wgpu::BindGroupLayout,
-    skybox_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     bloom_amount: usize,
@@ -354,9 +352,7 @@ impl SceneBuilder {
         let environment = EnvironmentBuilder::default().build(engine, &mut encoder);
 
         let render_bind_group_layout = engine.render_bind_group_layout.clone();
-        let skybox_bind_group_layout = engine.skybox_bind_group_layout.clone();
-
-        let skybox_pipeline = engine.skybox_pipeline.clone();
+        
         let brightness_pipeline = engine.brightness_pipeline.clone();
         let gaussian_blur_pipeline = engine.gaussian_blur_pipeline.clone();
 
@@ -374,8 +370,6 @@ impl SceneBuilder {
             light_manager,
             environment,
             render_bind_group_layout,
-            skybox_bind_group_layout,
-            skybox_pipeline,
             brightness_pipeline,
             gaussian_blur_pipeline,
             bloom_amount: 10,

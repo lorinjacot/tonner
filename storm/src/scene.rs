@@ -60,7 +60,7 @@ impl Scene {
     pub fn simulate(
         &mut self,
         duration: Duration,
-        encoder: &mut wgpu::CommandEncoder,
+        _encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), SimulateError> {
         self.animation_manager
             .simulate(duration, &mut self.node_manager)
@@ -81,7 +81,7 @@ impl Scene {
                 &self.node_manager,
                 &self.skin_manager,
                 &self.device,
-                encoder,
+                &self.queue,
             )
             .unwrap();
 

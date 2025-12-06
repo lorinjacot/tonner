@@ -212,7 +212,7 @@ impl NodeManager {
             self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Node storage buffer"),
                 size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                usage: wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: true,
             });
             let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();

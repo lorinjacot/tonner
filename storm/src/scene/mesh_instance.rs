@@ -1,10 +1,9 @@
-use std::{collections::HashMap, ops::Range, sync::mpsc::sync_channel};
+use std::{collections::HashMap, ops::Range};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Vec4};
 use thiserror::Error;
 use uuid::Uuid;
-use wgpu::BufferViewMut;
 
 use crate::{
     asset::mesh::{Mesh, MeshPrimitive},
@@ -121,19 +120,17 @@ pub enum MeshInstanceBuilderError {
 pub(super) struct MeshInstanceManager {
     mesh_instances: HashMap<MeshInstanceId, MeshInstanceData>,
     vertex_buffer: wgpu::Buffer,
-    staging_buffer: wgpu::Buffer,
     opaque_primitives: PrimitivesByPipeline,
     transparent_primitives: PrimitivesByPipeline,
 }
 
 impl MeshInstanceManager {
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let (vertex_buffer, staging_buffer) = Self::create_buffers(0, device);
+        let vertex_buffer = Self::create_vertex_buffer(0, false, device);
 
         Self {
             mesh_instances: HashMap::new(),
             vertex_buffer,
-            staging_buffer,
             opaque_primitives: PrimitivesByPipeline(HashMap::new()),
             transparent_primitives: PrimitivesByPipeline(HashMap::new()),
         }
@@ -144,7 +141,7 @@ impl MeshInstanceManager {
         node_manager: &NodeManager,
         skin_manager: &SkinManager,
         device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
     ) -> Result<(), UpdateMeshInstanceBufferError> {
         self.opaque_primitives.0.clear();
         self.transparent_primitives.0.clear();
@@ -196,68 +193,46 @@ impl MeshInstanceManager {
             }
         }
 
-        let size = primitive_count * size_of::<PrimitiveInstanceVertex>();
+        let mut data = Vec::with_capacity(primitive_count);
+        let size = size_of::<PrimitiveInstanceVertex>();
+        self.opaque_primitives
+            .0
+            .values_mut()
+            .chain(self.transparent_primitives.0.values_mut())
+            .for_each(|primitives| {
+                for (_, instances) in primitives.values_mut() {
+                    let start = data.len() * size;
+                    data.append(&mut instances.data);
+                    let end = data.len() * size;
+                    instances.bounds = start as u64..end as u64;
+                }
+            });
+
+        let size = data.len() * size_of::<PrimitiveInstanceVertex>();
         let aligned_size = wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT);
         if self.vertex_buffer.size() < size as u64 {
-            (self.vertex_buffer, self.staging_buffer) = Self::create_buffers(aligned_size, device);
+            self.vertex_buffer = Self::create_vertex_buffer(aligned_size, true, device);
+            let mut view = self.vertex_buffer.get_mapped_range_mut(..);
+            view[..size].copy_from_slice(cast_slice(&data));
+            drop(view);
+            self.vertex_buffer.unmap();
         } else {
-            let (sender, receiver) = sync_channel(1);
-            self.staging_buffer
-                .map_async(wgpu::MapMode::Write, .., move |result| {
-                    if let Ok(_) = result {
-                        sender.send(()).unwrap();
-                    }
-                });
-            if let Err(_) = receiver.recv() {
-                self.staging_buffer = Self::create_staging_buffer(aligned_size, device);
-            }
+            queue.write_buffer(&self.vertex_buffer, 0, cast_slice(&data));
         }
-        let mut view = self.staging_buffer.get_mapped_range_mut(0..size as u64);
-
-        let mut start = 0;
-        Self::update_buffer_and_bounds(&mut view, &mut start, &mut self.opaque_primitives);
-        Self::update_buffer_and_bounds(&mut view, &mut start, &mut self.transparent_primitives);
-        drop(view);
-        self.staging_buffer.unmap();
-        encoder.copy_buffer_to_buffer(&self.staging_buffer, 0, &self.vertex_buffer, 0, None);
 
         Ok(())
     }
 
-    fn update_buffer_and_bounds(
-        view: &mut BufferViewMut,
-        start: &mut usize,
-        primitives_by_pipeline: &mut PrimitivesByPipeline,
-    ) {
-        for pipeline in primitives_by_pipeline.0.values_mut() {
-            for (_, instances) in pipeline.values_mut() {
-                let end = *start + instances.data.len();
-                let size = size_of::<PrimitiveInstanceVertex>();
-                view[*start * size..end * size].copy_from_slice(cast_slice(&instances.data));
-                instances.bounds = *start as u64..end as u64;
-                *start = end;
-            }
-        }
-    }
-
-    fn create_buffers(size: u64, device: &wgpu::Device) -> (wgpu::Buffer, wgpu::Buffer) {
-        (
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Mesh instance vertex buffer"),
-                size,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            Self::create_staging_buffer(size, device),
-        )
-    }
-
-    fn create_staging_buffer(size: u64, device: &wgpu::Device) -> wgpu::Buffer {
+    fn create_vertex_buffer(
+        size: u64,
+        mapped_at_creation: bool,
+        device: &wgpu::Device,
+    ) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Mesh instance staging buffer"),
+            label: Some("Mesh instance vertex buffer"),
             size,
-            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: true,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation,
         })
     }
 
@@ -339,7 +314,7 @@ struct PrimitivesByPipeline(
     HashMap<wgpu::RenderPipeline, HashMap<MeshPrimitiveId, (MeshPrimitive, PrimitiveInstances)>>,
 );
 
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 pub(crate) struct PrimitiveInstanceVertex {
     model_matrix: Mat4,

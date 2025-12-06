@@ -159,7 +159,6 @@ impl ApplicationHandler for App {
                     .render(&render_target, self.camera.unwrap(), &mut encoder)
                     .unwrap();
                 engine.submit_commands(encoder.finish());
-                panic!();
                 surface_texture.present();
 
                 // Queue a RedrawRequested event.
@@ -177,7 +176,7 @@ impl ApplicationHandler for App {
 fn main() {
     let event_loop = EventLoop::new().unwrap();
 
-    event_loop.set_control_flow(ControlFlow::Wait);
+    event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
     event_loop.run_app(&mut app).unwrap();

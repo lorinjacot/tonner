@@ -69,9 +69,9 @@ impl ApplicationHandler for App {
         let triangle = GeometryBuilder::new(3, 0)
             .name("Triangle")
             .positions([
-                vec3(0.5, 0.5, 0.5),
-                vec3(0.0, -0.5, 0.0),
-                vec3(-0.5, 0.5, 0.5),
+                vec3(0.5, 0.5, -5.0),
+                vec3(0.0, -0.5, -5.0),
+                vec3(-0.5, 0.5, -5.0),
             ])
             .unwrap()
             .build(&mut engine)

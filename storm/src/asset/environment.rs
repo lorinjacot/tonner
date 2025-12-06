@@ -280,7 +280,7 @@ impl EnvironmentBuilder {
                         view_formats: &[],
                     },
                     wgpu::util::TextureDataOrder::LayerMajor,
-                    &[0; 6 * 4 * 1],
+                    &[u8::MAX; 6 * 4 * 1],
                 );
 
                 radiance_texture.create_view(&wgpu::TextureViewDescriptor {
@@ -502,7 +502,11 @@ pub(crate) struct EnvironmentManager {
 }
 
 impl EnvironmentManager {
-    pub fn new(skybox_bind_group_layout: &wgpu::BindGroupLayout, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> Self {
+    pub fn new(
+        skybox_bind_group_layout: &wgpu::BindGroupLayout,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Self {
         let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Environment builder cube vertex buffer"),
             contents: cast_slice(CUBE_VERTICES),

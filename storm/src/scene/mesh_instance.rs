@@ -182,6 +182,7 @@ impl MeshInstanceManager {
                         (
                             primitive.clone(),
                             PrimitiveInstances {
+                                count: 0,
                                 bounds: 0..0,
                                 data: Vec::with_capacity(1),
                             },
@@ -201,6 +202,7 @@ impl MeshInstanceManager {
             .chain(self.transparent_primitives.0.values_mut())
             .for_each(|primitives| {
                 for (_, instances) in primitives.values_mut() {
+                    instances.count = instances.data.len() as u32;
                     let start = data.len() * size;
                     data.append(&mut instances.data);
                     let end = data.len() * size;
@@ -269,7 +271,7 @@ impl MeshInstanceManager {
                 render_pass
                     .set_vertex_buffer(0, self.vertex_buffer.slice(instances.bounds.clone()));
                 render_pass.set_bind_group(1, primitive.bind_group(), &[]);
-                let instances = 0..instances.data.len() as u32;
+                let instances = 0..instances.count;
                 match primitive.indices() {
                     Some(GeometryIndices {
                         buffer,
@@ -298,6 +300,7 @@ struct MeshInstanceData {
 }
 
 struct PrimitiveInstances {
+    count: u32,
     data: Vec<PrimitiveInstanceVertex>,
     bounds: Range<u64>,
 }

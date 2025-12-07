@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
+use dioxus::logger::tracing;
 use lightning::EngineProvider;
+
+use lightning::components::menubar::*;
 
 #[cfg(feature = "web")]
 mod web_renderer;
@@ -8,6 +11,7 @@ mod web_renderer;
 mod native_renderer;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
+const DX_COMPONENT_THEME_CSS: Asset = asset!("/assets/dx-components-theme.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
@@ -16,37 +20,80 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let mut show_triangle = use_signal(|| true);
-
-    use_effect(move || println!("{:?}", show_triangle));
-
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "stylesheet", href: DX_COMPONENT_THEME_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
 
         EngineProvider {
-            div { id:"overlay",
-                h2 { "Control Panel" },
-                button {
-                    onclick: move |_| show_triangle.toggle(),
-                    if show_triangle() {
-                        "Hide triangle"
-                    } else {
-                        "Show triangle"
+            Demo { }
+        }
+    }
+}
+
+#[component]
+pub fn Demo() -> Element {
+    rsx! {
+        div { class: "menubar-example",
+            Menubar {
+                MenubarMenu { index: 0usize,
+                    MenubarTrigger { "File" }
+                    MenubarContent {
+                        MenubarItem {
+                            index: 0usize,
+                            value: "new".to_string(),
+                            on_select: move |value| {
+                                tracing::info!("Selected value: {}", value);
+                            },
+                            "New"
+                        }
+                        MenubarItem {
+                            index: 1usize,
+                            value: "open".to_string(),
+                            on_select: move |value| {
+                                tracing::info!("Selected value: {}", value);
+                            },
+                            "Open"
+                        }
+                        MenubarItem {
+                            index: 2usize,
+                            value: "save".to_string(),
+                            on_select: move |value| {
+                                tracing::info!("Selected value: {}", value);
+                            },
+                            "Save"
+                        }
                     }
                 }
-                br {}
-                p { "This overlay demonstrates that the custom WGPU content can be rendered beneath layers of HTML content" }
-            }
-            div { id:"underlay",
-                h2 { "Underlay" },
-                p { "This underlay demonstrates that the custom WGPU content can be rendered above layers and blended with the content underneath" }
-            }
-            header {
-                h1 { "Blitz WGPU Demo" }
-            }
-            if show_triangle() {
-                SpinningTriangle {  }
+                MenubarMenu { index: 1usize,
+                    MenubarTrigger { "Edit" }
+                    MenubarContent {
+                        MenubarItem {
+                            index: 0usize,
+                            value: "cut".to_string(),
+                            on_select: move |value| {
+                                tracing::info!("Selected value: {}", value);
+                            },
+                            "Cut"
+                        }
+                        MenubarItem {
+                            index: 1usize,
+                            value: "copy".to_string(),
+                            on_select: move |value| {
+                                tracing::info!("Selected value: {}", value);
+                            },
+                            "Copy"
+                        }
+                        MenubarItem {
+                            index: 2usize,
+                            value: "paste".to_string(),
+                            on_select: move |value| {
+                                tracing::info!("Selected value: {}", value);
+                            },
+                            "Paste"
+                        }
+                    }
+                }
             }
         }
     }

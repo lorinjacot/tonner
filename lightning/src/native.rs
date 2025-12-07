@@ -64,26 +64,3 @@ impl CustomPaintSource for EngineInitializer {
         None
     }
 }
-
-// #[component]
-// pub fn RenderTarget(scene: ReadSignal<Scene>, camera: CameraId) -> Element {}
-
-// struct RenderTarget {
-//     scene: ReadSignal<Scene>,
-//     builder: RenderTargetBuilder,
-// }
-
-// impl CustomPaintSource for RenderTarget {
-//     fn resume(&mut self, device_handle: &dioxus_native::DeviceHandle) {}
-
-//     fn suspend(&mut self) {}
-
-//     fn render(
-//         &mut self,
-//         ctx: dioxus_native::CustomPaintCtx<'_>,
-//         width: u32,
-//         height: u32,
-//         scale: f64,
-//     ) -> Option<dioxus_native::TextureHandle> {
-//     }
-// }

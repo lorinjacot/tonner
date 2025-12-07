@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.7.1", features = [] }
 dioxus-native = { version = "0.7.2", optional = true }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false, features = ["router"] }
 pollster = { workspace = true, optional = true }
 storm.workspace = true
 uuid = { workspace = true, features = ["js", "v4"] }

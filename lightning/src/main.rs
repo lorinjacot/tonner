@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use lightning::EngineProvider;
 
 #[cfg(feature = "web")]
 mod web_renderer;
@@ -23,28 +24,30 @@ fn App() -> Element {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
 
-        div { id:"overlay",
-            h2 { "Control Panel" },
-            button {
-                onclick: move |_| show_triangle.toggle(),
-                if show_triangle() {
-                    "Hide triangle"
-                } else {
-                    "Show triangle"
+        EngineProvider {
+            div { id:"overlay",
+                h2 { "Control Panel" },
+                button {
+                    onclick: move |_| show_triangle.toggle(),
+                    if show_triangle() {
+                        "Hide triangle"
+                    } else {
+                        "Show triangle"
+                    }
                 }
+                br {}
+                p { "This overlay demonstrates that the custom WGPU content can be rendered beneath layers of HTML content" }
             }
-            br {}
-            p { "This overlay demonstrates that the custom WGPU content can be rendered beneath layers of HTML content" }
-        }
-        div { id:"underlay",
-            h2 { "Underlay" },
-            p { "This underlay demonstrates that the custom WGPU content can be rendered above layers and blended with the content underneath" }
-        }
-        header {
-            h1 { "Blitz WGPU Demo" }
-        }
-        if show_triangle() {
-            SpinningTriangle {  }
+            div { id:"underlay",
+                h2 { "Underlay" },
+                p { "This underlay demonstrates that the custom WGPU content can be rendered above layers and blended with the content underneath" }
+            }
+            header {
+                h1 { "Blitz WGPU Demo" }
+            }
+            if show_triangle() {
+                SpinningTriangle {  }
+            }
         }
     }
 }
@@ -89,14 +92,12 @@ fn SpinningTriangle() -> Element {
 fn SpinningTriangle() -> Element {
     use crate::native_renderer::DemoPaintSource;
     use dioxus_native::use_wgpu;
-    use lightning::native::EngineProvider;
 
     // Create custom paint source and register it with the renderer
     let paint_source = DemoPaintSource::new();
     let paint_source_id = use_wgpu(move || paint_source);
 
     rsx!(
-        EngineProvider {  }
         div { id:"canvas-container",
             canvas {
                 id: "demo-canvas",

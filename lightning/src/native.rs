@@ -34,7 +34,7 @@ impl CustomPaintSource for EngineInitializer {
         let mut signal = self.0;
         std::thread::spawn(move || {
             let _span = span!(Level::ERROR, "Engine initialization").entered();
-            if let Some(engine) = signal.as_mut() {
+            if let Some(engine) = signal.as_ref() {
                 if engine.device() == &device_handle.device {
                     debug!("Engine already initalized with the correct device. Nothing to do.");
                     return;
@@ -47,7 +47,7 @@ impl CustomPaintSource for EngineInitializer {
                     .device(device_handle.device, device_handle.queue)
                     .build(),
             );
-            signal.set(Some(engine));
+            *signal.write() = Some(engine);
             debug!("Engine initalized!");
         });
     }

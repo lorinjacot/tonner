@@ -1,5 +1,11 @@
 #[cfg(feature = "web")]
-pub mod web;
+pub use web::{EngineContext, EngineProvider};
 
 #[cfg(feature = "desktop")]
-pub mod native;
+pub use native::{EngineContext, EngineProvider};
+
+#[cfg(feature = "web")]
+mod web;
+
+#[cfg(feature = "desktop")]
+mod native;

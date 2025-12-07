@@ -17,6 +17,3 @@ wgpu.workspace = true
 default = ["desktop"]
 web = ["dioxus/web", "dep:web-sys"]
 desktop = ["dioxus/native", "dep:dioxus-native"]
-
-[build-dependencies]
-cfg_aliases.workspace = true

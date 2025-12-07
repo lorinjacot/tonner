@@ -115,7 +115,6 @@ impl EngineBuilder {
                 label: Some("storm-js engine device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::defaults(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
             })

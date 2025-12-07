@@ -3505,7 +3505,6 @@ dependencies = [
 name = "lightning"
 version = "0.1.0"
 dependencies = [
- "cfg_aliases 0.1.1",
  "dioxus",
  "dioxus-native",
  "uuid",

@@ -9,6 +9,8 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.7.1", features = [] }
 dioxus-native = { version = "0.7.2", optional = true }
+pollster = { workspace = true, optional = true }
+storm.workspace = true
 uuid = { workspace = true, features = ["js", "v4"] }
 web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "Window"], optional = true }
 wgpu.workspace = true
@@ -16,4 +18,4 @@ wgpu.workspace = true
 [features]
 default = ["desktop"]
 web = ["dioxus/web", "dep:web-sys"]
-desktop = ["dioxus/native", "dep:dioxus-native"]
+desktop = ["dioxus/native", "dep:dioxus-native", "dep:pollster"]

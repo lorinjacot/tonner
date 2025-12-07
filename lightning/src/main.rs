@@ -89,12 +89,14 @@ fn SpinningTriangle() -> Element {
 fn SpinningTriangle() -> Element {
     use crate::native_renderer::DemoPaintSource;
     use dioxus_native::use_wgpu;
+    use lightning::native::EngineProvider;
 
     // Create custom paint source and register it with the renderer
     let paint_source = DemoPaintSource::new();
     let paint_source_id = use_wgpu(move || paint_source);
 
     rsx!(
+        EngineProvider {  }
         div { id:"canvas-container",
             canvas {
                 id: "demo-canvas",

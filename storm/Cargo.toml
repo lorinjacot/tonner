@@ -15,7 +15,7 @@ gltf-json = { version = "1.4.1", features = ["names"] }
 image = { version = "0.25.6", default-features = false, features = ["hdr"] }
 log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
-pollster = "0.4.0"
+pollster.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1.0.140"
 serde_repr = "0.1.20"

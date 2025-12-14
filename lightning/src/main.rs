@@ -17,9 +17,9 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "eframe template",
+        "Lightning",
         native_options,
-        Box::new(|cc| Ok(Box::new(lightning::TemplateApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(lightning::App::new(cc)))),
     )
 }
 
@@ -49,7 +49,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(lightning::TemplateApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(lightning::App::new(cc)))),
             )
             .await;
 

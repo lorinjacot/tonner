@@ -1,7 +1,9 @@
+use storm::Engine;
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
+struct State {
     // Example stuff:
     label: String,
 
@@ -9,7 +11,7 @@ pub struct TemplateApp {
     value: f32,
 }
 
-impl Default for TemplateApp {
+impl Default for State {
     fn default() -> Self {
         Self {
             // Example stuff:
@@ -19,7 +21,12 @@ impl Default for TemplateApp {
     }
 }
 
-impl TemplateApp {
+pub struct App {
+    state: State,
+    engine: Engine,
+}
+
+impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -27,18 +34,23 @@ impl TemplateApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
+        let state = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             Default::default()
-        }
+        };
+
+        let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
+        let engine = Engine::new(wgpu_state.device.clone(), wgpu_state.queue.clone());
+
+        Self { state, engine }
     }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for App {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
+        eframe::set_value(storage, eframe::APP_KEY, &self.state);
     }
 
     /// Called each time the UI needs repainting, which may be many times per second.
@@ -71,12 +83,12 @@ impl eframe::App for TemplateApp {
 
             ui.horizontal(|ui| {
                 ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
+                ui.text_edit_singleline(&mut self.state.label);
             });
 
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
+            ui.add(egui::Slider::new(&mut self.state.value, 0.0..=10.0).text("value"));
             if ui.button("Increment").clicked() {
-                self.value += 1.0;
+                self.state.value += 1.0;
             }
 
             ui.separator();

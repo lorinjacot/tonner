@@ -47,78 +47,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Convenience function to create a command encoder.
-    pub fn encoder(&self, label: Option<&str>) -> wgpu::CommandEncoder {
-        self.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label })
-    }
-
-    /// At the end of the frame, call this function to submit commands.
-    pub fn submit_commands(&self, command_buffer: wgpu::CommandBuffer) {
-        self.queue.submit([command_buffer]);
-    }
-
-    pub fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-}
-
-/// A builder for [Engine].
-#[must_use]
-pub struct EngineBuilder<'a> {
-    device: Option<(wgpu::Device, wgpu::Queue)>,
-    compatible_surface: Option<&'a wgpu::Surface<'a>>,
-    target_format: wgpu::TextureFormat,
-}
-
-impl<'a> Default for EngineBuilder<'a> {
-    fn default() -> Self {
-        Self {
-            device: None,
-            compatible_surface: None,
-            target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        }
-    }
-}
-
-impl<'a> EngineBuilder<'a> {
-    /// Use an existing [wgpu::Device] and [wgpu::Queue].
-    pub fn device(mut self, device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        self.device = Some((device, queue));
-        self
-    }
-
-    /// Ensure the engine is compatible with this surface.
-    pub fn compatible_surface(mut self, surface: &'a wgpu::Surface<'a>) -> Self {
-        self.compatible_surface = Some(surface);
-        self
-    }
-
-    /// Change the [wgpu::TextureFormat] of the rendering target.
-    /// This setting controls the encoding of the rendered [Scene]s.
-    pub fn target_format(mut self, target_format: wgpu::TextureFormat) -> Self {
-        self.target_format = target_format;
-        self
-    }
-
-    /// Build the [Engine].
-    pub async fn build(self) -> Engine {
-        let (device, queue) = match self.device {
-            Some(device) => device,
-            None => {
-                let instance =
-                    wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
-                let adapter = instance
-                    .request_adapter(&wgpu::RequestAdapterOptions::default())
-                    .await
-                    .expect("Failed to get wgpu adapter");
-                adapter
-                    .request_device(&wgpu::wgt::DeviceDescriptor::default())
-                    .await
-                    .expect("Failed to get wgpu device")
-            }
-        };
-
+    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
             label: Some("Engine builder command encoder"),
         });
@@ -557,5 +486,80 @@ impl<'a> EngineBuilder<'a> {
         engine.queue.submit([encoder.finish()]);
 
         engine
+    }
+
+    /// Convenience function to create a command encoder.
+    pub fn encoder(&self, label: Option<&str>) -> wgpu::CommandEncoder {
+        self.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label })
+    }
+
+    /// At the end of the frame, call this function to submit commands.
+    pub fn submit_commands(&self, command_buffer: wgpu::CommandBuffer) {
+        self.queue.submit([command_buffer]);
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+}
+
+/// A builder for [Engine].
+#[must_use]
+pub struct EngineBuilder<'a> {
+    device: Option<(wgpu::Device, wgpu::Queue)>,
+    compatible_surface: Option<&'a wgpu::Surface<'a>>,
+    target_format: wgpu::TextureFormat,
+}
+
+impl<'a> Default for EngineBuilder<'a> {
+    fn default() -> Self {
+        Self {
+            device: None,
+            compatible_surface: None,
+            target_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        }
+    }
+}
+
+impl<'a> EngineBuilder<'a> {
+    /// Use an existing [wgpu::Device] and [wgpu::Queue].
+    pub fn device(mut self, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        self.device = Some((device, queue));
+        self
+    }
+
+    /// Ensure the engine is compatible with this surface.
+    pub fn compatible_surface(mut self, surface: &'a wgpu::Surface<'a>) -> Self {
+        self.compatible_surface = Some(surface);
+        self
+    }
+
+    /// Change the [wgpu::TextureFormat] of the rendering target.
+    /// This setting controls the encoding of the rendered [Scene]s.
+    pub fn target_format(mut self, target_format: wgpu::TextureFormat) -> Self {
+        self.target_format = target_format;
+        self
+    }
+
+    /// Build the [Engine].
+    pub async fn build(self) -> Engine {
+        let (device, queue) = match self.device {
+            Some(device) => device,
+            None => {
+                let instance =
+                    wgpu::Instance::new(&wgpu::InstanceDescriptor::from_env_or_default());
+                let adapter = instance
+                    .request_adapter(&wgpu::RequestAdapterOptions::default())
+                    .await
+                    .expect("Failed to get wgpu adapter");
+                adapter
+                    .request_device(&wgpu::wgt::DeviceDescriptor::default())
+                    .await
+                    .expect("Failed to get wgpu device")
+            }
+        };
+
+        Engine::new(device, queue)
     }
 }

@@ -3,6 +3,7 @@ members = [
     "storm",
     "glam-js",
     "storm-js",
+    "lightning",
 ]
 resolver = "2"
 
@@ -11,6 +12,17 @@ bytemuck = "1.24.0"
 cfg_aliases = "0.1.0"
 console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
+eframe = { version = "0.33.3", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "persistence",
+    "wayland",
+    "web_screen_reader",
+    "wgpu",
+    "x11"
+] }
+egui = "0.33.3"
+env_logger = "0.11.8"
 glam = "0.30.8"
 gloo = { version = "0.11.0", default-features = false }
 js-sys = "0.3.82"
@@ -26,10 +38,14 @@ wasm-bindgen = "0.2.104"
 wasm-bindgen-futures = "0.4.54"
 wasm-bindgen-test = "0.3.34"
 web-sys = "0.3.81"
-wgpu = "26.0.1"
+wgpu = "27.0.1"
 
 storm = { path = "storm" }
 glam-js = { path = "glam-js" }
 
 [profile.release]
-opt-level = "s"
+opt-level = 2 # fast and small wasm
+
+# Optimize all dependencies even in debug builds:
+[profile.dev.package."*"]
+opt-level = 2

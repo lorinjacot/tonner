@@ -1,7 +1,10 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
-use storm::{Engine, Scene};
 pub use scene_view::SceneView;
+use storm::{Engine, Scene, SceneBuilder, camera::CameraBuilder};
 
 mod scene_view;
 
@@ -29,7 +32,8 @@ impl Default for State {
 pub struct App {
     state: State,
     engine: Engine,
-    scenes: Vec<Arc<RwLock<Scene>>>,
+    main_scene: Arc<RwLock<Scene>>,
+    main_scene_view: SceneView,
 }
 
 impl App {
@@ -47,12 +51,26 @@ impl App {
         };
 
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
-        let engine = Engine::new(wgpu_state.device.clone(), wgpu_state.queue.clone());
+        let mut engine = Engine::new(wgpu_state.device.clone(), wgpu_state.queue.clone());
+
+        let mut scene = SceneBuilder::default().build(&mut engine);
+        let camera = CameraBuilder::default().build(&mut scene);
+
+        let scene = Arc::new(RwLock::new(scene));
+        let main_scene_view = SceneView::new(
+            scene.clone(),
+            camera,
+            300,
+            300,
+            &mut wgpu_state.renderer.write(),
+            &mut engine,
+        );
 
         Self {
             state,
             engine,
-            scenes: Vec::new(),
+            main_scene: scene,
+            main_scene_view,
         }
     }
 }
@@ -64,7 +82,15 @@ impl eframe::App for App {
     }
 
     /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let mut encoder = self.engine.encoder(Some("App::update command encoder"));
+        let duration = Duration::from_secs_f32(ctx.input(|input_state| input_state.stable_dt));
+        self.main_scene
+            .write()
+            .unwrap()
+            .simulate(duration, &mut encoder)
+            .unwrap();
+
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
@@ -108,11 +134,21 @@ impl eframe::App for App {
                 "Source code."
             ));
 
+            self.main_scene_view.render(
+                ui,
+                &mut frame.wgpu_render_state().unwrap().renderer.write(),
+                &mut self.engine,
+                &mut encoder,
+            );
+
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
             });
         });
+
+        self.engine.submit_commands(encoder.finish());
+        ctx.request_repaint();
     }
 }
 

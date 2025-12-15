@@ -49,6 +49,12 @@ impl SceneView {
         let size = ui.available_size();
         let width = size.x as u32;
         let height = size.y as u32;
+        dbg!(size.x, size.y);
+
+        if width == 0 || height == 0 {
+            return;
+        }
+
         if self.texture_view.texture().width() != width
             || self.texture_view.texture().height() != height
         {
@@ -59,6 +65,7 @@ impl SceneView {
                 engine,
             );
 
+            self.texture_view = Self::create_texture_view(width, height, engine.device());
             let id = renderer.register_native_texture(
                 engine.device(),
                 &self.texture_view,
@@ -93,7 +100,7 @@ impl SceneView {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         texture.create_view(&wgpu::TextureViewDescriptor {

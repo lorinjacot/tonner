@@ -1,4 +1,4 @@
-use std::{time::Duration, u32};
+use std::{borrow::Borrow, time::Duration, u32};
 
 use bytemuck::{Pod, Zeroable, bytes_of};
 use glam::{Mat4, Vec3, usize};
@@ -97,9 +97,9 @@ impl Scene {
         Ok(())
     }
 
-    pub fn render(
+    pub fn render<View: Borrow<wgpu::TextureView>>(
         &self,
-        target: &RenderTarget,
+        target: &RenderTarget<View>,
         camera: CameraId,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
@@ -298,7 +298,7 @@ impl Scene {
         let mut tone_mapping_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Tone mapping render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target.render_texture_view,
+                view: target.render_texture_view.borrow(),
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {

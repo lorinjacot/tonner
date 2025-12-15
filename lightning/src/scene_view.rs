@@ -1,13 +1,16 @@
 use std::sync::{Arc, RwLock};
 
-use storm::{Engine, Scene, camera::CameraId, render_target::RenderTargetBuilder};
+use storm::{
+    Engine, Scene,
+    camera::CameraId,
+    render_target::{RenderTarget, RenderTargetBuilder},
+};
 
 pub struct SceneView {
     scene: Arc<RwLock<Scene>>,
     camera: CameraId,
-    texture_view: wgpu::TextureView,
     sized_texture: egui::load::SizedTexture,
-    render_target_builder: RenderTargetBuilder,
+    render_target: RenderTarget<wgpu::TextureView>,
 }
 
 impl SceneView {
@@ -19,8 +22,6 @@ impl SceneView {
         renderer: &mut eframe::egui_wgpu::Renderer,
         engine: &mut Engine,
     ) -> Self {
-        let render_target_builder =
-            RenderTargetBuilder::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, engine);
         let texture_view = Self::create_texture_view(width, height, engine.device());
 
         let id = renderer.register_native_texture(
@@ -30,12 +31,16 @@ impl SceneView {
         );
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
+        let render_target =
+            RenderTargetBuilder::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, engine)
+                .build(texture_view)
+                .unwrap();
+
         Self {
             scene,
             camera,
-            texture_view,
             sized_texture,
-            render_target_builder,
+            render_target,
         }
     }
 
@@ -49,40 +54,34 @@ impl SceneView {
         let size = ui.available_size();
         let width = size.x as u32;
         let height = size.y as u32;
-        dbg!(size.x, size.y);
 
         if width == 0 || height == 0 {
             return;
         }
 
-        if self.texture_view.texture().width() != width
-            || self.texture_view.texture().height() != height
-        {
-            self.render_target_builder = RenderTargetBuilder::new(
+        if self.render_target.width() != width || self.render_target.height() != height {
+            let texture_view = Self::create_texture_view(width, height, engine.device());
+            let id = renderer.register_native_texture(
+                engine.device(),
+                &texture_view,
+                wgpu::FilterMode::Linear,
+            );
+            self.sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
+
+            self.render_target = RenderTargetBuilder::new(
                 width,
                 height,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
                 engine,
-            );
-
-            self.texture_view = Self::create_texture_view(width, height, engine.device());
-            let id = renderer.register_native_texture(
-                engine.device(),
-                &self.texture_view,
-                wgpu::FilterMode::Linear,
-            );
-            self.sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
+            )
+            .build(texture_view)
+            .unwrap();
         }
 
-        let target = self
-            .render_target_builder
-            .clone()
-            .build(&self.texture_view)
-            .unwrap();
         self.scene
             .read()
             .unwrap()
-            .render(&target, self.camera, encoder)
+            .render(&self.render_target, self.camera, encoder)
             .unwrap();
 
         ui.image(self.sized_texture);

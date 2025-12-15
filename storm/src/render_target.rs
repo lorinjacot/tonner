@@ -1,4 +1,4 @@
-use std::iter::repeat_with;
+use std::{borrow::Borrow, iter::repeat_with};
 
 use bytemuck::bytes_of;
 use thiserror::Error;
@@ -98,30 +98,33 @@ impl RenderTargetBuilder {
     }
 
     /// Create a render target from a texture view.
-    pub fn build<'a>(
+    pub fn build<'a, View: Borrow<wgpu::TextureView>>(
         self,
-        target: &'a wgpu::TextureView,
-    ) -> Result<RenderTarget<'a>, IncompatibleTarget> {
-        if target.texture().width() != self.width {
+        target: View,
+    ) -> Result<RenderTarget<View>, IncompatibleTarget> {
+        let target_texture = target.borrow().texture();
+        if target_texture.width() != self.width {
             return Err(IncompatibleTarget::Width {
                 builder: self.width,
-                target: target.texture().width(),
+                target: target_texture.width(),
             });
         }
-        if target.texture().height() != self.height {
+        if target_texture.height() != self.height {
             return Err(IncompatibleTarget::Height {
                 builder: self.height,
-                target: target.texture().height(),
+                target: target_texture.height(),
             });
         }
-        if target.texture().format() != self.format {
+        if target_texture.format() != self.format {
             return Err(IncompatibleTarget::Format {
                 builder: self.format,
-                target: target.texture().format(),
+                target: target_texture.format(),
             });
         }
 
         Ok(RenderTarget {
+            width: self.width,
+            height: self.width,
             render_texture_view: target,
             opaque_attachment: self.opaque_attachment,
             accumulation_attachment: self.accumulation_attachment,
@@ -150,8 +153,10 @@ pub enum IncompatibleTarget {
 }
 
 /// Somewhere to render a [`Scene`][crate::Scene].
-pub struct RenderTarget<'a> {
-    pub(crate) render_texture_view: &'a wgpu::TextureView,
+pub struct RenderTarget<View: Borrow<wgpu::TextureView>> {
+    width: u32,
+    height: u32,
+    pub(crate) render_texture_view: View,
     pub(crate) opaque_attachment: wgpu::TextureView,
     pub(crate) accumulation_attachment: wgpu::TextureView,
     pub(crate) revealage_attachment: wgpu::TextureView,
@@ -162,10 +167,18 @@ pub struct RenderTarget<'a> {
     pub(crate) tone_mapping_pipeline: wgpu::RenderPipeline,
 }
 
-impl<'a> RenderTarget<'a> {
+impl<View: Borrow<wgpu::TextureView>> RenderTarget<View> {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
     pub(crate) fn aspect_ratio(&self) -> f32 {
-        self.render_texture_view.texture().width() as f32
-            / self.render_texture_view.texture().height() as f32
+        let target_texture = self.render_texture_view.borrow().texture();
+        target_texture.width() as f32 / target_texture.height() as f32
     }
 }
 

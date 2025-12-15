@@ -1887,6 +1887,7 @@ dependencies = [
  "storm",
  "wasm-bindgen-futures",
  "web-sys",
+ "wgpu",
 ]
 
 [[package]]

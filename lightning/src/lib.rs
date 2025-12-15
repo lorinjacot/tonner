@@ -1,4 +1,9 @@
-use storm::Engine;
+use std::sync::{Arc, RwLock};
+
+use storm::{Engine, Scene};
+pub use scene_view::SceneView;
+
+mod scene_view;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -24,6 +29,7 @@ impl Default for State {
 pub struct App {
     state: State,
     engine: Engine,
+    scenes: Vec<Arc<RwLock<Scene>>>,
 }
 
 impl App {
@@ -43,7 +49,11 @@ impl App {
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         let engine = Engine::new(wgpu_state.device.clone(), wgpu_state.queue.clone());
 
-        Self { state, engine }
+        Self {
+            state,
+            engine,
+            scenes: Vec::new(),
+        }
     }
 }
 

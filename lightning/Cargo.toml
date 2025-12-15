@@ -9,6 +9,7 @@ egui.workspace = true
 log.workspace = true
 serde.workspace = true
 storm.workspace = true
+wgpu.workspace = true
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

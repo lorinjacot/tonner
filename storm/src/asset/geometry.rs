@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ops::DerefMut,
     sync::{Arc, Mutex},
 };
@@ -11,7 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
-use crate::Engine;
+use crate::Context;
 
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
 
@@ -278,7 +277,7 @@ impl GeometryBuilder {
         self
     }
 
-    pub fn build(mut self, engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
+    pub fn build(mut self, ctx: &Context) -> Result<Geometry, GeometryBuilderError> {
         if self.morph_target_count > MAX_MORPH_TARGET_COUNT {
             return Err(GeometryBuilderError::TooManyMorphTarget);
         }
@@ -383,7 +382,7 @@ impl GeometryBuilder {
         let size = header_size
             + (1 + self.morph_target_count) * self.vertex_count * size_of::<Attribute>();
 
-        let vertex_buffer = engine.device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Geometry vertex buffer"),
             size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
             usage: wgpu::BufferUsages::STORAGE,
@@ -410,7 +409,7 @@ impl GeometryBuilder {
                 ),
             };
 
-            let buffer = engine
+            let buffer = ctx
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Geometry index buffer"),
@@ -436,14 +435,8 @@ impl GeometryBuilder {
             topology: self.topology,
             flags: self.attribute_flags,
         };
-        let geometry = Geometry(Arc::new(data));
 
-        engine
-            .geometry_manager
-            .geometries
-            .insert(id, geometry.clone());
-
-        Ok(geometry)
+        Ok(Geometry(Arc::new(data)))
     }
 
     fn compute_normals(attributes: &mut [Attribute]) {
@@ -539,7 +532,7 @@ impl<'a> mikktspace::Geometry for MikkTSpace<'a> {
 
 /// A shared reference to a geometry. A geometry describes only the 3D shape, not the material.
 /// To have a full 3d description, see [`Mesh`][super::mesh::Mesh].
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Geometry(Arc<GeometryData>);
 
 impl Geometry {
@@ -622,6 +615,7 @@ impl Geometry {
     }
 }
 
+#[derive(Debug)]
 struct GeometryData {
     /// Unique id for the geometry. Will never change.
     id: GeometryId,
@@ -648,18 +642,6 @@ pub struct GeometryIndices {
 
     /// The number of vertices. For triangle-based geometry, this will be a multiple of `3`.
     pub count: usize,
-}
-
-pub(crate) struct GeometryManager {
-    geometries: HashMap<GeometryId, Geometry>,
-}
-
-impl GeometryManager {
-    pub(crate) fn new() -> Self {
-        Self {
-            geometries: HashMap::new(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Pod, Zeroable)]

@@ -1,4 +1,4 @@
-use storm::{Engine, Scene, SceneBuilder};
+use storm::{Scene, SceneBuilder};
 
 #[derive(Debug, Default)]
 pub(super) struct NewSceneModal {
@@ -7,12 +7,16 @@ pub(super) struct NewSceneModal {
 }
 
 impl NewSceneModal {
-    pub(super) fn ui(&mut self, ctx: &egui::Context, engine: &mut Engine) -> Option<Scene> {
+    pub(super) fn ui(
+        &mut self,
+        egui_ctx: &egui::Context,
+        storm_ctx: &storm::Context,
+    ) -> Option<Scene> {
         if !self.open {
             return None;
         }
 
-        let modal = egui::Modal::new(egui::Id::new("New Scene Modal")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::new("New Scene Modal")).show(egui_ctx, |ui| {
             ui.heading("New Scene");
 
             ui.horizontal(|ui| {
@@ -30,7 +34,7 @@ impl NewSceneModal {
                             Some(
                                 SceneBuilder::default()
                                     .name(self.name.clone())
-                                    .build(engine),
+                                    .build(storm_ctx),
                             )
                         } else {
                             None

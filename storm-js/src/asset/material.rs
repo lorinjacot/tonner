@@ -3,7 +3,7 @@
 use glam_js::Vec4;
 use wasm_bindgen::prelude::*;
 
-use crate::Engine;
+use crate::Context;
 
 /// A material describe how to render a 2D surface.
 ///
@@ -47,7 +47,7 @@ impl MaterialBuilder {
     }
 
     /// Build the material.
-    pub fn build(self, engine: &mut Engine) -> Material {
-        Material(self.0.build(&mut engine.inner))
+    pub fn build(self, ctx: &Context) -> Material {
+        Material(self.0.build(&ctx.inner))
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
@@ -9,7 +8,7 @@ use image::DynamicImage;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
-use crate::Engine;
+use crate::Context;
 use crate::texture::TextureBuilder;
 
 pub const CUBE_VERTICES: &[Vec3] = &[
@@ -152,25 +151,24 @@ impl EnvironmentBuilder {
     }
 
     /// Create the environment.
-    pub fn build(self, engine: &mut Engine, encoder: &mut wgpu::CommandEncoder) -> Environment {
+    pub fn build(self, ctx: &Context, encoder: &mut wgpu::CommandEncoder) -> Environment {
         let name = self.name;
         let environment_map_view = match self.radiance_image {
             Some(radiance_image) => {
                 let radiance_texture = TextureBuilder::default()
                     .name(format!("{name} radiance texture").as_ref())
                     .from_dynamic_image(&radiance_image, false)
-                    .build(engine, encoder);
+                    .build(ctx, encoder);
                 let radiance_texture_view =
                     radiance_texture.create_view(&wgpu::TextureViewDescriptor {
                         label: Some(&format!("{name} radiance view")),
                         ..Default::default()
                     });
 
-                let manager = &engine.environment_manager;
                 let radiance_bind_group =
-                    engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some(&format!("{name} randiance bind group")),
-                        layout: &manager.radiance_bind_group_layout,
+                        layout: &ctx.environment_ctx.radiance_bind_group_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -180,7 +178,9 @@ impl EnvironmentBuilder {
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&manager.radiance_sampler),
+                                resource: wgpu::BindingResource::Sampler(
+                                    &ctx.environment_ctx.radiance_sampler,
+                                ),
                             },
                         ],
                     });
@@ -200,61 +200,57 @@ impl EnvironmentBuilder {
                             | wgpu::TextureUsages::TEXTURE_BINDING,
                     )
                     .generate_mips()
-                    .build_callback(
-                        engine,
-                        encoder,
-                        move |environment_cubemap_texture, engine, encoder| {
-                            for face in 0..6 {
-                                let environment_map_view = environment_cubemap_texture.create_view(
-                                    &wgpu::TextureViewDescriptor {
-                                        label: Some("environmnent cubemap render view"),
-                                        dimension: Some(wgpu::TextureViewDimension::D2),
-                                        base_array_layer: face as u32,
-                                        array_layer_count: Some(1),
-                                        base_mip_level: 0,
-                                        mip_level_count: Some(1),
-                                        ..Default::default()
-                                    },
-                                );
+                    .build_callback(ctx, encoder, |environment_cubemap_texture, encoder| {
+                        for face in 0..6 {
+                            let environment_map_view = environment_cubemap_texture.create_view(
+                                &wgpu::TextureViewDescriptor {
+                                    label: Some("environmnent cubemap render view"),
+                                    dimension: Some(wgpu::TextureViewDimension::D2),
+                                    base_array_layer: face as u32,
+                                    array_layer_count: Some(1),
+                                    base_mip_level: 0,
+                                    mip_level_count: Some(1),
+                                    ..Default::default()
+                                },
+                            );
 
-                                let mut render_pass =
-                                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                        label: Some("Equirectangular to cubemap render pass"),
-                                        color_attachments: &[Some(
-                                            wgpu::RenderPassColorAttachment {
-                                                view: &environment_map_view,
-                                                depth_slice: None,
-                                                resolve_target: None,
-                                                ops: wgpu::Operations {
-                                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                                    store: wgpu::StoreOp::Store,
-                                                },
-                                            },
-                                        )],
-                                        depth_stencil_attachment: None,
-                                        timestamp_writes: None,
-                                        occlusion_query_set: None,
-                                    });
+                            let mut render_pass =
+                                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                    label: Some("Equirectangular to cubemap render pass"),
+                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: &environment_map_view,
+                                        depth_slice: None,
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                            store: wgpu::StoreOp::Store,
+                                        },
+                                    })],
+                                    depth_stencil_attachment: None,
+                                    timestamp_writes: None,
+                                    occlusion_query_set: None,
+                                });
 
-                                let manager = &engine.environment_manager;
-                                render_pass
-                                    .set_pipeline(&manager.equirectangular_to_cubemap_pipeline);
-                                render_pass
-                                    .set_vertex_buffer(0, manager.cube_vertex_buffer.slice(..));
-                                render_pass.set_index_buffer(
-                                    manager.cube_index_buffer.slice(..),
-                                    wgpu::IndexFormat::Uint16,
-                                );
-                                render_pass.set_bind_group(
-                                    0,
-                                    &manager.view_projection_bind_groups[face],
-                                    &[],
-                                );
-                                render_pass.set_bind_group(1, &radiance_bind_group, &[]);
-                                render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
-                            }
-                        },
-                    );
+                            render_pass.set_pipeline(
+                                &ctx.environment_ctx.equirectangular_to_cubemap_pipeline,
+                            );
+                            render_pass.set_vertex_buffer(
+                                0,
+                                ctx.environment_ctx.cube_vertex_buffer.slice(..),
+                            );
+                            render_pass.set_index_buffer(
+                                ctx.environment_ctx.cube_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            render_pass.set_bind_group(
+                                0,
+                                &ctx.environment_ctx.view_projection_bind_groups[face],
+                                &[],
+                            );
+                            render_pass.set_bind_group(1, &radiance_bind_group, &[]);
+                            render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
+                        }
+                    });
 
                 environment_cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
                     label: Some(&format!("{name} environment cubemap view")),
@@ -263,8 +259,8 @@ impl EnvironmentBuilder {
                 })
             }
             None => {
-                let radiance_texture = engine.device.create_texture_with_data(
-                    &engine.queue,
+                let radiance_texture = ctx.device.create_texture_with_data(
+                    &ctx.queue,
                     &wgpu::TextureDescriptor {
                         label: Some("Default radiance texture"),
                         size: wgpu::Extent3d {
@@ -291,23 +287,22 @@ impl EnvironmentBuilder {
             }
         };
 
-        let environment_map_bind_group =
-            engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Environment map bind group"),
-                layout: &engine.skybox_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&environment_map_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(
-                            &engine.environment_manager.environment_map_sampler,
-                        ),
-                    },
-                ],
-            });
+        let environment_map_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Environment map bind group"),
+            layout: &ctx.environment_ctx.skybox_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&environment_map_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(
+                        &ctx.environment_ctx.environment_map_sampler,
+                    ),
+                },
+            ],
+        });
 
         let irradiance_map = TextureBuilder::default()
             .name(Some(format!("{name} irradiance map").as_ref()))
@@ -320,9 +315,8 @@ impl EnvironmentBuilder {
                 IRRADIANCE_MAP_FORMAT,
             )
             .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-            .build(engine, encoder);
+            .build(ctx, encoder);
 
-        let manager = &engine.environment_manager;
         for face in 0..6 {
             let irrandiance_map_view = irradiance_map.create_view(&wgpu::TextureViewDescriptor {
                 label: Some("irradiance map attachment render view"),
@@ -348,13 +342,17 @@ impl EnvironmentBuilder {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&manager.irradiance_pipeline);
-            render_pass.set_vertex_buffer(0, manager.cube_vertex_buffer.slice(..));
+            render_pass.set_pipeline(&ctx.environment_ctx.irradiance_pipeline);
+            render_pass.set_vertex_buffer(0, ctx.environment_ctx.cube_vertex_buffer.slice(..));
             render_pass.set_index_buffer(
-                manager.cube_index_buffer.slice(..),
+                ctx.environment_ctx.cube_index_buffer.slice(..),
                 wgpu::IndexFormat::Uint16,
             );
-            render_pass.set_bind_group(0, &manager.view_projection_bind_groups[face], &[]);
+            render_pass.set_bind_group(
+                0,
+                &ctx.environment_ctx.view_projection_bind_groups[face],
+                &[],
+            );
             render_pass.set_bind_group(1, &environment_map_bind_group, &[]);
             render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
         }
@@ -365,7 +363,7 @@ impl EnvironmentBuilder {
             ..Default::default()
         });
 
-        let irradiance_map_sampler = manager.environment_map_sampler.clone();
+        let irradiance_map_sampler = ctx.environment_ctx.environment_map_sampler.clone();
 
         let prefilter_map = TextureBuilder::default()
             .name(Some(format!("{name} prefilter map").as_ref()))
@@ -379,30 +377,25 @@ impl EnvironmentBuilder {
             )
             .mip_level_count(PREFILTER_MAP_MIP_COUNT)
             .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-            .build(engine, encoder);
+            .build(ctx, encoder);
 
-        let manager = &engine.environment_manager;
         for mip in 0..PREFILTER_MAP_MIP_COUNT {
             let roughness = mip as f32 / (PREFILTER_MAP_MIP_COUNT - 1) as f32;
             let roughness_buffer =
-                engine
-                    .device
+                ctx.device
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("prefilter roughness buffer"),
                         contents: bytes_of(&roughness),
                         usage: wgpu::BufferUsages::UNIFORM,
                     });
-            let roughness_bind_group =
-                engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("prefilter roughness bind group"),
-                    layout: &engine
-                        .environment_manager
-                        .prefilter_roughness_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: roughness_buffer.as_entire_binding(),
-                    }],
-                });
+            let roughness_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("prefilter roughness bind group"),
+                layout: &ctx.environment_ctx.prefilter_roughness_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: roughness_buffer.as_entire_binding(),
+                }],
+            });
 
             for face in 0..6 {
                 let prefilter_map_view = prefilter_map.create_view(&wgpu::TextureViewDescriptor {
@@ -431,13 +424,17 @@ impl EnvironmentBuilder {
                     occlusion_query_set: None,
                 });
 
-                render_pass.set_pipeline(&manager.prefilter_pipeline);
-                render_pass.set_vertex_buffer(0, manager.cube_vertex_buffer.slice(..));
+                render_pass.set_pipeline(&ctx.environment_ctx.prefilter_pipeline);
+                render_pass.set_vertex_buffer(0, ctx.environment_ctx.cube_vertex_buffer.slice(..));
                 render_pass.set_index_buffer(
-                    manager.cube_index_buffer.slice(..),
+                    ctx.environment_ctx.cube_index_buffer.slice(..),
                     wgpu::IndexFormat::Uint16,
                 );
-                render_pass.set_bind_group(0, &manager.view_projection_bind_groups[face], &[]);
+                render_pass.set_bind_group(
+                    0,
+                    &ctx.environment_ctx.view_projection_bind_groups[face],
+                    &[],
+                );
                 render_pass.set_bind_group(1, &environment_map_bind_group, &[]);
                 render_pass.set_bind_group(2, &roughness_bind_group, &[]);
                 render_pass.draw_indexed(0..CUBE_VERTEX_COUNT, 0, 0..1);
@@ -450,11 +447,11 @@ impl EnvironmentBuilder {
             ..Default::default()
         });
 
-        let prefilter_map_sampler = manager.environment_map_sampler.clone();
+        let prefilter_map_sampler = ctx.environment_ctx.environment_map_sampler.clone();
 
         let brdf_lut = (
-            manager.brdf_lut_view.clone(),
-            manager.brdf_lut_sampler.clone(),
+            ctx.environment_ctx.brdf_lut_view.clone(),
+            ctx.environment_ctx.brdf_lut_sampler.clone(),
         );
 
         let id = EnvironmentId(Uuid::new_v4());
@@ -466,13 +463,7 @@ impl EnvironmentBuilder {
             prefilter_map: (prefilter_map_view, prefilter_map_sampler),
             brdf_lut,
         };
-        let environment = Environment(Arc::new(data));
-
-        engine
-            .environment_manager
-            .environments
-            .insert(id, environment.clone());
-        environment
+        Environment(Arc::new(data))
     }
 }
 
@@ -485,13 +476,14 @@ struct EnvironmentData {
     brdf_lut: (wgpu::TextureView, wgpu::Sampler),
 }
 
-pub(crate) struct EnvironmentManager {
-    environments: HashMap<EnvironmentId, Environment>,
+#[derive(Debug, Clone)]
+pub(crate) struct EnvironmentContext {
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     radiance_sampler: wgpu::Sampler,
     brdf_lut_view: wgpu::TextureView,
     brdf_lut_sampler: wgpu::Sampler,
+    skybox_bind_group_layout: wgpu::BindGroupLayout,
     radiance_bind_group_layout: wgpu::BindGroupLayout,
     prefilter_roughness_bind_group_layout: wgpu::BindGroupLayout,
     environment_map_sampler: wgpu::Sampler,
@@ -501,12 +493,8 @@ pub(crate) struct EnvironmentManager {
     prefilter_pipeline: wgpu::RenderPipeline,
 }
 
-impl EnvironmentManager {
-    pub fn new(
-        skybox_bind_group_layout: &wgpu::BindGroupLayout,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Self {
+impl EnvironmentContext {
+    pub fn new(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> Self {
         let cube_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Environment builder cube vertex buffer"),
             contents: cast_slice(CUBE_VERTICES),
@@ -601,6 +589,29 @@ impl EnvironmentManager {
             create_bind_group(Mat4::look_to_rh(Vec3::ZERO, -Vec3::Z, Vec3::Y)), // the z-axis of wgpu is our -z
             create_bind_group(Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y)),
         ];
+
+        let skybox_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Skybox bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         let equirectangular_to_cubemap_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -893,12 +904,12 @@ impl EnvironmentManager {
         });
 
         Self {
-            environments: HashMap::new(),
             cube_vertex_buffer,
             cube_index_buffer,
             radiance_sampler,
             brdf_lut_view,
             brdf_lut_sampler,
+            skybox_bind_group_layout,
             radiance_bind_group_layout,
             prefilter_roughness_bind_group_layout,
             environment_map_sampler,

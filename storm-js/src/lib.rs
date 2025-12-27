@@ -15,19 +15,55 @@ fn start() {
     console_log::init_with_level(Level::Debug).expect("error initializing logger");
 }
 
-/// This is the entry point of the package. To get started, create a new Engine using {@link EngineBuilder}.
-/// Once created, an engine can be used to create a {@link Scene}. The engine is also responsible to manage
+/// This is the entry point of the package. To get started, create a new Context.
+/// Once created, context can be used to create a {@link Scene}. The context is also responsible to manage
 /// the resources shared between scenes.
 #[wasm_bindgen]
-pub struct Engine {
-    inner: storm::Engine,
+pub struct Context {
+    inner: storm::Context,
     #[allow(dead_code)]
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
 }
 
 #[wasm_bindgen]
-impl Engine {
+impl Context {
+    pub async fn new() -> Result<Self, ContextCreationError> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            flags: wgpu::InstanceFlags::from_build_config(),
+            ..Default::default()
+        });
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptionsBase {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            })
+            .await
+            .or(Err(ContextCreationError::Adapter))?;
+
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("storm-js engine device"),
+                required_features: wgpu::Features::empty(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                required_limits: wgpu::Limits::defaults(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .or(Err(ContextCreationError::Device))?;
+
+        let inner = storm::Context::from_device(device, queue);
+
+        Ok(Self {
+            inner,
+            instance,
+            adapter,
+        })
+    }
+
     /// Create a render target. A render target is needed to render a {@link Scene}.
     #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
     #[wasm_bindgen(js_name = createSurfaceFromCanvasElement)]
@@ -81,61 +117,10 @@ impl Engine {
     }
 }
 
-/// A builder for {@link Engine}.
-#[wasm_bindgen]
-#[derive(Default)]
-pub struct EngineBuilder(storm::EngineBuilder<'static>);
-
-#[wasm_bindgen]
-impl EngineBuilder {
-    /// Create an engine builder with default values.
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Build the engine.
-    pub async fn build(self) -> Result<Engine, BuildEngineError> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::BROWSER_WEBGPU,
-            flags: wgpu::InstanceFlags::from_build_config(),
-            ..Default::default()
-        });
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptionsBase {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: None,
-            })
-            .await
-            .or(Err(BuildEngineError::Adapter))?;
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("storm-js engine device"),
-                required_features: wgpu::Features::empty(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::defaults(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            })
-            .await
-            .or(Err(BuildEngineError::Device))?;
-
-        let inner = self.0.device(device, queue).build().await;
-
-        Ok(Engine {
-            inner,
-            instance,
-            adapter,
-        })
-    }
-}
-
-/// Error when {@link EngineBuilder.build()} fails.
+/// Error when {@link Context.new()} fails.
 #[wasm_bindgen]
 #[derive(Debug, Error)]
-pub enum BuildEngineError {
+pub enum ContextCreationError {
     /// failed to get a gpu adapter
     #[error("failed to get a gpu adapter")]
     Adapter,

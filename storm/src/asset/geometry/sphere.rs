@@ -4,7 +4,7 @@ use glam::{vec2, vec3};
 use thiserror::Error;
 
 use crate::{
-    Engine,
+    Context,
     asset::geometry::{Geometry, GeometryBuilder},
 };
 
@@ -112,7 +112,7 @@ impl SphereBuilder {
         }
     }
 
-    pub fn build(self, engine: &mut Engine) -> Geometry {
+    pub fn build(self, ctx: &Context) -> Geometry {
         let theta_end = (self.theta_start + self.theta_length).min(PI);
 
         let row_count = self.height_segments + 1;
@@ -195,7 +195,7 @@ impl SphereBuilder {
             .unwrap()
             .tex_coords_0(uvs)
             .unwrap()
-            .build(engine)
+            .build(ctx)
             .unwrap()
     }
 }

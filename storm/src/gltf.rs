@@ -10,8 +10,6 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::storage::Id;
-
 use accessor::{Accessor, AccessorComponentType, AccessorType};
 use animation::Animation;
 use buffer::{Buffer, BufferView};
@@ -77,10 +75,11 @@ pub enum GlbError {
     InvalidChunkLength,
 }
 
+#[derive(Debug)]
 pub struct GltfAsset {
     base_path: PathBuf,
     json: Gltf,
-    default_material: Option<Id<crate::material::Material>>,
+    default_material: Option<crate::material::Material>,
 }
 
 impl GltfAsset {
@@ -162,6 +161,10 @@ impl GltfAsset {
             json,
             default_material: None,
         })
+    }
+
+    pub fn default_scene(&self) -> Option<usize> {
+        self.json.scene
     }
 }
 

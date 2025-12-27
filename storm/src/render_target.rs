@@ -4,7 +4,7 @@ use bytemuck::bytes_of;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
-use crate::{Engine, texture::TextureBuilder};
+use crate::{Context, texture::TextureBuilder};
 
 /// A builder for [`RenderTarget`]. If possible, a builder should be reused, as calling
 /// [`RenderTargetBuilder::new`] is recreating multiple [`wgpu::Texture`], [`wgpu::BindGroup`] and [`wgpu::RenderPipeline`].
@@ -27,8 +27,8 @@ pub struct RenderTargetBuilder {
 impl RenderTargetBuilder {
     /// Create a new builder. If possible, a builder should be reused, as calling
     /// [`RenderTargetBuilder::new`] is recreating multiple [`wgpu::Texture`], [`wgpu::BindGroup`] and [`wgpu::RenderPipeline`].
-    pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, engine: &mut Engine) -> Self {
-        let mut encoder = engine
+    pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: &Context) -> Self {
+        let mut encoder = ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("RenderTarget::new() command encoder"),
@@ -43,16 +43,15 @@ impl RenderTargetBuilder {
             ],
             bloom_textures,
             [brightness_bind_group, tone_mapping_bind_group],
-        ) = create_render_attachments(width, height, 10, engine, &mut encoder);
+        ) = create_render_attachments(width, height, 10, ctx, &mut encoder);
 
         let tone_mapping_pipeline =
-            engine
-                .device
+            ctx.device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Tone mapping pipeline"),
-                    layout: Some(&engine.tone_mapping_pipeline_layout),
+                    layout: Some(&ctx.render_target_ctx.tone_mapping_pipeline_layout),
                     vertex: wgpu::VertexState {
-                        module: &engine.tone_mapping_shader_module,
+                        module: &ctx.render_target_ctx.tone_mapping_shader_module,
                         entry_point: Some("vs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         buffers: &[],
@@ -73,7 +72,7 @@ impl RenderTargetBuilder {
                         alpha_to_coverage_enabled: false,
                     },
                     fragment: Some(wgpu::FragmentState {
-                        module: &engine.tone_mapping_shader_module,
+                        module: &ctx.render_target_ctx.tone_mapping_shader_module,
                         entry_point: Some("fs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: &[Some(format.into())],
@@ -138,6 +137,138 @@ impl RenderTargetBuilder {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct RenderTargetContext {
+    tone_mapping_shader_module: wgpu::ShaderModule,
+    tone_mapping_bind_group_layout: wgpu::BindGroupLayout,
+    tone_mapping_pipeline_layout: wgpu::PipelineLayout,
+    pub(super) brightness_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_sampler: wgpu::Sampler,
+}
+
+impl RenderTargetContext {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
+        let tone_mapping_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("tone_mapping.wgsl"));
+
+        let tone_mapping_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Tone mapping bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let tone_mapping_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Tone mapping pipeline layout"),
+                bind_group_layouts: &[&tone_mapping_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let brightness_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Brightness bind group layout"),
+                entries: &[
+                    // opaque texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let gaussian_blur_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Gaussian blur bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Bloom texture samlper"),
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+
+        Self {
+            tone_mapping_shader_module,
+            tone_mapping_bind_group_layout,
+            tone_mapping_pipeline_layout,
+            brightness_bind_group_layout,
+            gaussian_blur_bind_group_layout,
+            bloom_sampler,
+        }
+    }
+}
+
 /// Erro when [`RenderTargetBuilder::build`] fails.
 #[derive(Debug, Error)]
 pub enum IncompatibleTarget {
@@ -171,7 +302,7 @@ impl<View: Borrow<wgpu::TextureView>> RenderTarget<View> {
     pub fn width(&self) -> u32 {
         self.width
     }
-    
+
     pub fn height(&self) -> u32 {
         self.height
     }
@@ -186,7 +317,7 @@ fn create_render_attachments(
     width: u32,
     height: u32,
     bloom_amount: usize,
-    engine: &mut Engine,
+    ctx: &Context,
     encoder: &mut wgpu::CommandEncoder,
 ) -> (
     [wgpu::TextureView; 4],
@@ -203,7 +334,7 @@ fn create_render_attachments(
         .name("Opaque render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(engine, encoder)
+        .build(ctx, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Opaque render attachment"),
             ..Default::default()
@@ -213,7 +344,7 @@ fn create_render_attachments(
         .name("Accumulation render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(engine, encoder)
+        .build(ctx, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Accumulation render attachment"),
             ..Default::default()
@@ -223,7 +354,7 @@ fn create_render_attachments(
         .name("Revealage render attachment")
         .empty(size, wgpu::TextureFormat::R8Unorm)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(engine, encoder)
+        .build(ctx, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Revealage render attachment"),
             ..Default::default()
@@ -233,15 +364,15 @@ fn create_render_attachments(
         .name("Depth render attachment")
         .empty(size, wgpu::TextureFormat::Depth24Plus)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
-        .build(engine, encoder)
+        .build(ctx, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Depth render attachment"),
             ..Default::default()
         });
 
-    let brightness_bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let brightness_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Brightness bind group"),
-        layout: &engine.brightness_bind_group_layout,
+        layout: &ctx.render_target_ctx.brightness_bind_group_layout,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::TextureView(&opaque_attachment),
@@ -254,23 +385,22 @@ fn create_render_attachments(
             .name("Bloom texture")
             .empty(size, wgpu::TextureFormat::Rgba16Float)
             .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
-            .build(engine, encoder)
+            .build(ctx, encoder)
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("Bloom texture view"),
                 ..Default::default()
             });
-        let horizontal_buffer =
-            engine
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Gaussian blur horizontal buffer"),
-                    contents: bytes_of(&(horizontal as u32)),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let horizontal_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Gaussian blur horizontal buffer"),
+                contents: bytes_of(&(horizontal as u32)),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         horizontal = !horizontal;
-        let bloom_bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bloom_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Bloom bind group"),
-            layout: &engine.gaussian_blur_bind_group_layout,
+            layout: &ctx.render_target_ctx.gaussian_blur_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -278,7 +408,7 @@ fn create_render_attachments(
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&engine.bloom_sampler),
+                    resource: wgpu::BindingResource::Sampler(&ctx.render_target_ctx.bloom_sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -295,7 +425,7 @@ fn create_render_attachments(
     .unwrap();
 
     let tone_mapping_bind_group =
-        create_tone_mapping_bind_group(engine, &opaque_attachment, &bloom_textures, bloom_amount);
+        create_tone_mapping_bind_group(ctx, &opaque_attachment, &bloom_textures, bloom_amount);
 
     (
         [
@@ -310,16 +440,16 @@ fn create_render_attachments(
 }
 
 fn create_tone_mapping_bind_group(
-    engine: &mut Engine,
+    ctx: &Context,
     opaque_texture: &wgpu::TextureView,
     bloom_textures: &[(wgpu::TextureView, wgpu::BindGroup); 2],
     bloom_amount: usize,
 ) -> wgpu::BindGroup {
     let final_bloom_texture = (bloom_amount % 2) as usize;
 
-    engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Tone mapping bind group"),
-        layout: &engine.tone_mapping_bind_group_layout,
+        layout: &ctx.render_target_ctx.tone_mapping_bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -327,7 +457,7 @@ fn create_tone_mapping_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Sampler(&engine.bloom_sampler),
+                resource: wgpu::BindingResource::Sampler(&ctx.render_target_ctx.bloom_sampler),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -337,7 +467,7 @@ fn create_tone_mapping_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: wgpu::BindingResource::Sampler(&engine.bloom_sampler),
+                resource: wgpu::BindingResource::Sampler(&ctx.render_target_ctx.bloom_sampler),
             },
         ],
     })

@@ -7,15 +7,12 @@ use super::transforms::{
     default_4x10, default_05, default_10, is_0, is_3x00, is_4x10, is_05, is_10, is_false,
 };
 
-use crate::Resources;
-use crate::storage::{DenseEntry, Id};
-
 /// The material appearance of a primitive.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Material {
-    /// Storm storage id, if the resource has been loaded.
+    /// [Some] if already loaded.
     #[serde(skip)]
-    id: Option<Id<crate::material::Material>>,
+    loaded: Option<crate::material::Material>,
 
     /// The user-defined name of this object. This is not necessarily unique, e.g.,
     /// an accessor and a buffer could have the same name, or two accessors could
@@ -101,11 +98,11 @@ impl Material {
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
         images: &mut [super::Image],
-        resources: &mut Resources,
+        ctx: &crate::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Id<crate::material::Material>> {
-        if let Some(id) = self.id {
-            return Ok(id);
+    ) -> anyhow::Result<crate::material::Material> {
+        if let Some(material) = self.loaded.clone() {
+            return Ok(material);
         }
 
         let pbr = &self.pbr_metallic_roughness;
@@ -124,7 +121,7 @@ impl Material {
             .double_sided(self.double_sided);
 
         if let Some(info) = &pbr.base_color_texture {
-            let id = textures
+            let (texture, sampler) = textures
                 .get_mut(info.index)
                 .ok_or(anyhow!(
                     "material.base_color_texture {} is out of range",
@@ -137,19 +134,20 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    resources,
+                    ctx,
                     encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.base_color_texture {}", info.index)
                 })?;
             builder = builder
-                .base_color_texture(id)
+                .base_color_texture(texture)
+                .base_color_sampler(sampler)
                 .base_color_tex_coord(info.tex_coord as u32);
         }
 
         if let Some(info) = &pbr.metallic_roughness_texture {
-            let id = textures
+            let (view, sampler) = textures
                 .get_mut(info.index)
                 .ok_or(anyhow!(
                     "material.metallic_roughness_texture {} is out of range",
@@ -162,7 +160,7 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    resources,
+                    ctx,
                     encoder,
                 )
                 .with_context(|| {
@@ -172,12 +170,13 @@ impl Material {
                     )
                 })?;
             builder = builder
-                .metallic_roughness_texture(id)
+                .metallic_roughness_texture(view)
+                .metallic_roughness_sampler(sampler)
                 .metallic_roughness_tex_coord(info.tex_coord as u32);
         }
 
         if let Some(info) = &self.normal_texture {
-            let id = textures
+            let (view, sampler) = textures
                 .get_mut(info.index)
                 .ok_or(anyhow!(
                     "material.normal_texture {} is out of range",
@@ -190,20 +189,21 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    resources,
+                    ctx,
                     encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.normal_texture {}", info.index)
                 })?;
             builder = builder
-                .normal_texture(id)
+                .normal_texture(view)
+                .normal_sampler(sampler)
                 .normal_tex_coord(info.tex_coord as u32)
                 .normal_scale(info.scale);
         }
 
         if let Some(info) = &self.occlusion_texture {
-            let id = textures
+            let (view, sampler) = textures
                 .get_mut(info.index)
                 .ok_or(anyhow!(
                     "material.occlusion_texture {} is out of range",
@@ -216,20 +216,21 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    resources,
+                    ctx,
                     encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.occlusion_texture {}", info.index)
                 })?;
             builder = builder
-                .occlusion_texture(id)
+                .occlusion_texture(view)
+                .occlusion_sampler(sampler)
                 .occlusion_tex_coord(info.tex_coord as u32)
                 .occlusion_strength(info.strength);
         }
 
         if let Some(info) = &self.emissive_texture {
-            let id = textures
+            let (view, sampler) = textures
                 .get_mut(info.index)
                 .ok_or(anyhow!(
                     "material.emissive_texture {} is out of range",
@@ -242,27 +243,28 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    resources,
+                    ctx,
                     encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.emissive_texture {}", info.index)
                 })?;
             builder = builder
-                .emissive_texture(id)
+                .emissive_texture(view)
+                .emissive_sampler(sampler)
                 .emissive_tex_coord(info.tex_coord as u32);
         }
 
-        let id = builder.build(resources).id();
-        self.id = Some(id);
-        Ok(id)
+        let material = builder.build(ctx);
+        self.loaded = Some(material.clone());
+        Ok(material)
     }
 }
 
 impl Default for Material {
     fn default() -> Self {
         Self {
-            id: None,
+            loaded: None,
             name: None,
             pbr_metallic_roughness: PbrMetallicRoughness::default(),
             normal_texture: None,

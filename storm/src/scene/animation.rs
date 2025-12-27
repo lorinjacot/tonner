@@ -91,8 +91,8 @@ pub struct AnimationBuilder {
     repeat: bool,
 }
 
-impl AnimationBuilder {
-    pub fn new() -> Self {
+impl Default for AnimationBuilder {
+    fn default() -> Self {
         Self {
             name: None,
             channels: Vec::new(),
@@ -100,7 +100,9 @@ impl AnimationBuilder {
             repeat: false,
         }
     }
+}
 
+impl AnimationBuilder {
     pub fn name(self, name: impl Into<String>) -> Self {
         Self {
             name: Some(name.into()),
@@ -113,6 +115,11 @@ impl AnimationBuilder {
             repeat: true,
             ..self
         }
+    }
+
+    pub fn channels(mut self, channels: impl IntoIterator<Item = Channel>) -> Self {
+        self.channels.extend(channels);
+        self
     }
 
     pub fn build(self, scene: &mut Scene) -> Result<AnimationId, AnimationBuilderError> {
@@ -220,11 +227,11 @@ pub(super) enum SimulateAnimationError {
     InvalidNode(NodeId),
 }
 
-struct Channel {
-    pub node: NodeId,
-    pub inputs: Vec<f32>,
-    pub interpolation: Interpolation,
-    pub outputs: Outputs,
+pub(crate) struct Channel {
+    pub(crate) node: NodeId,
+    pub(crate) inputs: Vec<f32>,
+    pub(crate) interpolation: Interpolation,
+    pub(crate) outputs: Outputs,
 }
 
 #[derive(Debug, Clone, Copy)]

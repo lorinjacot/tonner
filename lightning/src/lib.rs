@@ -4,7 +4,7 @@ use std::{
 };
 
 pub use scene_view::SceneView;
-use storm::{Engine, Scene, SceneBuilder, camera::CameraBuilder};
+use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder, gltf::GltfAsset};
 
 use crate::new_scene::NewSceneModal;
 
@@ -35,7 +35,7 @@ impl Default for State {
 
 pub struct App {
     state: State,
-    engine: Engine,
+    storm_ctx: Context,
     scenes: Vec<Arc<RwLock<Scene>>>,
     main_scene: Arc<RwLock<Scene>>,
     main_scene_view: SceneView,
@@ -57,9 +57,9 @@ impl App {
         };
 
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
-        let mut engine = Engine::new(wgpu_state.device.clone(), wgpu_state.queue.clone());
+        let storm_ctx = Context::from_device(wgpu_state.device.clone(), wgpu_state.queue.clone());
 
-        let mut scene = SceneBuilder::default().build(&mut engine);
+        let mut scene = SceneBuilder::default().build(&storm_ctx);
         let camera = CameraBuilder::default().build(&mut scene);
 
         let scene = Arc::new(RwLock::new(scene));
@@ -69,17 +69,32 @@ impl App {
             300,
             300,
             &mut wgpu_state.renderer.write(),
-            &mut engine,
+            &storm_ctx,
         );
 
         Self {
             state,
-            engine,
+            storm_ctx,
             scenes: vec![scene.clone()],
             main_scene: scene,
             main_scene_view,
             new_scene_modal: NewSceneModal::default(),
         }
+    }
+
+    fn open_file(&mut self) {
+        run(async {
+            if let Some(path) = rfd::AsyncFileDialog::new()
+                .add_filter("glTF", &["gltf", "glb"])
+                .pick_file()
+                .await
+            {
+                let asset = GltfAsset::open(path.path()).unwrap();
+                dbg!(asset);
+
+                // let scenes = asset.create_all_scenes(&mut self.engine);
+            }
+        });
     }
 }
 
@@ -91,12 +106,23 @@ impl eframe::App for App {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let mut encoder = self.engine.encoder(Some("App::update command encoder"));
+        let mut encoder =
+            self.storm_ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::update command encoder"),
+                });
         let duration = Duration::from_secs_f32(ctx.input(|input_state| input_state.stable_dt));
 
-        if ctx.input_mut(|input_state| input_state.consume_shortcut(&shortcut::NEW_SCENE)) {
-            self.new_scene_modal.open = true;
-        }
+        ctx.input_mut(|input_state| {
+            if input_state.consume_shortcut(&shortcut::NEW_SCENE) {
+                self.new_scene_modal.open = true;
+            }
+
+            if input_state.consume_shortcut(&shortcut::OPEN_FILE) {
+                self.open_file();
+            }
+        });
 
         self.main_scene
             .write()
@@ -120,6 +146,16 @@ impl eframe::App for App {
                         .clicked()
                     {
                         self.new_scene_modal.open = true;
+                    }
+
+                    if ui
+                        .add(
+                            egui::Button::new("Open File")
+                                .shortcut_text(ctx.format_shortcut(&shortcut::OPEN_FILE)),
+                        )
+                        .clicked()
+                    {
+                        self.open_file();
                     }
 
                     // NOTE: no File->Quit on web pages!
@@ -160,7 +196,7 @@ impl eframe::App for App {
             self.main_scene_view.render(
                 ui,
                 &mut frame.wgpu_render_state().unwrap().renderer.write(),
-                &mut self.engine,
+                &self.storm_ctx,
                 &mut encoder,
             );
 
@@ -170,7 +206,7 @@ impl eframe::App for App {
             });
         });
 
-        if let Some(mut scene) = self.new_scene_modal.ui(ctx, &mut self.engine) {
+        if let Some(mut scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {
             let camera = CameraBuilder::default().build(&mut scene);
             let scene = Arc::new(RwLock::new(scene));
             self.scenes.push(scene.clone());
@@ -181,12 +217,12 @@ impl eframe::App for App {
                 300,
                 300,
                 &mut renderer,
-                &mut self.engine,
+                &self.storm_ctx,
             );
             self.main_scene = scene;
         }
 
-        self.engine.submit_commands(encoder.finish());
+        self.storm_ctx.queue().submit([encoder.finish()]);
         ctx.request_repaint();
     }
 }
@@ -203,4 +239,14 @@ fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
         );
         ui.label(".");
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run<F: IntoFuture<Output = ()> + 'static>(future: F) {
+    pollster::block_on(future);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn run<F: IntoFuture<Output = ()> + 'static>(future: F) {
+    wasm_bindgen_futures::spawn_local(future.into_future());
 }

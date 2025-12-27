@@ -4,7 +4,7 @@ use glam_js::Vec3;
 use thiserror::Error;
 use wasm_bindgen::prelude::*;
 
-use crate::Engine;
+use crate::Context;
 
 /// A geometry describe a 3D shape.
 ///
@@ -57,8 +57,8 @@ impl GeometryBuilder {
     }
 
     /// Build the geometry.
-    pub fn build(self, engine: &mut Engine) -> Result<Geometry, GeometryBuilderError> {
-        let geometry = self.0.build(&mut engine.inner)?;
+    pub fn build(self, ctx: &Context) -> Result<Geometry, GeometryBuilderError> {
+        let geometry = self.0.build(&ctx.inner)?;
         Ok(Geometry(geometry))
     }
 }

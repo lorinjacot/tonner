@@ -1,6 +1,6 @@
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::{collections::HashMap, sync::Mutex};
+use std::sync::Mutex;
 
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, cast_slice};
@@ -8,8 +8,9 @@ use glam::{Vec3, Vec4};
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
 
-use crate::Engine;
+use crate::Context;
 
+#[derive(Debug)]
 struct Texture {
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
@@ -19,15 +20,17 @@ struct Texture {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MaterialId(Uuid);
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Material(Arc<MaterialData>);
 
+#[derive(Debug)]
 struct MaterialData {
     id: MaterialId,
     name: Mutex<String>,
     alpha_mode: AlphaMode,
     double_sided: bool,
     flags: MaterialFlags,
+    uniform: MaterialUniform,
     buffer: wgpu::Buffer,
     base_color_texture: Texture,
     metallic_roughness_texture: Texture,
@@ -111,6 +114,14 @@ impl Material {
         &self.0.normal_texture.sampler
     }
 
+    pub(crate) fn normal_tex_coord(&self) -> Option<u32> {
+        if self.has_normal_texture() {
+            Some(self.0.uniform.normal_tex_coord)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn occlusion_texture_view(&self) -> &wgpu::TextureView {
         &self.0.occlusion_texture.view
     }
@@ -137,7 +148,7 @@ impl Material {
 }
 
 bitflags! {
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub(super) struct MaterialFlags: u8 {
         const BASE_COLOR = 1 << 0;
         const METALLIC_ROUGHNESS = 1 << 1;
@@ -353,8 +364,8 @@ impl MaterialBuilder {
         self
     }
 
-    pub fn build(self, engine: &mut Engine) -> Material {
-        let buffer = engine
+    pub fn build(self, ctx: &Context) -> Material {
+        let buffer = ctx
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Material buffer"),
@@ -362,9 +373,8 @@ impl MaterialBuilder {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        let manager = &mut engine.material_manager;
-        let default_texture = &manager.dummy_texture;
-        let default_sampler = &manager.default_sampler;
+        let default_texture = &ctx.material_ctx.dummy_texture;
+        let default_sampler = &ctx.material_ctx.default_sampler;
 
         let base_color_texture = Texture {
             view: self
@@ -418,6 +428,7 @@ impl MaterialBuilder {
             alpha_mode: self.alpha_mode,
             double_sided: self.double_sided,
             flags: self.flags,
+            uniform: self.uniform,
             buffer,
             base_color_texture,
             metallic_roughness_texture,
@@ -425,20 +436,17 @@ impl MaterialBuilder {
             occlusion_texture,
             emissive_texture,
         };
-        let material = Material(Arc::new(data));
-        manager.materials.insert(id, material.clone());
-
-        material
+        Material(Arc::new(data))
     }
 }
 
-pub(crate) struct MaterialManager {
-    materials: HashMap<MaterialId, Material>,
+#[derive(Debug, Clone)]
+pub(crate) struct MaterialContext {
     dummy_texture: wgpu::TextureView,
     default_sampler: wgpu::Sampler,
 }
 
-impl MaterialManager {
+impl MaterialContext {
     pub(crate) fn new(device: &wgpu::Device) -> Self {
         let dummy_texture = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -466,14 +474,13 @@ impl MaterialManager {
         });
 
         Self {
-            materials: HashMap::new(),
             dummy_texture,
             default_sampler,
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlphaMode {
     /// The rendered material is fully opaque and any `alpha` value is ignored.
     Opaque = 0,
@@ -485,7 +492,7 @@ pub enum AlphaMode {
     Blend = 2,
 }
 
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct MaterialUniform {
     base_color_factor: Vec4,

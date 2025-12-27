@@ -5,6 +5,7 @@ use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    animation::AnimationBuilder,
     gltf::{Accessor, Buffer, BufferView, Node, accessor::IteratorConsumer},
     scene::animation,
 };
@@ -52,7 +53,8 @@ impl Animation {
                 .with_context(channel_ctx)?
                 .id()
             {
-                let morph_targets_count = scene[id].weights().len();
+                let morph_targets_count = todo!("get morph_targets_count");
+                // let morph_targets_count = scene[id].weights().len();
                 node_morph_targets_count_channel.push((
                     id,
                     morph_targets_count,
@@ -193,12 +195,10 @@ impl Animation {
             });
         }
 
-        scene
-            .animation_builder()
-            .name(self.name.clone())
-            .repeat()
+        AnimationBuilder::default()
+            .name(self.name.clone().unwrap_or_default())
             .channels(channels)
-            .build();
+            .build(scene);
 
         Ok(())
     }

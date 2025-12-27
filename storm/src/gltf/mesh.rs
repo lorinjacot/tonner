@@ -7,22 +7,21 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use super::accessor::IteratorConsumer;
-use crate::storage::{DenseEntry, Id};
 use crate::{
-    Resources,
     geometry::GeometryBuilder,
     gltf::{
         AccessorUsage, GltfError,
         accessor::{AccessorComponentType, AccessorType},
     },
+    mesh::MeshBuilder,
 };
 
 /// A set of primitives to be rendered. Its global transform is defined by a node that references it.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Mesh {
-    /// Storm storage id, if the resource has been loaded.
+    /// [Some] if already loaded.
     #[serde(skip)]
-    id: Option<Id<crate::mesh::Mesh>>,
+    loaded: Option<crate::mesh::Mesh>,
 
     /// An array of primitives, each defining geometry to be rendered.
     primitives: Vec<MeshPrimitive>,
@@ -53,21 +52,22 @@ impl Mesh {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<Id<crate::material::Material>>,
+        default_material: &mut Option<crate::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        resources: &mut Resources,
+        ctx: &crate::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Id<crate::mesh::Mesh>> {
-        if let Some(id) = self.id {
-            return Ok(id);
+    ) -> anyhow::Result<crate::mesh::Mesh> {
+        if let Some(mesh) = self.loaded.clone() {
+            return Ok(mesh);
         }
 
         let name = self.name.clone();
-        let mut primitives = Vec::with_capacity(self.primitives.len());
+        let mut mesh_builder = MeshBuilder::default().name(name.unwrap_or_default());
+
         for (idx, primitive) in self.primitives.iter().enumerate() {
             if let Some(position) = primitive.attributes.position {
                 let primitive_ctx = || format!("Failed to load mesh.primitives[{idx}].");
@@ -84,15 +84,15 @@ impl Mesh {
                             buffer_views,
                             buffers,
                             images,
-                            resources,
+                            ctx,
                             encoder,
                         )
                         .with_context(|| format!("Failed to load primitive.material {index}."))
                         .with_context(primitive_ctx)?,
                     None => match default_material {
-                        Some(id) => *id,
+                        Some(material) => material.clone(),
                         None => {
-                            let id = super::Material::default()
+                            let material = super::Material::default()
                                 .load(
                                     base_path,
                                     textures,
@@ -100,13 +100,13 @@ impl Mesh {
                                     buffer_views,
                                     buffers,
                                     images,
-                                    resources,
+                                    ctx,
                                     encoder,
                                 )
                                 .context("Failed to load default material.")
                                 .with_context(primitive_ctx)?;
-                            *default_material = Some(id);
-                            id
+                            *default_material = Some(material.clone());
+                            material
                         }
                     },
                 };
@@ -129,7 +129,7 @@ impl Mesh {
                     })
                     .with_context(primitive_ctx)?;
 
-                let normal_tex_coord = resources.materials[material].normal_tex_coord();
+                let normal_tex_coord = material.normal_tex_coord();
                 let mut builder = GeometryBuilder::new(accessor.count(), primitive.targets.len())
                     .topology(topology);
 
@@ -150,7 +150,7 @@ impl Mesh {
                                 self,
                                 iter: I,
                             ) -> Result<Self::Return> {
-                                Ok(self.builder.$register(iter$(.map($transform))?))
+                                Ok(self.builder.$register(iter$(.map($transform))?)?)
                             }
                         }
 
@@ -248,7 +248,7 @@ impl Mesh {
                                     self,
                                     iter: I,
                                 ) -> Result<Self::Return> {
-                                    Ok(self.builder.$register(self.target_idx, iter$(.map($transform))?))
+                                    Ok(self.builder.$register(self.target_idx, iter$(.map($transform))?)?)
                                 }
                             }
 
@@ -340,14 +340,15 @@ impl Mesh {
                         accessor.normalized(),
                     ) {
                         (AccessorType::Scalar, AccessorComponentType::UnsignedByte, false) => {
-                            let indices: Vec<_> = bytes.iter().map(|index| *index as u16).collect();
-                            builder.indices_u16(&indices, resources)
+                            builder.indices_u16(bytes.iter().map(|index| *index as u16))
                         }
                         (AccessorType::Scalar, AccessorComponentType::UnsignedShort, false) => {
-                            builder.indices_u16(cast_slice(bytes), resources)
+                            let indices: &[u16] = cast_slice(bytes);
+                            builder.indices_u16(indices.iter().cloned())
                         }
                         (AccessorType::Scalar, AccessorComponentType::UnsignedInt, false) => {
-                            builder.indices_u32(cast_slice(bytes), resources)
+                            let indices: &[u32] = cast_slice(bytes);
+                            builder.indices_u32(indices.iter().cloned())
                         }
                         (accessor_type, component_type, normalized) => {
                             return Err(GltfError::InvalidAccessorDataType {
@@ -361,21 +362,14 @@ impl Mesh {
                     }
                 }
 
-                let geometry = builder.build(resources, encoder).id();
-                primitives.push((geometry, material));
+                let geometry = builder.build(ctx).unwrap();
+                mesh_builder = mesh_builder.primitive(geometry, material);
             }
         }
 
-        let id = resources
-            .mesh_builder()
-            .name(name)
-            .primitives(primitives)
-            .build()
-            .id();
-
-        self.id = Some(id);
-
-        Ok(id)
+        let mesh = mesh_builder.build(ctx).unwrap();
+        self.loaded = Some(mesh.clone());
+        Ok(mesh)
     }
 }
 

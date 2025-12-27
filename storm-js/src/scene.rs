@@ -5,11 +5,11 @@ use std::time::Duration;
 use thiserror::Error;
 use wasm_bindgen::prelude::*;
 
-use crate::{Engine, RenderTarget};
+use crate::{Context, RenderTarget};
 
 mod camera;
-mod node;
 mod mesh_instance;
+mod node;
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered to a screen or a texture.
 ///
@@ -34,9 +34,15 @@ impl Scene {
         let duration =
             Duration::try_from_secs_f64(duration).or(Err(SimulateError::InvalidDuration))?;
 
-        let mut encoder = self.0.create_command_encoder();
+        let mut encoder =
+            self.0
+                .context()
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Scene::simulate command encoder"),
+                });
         self.0.simulate(duration, &mut encoder).unwrap();
-        self.0.sumbit_command_encoder(encoder);
+        self.0.context().queue().submit([encoder.finish()]);
 
         Ok(())
     }
@@ -44,7 +50,13 @@ impl Scene {
     /// Render the current state of the scene to the surface as seen by the camera.
     /// This does not modify the scene. To update the scene, see {@link Scene.simulate()}.
     pub fn render(&self, renderTarget: &RenderTarget, camera: &camera::CameraId) {
-        let mut encoder = self.0.create_command_encoder();
+        let mut encoder =
+            self.0
+                .context()
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Scene::render command encoder"),
+                });
         let texture = renderTarget.surface.get_current_texture().unwrap();
         let view = texture
             .texture
@@ -53,7 +65,7 @@ impl Scene {
         self.0
             .render(&render_target, camera.0, &mut encoder)
             .unwrap();
-        self.0.sumbit_command_encoder(encoder);
+        self.0.context().queue().submit([encoder.finish()]);
         texture.present();
     }
 }
@@ -72,8 +84,8 @@ impl SceneBuilder {
     }
 
     /// Build the scene.
-    pub async fn build(self, engine: &mut Engine) -> Scene {
-        Scene(self.0.build(&mut engine.inner))
+    pub async fn build(self, context: &Context) -> Scene {
+        Scene(self.0.build(&context.inner))
     }
 }
 

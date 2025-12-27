@@ -9,7 +9,7 @@ use storm::material::MaterialBuilder;
 use storm::mesh::MeshBuilder;
 use storm::mesh_instance::MeshInstanceBuilder;
 use storm::render_target::RenderTargetBuilder;
-use storm::{Engine, EngineBuilder, Scene, SceneBuilder};
+use storm::{Context, Scene, SceneBuilder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -17,7 +17,6 @@ use winit::window::{Window, WindowId};
 
 #[derive(Default)]
 struct App {
-    engine: Option<Engine>,
     scene: Option<Scene>,
     surface: Option<wgpu::Surface<'static>>,
     render_target_builder: Option<RenderTargetBuilder>,
@@ -58,13 +57,7 @@ impl ApplicationHandler for App {
             },
         );
 
-        let mut engine = block_on(
-            EngineBuilder::default()
-                .device(device, queue)
-                .compatible_surface(&surface)
-                .target_format(wgpu::TextureFormat::Rgba8UnormSrgb)
-                .build(),
-        );
+        let ctx = Context::from_device(device, queue);
 
         let triangle = GeometryBuilder::new(3, 0)
             .name("Triangle")
@@ -74,21 +67,21 @@ impl ApplicationHandler for App {
                 vec3(-0.5, 0.5, -5.0),
             ])
             .unwrap()
-            .build(&mut engine)
+            .build(&ctx)
             .unwrap();
 
         let red = MaterialBuilder::default()
             .name("red")
             .base_color_factor(vec4(1.0, 0.0, 0.0, 1.0))
-            .build(&mut engine);
+            .build(&ctx);
 
         let red_triangle = MeshBuilder::default()
             .name("Triangle")
             .primitive(triangle, red)
-            .build(&mut engine)
+            .build(&ctx)
             .unwrap();
 
-        let mut scene = SceneBuilder::default().build(&mut engine);
+        let mut scene = SceneBuilder::default().build(&ctx);
 
         MeshInstanceBuilder::new(red_triangle)
             .name("first triangle")
@@ -99,13 +92,12 @@ impl ApplicationHandler for App {
             size.width,
             size.height,
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            &mut engine,
+            &ctx,
         );
 
         let camera = CameraBuilder::default().build(&mut scene);
 
         self.window = Some(window);
-        self.engine = Some(engine);
         self.scene = Some(scene);
         self.surface = Some(surface);
         self.render_target_builder = Some(render_target_builder);
@@ -133,7 +125,16 @@ impl ApplicationHandler for App {
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
                 let window = self.window.as_ref().unwrap();
-                let engine = self.engine.as_mut().unwrap();
+
+                let now = Instant::now();
+                let duration = now.duration_since(self.last_redraw.replace(now).unwrap());
+
+                let scene = self.scene.as_mut().unwrap();
+                let mut encoder = scene
+                    .context()
+                    .device()
+                    .create_command_encoder(&Default::default());
+
                 let render_target_builder = self.render_target_builder.clone().unwrap();
                 let render_target = match render_target_builder.build(&surface_view) {
                     Ok(render_target) => render_target,
@@ -143,22 +144,17 @@ impl ApplicationHandler for App {
                             size.width,
                             size.height,
                             wgpu::TextureFormat::Rgba8UnormSrgb,
-                            engine,
+                            scene.context(),
                         );
                         self.render_target_builder = Some(render_target_builder.clone());
                         render_target_builder.build(&surface_view).unwrap()
                     }
                 };
-
-                let mut encoder = engine.encoder(None);
-                let scene = self.scene.as_mut().unwrap();
-                let now = Instant::now();
-                let duration = now.duration_since(self.last_redraw.replace(now).unwrap());
                 scene.simulate(duration, &mut encoder).unwrap();
                 scene
                     .render(&render_target, self.camera.unwrap(), &mut encoder)
                     .unwrap();
-                engine.submit_commands(encoder.finish());
+                scene.context().queue().submit([encoder.finish()]);
                 surface_texture.present();
 
                 // Queue a RedrawRequested event.

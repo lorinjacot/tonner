@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
-use glam::{Mat4, Quat, Vec3};
+use glam::Mat4;
 use serde::{Deserialize, Serialize};
 
-use crate::storage::{DenseEntry, Id};
-use crate::{Resources, gltf::accessor::IteratorConsumer, skin::SkinBuilder};
+use crate::{gltf::accessor::IteratorConsumer, skin::SkinBuilder};
 
 /// A node in the node hierarchy. When the node contains [skin](Node::skin),
 /// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
@@ -18,9 +17,9 @@ use crate::{Resources, gltf::accessor::IteratorConsumer, skin::SkinBuilder};
 /// **MUST NOT** be present.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Node {
-    /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
+    /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    id: Option<Id<crate::Node>>,
+    id: Option<crate::node::NodeId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -82,7 +81,7 @@ pub(super) struct Node {
 
 impl Node {
     /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
-    pub(super) fn id(&self) -> Option<Id<crate::Node>> {
+    pub(super) fn id(&self) -> Option<crate::node::NodeId> {
         self.id
     }
 }
@@ -108,7 +107,7 @@ pub(super) struct Scene {
 pub(super) struct Skin {
     /// Nodes using this skin. Cleared once the scene has been loaded.
     #[serde(skip)]
-    nodes: Vec<Id<crate::Node>>,
+    nodes: Vec<crate::node::NodeId>,
 
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
@@ -140,11 +139,10 @@ impl super::GltfAsset {
     pub fn load_scene_into(
         &mut self,
         scene_index: usize,
-        resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
         scene: &mut crate::Scene,
-        base_node: Option<Id<crate::Node>>,
-    ) -> Result<Vec<Id<crate::Node>>> {
+        base_node: Option<crate::node::NodeId>,
+    ) -> Result<Vec<crate::node::NodeId>> {
         let root_nodes_idx = self
             .json
             .scenes
@@ -158,7 +156,7 @@ impl super::GltfAsset {
         let mut root_nodes_ids = Vec::with_capacity(root_nodes_idx.len());
         for node in root_nodes_idx {
             root_nodes_ids.push(
-                self.load_node(node, base_node, scene, resources, encoder)
+                self.load_node(node, base_node, scene, encoder)
                     .with_context(scene_ctx)?,
             );
         }
@@ -196,19 +194,16 @@ impl super::GltfAsset {
         }
 
         for (nodes, joints, inverse_bind_matrices, skin_ctx) in data {
-            let mut builder = scene.skin_builder().nodes(joints);
+            let mut builder = SkinBuilder::default().nodes(joints);
             if let Some(inverse_bind_matrices) = inverse_bind_matrices {
-                struct RegisterBindMatrices<'a, 's> {
-                    builder: SkinBuilder<'a, 's>,
+                struct RegisterBindMatrices {
+                    builder: SkinBuilder,
                 }
 
-                impl<'a, 's> IteratorConsumer<'a, Mat4> for RegisterBindMatrices<'a, 's> {
-                    type Return = SkinBuilder<'a, 's>;
+                impl IteratorConsumer<'_, Mat4> for RegisterBindMatrices {
+                    type Return = SkinBuilder;
 
-                    fn consume<I: Iterator<Item = Mat4> + 'a>(
-                        self,
-                        iter: I,
-                    ) -> Result<Self::Return> {
+                    fn consume<I: Iterator<Item = Mat4>>(self, iter: I) -> Result<Self::Return> {
                         Ok(self.builder.inverse_bind_matrices(iter))
                     }
                 }
@@ -228,9 +223,10 @@ impl super::GltfAsset {
                     accessor.iter_mat4(&self.json.buffer_views, &self.json.buffers, consumer)?;
             }
 
-            let skin = builder.build().id();
+            let skin = builder.build(scene).unwrap();
             for node in nodes {
-                scene.add_skin_to_node(skin, node);
+                // scene.add_skin_to_node(skin, node);
+                todo!("add skin to node");
             }
         }
 
@@ -254,11 +250,10 @@ impl super::GltfAsset {
     fn load_node(
         &mut self,
         index: usize,
-        parent: Option<Id<crate::Node>>,
+        parent: Option<crate::node::NodeId>,
         scene: &mut crate::Scene,
-        resources: &mut Resources,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Id<crate::Node>> {
+    ) -> anyhow::Result<crate::node::NodeId> {
         let node = self
             .json
             .nodes
@@ -284,7 +279,7 @@ impl super::GltfAsset {
                         &mut self.json.images,
                         &self.json.buffer_views,
                         &self.json.buffers,
-                        resources,
+                        scene.context(),
                         encoder,
                     )
                     .with_context(|| format!("Failed to load node.mesh {index}"))?,

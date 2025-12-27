@@ -2,7 +2,7 @@ use thiserror::Error;
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    Engine,
+    Context,
     asset::{geometry::Geometry, material::Material},
 };
 
@@ -46,8 +46,8 @@ impl MeshBuilder {
     }
 
     /// Build the mesh.
-    pub fn build(self, engine: &mut Engine) -> Result<Mesh, MeshBuilderError> {
-        Ok(Mesh(self.0.build(&mut engine.inner)?))
+    pub fn build(self, ctx: &Context) -> Result<Mesh, MeshBuilderError> {
+        Ok(Mesh(self.0.build(&ctx.inner)?))
     }
 }
 

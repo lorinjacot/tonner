@@ -7,6 +7,7 @@ edition = "2024"
 eframe.workspace = true
 egui.workspace = true
 log.workspace = true
+rfd.workspace = true
 serde.workspace = true
 storm.workspace = true
 wgpu.workspace = true
@@ -14,6 +15,7 @@ wgpu.workspace = true
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger.workspace = true
+pollster.workspace = true
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]

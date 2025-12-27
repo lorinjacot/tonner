@@ -1,9 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use storm::{
-    Engine, Scene,
-    camera::CameraId,
-    render_target::{RenderTarget, RenderTargetBuilder},
+    Context, Scene, camera::CameraId, render_target::{RenderTarget, RenderTargetBuilder}
 };
 
 pub struct SceneView {
@@ -20,19 +18,19 @@ impl SceneView {
         width: u32,
         height: u32,
         renderer: &mut eframe::egui_wgpu::Renderer,
-        engine: &mut Engine,
+        ctx: &Context,
     ) -> Self {
-        let texture_view = Self::create_texture_view(width, height, engine.device());
+        let texture_view = Self::create_texture_view(width, height, ctx.device());
 
         let id = renderer.register_native_texture(
-            engine.device(),
+            ctx.device(),
             &texture_view,
             wgpu::FilterMode::Linear,
         );
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
         let render_target =
-            RenderTargetBuilder::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, engine)
+            RenderTargetBuilder::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx)
                 .build(texture_view)
                 .unwrap();
 
@@ -48,7 +46,7 @@ impl SceneView {
         &mut self,
         ui: &mut egui::Ui,
         renderer: &mut eframe::egui_wgpu::Renderer,
-        engine: &mut Engine,
+        ctx: &Context,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let size = ui.available_size();
@@ -60,9 +58,9 @@ impl SceneView {
         }
 
         if self.render_target.width() != width || self.render_target.height() != height {
-            let texture_view = Self::create_texture_view(width, height, engine.device());
+            let texture_view = Self::create_texture_view(width, height, ctx.device());
             let id = renderer.register_native_texture(
-                engine.device(),
+                ctx.device(),
                 &texture_view,
                 wgpu::FilterMode::Linear,
             );
@@ -72,7 +70,7 @@ impl SceneView {
                 width,
                 height,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
-                engine,
+                ctx,
             )
             .build(texture_view)
             .unwrap();

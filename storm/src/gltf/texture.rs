@@ -6,15 +6,12 @@ use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::Resources;
-use crate::storage::{DenseEntry, Id};
-
 /// Image data used to create a texture. Image **MAY** be referenced by an URI (or IRI) or a buffer view index.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Image {
     /// wgpu texture, if the resource has been loaded.
     #[serde(skip)]
-    wgpu: Option<wgpu::Texture>,
+    wgpu: Option<wgpu::TextureView>,
 
     /// The URI (or IRI) of the image. Relative paths are relative to the current glTF asset.
     /// Instead of referencing an external file, this field **MAY** contain a `data:`-URI.
@@ -52,9 +49,9 @@ impl Image {
         base_path: &Path,
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        resources: &mut Resources,
+        ctx: &crate::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<wgpu::Texture> {
+    ) -> anyhow::Result<wgpu::TextureView> {
         if let Some(image) = &self.wgpu {
             return Ok(image.clone());
         }
@@ -111,7 +108,11 @@ impl Image {
             .name(name)
             .from_dynamic_image(&image, srgb)
             // .generate_mips()
-            .build(resources, encoder);
+            .build(ctx, encoder)
+            .create_view(&wgpu::TextureViewDescriptor {
+                label: Some(name.unwrap_or_default()),
+                ..Default::default()
+            });
         self.wgpu = Some(texture.clone());
         Ok(texture)
     }
@@ -180,7 +181,7 @@ pub(super) struct Sampler {
 }
 
 impl Sampler {
-    fn load(&mut self, resources: &mut Resources) -> anyhow::Result<wgpu::Sampler> {
+    fn load(&mut self, ctx: &crate::Context) -> anyhow::Result<wgpu::Sampler> {
         if let Some(sampler) = &self.wgpu {
             return Ok(sampler.clone());
         }
@@ -200,7 +201,7 @@ impl Sampler {
             MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
         };
 
-        let sampler = resources.device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
             label: self.name.as_deref(),
             address_mode_u: wrapping_mode_to_address_mode(self.wrap_s),
             address_mode_v: wrapping_mode_to_address_mode(self.wrap_t),
@@ -287,10 +288,6 @@ impl WrappingMode {
 /// A texture and its sampler.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Texture {
-    /// Storm storage id, if the resource has been loaded.
-    #[serde(skip)]
-    id: Option<Id<crate::material::Texture>>,
-
     /// The index of the sampler used by this texture. When undefined, a sampler
     /// with repeat wrapping and auto filtering **SHOULD** be used.
     #[serde(default)]
@@ -320,14 +317,9 @@ impl Texture {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        resources: &mut Resources,
+        ctx: &crate::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Id<crate::material::Texture>> {
-        if let Some(id) = self.id {
-            return Ok(id);
-        }
-
-        let name = self.name.clone();
+    ) -> anyhow::Result<(wgpu::TextureView, wgpu::Sampler)> {
         let sampler = self.sampler;
         let source = self.source.context("image.source must be defined.")?;
 
@@ -336,7 +328,7 @@ impl Texture {
                 samplers
                     .get_mut(index)
                     .with_context(|| format!("texture.sampler {index} is out of range."))?
-                    .load(resources)
+                    .load(ctx)
                     .with_context(|| format!("Failed to load texture.sampler {index}."))?,
             ),
             None => None,
@@ -345,16 +337,17 @@ impl Texture {
         let source = images
             .get_mut(source)
             .with_context(|| format!("texture.image {source} is out of range."))?
-            .load(srgb, base_path, buffer_views, buffers, resources, encoder)
+            .load(srgb, base_path, buffer_views, buffers, ctx, encoder)
             .with_context(|| format!("Failed to load texture.image {source}."))?;
 
-        let id = crate::material::TextureBuilder::default()
-            .name(name)
-            .sampler(sampler)
-            .texture(source)
-            .build(resources)
-            .id();
-        self.id = Some(id);
-        Ok(id)
+        Ok((
+            source.clone(),
+            sampler.clone().unwrap_or_else(|| {
+                ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("Default glTF texture sampler"),
+                    ..Default::default()
+                })
+            }),
+        ))
     }
 }

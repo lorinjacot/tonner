@@ -1,14 +1,14 @@
 use std::{
-    collections::HashMap,
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     sync::{Arc, Mutex},
 };
 
+use dashmap::DashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    Engine,
+    Context,
     environment::PREFILTER_MAP_MIP_COUNT,
     geometry::{Geometry, GeometryFlags, GeometryIndices},
     material::{AlphaMode, Material, MaterialFlags},
@@ -20,7 +20,7 @@ use crate::{
 pub struct MeshId(Uuid);
 
 /// A mesh describe a 3D object. It wraps a [Geometry] with a [Material].
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Mesh(Arc<MeshData>);
 
 impl Mesh {
@@ -64,6 +64,7 @@ impl Mesh {
 }
 
 /// Data contained in a [Mesh]. Private to this module.
+#[derive(Debug)]
 struct MeshData {
     /// Unique id for the mesh. Will never change.
     id: MeshId,
@@ -102,7 +103,7 @@ impl MeshBuilder {
     }
 
     /// Create the mesh.
-    pub fn build(self, engine: &mut Engine) -> Result<Mesh, MeshBuilderError> {
+    pub fn build(self, ctx: &Context) -> Result<Mesh, MeshBuilderError> {
         let mut primitives = Vec::with_capacity(self.primitives.len());
         let morph_target_count = self
             .primitives
@@ -126,14 +127,14 @@ impl MeshBuilder {
                 double_sided: material.double_sided(),
             };
 
-            let render_pipelines = engine
-                .mesh_manager
-                .get_or_create_render_pipeline(parameters, &engine.device)
+            let render_pipelines = ctx
+                .mesh_ctx
+                .get_or_create_render_pipeline(parameters, &ctx.device)
                 .clone();
 
-            let bind_group = engine.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Mesh primitive bind group"),
-                layout: &engine.mesh_manager.primitive_bind_group_layout,
+                layout: &ctx.mesh_ctx.primitive_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -219,10 +220,7 @@ impl MeshBuilder {
             name: Mutex::new(self.name),
             primitives,
         };
-        let mesh = Mesh(Arc::new(data));
-        engine.mesh_manager.meshes.insert(id, mesh.clone());
-
-        Ok(mesh)
+        Ok(Mesh(Arc::new(data)))
     }
 }
 
@@ -238,7 +236,7 @@ pub enum MeshBuilderError {
 }
 
 /// A primitive is a [`Geometry`], [`Material`] pair. A [`Mesh`] is described as a list of primitives.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MeshPrimitive {
     id: MeshPrimitiveId,
     geometry: Geometry,
@@ -335,15 +333,15 @@ impl MeshPrimitive {
 }
 
 /// A container for all [meshes][Mesh]. This type is used to create, query and delete meshes.
-pub(crate) struct MeshManager {
-    meshes: HashMap<MeshId, Mesh>,
+#[derive(Debug, Clone)]
+pub(crate) struct MeshContext {
     primitive_shader_module: wgpu::ShaderModule,
     primitive_pipeline_layout: wgpu::PipelineLayout,
     primitive_bind_group_layout: wgpu::BindGroupLayout,
-    primitive_pipelines: HashMap<PrimitivePipelineParameters, [wgpu::RenderPipeline; 2]>,
+    primitive_pipelines: DashMap<PrimitivePipelineParameters, [wgpu::RenderPipeline; 2]>,
 }
 
-impl MeshManager {
+impl MeshContext {
     pub(crate) fn new(
         render_bind_group_layout: &wgpu::BindGroupLayout,
         device: &wgpu::Device,
@@ -478,11 +476,10 @@ impl MeshManager {
             });
 
         Self {
-            meshes: HashMap::new(),
             primitive_shader_module,
             primitive_pipeline_layout,
             primitive_bind_group_layout,
-            primitive_pipelines: HashMap::new(),
+            primitive_pipelines: DashMap::new(),
         }
     }
 
@@ -498,10 +495,10 @@ impl MeshManager {
     };
 
     fn get_or_create_render_pipeline(
-        &mut self,
+        &self,
         parameters: PrimitivePipelineParameters,
         device: &wgpu::Device,
-    ) -> &[wgpu::RenderPipeline; 2] {
+    ) -> impl Deref<Target = [wgpu::RenderPipeline; 2]> {
         self.primitive_pipelines
             .entry(parameters.clone())
             .or_insert_with(|| {
@@ -618,7 +615,7 @@ impl MeshManager {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PrimitivePipelineParameters {
     geometry_flags: GeometryFlags,
     topology: wgpu::PrimitiveTopology,

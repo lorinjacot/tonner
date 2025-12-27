@@ -111,9 +111,10 @@ impl EngineBuilder {
             .or(Err(BuildEngineError::Adapter))?;
 
         let (device, queue) = adapter
-            .request_device(&wgpu::wgt::DeviceDescriptor {
+            .request_device(&wgpu::DeviceDescriptor {
                 label: Some("storm-js engine device"),
                 required_features: wgpu::Features::empty(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 required_limits: wgpu::Limits::defaults(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,

@@ -6,7 +6,11 @@ use std::{
 pub use scene_view::SceneView;
 use storm::{Engine, Scene, SceneBuilder, camera::CameraBuilder};
 
+use crate::new_scene::NewSceneModal;
+
+mod new_scene;
 mod scene_view;
+mod shortcut;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -32,8 +36,10 @@ impl Default for State {
 pub struct App {
     state: State,
     engine: Engine,
+    scenes: Vec<Arc<RwLock<Scene>>>,
     main_scene: Arc<RwLock<Scene>>,
     main_scene_view: SceneView,
+    new_scene_modal: NewSceneModal,
 }
 
 impl App {
@@ -69,8 +75,10 @@ impl App {
         Self {
             state,
             engine,
+            scenes: vec![scene.clone()],
             main_scene: scene,
             main_scene_view,
+            new_scene_modal: NewSceneModal::default(),
         }
     }
 }
@@ -85,6 +93,11 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let mut encoder = self.engine.encoder(Some("App::update command encoder"));
         let duration = Duration::from_secs_f32(ctx.input(|input_state| input_state.stable_dt));
+
+        if ctx.input_mut(|input_state| input_state.consume_shortcut(&shortcut::NEW_SCENE)) {
+            self.new_scene_modal.open = true;
+        }
+
         self.main_scene
             .write()
             .unwrap()
@@ -98,16 +111,26 @@ impl eframe::App for App {
             // The top panel is often a good place for a menu bar:
 
             egui::MenuBar::new().ui(ui, |ui| {
-                // NOTE: no File->Quit on web pages!
-                let is_web = cfg!(target_arch = "wasm32");
-                if !is_web {
-                    ui.menu_button("File", |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new("New Scene")
+                                .shortcut_text(ctx.format_shortcut(&shortcut::NEW_SCENE)),
+                        )
+                        .clicked()
+                    {
+                        self.new_scene_modal.open = true;
+                    }
+
+                    // NOTE: no File->Quit on web pages!
+                    let is_web = cfg!(target_arch = "wasm32");
+                    if !is_web {
                         if ui.button("Quit").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
-                    });
-                    ui.add_space(16.0);
-                }
+                    }
+                });
+                ui.add_space(16.0);
 
                 egui::widgets::global_theme_preference_buttons(ui);
             });
@@ -146,6 +169,22 @@ impl eframe::App for App {
                 egui::warn_if_debug_build(ui);
             });
         });
+
+        if let Some(mut scene) = self.new_scene_modal.ui(ctx, &mut self.engine) {
+            let camera = CameraBuilder::default().build(&mut scene);
+            let scene = Arc::new(RwLock::new(scene));
+            self.scenes.push(scene.clone());
+            let mut renderer = frame.wgpu_render_state().unwrap().renderer.write();
+            self.main_scene_view = SceneView::new(
+                scene.clone(),
+                camera,
+                300,
+                300,
+                &mut renderer,
+                &mut self.engine,
+            );
+            self.main_scene = scene;
+        }
 
         self.engine.submit_commands(encoder.finish());
         ctx.request_repaint();

@@ -83,7 +83,7 @@ impl SkinBuilder {
     }
 }
 
-/// Error when [`SkinBuilder.build`] fails.
+/// Error when [`SkinBuilder::build`] fails.
 #[derive(Debug, Error)]
 pub enum SkinBuilderError {
     #[error("invalid node: {0}")]

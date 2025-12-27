@@ -200,7 +200,7 @@ impl SphereBuilder {
     }
 }
 
-/// Error when [`SphereBuilder.width_segments`] or [`SphereBuilder.height_segments`] fail.
+/// Error when [`SphereBuilder::width_segments`] or [`SphereBuilder::height_segments`] fail.
 #[derive(Debug, Error)]
 #[error("need {min} segments, got only {actual}")]
 pub struct NotEnoughSegmentsError {

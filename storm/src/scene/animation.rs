@@ -38,7 +38,7 @@ impl AnimationData {
                                 &slice,
                             ),
                         )
-                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node));
+                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node))?;
                 }
                 Outputs::Rotations(slice) => {
                     node_manager
@@ -51,7 +51,7 @@ impl AnimationData {
                                 &slice,
                             ),
                         )
-                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node));
+                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node))?;
                 }
                 Outputs::Scales(slice) => {
                     node_manager
@@ -64,7 +64,7 @@ impl AnimationData {
                                 &slice,
                             ),
                         )
-                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node));
+                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node))?;
                 }
                 Outputs::Weights(_slice, _count) => {
                     // node.weights = interpolate_weights(
@@ -113,17 +113,6 @@ impl AnimationBuilder {
             repeat: true,
             ..self
         }
-    }
-
-    pub fn channels(mut self, channels: impl IntoIterator<Item = Channel>) -> Self {
-        self.channels.extend(channels.into_iter().map(|channel| {
-            let duration = *channel.inputs.last().unwrap();
-            if duration > self.duration {
-                self.duration = duration;
-            }
-            channel
-        }));
-        self
     }
 
     pub fn build(self, scene: &mut Scene) -> Result<AnimationId, AnimationBuilderError> {

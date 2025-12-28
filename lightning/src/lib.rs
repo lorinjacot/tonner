@@ -1,13 +1,15 @@
 use std::{
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool},
     time::Duration,
 };
 
+use egui::containers::menu::SubMenuButton;
 pub use scene_view::SceneView;
 use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder, gltf::GltfAsset};
 
-use crate::new_scene::NewSceneModal;
+use crate::{mesh_explorer::MeshExplorer, new_scene::NewSceneModal};
 
+mod mesh_explorer;
 mod new_scene;
 mod scene_view;
 mod shortcut;
@@ -21,6 +23,10 @@ struct State {
 
     #[serde(skip)] // This how you opt-out of serialization of a field
     value: f32,
+
+    show_mesh_explorer: Arc<AtomicBool>,
+    #[cfg_attr(target_arch = "wasm32", serde(skip))]
+    detached_mesh_explorer: Arc<AtomicBool>,
 }
 
 impl Default for State {
@@ -29,6 +35,8 @@ impl Default for State {
             // Example stuff:
             label: "Hello World!".to_owned(),
             value: 2.7,
+            show_mesh_explorer: Arc::new(AtomicBool::new(false)),
+            detached_mesh_explorer: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -36,6 +44,7 @@ impl Default for State {
 pub struct App {
     state: State,
     storm_ctx: Context,
+    mesh_explorer: MeshExplorer,
     scenes: Vec<Arc<RwLock<Scene>>>,
     main_scene: Arc<RwLock<Scene>>,
     main_scene_view: SceneView,
@@ -50,7 +59,7 @@ impl App {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        let state = if let Some(storage) = cc.storage {
+        let state: State = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             Default::default()
@@ -72,9 +81,15 @@ impl App {
             &storm_ctx,
         );
 
+        let mesh_explorer = MeshExplorer::new(
+            state.show_mesh_explorer.clone(),
+            state.detached_mesh_explorer.clone(),
+        );
+
         Self {
             state,
             storm_ctx,
+            mesh_explorer,
             scenes: vec![scene.clone()],
             main_scene: scene,
             main_scene_view,
@@ -83,16 +98,34 @@ impl App {
     }
 
     fn open_file(&mut self) {
-        run(async {
+        let ctx = self.storm_ctx.clone();
+        let meshes = Arc::clone(self.mesh_explorer.meshes());
+        run(async move {
             if let Some(path) = rfd::AsyncFileDialog::new()
                 .add_filter("glTF", &["gltf", "glb"])
                 .pick_file()
                 .await
             {
-                let asset = GltfAsset::open(path.path()).unwrap();
-                dbg!(asset);
+                let mut asset = GltfAsset::open(path.path()).unwrap();
+                dbg!(&asset);
+
+                let mut encoder =
+                    ctx.device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("lighting::App:open_file command encoder"),
+                        });
+
+                asset
+                    .load_meshes(&ctx, &mut encoder)
+                    .unwrap()
+                    .into_iter()
+                    .for_each(|mesh| {
+                        meshes.insert(mesh);
+                    });
 
                 // let scenes = asset.create_all_scenes(&mut self.engine);
+
+                ctx.queue().submit([encoder.finish()]);
             }
         });
     }
@@ -121,6 +154,10 @@ impl eframe::App for App {
 
             if input_state.consume_shortcut(&shortcut::OPEN_FILE) {
                 self.open_file();
+            }
+
+            if input_state.consume_shortcut(&shortcut::MESH_EXPLORER) {
+                self.mesh_explorer.toggle_show();
             }
         });
 
@@ -166,6 +203,33 @@ impl eframe::App for App {
                         }
                     }
                 });
+
+                ui.menu_button("View", |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new("Mesh Explorer")
+                                .shortcut_text(ctx.format_shortcut(&shortcut::MESH_EXPLORER)),
+                        )
+                        .clicked()
+                    {
+                        self.mesh_explorer.toggle_show();
+                    }
+
+                    if cfg!(not(target_arch = "wasm32")) {
+                        ui.separator();
+
+                        SubMenuButton::from_button(
+                            egui::Button::new("Detached Windows")
+                                .right_text(SubMenuButton::RIGHT_ARROW),
+                        )
+                        .ui(ui, |ui| {
+                            let mut detached = self.mesh_explorer.detached();
+                            ui.checkbox(&mut detached, "Mesh Explorer");
+                            self.mesh_explorer.set_detached(detached);
+                        });
+                    }
+                });
+
                 ui.add_space(16.0);
 
                 egui::widgets::global_theme_preference_buttons(ui);
@@ -222,6 +286,8 @@ impl eframe::App for App {
             self.main_scene = scene;
         }
 
+        self.mesh_explorer.ui(ctx);
+
         self.storm_ctx.queue().submit([encoder.finish()]);
         ctx.request_repaint();
     }
@@ -242,8 +308,10 @@ fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn run<F: IntoFuture<Output = ()> + 'static>(future: F) {
-    pollster::block_on(future);
+fn run<F: IntoFuture<Output = ()> + Send + 'static>(future: F) {
+    std::thread::spawn(|| {
+        pollster::block_on(future);
+    });
 }
 
 #[cfg(target_arch = "wasm32")]

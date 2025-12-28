@@ -1,6 +1,5 @@
 use std::{
-    ops::{Deref, DerefMut},
-    sync::{Arc, Mutex},
+    hash::Hash, ops::{Deref, DerefMut}, sync::{Arc, Mutex}
 };
 
 use dashmap::DashMap;
@@ -16,11 +15,11 @@ use crate::{
 };
 
 /// A unique id for a [mesh][Mesh]. A mesh will always have the same id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeshId(Uuid);
 
 /// A mesh describe a 3D object. It wraps a [Geometry] with a [Material].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Mesh(Arc<MeshData>);
 
 impl Mesh {
@@ -73,6 +72,20 @@ struct MeshData {
     name: Mutex<String>,
 
     primitives: Vec<MeshPrimitive>,
+}
+
+impl PartialEq for MeshData {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for MeshData {}
+
+impl Hash for MeshData {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
 }
 
 /// A builder for [`Mesh`].

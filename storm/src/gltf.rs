@@ -163,6 +163,32 @@ impl GltfAsset {
         })
     }
 
+    pub fn load_meshes(
+        &mut self,
+        ctx: &crate::Context,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> anyhow::Result<Vec<crate::mesh::Mesh>> {
+        let mut meshes = Vec::with_capacity(self.json.meshes.len());
+
+        for mesh in self.json.meshes.iter_mut() {
+            meshes.push(mesh.load(
+                &self.base_path,
+                &self.json.accessors,
+                &mut self.json.materials,
+                &mut self.default_material,
+                &mut self.json.textures,
+                &mut self.json.samplers,
+                &mut self.json.images,
+                &self.json.buffer_views,
+                &self.json.buffers,
+                ctx,
+                encoder,
+            )?);
+        }
+
+        Ok(meshes)
+    }
+
     pub fn default_scene(&self) -> Option<usize> {
         self.json.scene
     }

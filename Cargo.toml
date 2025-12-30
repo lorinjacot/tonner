@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "storm",
+    "storm-controls",
     "glam-js",
     "storm-js",
     "lightning",
@@ -43,6 +44,7 @@ web-sys = "0.3.81"
 wgpu = "27.0.1"
 
 storm = { path = "storm" }
+storm-controls = { path = "storm-controls" }
 glam-js = { path = "glam-js" }
 
 [profile.release]

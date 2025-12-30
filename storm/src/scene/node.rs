@@ -137,6 +137,16 @@ impl NodeManager {
         self.nodes.get(&node).map(|data| data.local_matrix)
     }
 
+    /// Returns the node local position, or `None` if the node does not exists.
+    ///
+    /// The local position describe the translation between the node coordinate system origin
+    /// and the parent one.
+    /// If the node has no parent, the local position is equal to the global position.
+    pub(super) fn local_position(&self, node: NodeId) -> Option<Vec3> {
+        self.local_matrix(node)
+            .map(|m| m.transform_point3(Vec3::ZERO))
+    }
+
     /// Modifies the scale part of the local transform. The local transform is expected
     /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
     pub(super) fn set_local_scale(&mut self, node: NodeId, scale: Vec3) -> Result<(), ()> {
@@ -221,6 +231,62 @@ impl NodeManager {
             drop(buffer_view);
             self.buffer.unmap();
         }
+    }
+}
+
+/// Nodes operations
+impl Scene {
+    /// Returns the node local position, or `None` if the node does not exists.
+    ///
+    /// The local position describe the translation between the node coordinate system origin
+    /// and the parent one.
+    /// If the node has no parent, the local position is equal to the global position.
+    pub fn local_position(&self, node: NodeId) -> Option<Vec3> {
+        self.node_manager.local_position(node)
+    }
+
+    /// Returns the node local rotation, or `None` if the node does not exists.
+    pub fn local_rotation(&self, node: NodeId) -> Option<Quat> {
+        self.node_manager
+            .nodes
+            .get(&node)
+            .map(|node| node.local_matrix.to_scale_rotation_translation().1)
+    }
+
+    /// Returns the node local matrix, or `None` if the node does not exists.
+    ///
+    /// The local matrix describe the transform between the node local coordinate system
+    /// to the parent one.
+    /// If the node has no parent, the local transform is equal to the global transform.
+    pub fn local_matrix(&self, node: NodeId) -> Option<Mat4> {
+        self.node_manager.local_matrix(node)
+    }
+
+    /// Modifies the translation part of the local transform. The local transform is expected
+    /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
+    pub fn set_local_position(&mut self, node: NodeId, position: Vec3) -> Result<(), ()> {
+        self.node_manager.set_local_translation(node, position)
+    }
+
+    /// Rotate `node` such that it is facing `target`. Returns `Err(())` if the node does not
+    /// exist.
+    pub fn look_at(&mut self, node: NodeId, target: Vec3) -> Result<(), ()> {
+        let node_data = self.node_manager.nodes.get(&node).ok_or(())?;
+        let eye = node_data.global_matrix.transform_point3(Vec3::ZERO);
+        let mut rotation = Quat::look_at_rh(eye, target, Vec3::Y);
+        if let Some(parent) = node_data.parent {
+            let parent_rotation = self
+                .node_manager
+                .global_matrix(parent)
+                .unwrap()
+                .to_scale_rotation_translation()
+                .1;
+            rotation = parent_rotation.inverse() * rotation;
+        }
+        self.node_manager
+            .set_local_rotation(node, rotation)
+            .unwrap();
+        Ok(())
     }
 }
 

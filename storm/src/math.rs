@@ -1,5 +1,9 @@
 use glam::{Mat4, Quat, Vec3};
 
+pub use spherical::Spherical;
+
+mod spherical;
+
 pub const EPSILON: f32 = 1e-8;
 
 #[derive(Debug, Clone)]

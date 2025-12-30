@@ -3137,6 +3137,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "storm-controls"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.8",
+ "log",
+ "storm",
+]
+
+[[package]]
 name = "storm-js"
 version = "0.1.0"
 dependencies = [

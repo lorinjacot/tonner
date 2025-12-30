@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -111,6 +111,8 @@ pub struct OrthographicProjection {
 
     /// The floating-point distance to the near clipping plane. Default to `0.1`.
     pub z_near: f32,
+
+    pub zoom: f32,
 }
 
 impl Default for OrthographicProjection {
@@ -120,6 +122,7 @@ impl Default for OrthographicProjection {
             y_mag: 2.0,
             z_far: 2000.0,
             z_near: 0.1,
+            zoom: 1.0,
         }
     }
 }
@@ -147,6 +150,8 @@ pub struct PerspectiveProjection {
     ///
     /// Default is `None`.
     pub z_far: Option<f32>,
+
+    pub zoom: f32,
 }
 
 impl Default for PerspectiveProjection {
@@ -156,6 +161,7 @@ impl Default for PerspectiveProjection {
             y_fov: 50.0f32.to_radians(),
             z_far: None,
             z_near: 0.1,
+            zoom: 1.0,
         }
     }
 }
@@ -197,6 +203,146 @@ impl CameraManager {
     }
 }
 
+/// Camera operations
+impl Scene {
+    /// Returns `true` if `camera` is a orthographic camera. Returns `false` if it is
+    /// a perspective camera or if it does not exist.
+    pub fn is_orthographic_camera(&self, camera: CameraId) -> bool {
+        if let Some(camera) = self.camera_manager.cameras.get(&camera) {
+            if let Projection::Orthographic(_) = camera.projection {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns `true` if `node` is an orthographic camera node. Returns `false` if it is
+    /// another type of camera node, if not camera is attached to the node of if it does not exist.
+    pub fn is_orthographic_camera_node(&self, node: NodeId) -> bool {
+        self.camera_manager
+            .cameras
+            .values()
+            .find(|camera| {
+                camera.node == node
+                    && match camera.projection {
+                        Projection::Orthographic(_) => true,
+                        _ => false,
+                    }
+            })
+            .is_some()
+    }
+
+    /// Returns `true` if `node` is a perspective amera node. Returns `false` if it is
+    /// another type of camera node, if not camera is attached to the node of if it does not exist.
+    pub fn is_perspective_camera_node(&self, node: NodeId) -> bool {
+        self.camera_manager
+            .cameras
+            .values()
+            .find(|camera| {
+                camera.node == node
+                    && match camera.projection {
+                        Projection::Perspective(_) => true,
+                        _ => false,
+                    }
+            })
+            .is_some()
+    }
+
+    /// Transform a vector from the camera's normalized device coordinate space into world space.
+    /// Returns `None` if the camera does not exist.
+    pub fn unproject(
+        &self,
+        camera: CameraId,
+        position: Vec3,
+        viewport_aspect_ratio: f32,
+    ) -> Option<Vec3> {
+        self.camera_manager.cameras.get(&camera).map(|camera| {
+            let view = self.node_manager.global_matrix(camera.node).unwrap();
+            let projection = camera.projection.matrix(viewport_aspect_ratio);
+            (projection.inverse() * view).transform_point3(position)
+        })
+    }
+
+    /// Same as [Self::unproject] but using the node id instead of the camera id.
+    pub fn unproject_node(
+        &self,
+        node: NodeId,
+        position: Vec3,
+        viewport_aspect_ratio: f32,
+    ) -> Option<Vec3> {
+        self.camera_manager
+            .cameras
+            .values()
+            .find(|camera| camera.node == node)
+            .map(|camera| {
+                let view = self.node_manager.global_matrix(camera.node).unwrap();
+                let projection = camera.projection.matrix(viewport_aspect_ratio);
+                (projection.inverse() * view).transform_point3(position)
+            })
+    }
+
+    pub fn camera_y_fov_node(&self, node: NodeId) -> Option<f32> {
+        self.camera_manager.cameras.values().find_map(|camera| {
+            if camera.node == node
+                && let Projection::Perspective(PerspectiveProjection { y_fov, .. }) =
+                    &camera.projection
+            {
+                return Some(*y_fov);
+            }
+            None
+        })
+    }
+
+    pub fn camera_zoom_node(&self, node: NodeId) -> Option<f32> {
+        self.camera_manager.cameras.values().find_map(|camera| {
+            if camera.node == node
+                && let Projection::Perspective(PerspectiveProjection { zoom, .. }) =
+                    &camera.projection
+            {
+                return Some(*zoom);
+            }
+            None
+        })
+    }
+
+    pub fn set_camera_zoom_node(&mut self, node: NodeId, zoom: f32) -> Result<(), ()> {
+        for camera in self.camera_manager.cameras.values_mut() {
+            if camera.node == node
+                && let Projection::Perspective(PerspectiveProjection {
+                    zoom: current_zoom, ..
+                }) = &mut camera.projection
+            {
+                *current_zoom = zoom;
+            }
+        }
+        Err(())
+    }
+
+    pub fn camera_x_mag_node(&self, node: NodeId) -> Option<f32> {
+        self.camera_manager.cameras.values().find_map(|camera| {
+            if camera.node == node
+                && let Projection::Orthographic(OrthographicProjection { x_mag, .. }) =
+                    &camera.projection
+            {
+                return Some(*x_mag);
+            }
+            None
+        })
+    }
+
+    pub fn camera_y_mag_node(&self, node: NodeId) -> Option<f32> {
+        self.camera_manager.cameras.values().find_map(|camera| {
+            if camera.node == node
+                && let Projection::Orthographic(OrthographicProjection { y_mag, .. }) =
+                    &camera.projection
+            {
+                return Some(*y_mag);
+            }
+            None
+        })
+    }
+}
+
 enum Projection {
     Orthographic(OrthographicProjection),
     Perspective(PerspectiveProjection),
@@ -210,12 +356,14 @@ impl Projection {
                 y_mag,
                 z_far,
                 z_near,
+                zoom,
             }) => Mat4::orthographic_rh(-*x_mag, *x_mag, -*y_mag, *y_mag, *z_near, *z_far),
             Projection::Perspective(PerspectiveProjection {
                 aspect_ratio,
                 y_fov,
                 z_near,
                 z_far: Some(z_far),
+                zoom,
             }) => Mat4::perspective_rh(
                 *y_fov,
                 aspect_ratio.unwrap_or(viewport_aspect_ratio),
@@ -227,6 +375,7 @@ impl Projection {
                 y_fov,
                 z_near,
                 z_far: None,
+                zoom,
             }) => Mat4::perspective_infinite_rh(
                 *y_fov,
                 aspect_ratio.unwrap_or(viewport_aspect_ratio),

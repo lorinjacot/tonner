@@ -82,6 +82,8 @@ impl App {
         );
 
         let mesh_explorer = MeshExplorer::new(
+            storm_ctx.clone(),
+            wgpu_state.renderer.clone(),
             state.show_mesh_explorer.clone(),
             state.detached_mesh_explorer.clone(),
         );
@@ -107,7 +109,6 @@ impl App {
                 .await
             {
                 let mut asset = GltfAsset::open(path.path()).unwrap();
-                dbg!(&asset);
 
                 let mut encoder =
                     ctx.device()
@@ -115,13 +116,12 @@ impl App {
                             label: Some("lighting::App:open_file command encoder"),
                         });
 
-                asset
-                    .load_meshes(&ctx, &mut encoder)
-                    .unwrap()
-                    .into_iter()
-                    .for_each(|mesh| {
-                        meshes.insert(mesh);
-                    });
+                let mut new_meshes = asset.load_meshes(&ctx, &mut encoder).unwrap();
+
+                let mut meshes = meshes.lock().unwrap();
+                meshes.append(&mut new_meshes);
+                meshes.sort_by(|a, b| a.name().cmp(&b.name()));
+                drop(meshes);
 
                 // let scenes = asset.create_all_scenes(&mut self.engine);
 

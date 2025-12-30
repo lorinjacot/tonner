@@ -123,7 +123,7 @@ impl RenderTargetBuilder {
 
         Ok(RenderTarget {
             width: self.width,
-            height: self.width,
+            height: self.height,
             render_texture_view: target,
             opaque_attachment: self.opaque_attachment,
             accumulation_attachment: self.accumulation_attachment,

@@ -77,7 +77,7 @@ impl App {
             camera,
             300,
             300,
-            &mut wgpu_state.renderer.write(),
+            wgpu_state.renderer.clone(),
             &storm_ctx,
         );
 
@@ -257,12 +257,8 @@ impl eframe::App for App {
                 "Source code."
             ));
 
-            self.main_scene_view.render(
-                ui,
-                &mut frame.wgpu_render_state().unwrap().renderer.write(),
-                &self.storm_ctx,
-                &mut encoder,
-            );
+            self.main_scene_view
+                .render(ui, &self.storm_ctx, &mut encoder);
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
@@ -274,13 +270,12 @@ impl eframe::App for App {
             let camera = CameraBuilder::default().build(&mut scene);
             let scene = Arc::new(RwLock::new(scene));
             self.scenes.push(scene.clone());
-            let mut renderer = frame.wgpu_render_state().unwrap().renderer.write();
             self.main_scene_view = SceneView::new(
                 scene.clone(),
                 camera,
                 300,
                 300,
-                &mut renderer,
+                frame.wgpu_render_state().unwrap().renderer.clone(),
                 &self.storm_ctx,
             );
             self.main_scene = scene;

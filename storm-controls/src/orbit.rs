@@ -46,7 +46,7 @@ use storm::{
     node::NodeId,
 };
 
-use crate::{Key, Modifiers};
+use crate::{Key, Modifiers, MouseButton};
 
 /// Orbit controls allow the camera to orbit around a target.
 ///
@@ -175,6 +175,15 @@ pub struct OrbitControls {
     /// Keyboard key used for downward camera panning. Defaults to [`Key::ArrowDown`].
     pub bottom_key: Key,
 
+    /// Mouse button used for dolly. Defaults to [`MouseButton::Middle`].
+    pub dolly_botton: MouseButton,
+
+    /// Mouse button used for rotate. Defaults to [`MouseButton::Left`].
+    pub rotate_button: MouseButton,
+
+    // Mouse button used for pan. Defaults to [`MouseButton::Right`].
+    pub pan_button: MouseButton,
+
     last_position: Vec3,
     last_quaternion: Quat,
     last_target_position: Vec3,
@@ -189,23 +198,10 @@ pub struct OrbitControls {
     scale: f32,
     pan_offset: Vec3,
 
-    rotate_start: Vec2,
-    rotate_end: Vec2,
-    rotate_delta: Vec2,
-
-    pan_start: Vec2,
-    pan_end: Vec2,
-    pan_delta: Vec2,
-
-    dolly_start: Vec2,
-    dolly_end: Vec2,
-    dolly_delta: Vec2,
-
     dolly_direction: Vec3,
     mouse: Vec2,
     perform_cursor_zoom: bool,
 
-    control_active: bool,
     state: State,
 }
 
@@ -238,6 +234,9 @@ impl Default for OrbitControls {
             up_key: Key::ArrowUp,
             right_key: Key::ArrowRight,
             bottom_key: Key::ArrowDown,
+            dolly_botton: MouseButton::Middle,
+            rotate_button: MouseButton::Left,
+            pan_button: MouseButton::Left,
             last_position: Vec3::ZERO,
             last_quaternion: Quat::IDENTITY,
             last_target_position: Vec3::ZERO,
@@ -247,31 +246,16 @@ impl Default for OrbitControls {
             spherical_delta: Spherical::ZERO,
             scale: 1.0,
             pan_offset: Vec3::ZERO,
-            rotate_start: Vec2::ZERO,
-            rotate_end: Vec2::ZERO,
-            rotate_delta: Vec2::ZERO,
-            pan_start: Vec2::ZERO,
-            pan_end: Vec2::ZERO,
-            pan_delta: Vec2::ZERO,
-            dolly_start: Vec2::ZERO,
-            dolly_end: Vec2::ZERO,
-            dolly_delta: Vec2::ZERO,
             dolly_direction: Vec3::ZERO,
             mouse: Vec2::ZERO,
             perform_cursor_zoom: false,
-            control_active: false,
             state: State::None,
         }
     }
 }
 
 impl OrbitControls {
-    pub fn update(
-        &mut self,
-        scene: &mut Scene,
-        delta_time: Option<Duration>,
-        viewport_aspect_ratio: f32,
-    ) {
+    pub fn update(&mut self, scene: &mut Scene, delta_time: Duration, viewport_aspect_ratio: f32) {
         let v = scene.local_position(self.node).unwrap() - self.target;
 
         // rotate offset to "y-axis-is-up" space
@@ -489,11 +473,8 @@ impl OrbitControls {
         }
     }
 
-    fn get_auto_rotation_angle(&self, delta_time: Option<Duration>) -> f32 {
-        match delta_time {
-            Some(delta_time) => 2.0 * PI / 60.0 * self.auto_rotate_speed * delta_time.as_secs_f32(),
-            None => 2.0 * PI / 60.0 / 60.0 * self.auto_rotate_speed,
-        }
+    fn get_auto_rotation_angle(&self, delta_time: Duration) -> f32 {
+        2.0 * PI / 60.0 * self.auto_rotate_speed * delta_time.as_secs_f32()
     }
 
     fn get_zoom_scale(&self, delta: f32) -> f32 {
@@ -613,109 +594,46 @@ impl OrbitControls {
         distance.clamp(*self.distance_range.start(), *self.distance_range.end())
     }
 
-    //
-    // event callbacks - update the object state
-    //
-
-    pub fn handle_mouse_down_rotate(&mut self, position: Vec2) {
-        self.rotate_start = position;
+    fn handle_mouse_move_rotate(&mut self, rotate_delta: Vec2, view_height: f32) {
+        self.rotate_left(2.0 * PI * rotate_delta.x / view_height); // yes, height
+        self.rotate_up(2.0 * PI * rotate_delta.y / view_height);
     }
 
-    pub fn handle_mouse_down_dolly(
-        &mut self,
-        position: Vec2,
-        view_width: f32,
-        view_height: f32,
-        scene: &Scene,
-    ) {
-        self.update_zoom_parameters(position.x, position.y, view_width, view_height, scene);
-        self.dolly_start = position;
-    }
-
-    pub fn handle_mouse_down_pan(&mut self, position: Vec2) {
-        self.pan_start = position;
-    }
-
-    pub fn handle_mouse_move_rotate(
-        &mut self,
-        position: Vec2,
-        scene: &mut Scene,
-        view_width: f32,
-        view_height: f32,
-    ) {
-        self.rotate_end = position;
-        self.rotate_delta = (self.rotate_end - self.rotate_start) * self.rotate_speed;
-
-        self.rotate_left(2.0 * PI * self.rotate_delta.x / view_height); // yes, height
-        self.rotate_up(2.0 * PI * self.rotate_delta.y / view_height);
-
-        self.rotate_start = self.rotate_end;
-        self.update(scene, None, view_width / view_height);
-    }
-
-    pub fn handle_mouse_move_dolly(
-        &mut self,
-        position: Vec2,
-        scene: &mut Scene,
-        view_width: f32,
-        view_height: f32,
-    ) {
-        self.dolly_end = position;
-        self.dolly_delta = self.dolly_end - self.dolly_start;
-
-        if self.dolly_delta.y > 0.0 {
-            self.dolly_out(self.get_zoom_scale(self.dolly_delta.y), scene);
-        } else if (self.dolly_delta.y < 0.0) {
-            self.dolly_in(self.get_zoom_scale(self.dolly_delta.y), scene);
+    fn handle_mouse_move_dolly(&mut self, dolly_delta: Vec2, scene: &mut Scene) {
+        if dolly_delta.y > 0.0 {
+            self.dolly_out(self.get_zoom_scale(dolly_delta.y), scene);
+        } else if dolly_delta.y < 0.0 {
+            self.dolly_in(self.get_zoom_scale(dolly_delta.y), scene);
         }
-
-        self.dolly_start = self.dolly_end;
-        self.update(scene, None, view_width / view_height);
     }
 
-    pub fn handle_mouse_move_pan(
+    fn handle_mouse_move_pan(&mut self, pan_delta: Vec2, scene: &mut Scene, view_height: f32) {
+        self.pan(scene, pan_delta.x, pan_delta.y, view_height);
+    }
+
+    fn handle_mouse_wheel(
         &mut self,
-        position: Vec2,
+        delta: Vec2,
         scene: &mut Scene,
         view_width: f32,
         view_height: f32,
     ) {
-        self.pan_end = position;
-        self.pan_delta = (self.pan_end - self.pan_start) * self.pan_speed;
+        self.update_zoom_parameters(delta.x, delta.y, view_width, view_height, scene);
 
-        self.pan(scene, self.pan_delta.x, self.pan_delta.y, view_height);
-
-        self.pan_start = self.pan_end;
-        self.update(scene, None, view_width / view_height);
-    }
-
-    pub fn handle_mouse_wheel(
-        &mut self,
-        position: Vec2,
-        scene: &mut Scene,
-        view_width: f32,
-        view_height: f32,
-    ) {
-        self.update_zoom_parameters(position.x, position.y, view_width, view_height, scene);
-
-        if position.y < 0.0 {
-            self.dolly_in(self.get_zoom_scale(position.y), scene);
-        } else if position.y > 0.0 {
-            self.dolly_out(self.get_zoom_scale(position.y), scene);
+        if delta.y < 0.0 {
+            self.dolly_in(self.get_zoom_scale(delta.y), scene);
+        } else if delta.y > 0.0 {
+            self.dolly_out(self.get_zoom_scale(delta.y), scene);
         }
-
-        self.update(scene, None, view_width / view_height);
     }
 
-    pub fn handle_key_down(
+    fn handle_key_down(
         &mut self,
         key: Key,
         modifiers: Modifiers,
         scene: &mut Scene,
-        view_width: f32,
         view_height: f32,
     ) {
-        let mut needs_update = false;
         if key == self.up_key {
             if modifiers.contains(Modifiers::CTRL)
                 || modifiers.contains(Modifiers::META)
@@ -729,7 +647,6 @@ impl OrbitControls {
                     self.pan(scene, 0.0, self.key_pan_speed, view_height);
                 }
             }
-            needs_update = true;
         } else if key == self.bottom_key {
             if modifiers.contains(Modifiers::CTRL)
                 || modifiers.contains(Modifiers::META)
@@ -743,7 +660,6 @@ impl OrbitControls {
                     self.pan(scene, 0.0, -self.key_pan_speed, view_height);
                 }
             }
-            needs_update = true;
         } else if key == self.left_key {
             if modifiers.contains(Modifiers::CTRL)
                 || modifiers.contains(Modifiers::META)
@@ -757,7 +673,6 @@ impl OrbitControls {
                     self.pan(scene, self.key_pan_speed, 0.0, view_height);
                 }
             }
-            needs_update = true;
         } else if key == self.right_key {
             if modifiers.contains(Modifiers::CTRL)
                 || modifiers.contains(Modifiers::META)
@@ -771,234 +686,95 @@ impl OrbitControls {
                     self.pan(scene, -self.key_pan_speed, 0.0, view_height);
                 }
             }
-            needs_update = true;
-        }
-
-        if needs_update {
-            self.update(scene, None, view_width / view_height);
         }
     }
 
-    // 	_handleTouchStartDolly( event ) {
-
-    // 		const position = this._getSecondPointerPosition( event );
-
-    // 		const dx = event.pageX - position.x;
-    // 		const dy = event.pageY - position.y;
-
-    // 		const distance = Math.sqrt( dx * dx + dy * dy );
-
-    // 		this._dollyStart.set( 0, distance );
-
-    // 	}
-
-    // 	_handleTouchStartDollyPan( event ) {
-
-    // 		if ( this.enableZoom ) this._handleTouchStartDolly( event );
-
-    // 		if ( this.enablePan ) this._handleTouchStartPan( event );
-
-    // 	}
-
-    // 	_handleTouchStartDollyRotate( event ) {
-
-    // 		if ( this.enableZoom ) this._handleTouchStartDolly( event );
-
-    // 		if ( this.enableRotate ) this._handleTouchStartRotate( event );
-
-    // 	}
-
-    // 	_handleTouchMoveRotate( event ) {
-
-    // 		if ( this._pointers.length == 1 ) {
-
-    // 			this._rotateEnd.set( event.pageX, event.pageY );
-
-    // 		} else {
-
-    // 			const position = this._getSecondPointerPosition( event );
-
-    // 			const x = 0.5 * ( event.pageX + position.x );
-    // 			const y = 0.5 * ( event.pageY + position.y );
-
-    // 			this._rotateEnd.set( x, y );
-
-    // 		}
-
-    // 		this._rotateDelta.subVectors( this._rotateEnd, this._rotateStart ).multiplyScalar( this.rotateSpeed );
-
-    // 		const element = this.domElement;
-
-    // 		this._rotateLeft( _twoPI * this._rotateDelta.x / element.clientHeight ); // yes, height
-
-    // 		this._rotateUp( _twoPI * this._rotateDelta.y / element.clientHeight );
-
-    // 		this._rotateStart.copy( this._rotateEnd );
-
-    // 	}
-
-    // 	_handleTouchMovePan( event ) {
-
-    // 		if ( this._pointers.length === 1 ) {
-
-    // 			this._panEnd.set( event.pageX, event.pageY );
-
-    // 		} else {
-
-    // 			const position = this._getSecondPointerPosition( event );
-
-    // 			const x = 0.5 * ( event.pageX + position.x );
-    // 			const y = 0.5 * ( event.pageY + position.y );
-
-    // 			this._panEnd.set( x, y );
-
-    // 		}
-
-    // 		this._panDelta.subVectors( this._panEnd, this._panStart ).multiplyScalar( this.panSpeed );
-
-    // 		this._pan( this._panDelta.x, this._panDelta.y );
-
-    // 		this._panStart.copy( this._panEnd );
-
-    // 	}
-
-    // 	_handleTouchMoveDolly( event ) {
-
-    // 		const position = this._getSecondPointerPosition( event );
-
-    // 		const dx = event.pageX - position.x;
-    // 		const dy = event.pageY - position.y;
-
-    // 		const distance = Math.sqrt( dx * dx + dy * dy );
-
-    // 		this._dollyEnd.set( 0, distance );
-
-    // 		this._dollyDelta.set( 0, Math.pow( this._dollyEnd.y / this._dollyStart.y, this.zoomSpeed ) );
-
-    // 		this._dollyOut( this._dollyDelta.y );
-
-    // 		this._dollyStart.copy( this._dollyEnd );
-
-    // 		const centerX = ( event.pageX + position.x ) * 0.5;
-    // 		const centerY = ( event.pageY + position.y ) * 0.5;
-
-    // 		this._updateZoomParameters( centerX, centerY );
-
-    // 	}
-
-    // 	_handleTouchMoveDollyPan( event ) {
-
-    // 		if ( this.enableZoom ) this._handleTouchMoveDolly( event );
-
-    // 		if ( this.enablePan ) this._handleTouchMovePan( event );
-
-    // 	}
-
-    // 	_handleTouchMoveDollyRotate( event ) {
-
-    // 		if ( this.enableZoom ) this._handleTouchMoveDolly( event );
-
-    // 		if ( this.enableRotate ) this._handleTouchMoveRotate( event );
-
-    // 	}
-
-    // 	// pointers
-
-    // 	_addPointer( event ) {
-
-    // 		this._pointers.push( event.pointerId );
-
-    // 	}
-
-    // 	_removePointer( event ) {
-
-    // 		delete this._pointerPositions[ event.pointerId ];
-
-    // 		for ( let i = 0; i < this._pointers.length; i ++ ) {
-
-    // 			if ( this._pointers[ i ] == event.pointerId ) {
-
-    // 				this._pointers.splice( i, 1 );
-    // 				return;
-
-    // 			}
-
-    // 		}
-
-    // 	}
-
-    // 	_isTrackingPointer( event ) {
-
-    // 		for ( let i = 0; i < this._pointers.length; i ++ ) {
-
-    // 			if ( this._pointers[ i ] == event.pointerId ) return true;
-
-    // 		}
-
-    // 		return false;
-
-    // 	}
-
-    // 	_trackPointer( event ) {
-
-    // 		let position = this._pointerPositions[ event.pointerId ];
-
-    // 		if ( position === undefined ) {
-
-    // 			position = new Vector2();
-    // 			this._pointerPositions[ event.pointerId ] = position;
-
-    // 		}
-
-    // 		position.set( event.pageX, event.pageY );
-
-    // 	}
-
-    // 	_getSecondPointerPosition( event ) {
-
-    // 		const pointerId = ( event.pointerId === this._pointers[ 0 ] ) ? this._pointers[ 1 ] : this._pointers[ 0 ];
-
-    // 		return this._pointerPositions[ pointerId ];
-
-    // 	}
-
-    // 	//
-
-    // 	_customWheelEvent( event ) {
-
-    // 		const mode = event.deltaMode;
-
-    // 		// minimal wheel event altered to meet delta-zoom demand
-    // 		const newEvent = {
-    // 			clientX: event.clientX,
-    // 			clientY: event.clientY,
-    // 			deltaY: event.deltaY,
-    // 		};
-
-    // 		switch ( mode ) {
-
-    // 			case 1: // LINE_MODE
-    // 				newEvent.deltaY *= 16;
-    // 				break;
-
-    // 			case 2: // PAGE_MODE
-    // 				newEvent.deltaY *= 100;
-    // 				break;
-
-    // 		}
-
-    // 		// detect if event was triggered by pinching
-    // 		if ( event.ctrlKey && ! this._controlActive ) {
-
-    // 			newEvent.deltaY *= 10;
-
-    // 		}
-
-    // 		return newEvent;
-
-    // 	}
-
-    // }
+    pub fn on_mouse_down(
+        &mut self,
+        position: Vec2,
+        mouse_button: MouseButton,
+        modifiers: Modifiers,
+        view_width: f32,
+        view_height: f32,
+        scene: &Scene,
+    ) {
+        if mouse_button == self.dolly_botton {
+            if !self.enable_zoom {
+                return;
+            }
+            self.update_zoom_parameters(position.x, position.y, view_width, view_height, scene);
+            self.state = State::Dolly;
+        } else if mouse_button == self.rotate_button {
+            if modifiers.contains(Modifiers::CTRL)
+                || modifiers.contains(Modifiers::META)
+                || modifiers.contains(Modifiers::SHIFT)
+            {
+                if !self.enable_pan {
+                    return;
+                }
+                self.state = State::Pan;
+            } else {
+                if !self.enable_rotate {
+                    return;
+                }
+                self.state = State::Rotate;
+            }
+        } else if mouse_button == self.pan_button {
+            if modifiers.contains(Modifiers::CTRL)
+                || modifiers.contains(Modifiers::META)
+                || modifiers.contains(Modifiers::SHIFT)
+            {
+                if !self.enable_rotate {
+                    return;
+                }
+                self.state = State::Rotate;
+            } else {
+                if !self.enable_pan {
+                    return;
+                }
+                self.state = State::Pan;
+            }
+        } else {
+            self.state = State::None;
+        }
+    }
+
+    pub fn on_mouse_move(&mut self, delta: Vec2, view_height: f32, scene: &mut Scene) {
+        match self.state {
+            State::Rotate if self.enable_rotate => {
+                self.handle_mouse_move_rotate(delta, view_height)
+            }
+            State::Dolly if self.enable_zoom => {
+                self.handle_mouse_move_dolly(delta, scene);
+            }
+            State::Pan if self.enable_pan => {
+                self.handle_mouse_move_pan(delta, scene, view_height);
+            }
+            _ => (),
+        }
+    }
+
+    pub fn on_mouse_wheel(
+        &mut self,
+        delta: Vec2,
+        view_width: f32,
+        view_height: f32,
+        scene: &mut Scene,
+    ) {
+        if self.enable_zoom && self.state == State::None {
+            self.handle_mouse_wheel(delta, scene, view_width, view_height);
+        }
+    }
+
+    pub fn on_key_down(
+        &mut self,
+        key: Key,
+        modifiers: Modifiers,
+        view_width: f32,
+        scene: &mut Scene,
+    ) {
+        self.handle_key_down(key, modifiers, scene, view_width);
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1007,417 +783,4 @@ enum State {
     Rotate,
     Dolly,
     Pan,
-    TouchRotate,
-    TouchPan,
-    TouchDollyPan,
-    TouchDollyRotate,
 }
-
-// function onPointerDown( event ) {
-
-// 	if ( this.enabled === false ) return;
-
-// 	if ( this._pointers.length === 0 ) {
-
-// 		this.domElement.setPointerCapture( event.pointerId );
-
-// 		this.domElement.ownerDocument.addEventListener( 'pointermove', this._onPointerMove );
-// 		this.domElement.ownerDocument.addEventListener( 'pointerup', this._onPointerUp );
-
-// 	}
-
-// 	//
-
-// 	if ( this._isTrackingPointer( event ) ) return;
-
-// 	//
-
-// 	this._addPointer( event );
-
-// 	if ( event.pointerType === 'touch' ) {
-
-// 		this._onTouchStart( event );
-
-// 	} else {
-
-// 		this._onMouseDown( event );
-
-// 	}
-
-// }
-
-// function onPointerMove( event ) {
-
-// 	if ( this.enabled === false ) return;
-
-// 	if ( event.pointerType === 'touch' ) {
-
-// 		this._onTouchMove( event );
-
-// 	} else {
-
-// 		this._onMouseMove( event );
-
-// 	}
-
-// }
-
-// function onPointerUp( event ) {
-
-// 	this._removePointer( event );
-
-// 	switch ( this._pointers.length ) {
-
-// 		case 0:
-
-// 			this.domElement.releasePointerCapture( event.pointerId );
-
-// 			this.domElement.ownerDocument.removeEventListener( 'pointermove', this._onPointerMove );
-// 			this.domElement.ownerDocument.removeEventListener( 'pointerup', this._onPointerUp );
-
-// 			this.dispatchEvent( _endEvent );
-
-// 			this.state = _STATE.NONE;
-
-// 			break;
-
-// 		case 1:
-
-// 			const pointerId = this._pointers[ 0 ];
-// 			const position = this._pointerPositions[ pointerId ];
-
-// 			// minimal placeholder event - allows state correction on pointer-up
-// 			this._onTouchStart( { pointerId: pointerId, pageX: position.x, pageY: position.y } );
-
-// 			break;
-
-// 	}
-
-// }
-
-// function onMouseDown( event ) {
-
-// 	let mouseAction;
-
-// 	switch ( event.button ) {
-
-// 		case 0:
-
-// 			mouseAction = this.mouseButtons.LEFT;
-// 			break;
-
-// 		case 1:
-
-// 			mouseAction = this.mouseButtons.MIDDLE;
-// 			break;
-
-// 		case 2:
-
-// 			mouseAction = this.mouseButtons.RIGHT;
-// 			break;
-
-// 		default:
-
-// 			mouseAction = - 1;
-
-// 	}
-
-// 	switch ( mouseAction ) {
-
-// 		case MOUSE.DOLLY:
-
-// 			if ( this.enableZoom === false ) return;
-
-// 			this._handleMouseDownDolly( event );
-
-// 			this.state = _STATE.DOLLY;
-
-// 			break;
-
-// 		case MOUSE.ROTATE:
-
-// 			if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
-
-// 				if ( this.enablePan === false ) return;
-
-// 				this._handleMouseDownPan( event );
-
-// 				this.state = _STATE.PAN;
-
-// 			} else {
-
-// 				if ( this.enableRotate === false ) return;
-
-// 				this._handleMouseDownRotate( event );
-
-// 				this.state = _STATE.ROTATE;
-
-// 			}
-
-// 			break;
-
-// 		case MOUSE.PAN:
-
-// 			if ( event.ctrlKey || event.metaKey || event.shiftKey ) {
-
-// 				if ( this.enableRotate === false ) return;
-
-// 				this._handleMouseDownRotate( event );
-
-// 				this.state = _STATE.ROTATE;
-
-// 			} else {
-
-// 				if ( this.enablePan === false ) return;
-
-// 				this._handleMouseDownPan( event );
-
-// 				this.state = _STATE.PAN;
-
-// 			}
-
-// 			break;
-
-// 		default:
-
-// 			this.state = _STATE.NONE;
-
-// 	}
-
-// 	if ( this.state !== _STATE.NONE ) {
-
-// 		this.dispatchEvent( _startEvent );
-
-// 	}
-
-// }
-
-// function onMouseMove( event ) {
-
-// 	switch ( this.state ) {
-
-// 		case _STATE.ROTATE:
-
-// 			if ( this.enableRotate === false ) return;
-
-// 			this._handleMouseMoveRotate( event );
-
-// 			break;
-
-// 		case _STATE.DOLLY:
-
-// 			if ( this.enableZoom === false ) return;
-
-// 			this._handleMouseMoveDolly( event );
-
-// 			break;
-
-// 		case _STATE.PAN:
-
-// 			if ( this.enablePan === false ) return;
-
-// 			this._handleMouseMovePan( event );
-
-// 			break;
-
-// 	}
-
-// }
-
-// function onMouseWheel( event ) {
-
-// 	if ( this.enabled === false || this.enableZoom === false || this.state !== _STATE.NONE ) return;
-
-// 	event.preventDefault();
-
-// 	this.dispatchEvent( _startEvent );
-
-// 	this._handleMouseWheel( this._customWheelEvent( event ) );
-
-// 	this.dispatchEvent( _endEvent );
-
-// }
-
-// function onKeyDown( event ) {
-
-// 	if ( this.enabled === false ) return;
-
-// 	this._handleKeyDown( event );
-
-// }
-
-// function onTouchStart( event ) {
-
-// 	this._trackPointer( event );
-
-// 	switch ( this._pointers.length ) {
-
-// 		case 1:
-
-// 			switch ( this.touches.ONE ) {
-
-// 				case TOUCH.ROTATE:
-
-// 					if ( this.enableRotate === false ) return;
-
-// 					this._handleTouchStartRotate( event );
-
-// 					this.state = _STATE.TOUCH_ROTATE;
-
-// 					break;
-
-// 				case TOUCH.PAN:
-
-// 					if ( this.enablePan === false ) return;
-
-// 					this._handleTouchStartPan( event );
-
-// 					this.state = _STATE.TOUCH_PAN;
-
-// 					break;
-
-// 				default:
-
-// 					this.state = _STATE.NONE;
-
-// 			}
-
-// 			break;
-
-// 		case 2:
-
-// 			switch ( this.touches.TWO ) {
-
-// 				case TOUCH.DOLLY_PAN:
-
-// 					if ( this.enableZoom === false && this.enablePan === false ) return;
-
-// 					this._handleTouchStartDollyPan( event );
-
-// 					this.state = _STATE.TOUCH_DOLLY_PAN;
-
-// 					break;
-
-// 				case TOUCH.DOLLY_ROTATE:
-
-// 					if ( this.enableZoom === false && this.enableRotate === false ) return;
-
-// 					this._handleTouchStartDollyRotate( event );
-
-// 					this.state = _STATE.TOUCH_DOLLY_ROTATE;
-
-// 					break;
-
-// 				default:
-
-// 					this.state = _STATE.NONE;
-
-// 			}
-
-// 			break;
-
-// 		default:
-
-// 			this.state = _STATE.NONE;
-
-// 	}
-
-// 	if ( this.state !== _STATE.NONE ) {
-
-// 		this.dispatchEvent( _startEvent );
-
-// 	}
-
-// }
-
-// function onTouchMove( event ) {
-
-// 	this._trackPointer( event );
-
-// 	switch ( this.state ) {
-
-// 		case _STATE.TOUCH_ROTATE:
-
-// 			if ( this.enableRotate === false ) return;
-
-// 			this._handleTouchMoveRotate( event );
-
-// 			this[.Self::update();]
-
-// 			break;
-
-// 		case _STATE.TOUCH_PAN:
-
-// 			if ( this.enablePan === false ) return;
-
-// 			this._handleTouchMovePan( event );
-
-// 			this[.Self::update();]
-
-// 			break;
-
-// 		case _STATE.TOUCH_DOLLY_PAN:
-
-// 			if ( this.enableZoom === false && this.enablePan === false ) return;
-
-// 			this._handleTouchMoveDollyPan( event );
-
-// 			this[.Self::update();]
-
-// 			break;
-
-// 		case _STATE.TOUCH_DOLLY_ROTATE:
-
-// 			if ( this.enableZoom === false && this.enableRotate === false ) return;
-
-// 			this._handleTouchMoveDollyRotate( event );
-
-// 			this[.Self::update();]
-
-// 			break;
-
-// 		default:
-
-// 			this.state = _STATE.NONE;
-
-// 	}
-
-// }
-
-// function onContextMenu( event ) {
-
-// 	if ( this.enabled === false ) return;
-
-// 	event.preventDefault();
-
-// }
-
-// function interceptControlDown( event ) {
-
-// 	if ( event.key === 'Control' ) {
-
-// 		this._controlActive = true;
-
-// 		const document = this.domElement.getRootNode(); // offscreen canvas compatibility
-
-// 		document.addEventListener( 'keyup', this._interceptControlUp, { passive: true, capture: true } );
-
-// 	}
-
-// }
-
-// function interceptControlUp( event ) {
-
-// 	if ( event.key === 'Control' ) {
-
-// 		this._controlActive = false;
-
-// 		const document = this.domElement.getRootNode(); // offscreen canvas compatibility
-
-// 		document.removeEventListener( 'keyup', this._interceptControlUp, { passive: true, capture: true } );
-
-// 	}
-
-// }
-
-// export { OrbitControls };

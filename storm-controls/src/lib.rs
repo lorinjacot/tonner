@@ -18,3 +18,10 @@ bitflags! {
         const META  = 1 << 2;
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+}

@@ -7,15 +7,13 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     Context,
+    camera::Camera,
     environment::{Environment, EnvironmentBuilder},
+    node::NodeId,
     render_target::RenderTarget,
     scene::{
-        animation::AnimationManager,
-        camera::{CameraId, CameraManager},
-        light::LightManager,
-        mesh_instance::MeshInstanceManager,
-        node::NodeManager,
-        skin::SkinManager,
+        animation::AnimationManager, light::LightManager, mesh_instance::MeshInstanceManager,
+        node::NodeManager, skin::SkinManager,
     },
 };
 
@@ -42,7 +40,6 @@ pub struct Scene {
     ctx: Context,
     node_manager: NodeManager,
     skin_manager: SkinManager,
-    camera_manager: CameraManager,
     mesh_instance_manager: MeshInstanceManager,
     animation_manager: AnimationManager,
     light_manager: LightManager,
@@ -93,20 +90,17 @@ impl Scene {
     pub fn render<View: Borrow<wgpu::TextureView>>(
         &self,
         target: &RenderTarget<View>,
-        camera: CameraId,
+        camera: &Camera,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
         let viewport_aspect_ratio = target.aspect_ratio();
 
-        let projection_matrix = self
-            .camera_manager
-            .projection_matrix(camera, viewport_aspect_ratio)
-            .ok_or(RenderError::InvalidCamera(camera))?;
-        let camera_node = self.camera_manager.node(camera).unwrap();
+        let projection_matrix = camera.projection_matrix(viewport_aspect_ratio);
+
         let camera_matrix = self
             .node_manager
-            .global_matrix(camera_node)
-            .ok_or(RenderError::InvalidCamera(camera))?;
+            .global_matrix(camera.node)
+            .ok_or(RenderError::InvalidCameraNode(camera.node))?;
         let camera_position = camera_matrix.transform_point3(Vec3::ZERO);
 
         let view_matrix = Mat4::look_to_rh(
@@ -344,7 +338,6 @@ impl SceneBuilder {
 
         let node_manager = NodeManager::new(&ctx.device);
         let skin_manager = SkinManager::new(&ctx.device);
-        let camera_manager = CameraManager::new();
         let mesh_instance_manager = MeshInstanceManager::new(&ctx.device);
         let animation_manager = AnimationManager::new();
         let light_manager = LightManager::new(&ctx.device);
@@ -363,7 +356,6 @@ impl SceneBuilder {
             ctx: ctx.clone(),
             node_manager,
             skin_manager,
-            camera_manager,
             mesh_instance_manager,
             animation_manager,
             light_manager,
@@ -603,6 +595,6 @@ pub enum SimulateError {}
 
 #[derive(Debug, Error)]
 pub enum RenderError {
-    #[error("invalid camera: {0}")]
-    InvalidCamera(CameraId),
+    #[error("camera node ({0}) is not part of the scene graph")]
+    InvalidCameraNode(NodeId),
 }

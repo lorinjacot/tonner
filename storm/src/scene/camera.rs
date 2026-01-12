@@ -1,23 +1,10 @@
-use std::{collections::HashMap, fmt::Display};
-
 use glam::{Mat4, Vec3};
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::{
     node::NodeBuilder,
     scene::{Scene, node::NodeId},
 };
-
-/// A unique id for a camera. A camera can only have one id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CameraId(Uuid);
-
-impl Display for CameraId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CameraId({})", self.0)
-    }
-}
 
 /// A builder for camera.
 #[must_use]
@@ -66,7 +53,7 @@ impl CameraBuilder {
     }
 
     /// Build the camera.
-    pub fn build(self, scene: &mut Scene) -> CameraId {
+    pub fn build(self, scene: &mut Scene) -> Camera {
         let node = self.node.unwrap_or_else(|| {
             NodeBuilder::default()
                 .name(&self.name)
@@ -78,16 +65,11 @@ impl CameraBuilder {
             .projection
             .unwrap_or_else(|| Projection::Perspective(PerspectiveProjection::default()));
 
-        let id = CameraId(Uuid::new_v4());
-        let data = CameraData {
-            id,
+        Camera {
             name: self.name,
             node,
             projection,
-        };
-        scene.camera_manager.cameras.insert(id, data);
-
-        id
+        }
     }
 }
 
@@ -166,180 +148,77 @@ impl Default for PerspectiveProjection {
     }
 }
 
-struct CameraData {
-    id: CameraId,
+/// A camera is used to render a [Scene].
+pub struct Camera {
     name: String,
-    node: NodeId,
+    /// The location of the camera. The camera will also move with this node.
+    pub node: NodeId,
     projection: Projection,
 }
 
-pub(super) struct CameraManager {
-    cameras: HashMap<CameraId, CameraData>,
-}
-
-impl CameraManager {
-    pub(super) fn new() -> Self {
-        Self {
-            cameras: HashMap::new(),
+impl Camera {
+    /// - If self is an orthographic camera, returns the orthographic projection data;
+    /// - Returns `None` otherwise.
+    pub fn orthographic_projection(&self) -> Option<&OrthographicProjection> {
+        match &self.projection {
+            Projection::Orthographic(projection) => Some(projection),
+            _ => None,
         }
     }
 
-    /// Returns the node associated with the camera. The global transform of that node
-    /// should be used as the camera view matrix. `None` if not camera is associated with the id.
-    pub(super) fn node(&self, id: CameraId) -> Option<NodeId> {
-        self.cameras.get(&id).map(|data| data.node)
+    pub fn is_orthographic(&self) -> bool {
+        self.orthographic_projection().is_some()
     }
 
-    /// Returns the projection matrix of the camera. `viewport_aspect_ration` should be the width over the height
-    /// of the render target. Returns `None` if no camera is associated with the id.
-    pub(super) fn projection_matrix(
-        &self,
-        id: CameraId,
-        viewport_aspect_ratio: f32,
-    ) -> Option<Mat4> {
-        self.cameras
-            .get(&id)
-            .map(|data| data.projection.matrix(viewport_aspect_ratio))
-    }
-}
-
-/// Camera operations
-impl Scene {
-    /// Returns `true` if `camera` is a orthographic camera. Returns `false` if it is
-    /// a perspective camera or if it does not exist.
-    pub fn is_orthographic_camera(&self, camera: CameraId) -> bool {
-        if let Some(camera) = self.camera_manager.cameras.get(&camera) {
-            if let Projection::Orthographic(_) = camera.projection {
-                return true;
-            }
+    /// - If self is an perspective camera, returns the perspective projection data;
+    /// - Returns `None` otherwise.
+    pub fn perspective_projection(&self) -> Option<&PerspectiveProjection> {
+        match &self.projection {
+            Projection::Perspective(projection) => Some(projection),
+            _ => None,
         }
-        false
     }
 
-    /// Returns `true` if `node` is an orthographic camera node. Returns `false` if it is
-    /// another type of camera node, if not camera is attached to the node of if it does not exist.
-    pub fn is_orthographic_camera_node(&self, node: NodeId) -> bool {
-        self.camera_manager
-            .cameras
-            .values()
-            .find(|camera| {
-                camera.node == node
-                    && match camera.projection {
-                        Projection::Orthographic(_) => true,
-                        _ => false,
-                    }
-            })
-            .is_some()
+    pub fn is_perspective(&self) -> bool {
+        self.perspective_projection().is_some()
     }
 
-    /// Returns `true` if `node` is a perspective amera node. Returns `false` if it is
-    /// another type of camera node, if not camera is attached to the node of if it does not exist.
-    pub fn is_perspective_camera_node(&self, node: NodeId) -> bool {
-        self.camera_manager
-            .cameras
-            .values()
-            .find(|camera| {
-                camera.node == node
-                    && match camera.projection {
-                        Projection::Perspective(_) => true,
-                        _ => false,
-                    }
-            })
-            .is_some()
+    /// Transform a position from the camera's normalized device coordinate space into world space.
+    pub fn unproject(&self, position: Vec3, viewport_aspect_ratio: f32, scene: &Scene) -> Vec3 {
+        let view = scene.node_manager.global_matrix(self.node).unwrap();
+        let projection = self.projection.matrix(viewport_aspect_ratio);
+        (projection.inverse() * view).transform_point3(position)
     }
 
-    /// Transform a vector from the camera's normalized device coordinate space into world space.
-    /// Returns `None` if the camera does not exist.
-    pub fn unproject(
-        &self,
-        camera: CameraId,
-        position: Vec3,
-        viewport_aspect_ratio: f32,
-    ) -> Option<Vec3> {
-        self.camera_manager.cameras.get(&camera).map(|camera| {
-            let view = self.node_manager.global_matrix(camera.node).unwrap();
-            let projection = camera.projection.matrix(viewport_aspect_ratio);
-            (projection.inverse() * view).transform_point3(position)
-        })
-    }
-
-    /// Same as [Self::unproject] but using the node id instead of the camera id.
-    pub fn unproject_node(
-        &self,
-        node: NodeId,
-        position: Vec3,
-        viewport_aspect_ratio: f32,
-    ) -> Option<Vec3> {
-        self.camera_manager
-            .cameras
-            .values()
-            .find(|camera| camera.node == node)
-            .map(|camera| {
-                let view = self.node_manager.global_matrix(camera.node).unwrap();
-                let projection = camera.projection.matrix(viewport_aspect_ratio);
-                (projection.inverse() * view).transform_point3(position)
-            })
-    }
-
-    pub fn camera_y_fov_node(&self, node: NodeId) -> Option<f32> {
-        self.camera_manager.cameras.values().find_map(|camera| {
-            if camera.node == node
-                && let Projection::Perspective(PerspectiveProjection { y_fov, .. }) =
-                    &camera.projection
-            {
-                return Some(*y_fov);
-            }
-            None
-        })
-    }
-
-    pub fn camera_zoom_node(&self, node: NodeId) -> Option<f32> {
-        self.camera_manager.cameras.values().find_map(|camera| {
-            if camera.node == node
-                && let Projection::Perspective(PerspectiveProjection { zoom, .. }) =
-                    &camera.projection
-            {
-                return Some(*zoom);
-            }
-            None
-        })
-    }
-
-    pub fn set_camera_zoom_node(&mut self, node: NodeId, zoom: f32) -> Result<(), ()> {
-        for camera in self.camera_manager.cameras.values_mut() {
-            if camera.node == node
-                && let Projection::Perspective(PerspectiveProjection {
-                    zoom: current_zoom, ..
-                }) = &mut camera.projection
-            {
-                *current_zoom = zoom;
-            }
+    /// Returns the current zoom of the camera, if available. The following camera have zooming capabilities:
+    /// - Orthographic
+    /// - Perspective
+    pub fn zoom(&self) -> Option<f32> {
+        match self.projection {
+            Projection::Orthographic(OrthographicProjection { zoom, .. }) => Some(zoom),
+            Projection::Perspective(PerspectiveProjection { zoom, .. }) => Some(zoom),
         }
-        Err(())
     }
 
-    pub fn camera_x_mag_node(&self, node: NodeId) -> Option<f32> {
-        self.camera_manager.cameras.values().find_map(|camera| {
-            if camera.node == node
-                && let Projection::Orthographic(OrthographicProjection { x_mag, .. }) =
-                    &camera.projection
-            {
-                return Some(*x_mag);
+    /// Modifies the current zoom of the camera, if available. The following camera have zooming capabilities:
+    /// - Orthographic
+    /// - Perspective
+    pub fn set_zoom(&mut self, zoom: f32) -> Result<(), ()> {
+        match &mut self.projection {
+            Projection::Orthographic(OrthographicProjection { zoom: mut_zoom, .. }) => {
+                *mut_zoom = zoom;
+                Ok(())
             }
-            None
-        })
+            Projection::Perspective(PerspectiveProjection { zoom: mut_zoom, .. }) => {
+                *mut_zoom = zoom;
+                Ok(())
+            }
+            _ => Err(()),
+        }
     }
 
-    pub fn camera_y_mag_node(&self, node: NodeId) -> Option<f32> {
-        self.camera_manager.cameras.values().find_map(|camera| {
-            if camera.node == node
-                && let Projection::Orthographic(OrthographicProjection { y_mag, .. }) =
-                    &camera.projection
-            {
-                return Some(*y_mag);
-            }
-            None
-        })
+    pub fn projection_matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
+        self.projection.matrix(viewport_aspect_ratio)
     }
 }
 

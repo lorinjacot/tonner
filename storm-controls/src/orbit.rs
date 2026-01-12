@@ -42,8 +42,8 @@ use glam::{Mat4, Quat, Vec2, Vec3, vec3};
 use log::warn;
 use storm::{
     Scene,
+    camera::Camera,
     math::{Plane, Ray, Spherical},
-    node::NodeId,
 };
 
 use crate::{Key, Modifiers, MouseButton};
@@ -77,7 +77,7 @@ use crate::{Key, Modifiers, MouseButton};
 /// Based on [three.js OrbitControl][https://threejs.org/docs/#OrbitControls].
 pub struct OrbitControls {
     /// The node that is managed by the controls.
-    pub node: NodeId,
+    pub camera: Camera,
 
     /// The focus point of the controls, the `object` orbits around this.
     /// It can be updated manually at any point to change the focus of the controls.
@@ -208,7 +208,7 @@ pub struct OrbitControls {
 impl Default for OrbitControls {
     fn default() -> Self {
         Self {
-            node: todo!(),
+            camera: todo!(),
             target: Vec3::ZERO,
             cursor: Vec3::ZERO,
             distance_range: 0.0..=INFINITY,
@@ -256,7 +256,7 @@ impl Default for OrbitControls {
 
 impl OrbitControls {
     pub fn update(&mut self, scene: &mut Scene, delta_time: Duration, viewport_aspect_ratio: f32) {
-        let v = scene.local_position(self.node).unwrap() - self.target;
+        let v = scene.local_position(self.camera.node).unwrap() - self.target;
 
         // rotate offset to "y-axis-is-up" space
         let v = self.quat.mul_vec3(v);
@@ -329,9 +329,7 @@ impl OrbitControls {
         let mut zoom_changed = false;
         // adjust the camera position based on zoom only if we're not zooming to the cursor or if it's an ortho camera
         // we adjust zoom later in these cases
-        if self.zoom_to_cursor && self.perform_cursor_zoom
-            || scene.is_orthographic_camera_node(self.node)
-        {
+        if self.zoom_to_cursor && self.perform_cursor_zoom || self.camera.is_orthographic() {
             self.spherical.radius = self.clamp_distance(self.spherical.radius);
         } else {
             let previus_radius = self.spherical.radius;
@@ -345,9 +343,9 @@ impl OrbitControls {
         let v = self.quat_inverse.mul_vec3(v);
 
         scene
-            .set_local_position(self.node, self.target + v)
+            .set_local_position(self.camera.node, self.target + v)
             .unwrap();
-        scene.look_at(self.node, self.target).unwrap();
+        scene.look_at(self.camera.node, self.target).unwrap();
 
         if self.enable_damping {
             self.spherical_delta.theta *= 1.0 - self.damping_factor;
@@ -361,7 +359,7 @@ impl OrbitControls {
         // adjust camera position
         if zoom_changed && self.perform_cursor_zoom {
             let mut new_radius = None;
-            if scene.is_perspective_camera_node(self.node) {
+            if self.camera.is_perspective() {
                 // move the camera down the pointer ray
                 // this method avoids floating point error
                 let previous_radius = v.length();
@@ -370,36 +368,37 @@ impl OrbitControls {
                 let radius_delta = previous_radius - new_radius.unwrap();
                 scene
                     .set_local_position(
-                        self.node,
-                        scene.local_position(self.node).unwrap()
+                        self.camera.node,
+                        scene.local_position(self.camera.node).unwrap()
                             + self.dolly_direction * radius_delta,
                     )
                     .unwrap();
 
                 zoom_changed = radius_delta != 0.0;
-            } else if scene.is_orthographic_camera_node(self.node) {
+            } else if self.camera.is_orthographic() {
                 // adjust the ortho camera position based on zoom changes
                 let mouse_before = vec3(self.mouse.x, self.mouse.y, 0.0);
-                let mouse_before = scene
-                    .unproject_node(self.node, mouse_before, viewport_aspect_ratio)
-                    .unwrap();
+                let mouse_before =
+                    self.camera
+                        .unproject(mouse_before, viewport_aspect_ratio, scene);
 
-                let previous_zoom = scene.camera_zoom_node(self.node).unwrap();
+                let previous_zoom = self.camera.zoom().unwrap();
                 let new_zoom =
                     previous_zoom.clamp(*self.zoom_range.start(), *self.zoom_range.end());
-                scene.set_camera_zoom_node(self.node, new_zoom).unwrap();
+                self.camera.set_zoom(new_zoom).unwrap();
 
                 zoom_changed = previous_zoom != new_zoom;
 
                 let mouse_after = vec3(self.mouse.x, self.mouse.y, 0.0);
-                let mouse_after = scene
-                    .unproject_node(self.node, mouse_after, viewport_aspect_ratio)
-                    .unwrap();
+                let mouse_after = self
+                    .camera
+                    .unproject(mouse_after, viewport_aspect_ratio, scene);
 
                 scene
                     .set_local_position(
-                        self.node,
-                        scene.local_position(self.node).unwrap() - mouse_after + mouse_before,
+                        self.camera.node,
+                        scene.local_position(self.camera.node).unwrap() - mouse_after
+                            + mouse_before,
                     )
                     .unwrap();
             } else {
@@ -412,17 +411,17 @@ impl OrbitControls {
                 if self.screen_space_panning {
                     // position the orbit target in front of the new camera position
                     self.target = scene
-                        .local_matrix(self.node)
+                        .local_matrix(self.camera.node)
                         .unwrap()
                         .transform_vector3(vec3(0.0, 0.0, -1.0))
                         * new_radius
-                        + scene.local_position(self.node).unwrap();
+                        + scene.local_position(self.camera.node).unwrap();
                 } else {
                     // get the ray and translation plane to compute target
                     let ray = Ray {
-                        origin: scene.local_position(self.node).unwrap(),
+                        origin: scene.local_position(self.camera.node).unwrap(),
                         direction: scene
-                            .local_matrix(self.node)
+                            .local_matrix(self.camera.node)
                             .unwrap()
                             .transform_vector3(vec3(0.0, 0.0, -1.0)),
                     };
@@ -430,18 +429,18 @@ impl OrbitControls {
                     // if the camera is 20 degrees above the horizon then don't adjust the focus target to avoid
                     // extremely large values
                     if Vec3::Y.dot(ray.direction).abs() < TILT_LIMIT {
-                        scene.look_at(self.node, self.target).unwrap();
+                        scene.look_at(self.camera.node, self.target).unwrap();
                     } else {
                         let plane = Plane::from_normal_and_coplanar_point(Vec3::Y, self.target);
                         self.target = ray.intersect_plane(plane).unwrap();
                     }
                 }
             }
-        } else if scene.is_orthographic_camera_node(self.node) {
-            let previous_zoom = scene.camera_zoom_node(self.node).unwrap();
+        } else if self.camera.is_orthographic() {
+            let previous_zoom = self.camera.zoom().unwrap();
             let new_zoom = (previous_zoom / self.scale)
                 .clamp(*self.zoom_range.start(), *self.zoom_range.end());
-            scene.set_camera_zoom_node(self.node, new_zoom).unwrap();
+            self.camera.set_zoom(new_zoom).unwrap();
 
             if previous_zoom != new_zoom {
                 zoom_changed = true;
@@ -457,18 +456,18 @@ impl OrbitControls {
         if zoom_changed
             || self
                 .last_position
-                .distance_squared(scene.local_position(self.node).unwrap())
+                .distance_squared(scene.local_position(self.camera.node).unwrap())
                 > EPS
             || 8.0
                 * (1.0
                     - self
                         .last_quaternion
-                        .dot(scene.local_rotation(self.node).unwrap()))
+                        .dot(scene.local_rotation(self.camera.node).unwrap()))
                 > EPS
             || self.last_target_position.distance_squared(self.target) > EPS
         {
-            self.last_position = scene.local_position(self.node).unwrap();
-            self.last_quaternion = scene.local_rotation(self.node).unwrap();
+            self.last_position = scene.local_position(self.camera.node).unwrap();
+            self.last_quaternion = scene.local_rotation(self.camera.node).unwrap();
             self.last_target_position = self.target;
         }
     }
@@ -505,17 +504,15 @@ impl OrbitControls {
 
     // delta_x and delta_y are in pixels; right and down are positive
     fn pan(&mut self, scene: &Scene, delta_x: f32, delta_y: f32, view_height: f32) {
-        if scene.is_perspective_camera_node(self.node) {
-            let v = scene.local_position(self.node).unwrap() - self.target;
+        if let Some(projection) = self.camera.perspective_projection() {
+            let v = scene.local_position(self.camera.node).unwrap() - self.target;
             let mut target_distance = v.length();
 
             // half of the fov is center to top of screen
-            target_distance *= (scene.camera_y_fov_node(self.node).unwrap() / 2.0)
-                .to_radians()
-                .tan();
+            target_distance *= (projection.y_fov / 2.0).to_radians().tan();
 
             // we use only clientHeight here so aspect ratio does not distort speed
-            let node_local_transform = scene.local_matrix(self.node).unwrap();
+            let node_local_transform = scene.local_matrix(self.camera.node).unwrap();
             self.pan_left(
                 2.0 * delta_x * target_distance / view_height,
                 node_local_transform,
@@ -524,27 +521,21 @@ impl OrbitControls {
                 2.0 * delta_y * target_distance / view_height,
                 node_local_transform,
             );
-        } else if scene.is_orthographic_camera_node(self.node) {
-            let node_local_transform = scene.local_matrix(self.node).unwrap();
-            let zoom = scene.camera_zoom_node(self.node).unwrap();
-            self.pan_left(
-                delta_x * scene.camera_x_mag_node(self.node).unwrap() / zoom / view_height,
-                node_local_transform,
-            );
-            self.pan_left(
-                delta_y * scene.camera_y_mag_node(self.node).unwrap() / zoom / view_height,
-                node_local_transform,
-            );
+        } else if let Some(projection) = self.camera.orthographic_projection() {
+            let node_local_transform = scene.local_matrix(self.camera.node).unwrap();
+            let zoom = projection.zoom;
+            let x_mag = projection.x_mag;
+            let y_mag = projection.y_mag;
+            self.pan_left(delta_x * x_mag / zoom / view_height, node_local_transform);
+            self.pan_left(delta_y * y_mag / zoom / view_height, node_local_transform);
         } else {
             warn!("OrbitControls encountered an unknown camera type - pan disabled.");
             self.enable_pan = false;
         }
     }
 
-    fn dolly_out(&mut self, dolly_scale: f32, scene: &Scene) {
-        if scene.is_perspective_camera_node(self.node)
-            || scene.is_orthographic_camera_node(self.node)
-        {
+    fn dolly_out(&mut self, dolly_scale: f32) {
+        if self.camera.is_perspective() || self.camera.is_orthographic() {
             self.scale /= dolly_scale;
         } else {
             warn!("OrbitControls encountered an unknown camera type - dolly/zoom disabled.");
@@ -552,10 +543,8 @@ impl OrbitControls {
         }
     }
 
-    fn dolly_in(&mut self, dolly_scale: f32, scene: &Scene) {
-        if scene.is_perspective_camera_node(self.node)
-            || scene.is_orthographic_camera_node(self.node)
-        {
+    fn dolly_in(&mut self, dolly_scale: f32) {
+        if self.camera.is_perspective() || self.camera.is_orthographic() {
             self.scale *= dolly_scale;
         } else {
             warn!("OrbitControls encountered an unknown camera type - dolly/zoom disabled.");
@@ -580,14 +569,11 @@ impl OrbitControls {
         self.mouse.x = (x / view_width) * 2.0 - 1.0;
         self.mouse.y = -(y / view_height) * 2.0 + 1.0;
 
-        self.dolly_direction = scene
-            .unproject_node(
-                self.node,
-                vec3(self.mouse.x, self.mouse.y, 1.0),
-                view_width / view_height,
-            )
-            .unwrap()
-            - scene.local_position(self.node).unwrap().normalize();
+        self.dolly_direction = self.camera.unproject(
+            vec3(self.mouse.x, self.mouse.y, 1.0),
+            view_width / view_height,
+            scene,
+        ) - scene.local_position(self.camera.node).unwrap().normalize();
     }
 
     fn clamp_distance(&self, distance: f32) -> f32 {
@@ -599,11 +585,11 @@ impl OrbitControls {
         self.rotate_up(2.0 * PI * rotate_delta.y / view_height);
     }
 
-    fn handle_mouse_move_dolly(&mut self, dolly_delta: Vec2, scene: &mut Scene) {
+    fn handle_mouse_move_dolly(&mut self, dolly_delta: Vec2) {
         if dolly_delta.y > 0.0 {
-            self.dolly_out(self.get_zoom_scale(dolly_delta.y), scene);
+            self.dolly_out(self.get_zoom_scale(dolly_delta.y));
         } else if dolly_delta.y < 0.0 {
-            self.dolly_in(self.get_zoom_scale(dolly_delta.y), scene);
+            self.dolly_in(self.get_zoom_scale(dolly_delta.y));
         }
     }
 
@@ -621,9 +607,9 @@ impl OrbitControls {
         self.update_zoom_parameters(delta.x, delta.y, view_width, view_height, scene);
 
         if delta.y < 0.0 {
-            self.dolly_in(self.get_zoom_scale(delta.y), scene);
+            self.dolly_in(self.get_zoom_scale(delta.y));
         } else if delta.y > 0.0 {
-            self.dolly_out(self.get_zoom_scale(delta.y), scene);
+            self.dolly_out(self.get_zoom_scale(delta.y));
         }
     }
 
@@ -745,7 +731,7 @@ impl OrbitControls {
                 self.handle_mouse_move_rotate(delta, view_height)
             }
             State::Dolly if self.enable_zoom => {
-                self.handle_mouse_move_dolly(delta, scene);
+                self.handle_mouse_move_dolly(delta);
             }
             State::Pan if self.enable_pan => {
                 self.handle_mouse_move_pan(delta, scene, view_height);

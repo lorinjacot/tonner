@@ -1,36 +1,4 @@
-// /**
-//  * Fires when the camera has been transformed by the controls.
-//  *
-//  * @event OrbitControls#change
-//  * @type {Object}
-//  */
-// const _changeEvent = { type: 'change' };
-
-// /**
-//  * Fires when an interaction was initiated.
-//  *
-//  * @event OrbitControls#start
-//  * @type {Object}
-//  */
-// const _startEvent = { type: 'start' };
-
-// /**
-//  * Fires when an interaction has finished.
-//  *
-//  * @event OrbitControls#end
-//  * @type {Object}
-//  */
-// const _endEvent = { type: 'end' };
-
-// const _ray = new Ray();
-// const _plane = new Plane();
-
 const TILT_LIMIT: f32 = 0.34202; // 70.0f32.to_radians().cos();
-
-// const _v = new Vector3();
-// const _twoPI = 2 * Math.PI;
-
-const EPS: f32 = 0.000001;
 
 use std::{
     f32::{INFINITY, consts::PI},
@@ -38,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use glam::{Mat4, Quat, Vec2, Vec3, vec3};
+use glam::{Mat4, Vec2, Vec3, vec3};
 use log::warn;
 use storm::{
     Scene,
@@ -60,14 +28,14 @@ use crate::{Key, Modifiers, MouseButton};
 /// ```js
 /// const controls = new OrbitControls( camera, renderer.domElement );
 ///
-/// // controls[.Self::update() ]must be called after any manual changes to the camera's transform
+/// // controls.update() must be called after any manual changes to the camera's transform
 /// camera.position.set( 0, 20, 100 );
-/// controls[.Self::update();]
+/// controls.update();
 ///
 /// function animate() {
 ///
 /// 	// required if controls.enableDamping or controls.autoRotate are set to true
-/// 	controls[.Self::update();]
+/// 	controls.update();
 ///
 /// 	renderer.render( scene, camera );
 ///
@@ -81,6 +49,7 @@ pub struct OrbitControls {
 
     /// The focus point of the controls, the `object` orbits around this.
     /// It can be updated manually at any point to change the focus of the controls.
+    /// Defaults to [`Vec3::ZERO`].
     pub target: Vec3,
 
     /// The focus point of the `minTargetRadius` and `maxTargetRadius` limits.
@@ -184,15 +153,6 @@ pub struct OrbitControls {
     // Mouse button used for pan. Defaults to [`MouseButton::Right`].
     pub pan_button: MouseButton,
 
-    last_position: Vec3,
-    last_quaternion: Quat,
-    last_target_position: Vec3,
-
-    // so camera.up is the orbit axis
-    quat: Quat,
-    quat_inverse: Quat,
-
-    spherical: Spherical,
     spherical_delta: Spherical,
 
     scale: f32,
@@ -205,10 +165,11 @@ pub struct OrbitControls {
     state: State,
 }
 
-impl Default for OrbitControls {
-    fn default() -> Self {
+impl OrbitControls {
+    /// Create a new orbit controls for `camera` with default parameters.
+    pub fn new(camera: Camera) -> Self {
         Self {
-            camera: todo!(),
+            camera,
             target: Vec3::ZERO,
             cursor: Vec3::ZERO,
             distance_range: 0.0..=INFINITY,
@@ -237,12 +198,6 @@ impl Default for OrbitControls {
             dolly_botton: MouseButton::Middle,
             rotate_button: MouseButton::Left,
             pan_button: MouseButton::Left,
-            last_position: Vec3::ZERO,
-            last_quaternion: Quat::IDENTITY,
-            last_target_position: Vec3::ZERO,
-            quat: Quat::IDENTITY,
-            quat_inverse: Quat::IDENTITY,
-            spherical: Spherical::ZERO,
             spherical_delta: Spherical::ZERO,
             scale: 1.0,
             pan_offset: Vec3::ZERO,
@@ -252,28 +207,23 @@ impl Default for OrbitControls {
             state: State::None,
         }
     }
-}
 
-impl OrbitControls {
     pub fn update(&mut self, scene: &mut Scene, delta_time: Duration, viewport_aspect_ratio: f32) {
         let v = scene.local_position(self.camera.node).unwrap() - self.target;
 
-        // rotate offset to "y-axis-is-up" space
-        let v = self.quat.mul_vec3(v);
-
         // angle from z-axis around y-axis
-        self.spherical = Spherical::from_vec3(v);
+        let mut spherical = Spherical::from_vec3(v);
 
         if self.auto_rotate && self.state == State::None {
             self.rotate_left(self.get_auto_rotation_angle(delta_time));
         }
 
         if self.enable_damping {
-            self.spherical.theta += self.spherical_delta.theta * self.damping_factor;
-            self.spherical.phi += self.spherical_delta.phi * self.damping_factor;
+            spherical.theta += self.spherical_delta.theta * self.damping_factor;
+            spherical.phi += self.spherical_delta.phi * self.damping_factor;
         } else {
-            self.spherical.theta += self.spherical_delta.theta;
-            self.spherical.phi += self.spherical_delta.phi;
+            spherical.theta += self.spherical_delta.theta;
+            spherical.phi += self.spherical_delta.phi;
         }
 
         // restrict theta to be between desired limits
@@ -294,22 +244,22 @@ impl OrbitControls {
             }
 
             if min <= max {
-                self.spherical.theta = self.spherical.theta.clamp(min, max);
+                spherical.theta = spherical.theta.clamp(min, max);
             } else {
-                self.spherical.theta = if self.spherical.theta > (min + max) / 2.0 {
-                    min.max(self.spherical.theta)
+                spherical.theta = if spherical.theta > (min + max) / 2.0 {
+                    min.max(spherical.theta)
                 } else {
-                    max.min(self.spherical.theta)
+                    max.min(spherical.theta)
                 }
             }
         }
 
         // restrict phi to be between desired limits
-        self.spherical.phi = self.spherical.phi.clamp(
+        spherical.phi = spherical.phi.clamp(
             *self.polar_angle_range.start(),
             *self.polar_angle_range.end(),
         );
-        self.spherical = self.spherical.safe();
+        spherical = spherical.safe();
 
         // move target to panned location
         if self.enable_damping {
@@ -330,17 +280,14 @@ impl OrbitControls {
         // adjust the camera position based on zoom only if we're not zooming to the cursor or if it's an ortho camera
         // we adjust zoom later in these cases
         if self.zoom_to_cursor && self.perform_cursor_zoom || self.camera.is_orthographic() {
-            self.spherical.radius = self.clamp_distance(self.spherical.radius);
+            spherical.radius = self.clamp_distance(spherical.radius);
         } else {
-            let previus_radius = self.spherical.radius;
-            self.spherical.radius = self.clamp_distance(self.spherical.radius * self.scale);
-            zoom_changed = previus_radius != self.spherical.radius;
+            let previus_radius = spherical.radius;
+            spherical.radius = self.clamp_distance(spherical.radius * self.scale);
+            zoom_changed = previus_radius != spherical.radius;
         }
 
-        let v = self.spherical.to_vec3();
-
-        // rotate offset back to "camera-up-vector-is-up" space
-        let v = self.quat_inverse.mul_vec3(v);
+        let v = spherical.to_vec3();
 
         scene
             .set_local_position(self.camera.node, self.target + v)
@@ -373,8 +320,6 @@ impl OrbitControls {
                             + self.dolly_direction * radius_delta,
                     )
                     .unwrap();
-
-                zoom_changed = radius_delta != 0.0;
             } else if self.camera.is_orthographic() {
                 // adjust the ortho camera position based on zoom changes
                 let mouse_before = vec3(self.mouse.x, self.mouse.y, 0.0);
@@ -386,8 +331,6 @@ impl OrbitControls {
                 let new_zoom =
                     previous_zoom.clamp(*self.zoom_range.start(), *self.zoom_range.end());
                 self.camera.set_zoom(new_zoom).unwrap();
-
-                zoom_changed = previous_zoom != new_zoom;
 
                 let mouse_after = vec3(self.mouse.x, self.mouse.y, 0.0);
                 let mouse_after = self
@@ -441,35 +384,10 @@ impl OrbitControls {
             let new_zoom = (previous_zoom / self.scale)
                 .clamp(*self.zoom_range.start(), *self.zoom_range.end());
             self.camera.set_zoom(new_zoom).unwrap();
-
-            if previous_zoom != new_zoom {
-                zoom_changed = true;
-            }
         }
 
         self.scale = 1.0;
         self.perform_cursor_zoom = false;
-
-        // update condition is:
-        // min(camera displacement, camera rotation in radians)^2 > EPS
-        // using small-angle approximation cos(x/2) = 1 - x^2 / 8
-        if zoom_changed
-            || self
-                .last_position
-                .distance_squared(scene.local_position(self.camera.node).unwrap())
-                > EPS
-            || 8.0
-                * (1.0
-                    - self
-                        .last_quaternion
-                        .dot(scene.local_rotation(self.camera.node).unwrap()))
-                > EPS
-            || self.last_target_position.distance_squared(self.target) > EPS
-        {
-            self.last_position = scene.local_position(self.camera.node).unwrap();
-            self.last_quaternion = scene.local_rotation(self.camera.node).unwrap();
-            self.last_target_position = self.target;
-        }
     }
 
     fn get_auto_rotation_angle(&self, delta_time: Duration) -> f32 {

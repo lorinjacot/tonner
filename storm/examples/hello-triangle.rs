@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use glam::{vec3, vec4};
 use pollster::block_on;
-use storm::camera::{CameraBuilder, CameraId};
+use storm::camera::{Camera, CameraBuilder};
 use storm::geometry::GeometryBuilder;
 use storm::material::MaterialBuilder;
 use storm::mesh::MeshBuilder;
@@ -20,7 +20,7 @@ struct App {
     scene: Option<Scene>,
     surface: Option<wgpu::Surface<'static>>,
     render_target_builder: Option<RenderTargetBuilder>,
-    camera: Option<CameraId>,
+    camera: Option<Camera>,
     last_redraw: Option<Instant>,
     window: Option<Arc<Window>>,
 }
@@ -152,7 +152,7 @@ impl ApplicationHandler for App {
                 };
                 scene.simulate(duration, &mut encoder).unwrap();
                 scene
-                    .render(&render_target, self.camera.unwrap(), &mut encoder)
+                    .render(&render_target, self.camera.as_ref().unwrap(), &mut encoder)
                     .unwrap();
                 scene.context().queue().submit([encoder.finish()]);
                 surface_texture.present();

@@ -150,7 +150,8 @@ impl Default for PerspectiveProjection {
 
 /// A camera is used to render a [Scene].
 pub struct Camera {
-    name: String,
+    /// Name of the camera. Does not need to be unique. Used for GUI and debugging.
+    pub name: String,
     /// The location of the camera. The camera will also move with this node.
     pub node: NodeId,
     projection: Projection,

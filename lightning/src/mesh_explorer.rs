@@ -1,4 +1,5 @@
 use std::{
+    f32::consts::PI,
     hash::Hash,
     ops::DerefMut,
     sync::{
@@ -9,6 +10,7 @@ use std::{
 };
 
 use dashmap::DashSet;
+use glam::Quat;
 use storm::{
     Context, Scene, SceneBuilder, camera::CameraBuilder, mesh::Mesh,
     mesh_instance::MeshInstanceBuilder, node::NodeBuilder,
@@ -143,6 +145,7 @@ impl MeshExplorer {
                         .node(
                             NodeBuilder::default()
                                 .translation([0.0, 0.0, -5.0])
+                                .rotation(Quat::from_rotation_y(PI))
                                 .build(&mut scene)
                                 .unwrap(),
                         )

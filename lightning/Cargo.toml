@@ -7,10 +7,12 @@ edition = "2024"
 dashmap.workspace = true
 eframe.workspace = true
 egui.workspace = true
+glam.workspace = true
 log.workspace = true
 rfd.workspace = true
 serde.workspace = true
 storm.workspace = true
+storm-controls.workspace = true
 wgpu.workspace = true
 
 # native:

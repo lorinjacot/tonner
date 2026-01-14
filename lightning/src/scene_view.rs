@@ -1,15 +1,19 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use eframe::egui_wgpu;
 use storm::{
     Context, Scene,
-    camera::CameraId,
+    camera::Camera,
     render_target::{RenderTarget, RenderTargetBuilder},
 };
+use storm_controls::orbit::OrbitControls;
 
 pub struct SceneView {
     scene: Arc<RwLock<Scene>>,
-    camera: CameraId,
+    controls: OrbitControls,
     sized_texture: egui::load::SizedTexture,
     render_target: RenderTarget<wgpu::TextureView>,
     renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
@@ -18,7 +22,7 @@ pub struct SceneView {
 impl SceneView {
     pub fn new(
         scene: Arc<RwLock<Scene>>,
-        camera: CameraId,
+        camera: Camera,
         width: u32,
         height: u32,
         renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
@@ -38,13 +42,23 @@ impl SceneView {
                 .build(texture_view)
                 .unwrap();
 
+        let controls = OrbitControls::new(camera);
+
         Self {
             scene,
-            camera,
+            controls,
             sized_texture,
             render_target,
             renderer,
         }
+    }
+
+    pub fn update(&mut self, delta_time: Duration, viewport_aspect_ratio: f32) {
+        self.controls.update(
+            &mut self.scene.write().unwrap(),
+            delta_time,
+            viewport_aspect_ratio,
+        );
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui, ctx: &Context, encoder: &mut wgpu::CommandEncoder) {
@@ -77,7 +91,7 @@ impl SceneView {
         self.scene
             .read()
             .unwrap()
-            .render(&self.render_target, self.camera, encoder)
+            .render(&self.render_target, &self.controls.camera, encoder)
             .unwrap();
 
         ui.image(self.sized_texture);

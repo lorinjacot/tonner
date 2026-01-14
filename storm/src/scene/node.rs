@@ -24,6 +24,8 @@ pub struct NodeBuilder {
     name: Option<String>,
     parent: Option<NodeId>,
     translation: Option<Vec3>,
+    rotation: Option<Quat>,
+    scale: Option<Vec3>,
 }
 
 impl NodeBuilder {
@@ -51,10 +53,30 @@ impl NodeBuilder {
         }
     }
 
+    /// Set the rotation component of the node local transform. Defaults to [`Quat::IDENTITY`].
+    pub fn rotation(self, rotation: impl Into<Quat>) -> Self {
+        Self {
+            rotation: Some(rotation.into()),
+            ..self
+        }
+    }
+
+    /// Set the scale component of the node local transform. Defaults to [`Vec3::ONE`].
+    pub fn scale(self, scale: impl Into<Vec3>) -> Self {
+        Self {
+            scale: Some(scale.into()),
+            ..self
+        }
+    }
+
     /// Build the node and add it to the scene.
     pub fn build(self, scene: &mut Scene) -> Result<NodeId, NodeBuilderError> {
         let id = NodeId(Uuid::new_v4());
-        let local_matrix = Mat4::from_translation(self.translation.unwrap_or(Vec3::ZERO));
+        let local_matrix = Mat4::from_scale_rotation_translation(
+            self.scale.unwrap_or(Vec3::ONE),
+            self.rotation.unwrap_or(Quat::IDENTITY),
+            self.translation.unwrap_or(Vec3::ZERO),
+        );
         let global_matrix = match self.parent {
             Some(parent) => {
                 let parent_data = scene

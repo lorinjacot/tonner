@@ -9,7 +9,7 @@ use storm::{
     camera::Camera,
     render_target::{RenderTarget, RenderTargetBuilder},
 };
-use storm_controls::orbit::OrbitControls;
+use storm_controls::{EguiControls, orbit::OrbitControls};
 
 pub struct SceneView {
     scene: Arc<RwLock<Scene>>,
@@ -53,11 +53,11 @@ impl SceneView {
         }
     }
 
-    pub fn update(&mut self, delta_time: Duration, viewport_aspect_ratio: f32) {
+    pub fn update(&mut self, delta_time: Duration) {
         self.controls.update(
             &mut self.scene.write().unwrap(),
             delta_time,
-            viewport_aspect_ratio,
+            self.sized_texture.size.x / self.sized_texture.size.y,
         );
     }
 
@@ -94,7 +94,14 @@ impl SceneView {
             .render(&self.render_target, &self.controls.camera, encoder)
             .unwrap();
 
-        ui.image(self.sized_texture);
+        let response = ui.image(self.sized_texture).interact(egui::Sense::drag());
+        self.controls.handle_response(
+            response,
+            ui,
+            size.x,
+            size.y,
+            &mut self.scene.write().unwrap(),
+        );
     }
 
     fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {

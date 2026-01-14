@@ -3143,6 +3143,7 @@ name = "storm-controls"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.10.0",
+ "egui",
  "glam 0.30.8",
  "log",
  "storm",

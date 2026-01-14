@@ -178,6 +178,8 @@ impl MeshExplorer {
         let duration = Duration::from_secs_f32(ui.input(|input_state| input_state.stable_dt));
 
         self.properties_windows.retain(|properties_window| {
+            properties_window.preview.lock().unwrap().update(duration);
+
             properties_window
                 .scene
                 .write()

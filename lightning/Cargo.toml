@@ -12,7 +12,7 @@ log.workspace = true
 rfd.workspace = true
 serde.workspace = true
 storm.workspace = true
-storm-controls.workspace = true
+storm-controls = { workspace = true, features = ["egui"] }
 wgpu.workspace = true
 
 # native:

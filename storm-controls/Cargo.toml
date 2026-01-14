@@ -5,6 +5,12 @@ edition = "2024"
 
 [dependencies]
 bitflags.workspace = true
+egui = { workspace = true, optional = true }
 glam.workspace = true
 log.workspace = true
 storm.workspace = true
+
+[features]
+default = ["egui", "orbit"]
+orbit = []
+egui = ["dep:egui"]

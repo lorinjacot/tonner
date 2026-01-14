@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use glam::{Mat4, Vec2, Vec3, vec3};
+use glam::{Mat4, Vec2, Vec3, vec2, vec3};
 use log::warn;
 use storm::{
     Scene,
@@ -14,7 +14,7 @@ use storm::{
     math::{Plane, Ray, Spherical},
 };
 
-use crate::{Key, Modifiers, MouseButton};
+use crate::{EguiControls, Key, Modifiers};
 
 /// Orbit controls allow the camera to orbit around a target.
 ///
@@ -144,14 +144,17 @@ pub struct OrbitControls {
     /// Keyboard key used for downward camera panning. Defaults to [`Key::ArrowDown`].
     pub bottom_key: Key,
 
-    /// Mouse button used for dolly. Defaults to [`MouseButton::Middle`].
-    pub dolly_botton: MouseButton,
+    /// Mouse button used for dolly. Defaults to [`egui::PointerButton::Middle`].
+    #[cfg(feature = "egui")]
+    pub egui_dolly_botton: egui::PointerButton,
 
-    /// Mouse button used for rotate. Defaults to [`MouseButton::Left`].
-    pub rotate_button: MouseButton,
+    /// Mouse button used for rotate. Defaults to [`egui::PointerButton::Primary`].
+    #[cfg(feature = "egui")]
+    pub egui_rotate_button: egui::PointerButton,
 
-    // Mouse button used for pan. Defaults to [`MouseButton::Right`].
-    pub pan_button: MouseButton,
+    /// Mouse button used for pan. Defaults to [`egui::PointerButton::Secondary`].
+    #[cfg(feature = "egui")]
+    pub egui_pan_button: egui::PointerButton,
 
     spherical_delta: Spherical,
 
@@ -195,9 +198,12 @@ impl OrbitControls {
             up_key: Key::ArrowUp,
             right_key: Key::ArrowRight,
             bottom_key: Key::ArrowDown,
-            dolly_botton: MouseButton::Middle,
-            rotate_button: MouseButton::Left,
-            pan_button: MouseButton::Left,
+            #[cfg(feature = "egui")]
+            egui_dolly_botton: egui::PointerButton::Middle,
+            #[cfg(feature = "egui")]
+            egui_rotate_button: egui::PointerButton::Primary,
+            #[cfg(feature = "egui")]
+            egui_pan_button: egui::PointerButton::Secondary,
             spherical_delta: Spherical::ZERO,
             scale: 1.0,
             pan_offset: Vec3::ZERO,
@@ -218,6 +224,12 @@ impl OrbitControls {
             self.rotate_left(self.get_auto_rotation_angle(delta_time));
         }
 
+        // if self.spherical_delta.phi != 0.0 {
+        //     dbg!(self.spherical_delta.phi);
+        // }
+        // if self.spherical_delta.theta != 0.0 {
+        //     dbg!(self.spherical_delta.theta);
+        // }
         if self.enable_damping {
             spherical.theta += self.spherical_delta.theta * self.damping_factor;
             spherical.phi += self.spherical_delta.phi * self.damping_factor;
@@ -593,71 +605,6 @@ impl OrbitControls {
         }
     }
 
-    pub fn on_mouse_down(
-        &mut self,
-        position: Vec2,
-        mouse_button: MouseButton,
-        modifiers: Modifiers,
-        view_width: f32,
-        view_height: f32,
-        scene: &Scene,
-    ) {
-        if mouse_button == self.dolly_botton {
-            if !self.enable_zoom {
-                return;
-            }
-            self.update_zoom_parameters(position.x, position.y, view_width, view_height, scene);
-            self.state = State::Dolly;
-        } else if mouse_button == self.rotate_button {
-            if modifiers.contains(Modifiers::CTRL)
-                || modifiers.contains(Modifiers::META)
-                || modifiers.contains(Modifiers::SHIFT)
-            {
-                if !self.enable_pan {
-                    return;
-                }
-                self.state = State::Pan;
-            } else {
-                if !self.enable_rotate {
-                    return;
-                }
-                self.state = State::Rotate;
-            }
-        } else if mouse_button == self.pan_button {
-            if modifiers.contains(Modifiers::CTRL)
-                || modifiers.contains(Modifiers::META)
-                || modifiers.contains(Modifiers::SHIFT)
-            {
-                if !self.enable_rotate {
-                    return;
-                }
-                self.state = State::Rotate;
-            } else {
-                if !self.enable_pan {
-                    return;
-                }
-                self.state = State::Pan;
-            }
-        } else {
-            self.state = State::None;
-        }
-    }
-
-    pub fn on_mouse_move(&mut self, delta: Vec2, view_height: f32, scene: &mut Scene) {
-        match self.state {
-            State::Rotate if self.enable_rotate => {
-                self.handle_mouse_move_rotate(delta, view_height)
-            }
-            State::Dolly if self.enable_zoom => {
-                self.handle_mouse_move_dolly(delta);
-            }
-            State::Pan if self.enable_pan => {
-                self.handle_mouse_move_pan(delta, scene, view_height);
-            }
-            _ => (),
-        }
-    }
-
     pub fn on_mouse_wheel(
         &mut self,
         delta: Vec2,
@@ -678,6 +625,74 @@ impl OrbitControls {
         scene: &mut Scene,
     ) {
         self.handle_key_down(key, modifiers, scene, view_width);
+    }
+}
+
+#[cfg(feature = "egui")]
+impl EguiControls for OrbitControls {
+    fn handle_response(
+        &mut self,
+        response: egui::Response,
+        ui: &egui::Ui,
+        view_width: f32,
+        view_height: f32,
+        scene: &mut Scene,
+    ) {
+        if let Some(position) = response.interact_pointer_pos() {
+            if response.drag_started() {
+                let modifiers =
+                    ui.input(|input_state| input_state.modifiers.ctrl || input_state.modifiers.alt);
+                if response.drag_started_by(self.egui_dolly_botton) {
+                    if self.enable_zoom {
+                        self.update_zoom_parameters(
+                            position.x,
+                            position.y,
+                            view_width,
+                            view_height,
+                            scene,
+                        );
+                        self.state = State::Dolly;
+                    }
+                } else if response.drag_started_by(self.egui_rotate_button) {
+                    if modifiers {
+                        if self.enable_pan {
+                            self.state = State::Pan;
+                        }
+                    } else {
+                        if self.enable_rotate {
+                            self.state = State::Rotate;
+                        }
+                    }
+                } else if response.drag_started_by(self.egui_pan_button) {
+                    if modifiers {
+                        if self.enable_rotate {
+                            self.state = State::Rotate
+                        }
+                    } else {
+                        if self.enable_pan {
+                            self.state = State::Pan;
+                        }
+                    }
+                } else {
+                    self.state = State::None;
+                }
+            }
+
+            let delta = response.drag_motion();
+            let delta = vec2(delta.x, delta.y);
+            match self.state {
+                State::Rotate if self.enable_rotate => {
+                    self.handle_mouse_move_rotate(delta, view_height);
+                }
+                State::Dolly if self.enable_zoom => {
+                    self.handle_mouse_move_dolly(delta);
+                }
+                State::Pan if self.enable_pan => {
+                    self.handle_mouse_move_pan(delta, scene, view_height);
+                }
+                _ => (),
+            }
+        }
     }
 }
 

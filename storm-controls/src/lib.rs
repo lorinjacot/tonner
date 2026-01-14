@@ -1,5 +1,8 @@
 use bitflags::bitflags;
+#[cfg(feature = "egui")]
+use storm::Scene;
 
+#[cfg(feature = "orbit")]
 pub mod orbit;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
@@ -19,9 +22,17 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
-pub enum MouseButton {
-    Left,
-    Middle,
-    Right,
+/// A controls that can used with egui out of the box.
+#[cfg(feature = "egui")]
+pub trait EguiControls {
+    /// Handle egui responses. To make the controls interactive, this function
+    /// needs to be called each time the egui renders.
+    fn handle_response(
+        &mut self,
+        response: egui::Response,
+        ui: &egui::Ui,
+        view_width: f32,
+        view_height: f32,
+        scene: &mut Scene,
+    );
 }

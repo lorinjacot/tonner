@@ -17,6 +17,7 @@ use crate::{
     },
 };
 
+pub mod scene_graph;
 pub mod animation;
 pub mod camera;
 pub mod light;

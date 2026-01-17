@@ -25,6 +25,7 @@ mod texture;
 /// This is the first thing you need when using storm.
 ///
 /// [Context] is cheap to clone, and any clone refers to the same data.
+/// In general, two objects created with different contexts cannot be used together.
 ///
 /// Contains:
 /// - bind group layouts

@@ -172,19 +172,21 @@ impl NodeManager {
     /// Modifies the scale part of the local transform. The local transform is expected
     /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
     pub(super) fn set_local_scale(&mut self, node: NodeId, scale: Vec3) -> Result<(), ()> {
-        let node = self.nodes.get_mut(&node).ok_or(())?;
-        let (_, rotation, translation) = node.local_matrix.to_scale_rotation_translation();
-        node.local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
-        Ok(())
+        let node_data = self.nodes.get_mut(&node).ok_or(())?;
+        let (_, rotation, translation) = node_data.local_matrix.to_scale_rotation_translation();
+        node_data.local_matrix =
+            Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        self.update_global_matrix(node)
     }
 
     /// Modifies the rotation part of the local transform. The local transform is expected
     /// to be a 3D affine transformation matrix otherwise the resulting transform will be invalid.
     pub(super) fn set_local_rotation(&mut self, node: NodeId, rotation: Quat) -> Result<(), ()> {
-        let node = self.nodes.get_mut(&node).ok_or(())?;
-        let (scale, _, translation) = node.local_matrix.to_scale_rotation_translation();
-        node.local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
-        Ok(())
+        let node_data = self.nodes.get_mut(&node).ok_or(())?;
+        let (scale, _, translation) = node_data.local_matrix.to_scale_rotation_translation();
+        node_data.local_matrix =
+            Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        self.update_global_matrix(node)
     }
 
     /// Modifies the translation part of the local transform. The local transform is expected
@@ -194,9 +196,33 @@ impl NodeManager {
         node: NodeId,
         translation: Vec3,
     ) -> Result<(), ()> {
+        let node_data = self.nodes.get_mut(&node).ok_or(())?;
+        let (scale, rotation, _) = node_data.local_matrix.to_scale_rotation_translation();
+        node_data.local_matrix =
+            Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        self.update_global_matrix(node)
+    }
+
+    fn update_global_matrix(&mut self, node: NodeId) -> Result<(), ()> {
+        let parent = self.nodes.get(&node).ok_or(())?.parent;
+        let parent_global_matrix = match parent {
+            Some(parent) => self.nodes.get(&parent).ok_or(())?.global_matrix,
+            None => Mat4::IDENTITY,
+        };
+        self.update_global_matrix_from_parent_matrix(node, parent_global_matrix)
+    }
+
+    fn update_global_matrix_from_parent_matrix(
+        &mut self,
+        node: NodeId,
+        parent_global_matrix: Mat4,
+    ) -> Result<(), ()> {
         let node = self.nodes.get_mut(&node).ok_or(())?;
-        let (scale, rotation, _) = node.local_matrix.to_scale_rotation_translation();
-        node.local_matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+        let global_matrix = parent_global_matrix * node.local_matrix;
+        node.global_matrix = global_matrix;
+        for node in node.children.clone() {
+            self.update_global_matrix_from_parent_matrix(node, global_matrix)?;
+        }
         Ok(())
     }
 
@@ -295,7 +321,8 @@ impl Scene {
     pub fn look_at(&mut self, node: NodeId, target: Vec3) -> Result<(), ()> {
         let node_data = self.node_manager.nodes.get(&node).ok_or(())?;
         let eye = node_data.global_matrix.transform_point3(Vec3::ZERO);
-        let mut rotation = Quat::look_at_rh(eye, target, Vec3::Y);
+        let matrix = Mat4::look_at_rh(eye, target, Vec3::Y);
+        let mut rotation = Quat::from_mat4(&matrix.inverse());
         if let Some(parent) = node_data.parent {
             let parent_rotation = self
                 .node_manager

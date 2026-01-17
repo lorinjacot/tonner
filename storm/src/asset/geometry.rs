@@ -414,7 +414,7 @@ impl GeometryBuilder {
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Geometry index buffer"),
                     contents,
-                    usage: wgpu::BufferUsages::VERTEX,
+                    usage: wgpu::BufferUsages::INDEX,
                 });
 
             GeometryIndices {

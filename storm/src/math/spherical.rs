@@ -49,13 +49,13 @@ impl Spherical {
         if radius == 0.0 {
             Self {
                 radius,
-                phi: 0.0,
                 theta: 0.0,
+                phi: 0.0,
             }
         } else {
             Self {
                 radius,
-                theta: z.atan2(x),
+                theta: x.atan2(z),
                 phi: (y / radius).clamp(-1.0, 1.0).acos(),
             }
         }

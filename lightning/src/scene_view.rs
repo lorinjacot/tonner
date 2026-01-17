@@ -95,13 +95,8 @@ impl SceneView {
             .unwrap();
 
         let response = ui.image(self.sized_texture).interact(egui::Sense::drag());
-        self.controls.handle_response(
-            response,
-            ui,
-            size.x,
-            size.y,
-            &mut self.scene.write().unwrap(),
-        );
+        self.controls
+            .handle_response(response, ui, &mut self.scene.write().unwrap());
     }
 
     fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {

@@ -1,5 +1,3 @@
-const TILT_LIMIT: f32 = 0.34202; // 70.0f32.to_radians().cos();
-
 use std::{
     f32::{INFINITY, consts::PI},
     ops::RangeInclusive,
@@ -15,6 +13,8 @@ use storm::{
 };
 
 use crate::{EguiControls, Key, Modifiers};
+
+const TILT_LIMIT: f32 = 0.34202; // 70.0f32.to_radians().cos();
 
 /// Orbit controls allow the camera to orbit around a target.
 ///
@@ -224,12 +224,6 @@ impl OrbitControls {
             self.rotate_left(self.get_auto_rotation_angle(delta_time));
         }
 
-        // if self.spherical_delta.phi != 0.0 {
-        //     dbg!(self.spherical_delta.phi);
-        // }
-        // if self.spherical_delta.theta != 0.0 {
-        //     dbg!(self.spherical_delta.theta);
-        // }
         if self.enable_damping {
             spherical.theta += self.spherical_delta.theta * self.damping_factor;
             spherical.phi += self.spherical_delta.phi * self.damping_factor;
@@ -288,15 +282,12 @@ impl OrbitControls {
         );
         self.target += self.cursor;
 
-        let mut zoom_changed = false;
         // adjust the camera position based on zoom only if we're not zooming to the cursor or if it's an ortho camera
         // we adjust zoom later in these cases
         if self.zoom_to_cursor && self.perform_cursor_zoom || self.camera.is_orthographic() {
             spherical.radius = self.clamp_distance(spherical.radius);
         } else {
-            let previus_radius = spherical.radius;
             spherical.radius = self.clamp_distance(spherical.radius * self.scale);
-            zoom_changed = previus_radius != spherical.radius;
         }
 
         let v = spherical.to_vec3();
@@ -316,7 +307,7 @@ impl OrbitControls {
         }
 
         // adjust camera position
-        if zoom_changed && self.perform_cursor_zoom {
+        if self.zoom_to_cursor && self.perform_cursor_zoom {
             let mut new_radius = None;
             if self.camera.is_perspective() {
                 // move the camera down the pointer ray
@@ -484,8 +475,7 @@ impl OrbitControls {
 
     fn update_zoom_parameters(
         &mut self,
-        x: f32,
-        y: f32,
+        mouse_position: Vec2,
         view_width: f32,
         view_height: f32,
         scene: &Scene,
@@ -496,8 +486,8 @@ impl OrbitControls {
 
         self.perform_cursor_zoom = true;
 
-        self.mouse.x = (x / view_width) * 2.0 - 1.0;
-        self.mouse.y = -(y / view_height) * 2.0 + 1.0;
+        self.mouse.x = (mouse_position.x / view_width) * 2.0 - 1.0;
+        self.mouse.y = -(mouse_position.y / view_height) * 2.0 + 1.0;
 
         self.dolly_direction = self.camera.unproject(
             vec3(self.mouse.x, self.mouse.y, 1.0),
@@ -529,17 +519,18 @@ impl OrbitControls {
 
     fn handle_mouse_wheel(
         &mut self,
-        delta: Vec2,
+        mouse_position: Vec2,
+        scroll_delta: Vec2,
         scene: &mut Scene,
         view_width: f32,
         view_height: f32,
     ) {
-        self.update_zoom_parameters(delta.x, delta.y, view_width, view_height, scene);
+        self.update_zoom_parameters(mouse_position, view_width, view_height, scene);
 
-        if delta.y < 0.0 {
-            self.dolly_in(self.get_zoom_scale(delta.y));
-        } else if delta.y > 0.0 {
-            self.dolly_out(self.get_zoom_scale(delta.y));
+        if scroll_delta.y < 0.0 {
+            self.dolly_in(self.get_zoom_scale(scroll_delta.y));
+        } else if scroll_delta.y > 0.0 {
+            self.dolly_out(self.get_zoom_scale(scroll_delta.y));
         }
     }
 
@@ -605,18 +596,6 @@ impl OrbitControls {
         }
     }
 
-    pub fn on_mouse_wheel(
-        &mut self,
-        delta: Vec2,
-        view_width: f32,
-        view_height: f32,
-        scene: &mut Scene,
-    ) {
-        if self.enable_zoom && self.state == State::None {
-            self.handle_mouse_wheel(delta, scene, view_width, view_height);
-        }
-    }
-
     pub fn on_key_down(
         &mut self,
         key: Key,
@@ -630,14 +609,10 @@ impl OrbitControls {
 
 #[cfg(feature = "egui")]
 impl EguiControls for OrbitControls {
-    fn handle_response(
-        &mut self,
-        response: egui::Response,
-        ui: &egui::Ui,
-        view_width: f32,
-        view_height: f32,
-        scene: &mut Scene,
-    ) {
+    fn handle_response(&mut self, response: egui::Response, ui: &egui::Ui, scene: &mut Scene) {
+        let view_width = response.rect.width();
+        let view_height = response.rect.height();
+
         if let Some(position) = response.interact_pointer_pos() {
             if response.drag_started() {
                 let modifiers =
@@ -645,8 +620,7 @@ impl EguiControls for OrbitControls {
                 if response.drag_started_by(self.egui_dolly_botton) {
                     if self.enable_zoom {
                         self.update_zoom_parameters(
-                            position.x,
-                            position.y,
+                            vec2(position.x, position.y),
                             view_width,
                             view_height,
                             scene,
@@ -692,11 +666,35 @@ impl EguiControls for OrbitControls {
                 }
                 _ => (),
             }
+
+            if response.drag_stopped() {
+                self.state = State::None;
+            }
+        }
+
+        if let Some(position) = response.hover_pos() {
+            let mouse_position = vec2(
+                position.x - response.rect.left(),
+                position.y - response.rect.top(),
+            );
+
+            if self.enable_zoom && self.state == State::None {
+                let scroll_delta = ui.input(|input_state| input_state.smooth_scroll_delta);
+                if scroll_delta.length() > 0.0 {
+                    self.handle_mouse_wheel(
+                        mouse_position,
+                        vec2(scroll_delta.x, scroll_delta.y),
+                        scene,
+                        view_width,
+                        view_height,
+                    );
+                }
+            }
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
     None,
     Rotate,

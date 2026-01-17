@@ -27,12 +27,5 @@ bitflags! {
 pub trait EguiControls {
     /// Handle egui responses. To make the controls interactive, this function
     /// needs to be called each time the egui renders.
-    fn handle_response(
-        &mut self,
-        response: egui::Response,
-        ui: &egui::Ui,
-        view_width: f32,
-        view_height: f32,
-        scene: &mut Scene,
-    );
+    fn handle_response(&mut self, response: egui::Response, ui: &egui::Ui, scene: &mut Scene);
 }

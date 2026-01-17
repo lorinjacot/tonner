@@ -564,7 +564,7 @@ impl Geometry {
     /// Returns `true` if and only if the geometry has tangent attribute. This must be `true` if normal
     /// mapping is needed.
     pub fn has_tangent(&self) -> bool {
-        todo!()
+        self.0.flags.contains(GeometryFlags::TANGENT)
     }
 
     /// Returns the number of morph target. A morph target is used to deform the geometry based on some

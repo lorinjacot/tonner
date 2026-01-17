@@ -11,7 +11,7 @@ bytemuck.workspace = true
 dashmap.workspace = true
 data-url = "0.3.1"
 glam = { workspace = true, features = ["bytemuck"] }
-image = { version = "0.25.6", default-features = false, features = ["hdr"] }
+image = { version = "0.25.9" }
 log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
 pollster.workspace = true

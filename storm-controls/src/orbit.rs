@@ -7,9 +7,9 @@ use std::{
 use glam::{Mat4, Vec2, Vec3, vec2, vec3};
 use log::warn;
 use storm::{
-    Scene,
     camera::Camera,
     math::{Plane, Ray, Spherical},
+    scene_graph::SceneGraph,
 };
 
 use crate::{EguiControls, Key, Modifiers};
@@ -214,8 +214,17 @@ impl OrbitControls {
         }
     }
 
-    pub fn update(&mut self, scene: &mut Scene, delta_time: Duration, viewport_aspect_ratio: f32) {
-        let v = scene.local_position(self.camera.node).unwrap() - self.target;
+    pub fn update(
+        &mut self,
+        scene_graph: &mut SceneGraph,
+        delta_time: Duration,
+        viewport_aspect_ratio: f32,
+    ) {
+        let v = scene_graph
+            .get(self.camera.node)
+            .unwrap()
+            .local_translation()
+            - self.target;
 
         // angle from z-axis around y-axis
         let mut spherical = Spherical::from_vec3(v);
@@ -292,10 +301,10 @@ impl OrbitControls {
 
         let v = spherical.to_vec3();
 
-        scene
-            .set_local_position(self.camera.node, self.target + v)
+        scene_graph
+            .set_local_transformation(self.camera.node, self.target + v, None, None)
             .unwrap();
-        scene.look_at(self.camera.node, self.target).unwrap();
+        self.camera.look_at(self.target, scene_graph).unwrap();
 
         if self.enable_damping {
             self.spherical_delta.theta *= 1.0 - self.damping_factor;
@@ -316,11 +325,16 @@ impl OrbitControls {
                 new_radius = Some(self.clamp_distance(previous_radius * self.scale));
 
                 let radius_delta = previous_radius - new_radius.unwrap();
-                scene
-                    .set_local_position(
+                scene_graph
+                    .set_local_transformation(
                         self.camera.node,
-                        scene.local_position(self.camera.node).unwrap()
+                        scene_graph
+                            .get(self.camera.node)
+                            .unwrap()
+                            .local_translation()
                             + self.dolly_direction * radius_delta,
+                        None,
+                        None,
                     )
                     .unwrap();
             } else if self.camera.is_orthographic() {
@@ -328,23 +342,29 @@ impl OrbitControls {
                 let mouse_before = vec3(self.mouse.x, self.mouse.y, 0.0);
                 let mouse_before =
                     self.camera
-                        .unproject(mouse_before, viewport_aspect_ratio, scene);
+                        .unproject(mouse_before, viewport_aspect_ratio, scene_graph);
 
-                let previous_zoom = self.camera.zoom().unwrap();
-                let new_zoom =
-                    previous_zoom.clamp(*self.zoom_range.start(), *self.zoom_range.end());
-                self.camera.set_zoom(new_zoom).unwrap();
+                // let previous_zoom = self.camera.zoom().unwrap();
+                // let new_zoom =
+                //     previous_zoom.clamp(*self.zoom_range.start(), *self.zoom_range.end());
+                // self.camera.set_zoom(new_zoom).unwrap();
 
                 let mouse_after = vec3(self.mouse.x, self.mouse.y, 0.0);
-                let mouse_after = self
-                    .camera
-                    .unproject(mouse_after, viewport_aspect_ratio, scene);
+                let mouse_after =
+                    self.camera
+                        .unproject(mouse_after, viewport_aspect_ratio, scene_graph);
 
-                scene
-                    .set_local_position(
+                scene_graph
+                    .set_local_transformation(
                         self.camera.node,
-                        scene.local_position(self.camera.node).unwrap() - mouse_after
+                        scene_graph
+                            .get(self.camera.node)
+                            .unwrap()
+                            .local_translation()
+                            - mouse_after
                             + mouse_before,
+                        None,
+                        None,
                     )
                     .unwrap();
             } else {
@@ -356,26 +376,34 @@ impl OrbitControls {
             if let Some(new_radius) = new_radius {
                 if self.screen_space_panning {
                     // position the orbit target in front of the new camera position
-                    self.target = scene
-                        .local_matrix(self.camera.node)
+                    self.target = scene_graph
+                        .get(self.camera.node)
                         .unwrap()
+                        .local_transformation()
                         .transform_vector3(vec3(0.0, 0.0, -1.0))
                         * new_radius
-                        + scene.local_position(self.camera.node).unwrap();
+                        + scene_graph
+                            .get(self.camera.node)
+                            .unwrap()
+                            .local_translation();
                 } else {
                     // get the ray and translation plane to compute target
                     let ray = Ray {
-                        origin: scene.local_position(self.camera.node).unwrap(),
-                        direction: scene
-                            .local_matrix(self.camera.node)
+                        origin: scene_graph
+                            .get(self.camera.node)
                             .unwrap()
+                            .local_translation(),
+                        direction: scene_graph
+                            .get(self.camera.node)
+                            .unwrap()
+                            .local_transformation()
                             .transform_vector3(vec3(0.0, 0.0, -1.0)),
                     };
 
                     // if the camera is 20 degrees above the horizon then don't adjust the focus target to avoid
                     // extremely large values
                     if Vec3::Y.dot(ray.direction).abs() < TILT_LIMIT {
-                        scene.look_at(self.camera.node, self.target).unwrap();
+                        self.camera.look_at(self.target, scene_graph).unwrap();
                     } else {
                         let plane = Plane::from_normal_and_coplanar_point(Vec3::Y, self.target);
                         self.target = ray.intersect_plane(plane).unwrap();
@@ -383,10 +411,10 @@ impl OrbitControls {
                 }
             }
         } else if self.camera.is_orthographic() {
-            let previous_zoom = self.camera.zoom().unwrap();
-            let new_zoom = (previous_zoom / self.scale)
-                .clamp(*self.zoom_range.start(), *self.zoom_range.end());
-            self.camera.set_zoom(new_zoom).unwrap();
+            // let previous_zoom = self.camera.zoom().unwrap();
+            // let new_zoom = (previous_zoom / self.scale)
+            //     .clamp(*self.zoom_range.start(), *self.zoom_range.end());
+            // self.camera.set_zoom(new_zoom).unwrap();
         }
 
         self.scale = 1.0;
@@ -424,16 +452,23 @@ impl OrbitControls {
     }
 
     // delta_x and delta_y are in pixels; right and down are positive
-    fn pan(&mut self, scene: &Scene, delta_x: f32, delta_y: f32, view_height: f32) {
+    fn pan(&mut self, scene_graph: &mut SceneGraph, delta_x: f32, delta_y: f32, view_height: f32) {
         if let Some(projection) = self.camera.perspective_projection() {
-            let v = scene.local_position(self.camera.node).unwrap() - self.target;
+            let v = scene_graph
+                .get(self.camera.node)
+                .unwrap()
+                .local_translation()
+                - self.target;
             let mut target_distance = v.length();
 
             // half of the fov is center to top of screen
             target_distance *= (projection.y_fov / 2.0).to_radians().tan();
 
             // we use only clientHeight here so aspect ratio does not distort speed
-            let node_local_transform = scene.local_matrix(self.camera.node).unwrap();
+            let node_local_transform = scene_graph
+                .get(self.camera.node)
+                .unwrap()
+                .local_transformation();
             self.pan_left(
                 2.0 * delta_x * target_distance / view_height,
                 node_local_transform,
@@ -443,12 +478,17 @@ impl OrbitControls {
                 node_local_transform,
             );
         } else if let Some(projection) = self.camera.orthographic_projection() {
-            let node_local_transform = scene.local_matrix(self.camera.node).unwrap();
-            let zoom = projection.zoom;
+            let node_local_transform = scene_graph
+                .get(self.camera.node)
+                .unwrap()
+                .local_transformation();
+            // let zoom = projection.zoom;
             let x_mag = projection.x_mag;
             let y_mag = projection.y_mag;
-            self.pan_left(delta_x * x_mag / zoom / view_height, node_local_transform);
-            self.pan_left(delta_y * y_mag / zoom / view_height, node_local_transform);
+            // self.pan_left(delta_x * x_mag / zoom / view_height, node_local_transform);
+            // self.pan_left(delta_y * y_mag / zoom / view_height, node_local_transform);
+            self.pan_left(delta_x * x_mag / view_height, node_local_transform);
+            self.pan_left(delta_y * y_mag / view_height, node_local_transform);
         } else {
             warn!("OrbitControls encountered an unknown camera type - pan disabled.");
             self.enable_pan = false;
@@ -478,7 +518,7 @@ impl OrbitControls {
         mouse_position: Vec2,
         view_width: f32,
         view_height: f32,
-        scene: &Scene,
+        scene_graph: &mut SceneGraph,
     ) {
         if !self.zoom_to_cursor {
             return;
@@ -492,8 +532,12 @@ impl OrbitControls {
         self.dolly_direction = self.camera.unproject(
             vec3(self.mouse.x, self.mouse.y, 1.0),
             view_width / view_height,
-            scene,
-        ) - scene.local_position(self.camera.node).unwrap().normalize();
+            scene_graph,
+        ) - scene_graph
+            .get(self.camera.node)
+            .unwrap()
+            .local_translation()
+            .normalize();
     }
 
     fn clamp_distance(&self, distance: f32) -> f32 {
@@ -513,19 +557,24 @@ impl OrbitControls {
         }
     }
 
-    fn handle_mouse_move_pan(&mut self, pan_delta: Vec2, scene: &mut Scene, view_height: f32) {
-        self.pan(scene, pan_delta.x, pan_delta.y, view_height);
+    fn handle_mouse_move_pan(
+        &mut self,
+        pan_delta: Vec2,
+        scene_graph: &mut SceneGraph,
+        view_height: f32,
+    ) {
+        self.pan(scene_graph, pan_delta.x, pan_delta.y, view_height);
     }
 
     fn handle_mouse_wheel(
         &mut self,
         mouse_position: Vec2,
         scroll_delta: Vec2,
-        scene: &mut Scene,
+        scene_graph: &mut SceneGraph,
         view_width: f32,
         view_height: f32,
     ) {
-        self.update_zoom_parameters(mouse_position, view_width, view_height, scene);
+        self.update_zoom_parameters(mouse_position, view_width, view_height, scene_graph);
 
         if scroll_delta.y < 0.0 {
             self.dolly_in(self.get_zoom_scale(scroll_delta.y));
@@ -538,7 +587,7 @@ impl OrbitControls {
         &mut self,
         key: Key,
         modifiers: Modifiers,
-        scene: &mut Scene,
+        scene_graph: &mut SceneGraph,
         view_height: f32,
     ) {
         if key == self.up_key {
@@ -551,7 +600,7 @@ impl OrbitControls {
                 }
             } else {
                 if self.enable_pan {
-                    self.pan(scene, 0.0, self.key_pan_speed, view_height);
+                    self.pan(scene_graph, 0.0, self.key_pan_speed, view_height);
                 }
             }
         } else if key == self.bottom_key {
@@ -564,7 +613,7 @@ impl OrbitControls {
                 }
             } else {
                 if self.enable_pan {
-                    self.pan(scene, 0.0, -self.key_pan_speed, view_height);
+                    self.pan(scene_graph, 0.0, -self.key_pan_speed, view_height);
                 }
             }
         } else if key == self.left_key {
@@ -577,7 +626,7 @@ impl OrbitControls {
                 }
             } else {
                 if self.enable_pan {
-                    self.pan(scene, self.key_pan_speed, 0.0, view_height);
+                    self.pan(scene_graph, self.key_pan_speed, 0.0, view_height);
                 }
             }
         } else if key == self.right_key {
@@ -590,7 +639,7 @@ impl OrbitControls {
                 }
             } else {
                 if self.enable_pan {
-                    self.pan(scene, -self.key_pan_speed, 0.0, view_height);
+                    self.pan(scene_graph, -self.key_pan_speed, 0.0, view_height);
                 }
             }
         }
@@ -601,15 +650,20 @@ impl OrbitControls {
         key: Key,
         modifiers: Modifiers,
         view_width: f32,
-        scene: &mut Scene,
+        scene_graph: &mut SceneGraph,
     ) {
-        self.handle_key_down(key, modifiers, scene, view_width);
+        self.handle_key_down(key, modifiers, scene_graph, view_width);
     }
 }
 
 #[cfg(feature = "egui")]
 impl EguiControls for OrbitControls {
-    fn handle_response(&mut self, response: egui::Response, ui: &egui::Ui, scene: &mut Scene) {
+    fn handle_response(
+        &mut self,
+        response: egui::Response,
+        ui: &egui::Ui,
+        scene_graph: &mut SceneGraph,
+    ) {
         let view_width = response.rect.width();
         let view_height = response.rect.height();
 
@@ -623,7 +677,7 @@ impl EguiControls for OrbitControls {
                             vec2(position.x, position.y),
                             view_width,
                             view_height,
-                            scene,
+                            scene_graph,
                         );
                         self.state = State::Dolly;
                     }
@@ -662,7 +716,7 @@ impl EguiControls for OrbitControls {
                     self.handle_mouse_move_dolly(delta);
                 }
                 State::Pan if self.enable_pan => {
-                    self.handle_mouse_move_pan(delta, scene, view_height);
+                    self.handle_mouse_move_pan(delta, scene_graph, view_height);
                 }
                 _ => (),
             }
@@ -684,7 +738,7 @@ impl EguiControls for OrbitControls {
                     self.handle_mouse_wheel(
                         mouse_position,
                         vec2(scroll_delta.x, scroll_delta.y),
-                        scene,
+                        scene_graph,
                         view_width,
                         view_height,
                     );

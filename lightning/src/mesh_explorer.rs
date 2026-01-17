@@ -13,7 +13,7 @@ use dashmap::DashSet;
 use glam::Quat;
 use storm::{
     Context, Scene, SceneBuilder, camera::CameraBuilder, mesh::Mesh,
-    mesh_instance::MeshInstanceBuilder, node::NodeBuilder,
+    mesh_instance::MeshInstanceBuilder, scene_graph::NodeBuilder,
 };
 
 use crate::SceneView;
@@ -144,9 +144,9 @@ impl MeshExplorer {
                     let camera = CameraBuilder::default()
                         .node(
                             NodeBuilder::default()
-                                .translation([0.0, 0.0, -5.0])
-                                .rotation(Quat::from_rotation_y(PI))
-                                .build(&mut scene)
+                                .local_translation([0.0, 0.0, -5.0])
+                                .local_rotation(Quat::from_rotation_y(PI))
+                                .build(&mut scene.scene_graph)
                                 .unwrap(),
                         )
                         .build(&mut scene);

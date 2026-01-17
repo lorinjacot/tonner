@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 #[cfg(feature = "egui")]
-use storm::Scene;
+use storm::scene_graph::SceneGraph;
 
 #[cfg(feature = "orbit")]
 pub mod orbit;
@@ -27,5 +27,10 @@ bitflags! {
 pub trait EguiControls {
     /// Handle egui responses. To make the controls interactive, this function
     /// needs to be called each time the egui renders.
-    fn handle_response(&mut self, response: egui::Response, ui: &egui::Ui, scene: &mut Scene);
+    fn handle_response(
+        &mut self,
+        response: egui::Response,
+        ui: &egui::Ui,
+        scene_graph: &mut SceneGraph,
+    );
 }

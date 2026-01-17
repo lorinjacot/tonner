@@ -5,7 +5,7 @@ use glam::{Quat, Vec3, Vec4};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::scene::{NodeManager, node::NodeId};
+use crate::scene_graph::{NodeId, SceneGraph};
 
 use super::Scene;
 
@@ -24,12 +24,12 @@ struct AnimationData {
 }
 
 impl AnimationData {
-    fn update(&self, node_manager: &mut NodeManager) -> Result<(), SimulateAnimationError> {
+    fn update(&self, scene_graph: &mut SceneGraph) -> Result<(), SimulateAnimationError> {
         for channel in &self.channels {
             match &channel.outputs {
                 Outputs::Translations(slice) => {
-                    node_manager
-                        .set_local_translation(
+                    scene_graph
+                        .set_local_transformation(
                             channel.node,
                             interpolate_vec3(
                                 self.current_timestamp,
@@ -37,26 +37,32 @@ impl AnimationData {
                                 channel.interpolation,
                                 &slice,
                             ),
+                            None,
+                            None,
                         )
-                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node))?;
+                        .map_err(|_| SimulateAnimationError::InvalidNode(channel.node))?;
                 }
                 Outputs::Rotations(slice) => {
-                    node_manager
-                        .set_local_rotation(
+                    scene_graph
+                        .set_local_transformation(
                             channel.node,
+                            None,
                             interpolate_quat(
                                 self.current_timestamp,
                                 &channel.inputs,
                                 channel.interpolation,
                                 &slice,
                             ),
+                            None,
                         )
-                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node))?;
+                        .map_err(|_| SimulateAnimationError::InvalidNode(channel.node))?;
                 }
                 Outputs::Scales(slice) => {
-                    node_manager
-                        .set_local_scale(
+                    scene_graph
+                        .set_local_transformation(
                             channel.node,
+                            None,
+                            None,
                             interpolate_vec3(
                                 self.current_timestamp,
                                 &channel.inputs,
@@ -64,7 +70,7 @@ impl AnimationData {
                                 &slice,
                             ),
                         )
-                        .map_err(|()| SimulateAnimationError::InvalidNode(channel.node))?;
+                        .map_err(|_| SimulateAnimationError::InvalidNode(channel.node))?;
                 }
                 Outputs::Weights(_slice, _count) => {
                     // node.weights = interpolate_weights(
@@ -124,7 +130,7 @@ impl AnimationBuilder {
 
     pub fn build(self, scene: &mut Scene) -> Result<AnimationId, AnimationBuilderError> {
         for channel in &self.channels {
-            if !scene.node_manager.contains(channel.node) {
+            if !scene.scene_graph.contains(channel.node) {
                 return Err(AnimationBuilderError::InvalidNode(channel.node));
             }
         }
@@ -190,19 +196,19 @@ impl AnimationManager {
     pub(super) fn stop(
         &mut self,
         animation: AnimationId,
-        node_manager: &mut NodeManager,
+        scene_graph: &mut SceneGraph,
     ) -> Result<(), ()> {
         let data = self.animations.get_mut(&animation).ok_or(())?;
         data.playing = false;
         data.current_timestamp = 0.0;
-        data.update(node_manager);
+        data.update(scene_graph);
         Ok(())
     }
 
     pub(super) fn simulate(
         &mut self,
         duration: Duration,
-        node_manager: &mut NodeManager,
+        scene_graph: &mut SceneGraph,
     ) -> Result<(), SimulateAnimationError> {
         let delta_time = duration.as_secs_f32();
         for animation in self.animations.values_mut().filter(|data| data.playing) {
@@ -215,7 +221,7 @@ impl AnimationManager {
                     animation.playing = false;
                 }
             }
-            animation.update(node_manager)?;
+            animation.update(scene_graph)?;
         }
         Ok(())
     }

@@ -71,21 +71,22 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// Sets the node's local transformations. See [Node::local_transformation] for more informations.
+    /// Sets the node's local translation (if not `None`), rotation (if not `None`) and scale (if not `None`).
+    /// See [Node::local_transformation] for more informations.
     /// This function will fail the node contains an invalid parent or if any of the children
     /// (direct and indirect) is invalid.
     pub fn set_local_transformation(
         &mut self,
         node: NodeId,
-        scale: impl Into<Vec3>,
-        rotation: impl Into<Quat>,
-        translation: impl Into<Vec3>,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
     ) -> Result<(), NodeNotFoundError> {
         let parent_transformation = {
             let node = self.get_mut(node).ok_or(NodeNotFoundError(node))?;
-            node.local_scale = scale.into();
-            node.local_rotation = rotation.into();
-            node.local_translation = translation.into();
+            node.local_translation = translation.into().unwrap_or(node.local_translation);
+            node.local_rotation = rotation.into().unwrap_or(node.local_rotation);
+            node.local_scale = scale.into().unwrap_or(node.local_scale);
             match node.parent {
                 Some(parent) => {
                     self.get(parent)
@@ -431,4 +432,4 @@ pub enum NodeBuilderError {
 
 #[derive(Debug, Error)]
 #[error("no node found for {0}")]
-pub struct NodeNotFoundError(NodeId);
+pub struct NodeNotFoundError(pub NodeId);

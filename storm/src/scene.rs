@@ -9,20 +9,19 @@ use crate::{
     Context,
     camera::Camera,
     environment::{Environment, EnvironmentBuilder},
-    node::NodeId,
     render_target::RenderTarget,
     scene::{
         animation::AnimationManager, light::LightManager, mesh_instance::MeshInstanceManager,
-        node::NodeManager, skin::SkinManager,
+        skin::SkinManager,
     },
+    scene_graph::{NodeId, SceneGraph},
 };
 
-pub mod scene_graph;
 pub mod animation;
 pub mod camera;
 pub mod light;
 pub mod mesh_instance;
-pub mod node;
+pub mod scene_graph;
 pub mod skin;
 
 /// A scene describes a world. A scene can be evolve over time and can be rendered
@@ -38,8 +37,8 @@ pub mod skin;
 /// rendering, the attached mesh will be rendered at the local space origin.
 pub struct Scene {
     pub name: String,
+    pub scene_graph: SceneGraph,
     ctx: Context,
-    node_manager: NodeManager,
     skin_manager: SkinManager,
     mesh_instance_manager: MeshInstanceManager,
     animation_manager: AnimationManager,
@@ -62,23 +61,20 @@ impl Scene {
         _encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), SimulateError> {
         self.animation_manager
-            .simulate(duration, &mut self.node_manager)
+            .simulate(duration, &mut self.scene_graph)
             .unwrap();
 
-        self.node_manager
-            .update_buffer(&self.ctx.device, &self.ctx.queue);
-
         self.light_manager
-            .update_point_light_buffer(&self.node_manager, &self.ctx.device, &self.ctx.queue)
+            .update_point_light_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
             .unwrap();
 
         self.skin_manager
-            .update_buffer(&self.node_manager, &self.ctx.device, &self.ctx.queue)
+            .update_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
             .unwrap();
 
         self.mesh_instance_manager
             .update_buffer(
-                &self.node_manager,
+                &self.scene_graph,
                 &self.skin_manager,
                 &self.ctx.device,
                 &self.ctx.queue,
@@ -99,9 +95,10 @@ impl Scene {
         let projection_matrix = camera.projection_matrix(viewport_aspect_ratio);
 
         let camera_matrix = self
-            .node_manager
-            .global_matrix(camera.node)
-            .ok_or(RenderError::InvalidCameraNode(camera.node))?;
+            .scene_graph
+            .get(camera.node)
+            .ok_or(RenderError::InvalidCameraNode(camera.node))?
+            .global_transformation();
         let camera_position = camera_matrix.transform_point3(Vec3::ZERO);
 
         let view_matrix = Mat4::look_to_rh(
@@ -133,11 +130,6 @@ impl Scene {
                 label: Some(&format!("{} render bind group", self.name)),
                 layout: &self.render_bind_group_layout,
                 entries: &[
-                    // nodes
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.node_manager.buffer().as_entire_binding(),
-                    },
                     // skins
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -337,7 +329,7 @@ impl SceneBuilder {
                 label: Some("Engine builder encoder"),
             });
 
-        let node_manager = NodeManager::new(&ctx.device);
+        let scene_graph = SceneGraph::new(ctx);
         let skin_manager = SkinManager::new(&ctx.device);
         let mesh_instance_manager = MeshInstanceManager::new(&ctx.device);
         let animation_manager = AnimationManager::new();
@@ -355,7 +347,7 @@ impl SceneBuilder {
         Scene {
             name: self.name,
             ctx: ctx.clone(),
-            node_manager,
+            scene_graph,
             skin_manager,
             mesh_instance_manager,
             animation_manager,
@@ -386,17 +378,6 @@ impl SceneContext {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("render bind group layout"),
                 entries: &[
-                    // nodes
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
                     // skins
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,

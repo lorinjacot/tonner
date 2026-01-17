@@ -6,8 +6,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::scene::{
-    NodeManager, Scene,
-    node::{NodeBuilder, NodeId},
+    Scene,
+    scene_graph::{NodeBuilder, NodeId, SceneGraph},
 };
 
 /// A unique id for a point light. A point light has one and only one id.
@@ -60,14 +60,14 @@ impl PointLightBuilder {
         let name = self.name.unwrap_or_default();
         let node = match self.node {
             Some(node) => {
-                if !scene.node_manager.contains(node) {
+                if !scene.scene_graph.contains(node) {
                     return Err(PointLightBuilderError::InvalidNode(node));
                 }
                 node
             }
             None => NodeBuilder::default()
                 .name(name.clone())
-                .build(scene)
+                .build(&mut scene.scene_graph)
                 .unwrap(),
         };
         let color = self.color.unwrap_or(Vec3::ONE);
@@ -154,7 +154,7 @@ impl LightManager {
     /// Update the point light buffer with the current state of the nodes.
     pub(super) fn update_point_light_buffer(
         &mut self,
-        node_manager: &NodeManager,
+        scene_graph: &SceneGraph,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), UpdatePointLightBufferError> {
@@ -162,9 +162,10 @@ impl LightManager {
         for (i, data) in self.point_lights.values_mut().enumerate() {
             data.index = Some(i as u32);
             uniforms.push(PointLightUniform {
-                position: node_manager
-                    .global_matrix(data.node)
+                position: scene_graph
+                    .get(data.node)
                     .ok_or(UpdatePointLightBufferError::InvalidNode(data.node))?
+                    .global_transformation()
                     .transform_point3(Vec3::ZERO)
                     .to_array(),
                 _pad0: 0,

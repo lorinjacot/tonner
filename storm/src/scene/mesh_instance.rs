@@ -10,8 +10,8 @@ use crate::{
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
     material::AlphaMode,
     mesh::MeshPrimitiveId,
-    node::{NodeBuilder, NodeManager},
-    scene::{Scene, node::NodeId, skin::SkinId},
+    scene::{Scene, skin::SkinId},
+    scene_graph::{NodeBuilder, NodeId, SceneGraph},
     skin::SkinManager,
 };
 
@@ -75,11 +75,11 @@ impl MeshInstanceBuilder {
     /// Add the mesh to the scene.
     pub fn build(self, scene: &mut Scene) -> Result<MeshInstanceId, MeshInstanceBuilderError> {
         let node = match self.node {
-            Some(node) if scene.node_manager.contains(node) => node,
+            Some(node) if scene.scene_graph.contains(node) => node,
             Some(node) => return Err(MeshInstanceBuilderError::InvalidNode(node)),
             None => NodeBuilder::default()
                 .name(self.name.clone())
-                .build(scene)
+                .build(&mut scene.scene_graph)
                 .unwrap(),
         };
 
@@ -138,7 +138,7 @@ impl MeshInstanceManager {
 
     pub(super) fn update_buffer(
         &mut self,
-        node_manager: &NodeManager,
+        scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -148,9 +148,12 @@ impl MeshInstanceManager {
 
         let mut primitive_count = 0;
         for mesh_instance in self.mesh_instances.values() {
-            let model_matrix = node_manager.global_matrix(mesh_instance.node).ok_or(
-                UpdateMeshInstanceBufferError::InvalidNode(mesh_instance.node),
-            )?;
+            let model_matrix = scene_graph
+                .get(mesh_instance.node)
+                .ok_or(UpdateMeshInstanceBufferError::InvalidNode(
+                    mesh_instance.node,
+                ))?
+                .global_transformation();
             let pipeline_index = model_matrix.determinant().is_sign_positive() as usize;
             let joint_offset = match mesh_instance.skin {
                 Some(skin) => skin_manager

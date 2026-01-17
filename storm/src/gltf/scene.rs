@@ -19,7 +19,7 @@ use crate::{gltf::accessor::IteratorConsumer, skin::SkinBuilder};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    id: Option<crate::node::NodeId>,
+    id: Option<crate::scene_graph::NodeId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -81,7 +81,7 @@ pub(super) struct Node {
 
 impl Node {
     /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
-    pub(super) fn id(&self) -> Option<crate::node::NodeId> {
+    pub(super) fn id(&self) -> Option<crate::scene_graph::NodeId> {
         self.id
     }
 }
@@ -107,7 +107,7 @@ pub(super) struct Scene {
 pub(super) struct Skin {
     /// Nodes using this skin. Cleared once the scene has been loaded.
     #[serde(skip)]
-    nodes: Vec<crate::node::NodeId>,
+    nodes: Vec<crate::scene_graph::NodeId>,
 
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
@@ -141,8 +141,8 @@ impl super::GltfAsset {
         scene_index: usize,
         encoder: &mut wgpu::CommandEncoder,
         scene: &mut crate::Scene,
-        base_node: Option<crate::node::NodeId>,
-    ) -> Result<Vec<crate::node::NodeId>> {
+        base_node: Option<crate::scene_graph::NodeId>,
+    ) -> Result<Vec<crate::scene_graph::NodeId>> {
         let root_nodes_idx = self
             .json
             .scenes
@@ -250,10 +250,10 @@ impl super::GltfAsset {
     fn load_node(
         &mut self,
         index: usize,
-        parent: Option<crate::node::NodeId>,
+        parent: Option<crate::scene_graph::NodeId>,
         scene: &mut crate::Scene,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<crate::node::NodeId> {
+    ) -> anyhow::Result<crate::scene_graph::NodeId> {
         let node = self
             .json
             .nodes

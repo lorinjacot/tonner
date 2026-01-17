@@ -5,7 +5,7 @@ use glam::Mat4;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::scene::{NodeManager, node::NodeId};
+use crate::scene::scene_graph::{NodeId, SceneGraph};
 
 use super::Scene;
 
@@ -136,7 +136,7 @@ impl SkinManager {
     /// Update the skin buffer with the current state of the skins.
     pub(super) fn update_buffer(
         &mut self,
-        node_manager: &NodeManager,
+        scene_graph: &SceneGraph,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), UpdateSkinBufferError> {
@@ -150,9 +150,10 @@ impl SkinManager {
             } in &skin.joints
             {
                 joint_matrices.push(
-                    node_manager
-                        .global_matrix(node)
+                    scene_graph
+                        .get(node)
                         .ok_or(UpdateSkinBufferError::InvalidNode(node))?
+                        .global_transformation()
                         * inverse_bind_matrix,
                 );
             }

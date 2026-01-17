@@ -55,7 +55,7 @@ impl SceneView {
 
     pub fn update(&mut self, delta_time: Duration) {
         self.controls.update(
-            &mut self.scene.write().unwrap(),
+            &mut self.scene.write().unwrap().scene_graph,
             delta_time,
             self.sized_texture.size.x / self.sized_texture.size.y,
         );
@@ -96,7 +96,7 @@ impl SceneView {
 
         let response = ui.image(self.sized_texture).interact(egui::Sense::drag());
         self.controls
-            .handle_response(response, ui, &mut self.scene.write().unwrap());
+            .handle_response(response, ui, &mut self.scene.write().unwrap().scene_graph);
     }
 
     fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {

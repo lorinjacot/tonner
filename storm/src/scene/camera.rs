@@ -1,9 +1,9 @@
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 
 use crate::{
-    node::NodeBuilder,
-    scene::{Scene, node::NodeId},
+    scene::{Scene, scene_graph::NodeId},
+    scene_graph::{NodeBuilder, NodeNotFoundError, SceneGraph},
 };
 
 /// A builder for camera.
@@ -57,7 +57,7 @@ impl CameraBuilder {
         let node = self.node.unwrap_or_else(|| {
             NodeBuilder::default()
                 .name(&self.name)
-                .build(scene)
+                .build(&mut scene.scene_graph)
                 .unwrap()
         });
 
@@ -93,8 +93,6 @@ pub struct OrthographicProjection {
 
     /// The floating-point distance to the near clipping plane. Default to `0.1`.
     pub z_near: f32,
-
-    pub zoom: f32,
 }
 
 impl Default for OrthographicProjection {
@@ -104,7 +102,6 @@ impl Default for OrthographicProjection {
             y_mag: 2.0,
             z_far: 2000.0,
             z_near: 0.1,
-            zoom: 1.0,
         }
     }
 }
@@ -132,8 +129,6 @@ pub struct PerspectiveProjection {
     ///
     /// Default is `None`.
     pub z_far: Option<f32>,
-
-    pub zoom: f32,
 }
 
 impl Default for PerspectiveProjection {
@@ -143,7 +138,6 @@ impl Default for PerspectiveProjection {
             y_fov: 50.0f32.to_radians(),
             z_far: None,
             z_near: 0.1,
-            zoom: 1.0,
         }
     }
 }
@@ -185,41 +179,42 @@ impl Camera {
     }
 
     /// Transform a position from the camera's normalized device coordinate space into world space.
-    pub fn unproject(&self, position: Vec3, viewport_aspect_ratio: f32, scene: &Scene) -> Vec3 {
-        let view = scene.node_manager.global_matrix(self.node).unwrap();
+    pub fn unproject(
+        &self,
+        position: Vec3,
+        viewport_aspect_ratio: f32,
+        scene_graph: &mut SceneGraph,
+    ) -> Vec3 {
+        let view = scene_graph.get(self.node).unwrap().global_transformation();
         let projection = self.projection.matrix(viewport_aspect_ratio);
         (projection.inverse() * view).transform_point3(position)
     }
 
-    /// Returns the current zoom of the camera, if available. The following camera have zooming capabilities:
-    /// - Orthographic
-    /// - Perspective
-    pub fn zoom(&self) -> Option<f32> {
-        match self.projection {
-            Projection::Orthographic(OrthographicProjection { zoom, .. }) => Some(zoom),
-            Projection::Perspective(PerspectiveProjection { zoom, .. }) => Some(zoom),
-        }
-    }
-
-    /// Modifies the current zoom of the camera, if available. The following camera have zooming capabilities:
-    /// - Orthographic
-    /// - Perspective
-    pub fn set_zoom(&mut self, zoom: f32) -> Result<(), ()> {
-        match &mut self.projection {
-            Projection::Orthographic(OrthographicProjection { zoom: mut_zoom, .. }) => {
-                *mut_zoom = zoom;
-                Ok(())
-            }
-            Projection::Perspective(PerspectiveProjection { zoom: mut_zoom, .. }) => {
-                *mut_zoom = zoom;
-                Ok(())
-            }
-            _ => Err(()),
-        }
-    }
-
     pub fn projection_matrix(&self, viewport_aspect_ratio: f32) -> Mat4 {
         self.projection.matrix(viewport_aspect_ratio)
+    }
+
+    pub fn look_at(
+        &self,
+        target: Vec3,
+        scene_graph: &mut SceneGraph,
+    ) -> Result<(), NodeNotFoundError> {
+        let node = scene_graph
+            .get(self.node)
+            .ok_or(NodeNotFoundError(self.node))?;
+        let eye = node.global_transformation().transform_point3(Vec3::ZERO);
+        let mut rotation = Quat::look_at_rh(eye, target, Vec3::Y).inverse();
+        if let Some(parent) = node.parent() {
+            let parent_rotation = scene_graph
+                .get(parent)
+                .ok_or(NodeNotFoundError(parent))?
+                .global_transformation()
+                .to_scale_rotation_translation()
+                .1;
+            rotation = parent_rotation.inverse() * rotation;
+        }
+        scene_graph.set_local_transformation(self.node, None, rotation, None)?;
+        Ok(())
     }
 }
 
@@ -236,14 +231,12 @@ impl Projection {
                 y_mag,
                 z_far,
                 z_near,
-                zoom,
             }) => Mat4::orthographic_rh(-*x_mag, *x_mag, -*y_mag, *y_mag, *z_near, *z_far),
             Projection::Perspective(PerspectiveProjection {
                 aspect_ratio,
                 y_fov,
                 z_near,
                 z_far: Some(z_far),
-                zoom,
             }) => Mat4::perspective_rh(
                 *y_fov,
                 aspect_ratio.unwrap_or(viewport_aspect_ratio),
@@ -255,7 +248,6 @@ impl Projection {
                 y_fov,
                 z_near,
                 z_far: None,
-                zoom,
             }) => Mat4::perspective_infinite_rh(
                 *y_fov,
                 aspect_ratio.unwrap_or(viewport_aspect_ratio),

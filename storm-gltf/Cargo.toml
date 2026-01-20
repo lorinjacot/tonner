@@ -1,0 +1,17 @@
+[package]
+name = "storm-gltf"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+data-url.workspace = true
+glam.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_repr.workspace = true
+storm.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true

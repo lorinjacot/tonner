@@ -5,7 +5,8 @@ use std::{
 
 use egui::containers::menu::SubMenuButton;
 pub use scene_view::SceneView;
-use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder, gltf::GltfAsset};
+use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder};
+use storm_gltf::GltfAsset;
 
 use crate::{mesh_explorer::MeshExplorer, new_scene::NewSceneModal};
 

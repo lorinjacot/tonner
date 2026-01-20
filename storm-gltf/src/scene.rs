@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use glam::Mat4;
 use serde::{Deserialize, Serialize};
+use storm::skin::SkinBuilder;
 
-use crate::{gltf::accessor::IteratorConsumer, skin::SkinBuilder};
+use crate::accessor::IteratorConsumer;
 
 /// A node in the node hierarchy. When the node contains [skin](Node::skin),
 /// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
@@ -19,7 +20,7 @@ use crate::{gltf::accessor::IteratorConsumer, skin::SkinBuilder};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    id: Option<crate::scene_graph::NodeId>,
+    id: Option<storm::scene_graph::NodeId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -81,7 +82,7 @@ pub(super) struct Node {
 
 impl Node {
     /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
-    pub(super) fn id(&self) -> Option<crate::scene_graph::NodeId> {
+    pub(super) fn id(&self) -> Option<storm::scene_graph::NodeId> {
         self.id
     }
 }
@@ -107,7 +108,7 @@ pub(super) struct Scene {
 pub(super) struct Skin {
     /// Nodes using this skin. Cleared once the scene has been loaded.
     #[serde(skip)]
-    nodes: Vec<crate::scene_graph::NodeId>,
+    nodes: Vec<storm::scene_graph::NodeId>,
 
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
@@ -140,9 +141,9 @@ impl super::GltfAsset {
         &mut self,
         scene_index: usize,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &mut crate::Scene,
-        base_node: Option<crate::scene_graph::NodeId>,
-    ) -> Result<Vec<crate::scene_graph::NodeId>> {
+        scene: &mut storm::Scene,
+        base_node: Option<storm::scene_graph::NodeId>,
+    ) -> Result<Vec<storm::scene_graph::NodeId>> {
         let root_nodes_idx = self
             .json
             .scenes
@@ -250,10 +251,10 @@ impl super::GltfAsset {
     fn load_node(
         &mut self,
         index: usize,
-        parent: Option<crate::scene_graph::NodeId>,
-        scene: &mut crate::Scene,
+        parent: Option<storm::scene_graph::NodeId>,
+        scene: &mut storm::Scene,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<crate::scene_graph::NodeId> {
+    ) -> anyhow::Result<storm::scene_graph::NodeId> {
         let node = self
             .json
             .nodes

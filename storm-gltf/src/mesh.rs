@@ -5,15 +5,12 @@ use bytemuck::cast_slice;
 use glam::{UVec4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use storm::{geometry::GeometryBuilder, mesh::MeshBuilder};
 
 use super::accessor::IteratorConsumer;
 use crate::{
-    geometry::GeometryBuilder,
-    gltf::{
-        AccessorUsage, GltfError,
-        accessor::{AccessorComponentType, AccessorType},
-    },
-    mesh::MeshBuilder,
+    AccessorUsage, GltfError,
+    accessor::{AccessorComponentType, AccessorType},
 };
 
 /// A set of primitives to be rendered. Its global transform is defined by a node that references it.
@@ -21,7 +18,7 @@ use crate::{
 pub(super) struct Mesh {
     /// [Some] if already loaded.
     #[serde(skip)]
-    loaded: Option<crate::mesh::Mesh>,
+    loaded: Option<storm::mesh::Mesh>,
 
     /// An array of primitives, each defining geometry to be rendered.
     primitives: Vec<MeshPrimitive>,
@@ -52,15 +49,15 @@ impl Mesh {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<crate::material::Material>,
+        default_material: &mut Option<storm::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &crate::Context,
+        ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<crate::mesh::Mesh> {
+    ) -> anyhow::Result<storm::mesh::Mesh> {
         if let Some(mesh) = self.loaded.clone() {
             return Ok(mesh);
         }

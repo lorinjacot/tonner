@@ -49,7 +49,7 @@ impl Image {
         base_path: &Path,
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &crate::Context,
+        ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<wgpu::TextureView> {
         if let Some(image) = &self.wgpu {
@@ -104,7 +104,7 @@ impl Image {
             ImageReader::with_format(reader, format).decode()?
         };
 
-        let texture = crate::texture::TextureBuilder::default()
+        let texture = storm::texture::TextureBuilder::default()
             .name(name)
             .from_dynamic_image(&image, srgb)
             // .generate_mips()
@@ -181,7 +181,7 @@ pub(super) struct Sampler {
 }
 
 impl Sampler {
-    fn load(&mut self, ctx: &crate::Context) -> anyhow::Result<wgpu::Sampler> {
+    fn load(&mut self, ctx: &storm::Context) -> anyhow::Result<wgpu::Sampler> {
         if let Some(sampler) = &self.wgpu {
             return Ok(sampler.clone());
         }
@@ -201,7 +201,7 @@ impl Sampler {
             MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
         };
 
-        let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = ctx.device().create_sampler(&wgpu::SamplerDescriptor {
             label: self.name.as_deref(),
             address_mode_u: wrapping_mode_to_address_mode(self.wrap_s),
             address_mode_v: wrapping_mode_to_address_mode(self.wrap_t),
@@ -317,7 +317,7 @@ impl Texture {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &crate::Context,
+        ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<(wgpu::TextureView, wgpu::Sampler)> {
         let sampler = self.sampler;
@@ -343,7 +343,7 @@ impl Texture {
         Ok((
             source.clone(),
             sampler.clone().unwrap_or_else(|| {
-                ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+                ctx.device().create_sampler(&wgpu::SamplerDescriptor {
                     label: Some("Default glTF texture sampler"),
                     ..Default::default()
                 })

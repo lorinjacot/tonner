@@ -15,11 +15,10 @@ mod asset {
     pub mod material;
     pub mod mesh;
 }
-pub mod gltf;
 pub mod math;
 pub mod render_target;
 mod scene;
-mod texture;
+pub mod texture;
 
 /// Contains everything long-lived and shared by the engine.
 /// This is the first thing you need when using storm.

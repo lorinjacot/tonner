@@ -3,12 +3,9 @@ use std::fmt::Display;
 use anyhow::{Context, Result};
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
+use storm::animation;
 
-use crate::{
-    animation::AnimationBuilder,
-    gltf::{Accessor, Buffer, BufferView, Node, accessor::IteratorConsumer},
-    scene::animation,
-};
+use crate::{Accessor, Buffer, BufferView, Node, accessor::IteratorConsumer};
 
 /// A keyframe animation.
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,7 +34,7 @@ impl Animation {
         accessors: &[Accessor],
         buffer_views: &[BufferView],
         buffers: &[Buffer],
-        scene: &mut crate::Scene,
+        scene: &mut storm::Scene,
     ) -> Result<()> {
         let mut node_morph_targets_count_channel = Vec::new();
         for (channel_idx, channel) in self.channels.iter().enumerate() {
@@ -195,7 +192,7 @@ impl Animation {
             });
         }
 
-        AnimationBuilder::default()
+        animation::AnimationBuilder::default()
             .name(self.name.clone().unwrap_or_default())
             .channels(channels)
             .build(scene);

@@ -233,11 +233,11 @@ pub(super) enum SimulateAnimationError {
     InvalidNode(NodeId),
 }
 
-pub(crate) struct Channel {
-    pub(crate) node: NodeId,
-    pub(crate) inputs: Vec<f32>,
-    pub(crate) interpolation: Interpolation,
-    pub(crate) outputs: Outputs,
+pub struct Channel {
+    pub node: NodeId,
+    pub inputs: Vec<f32>,
+    pub interpolation: Interpolation,
+    pub outputs: Outputs,
 }
 
 #[derive(Debug, Clone, Copy)]

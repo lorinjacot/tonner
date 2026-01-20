@@ -114,7 +114,7 @@ impl Material {
         &self.0.normal_texture.sampler
     }
 
-    pub(crate) fn normal_tex_coord(&self) -> Option<u32> {
+    pub fn normal_tex_coord(&self) -> Option<u32> {
         if self.has_normal_texture() {
             Some(self.0.uniform.normal_tex_coord)
         } else {

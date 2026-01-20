@@ -15,8 +15,8 @@ use glam::{
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::gltf::transforms::{is_0, is_false};
-use crate::gltf::{Buffer, BufferView};
+use crate::transforms::{is_0, is_false};
+use crate::{Buffer, BufferView};
 
 /// A typed view into a buffer view that contains raw binary data.
 #[derive(Debug, Serialize, Deserialize)]

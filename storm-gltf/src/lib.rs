@@ -79,7 +79,7 @@ pub enum GlbError {
 pub struct GltfAsset {
     base_path: PathBuf,
     json: Gltf,
-    default_material: Option<crate::material::Material>,
+    default_material: Option<storm::material::Material>,
 }
 
 impl GltfAsset {
@@ -165,9 +165,9 @@ impl GltfAsset {
 
     pub fn load_meshes(
         &mut self,
-        ctx: &crate::Context,
+        ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Vec<crate::mesh::Mesh>> {
+    ) -> anyhow::Result<Vec<storm::mesh::Mesh>> {
         let mut meshes = Vec::with_capacity(self.json.meshes.len());
 
         for mesh in self.json.meshes.iter_mut() {

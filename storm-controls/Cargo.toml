@@ -11,6 +11,6 @@ log.workspace = true
 storm.workspace = true
 
 [features]
-default = ["egui", "orbit"]
+default = ["orbit"]
 orbit = []
 egui = ["dep:egui"]

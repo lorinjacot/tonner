@@ -290,34 +290,15 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-            // ui.heading("eframe template");
-
-            // ui.horizontal(|ui| {
-            //     ui.label("Write something: ");
-            //     ui.text_edit_singleline(&mut self.state.label);
-            // });
-
-            // ui.add(egui::Slider::new(&mut self.state.value, 0.0..=10.0).text("value"));
-            // if ui.button("Increment").clicked() {
-            //     self.state.value += 1.0;
-            // }
-
-            // ui.separator();
-
-            // ui.add(egui::github_link_file!(
-            //     "https://github.com/emilk/eframe_template/blob/main/",
-            //     "Source code."
-            // ));
-
             self.current_scene_view
                 .render(ui, &self.storm_ctx, &mut encoder);
 
-            // ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            //     powered_by_egui_and_eframe(ui);
-            //     egui::warn_if_debug_build(ui);
-            // });
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                egui::warn_if_debug_build(ui);
+            });
         });
+
+        self.current_scene_view.update(duration);
 
         if let Some(mut scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {
             let camera = CameraBuilder::default().build(&mut scene);
@@ -339,20 +320,6 @@ impl eframe::App for App {
         self.storm_ctx.queue().submit([encoder.finish()]);
         ctx.request_repaint();
     }
-}
-
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to(
-            "eframe",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
-        ui.label(".");
-    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]

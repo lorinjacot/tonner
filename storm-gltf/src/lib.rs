@@ -8,6 +8,7 @@ use std::{
     io::{BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
+use storm::SceneBuilder;
 use thiserror::Error;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
@@ -187,6 +188,31 @@ impl GltfAsset {
         }
 
         Ok(meshes)
+    }
+
+    pub fn create_scenes(&mut self, ctx: &storm::Context) -> anyhow::Result<Vec<storm::Scene>> {
+        let mut scenes: Vec<storm::Scene> = self
+            .json
+            .scenes
+            .iter()
+            .map(|scene| {
+                SceneBuilder::default()
+                    .name(scene.name().clone().unwrap_or(String::new()))
+                    .build(ctx)
+            })
+            .collect();
+
+        let mut encoder = ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("GltfAsset::create_scenes command encoder"),
+            });
+        for (scene_index, scene) in scenes.iter_mut().enumerate() {
+            self.load_scene_into(scene_index, &mut encoder, scene, None)?;
+        }
+        ctx.queue().submit([encoder.finish()]);
+
+        Ok(scenes)
     }
 
     pub fn default_scene(&self) -> Option<usize> {

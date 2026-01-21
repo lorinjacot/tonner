@@ -124,7 +124,7 @@ impl App {
                 meshes.sort_by(|a, b| a.name().cmp(&b.name()));
                 drop(meshes);
 
-                // let scenes = asset.create_all_scenes(&mut self.engine);
+                let _scenes = asset.create_scenes(&ctx).unwrap();
 
                 ctx.queue().submit([encoder.finish()]);
             }

@@ -1,11 +1,13 @@
 use std::{
+    f32::consts::PI,
     sync::{Arc, RwLock, atomic::AtomicBool},
     time::Duration,
 };
 
 use egui::containers::menu::SubMenuButton;
+use glam::Quat;
 pub use scene_view::SceneView;
-use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder};
+use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder, scene_graph::NodeBuilder};
 use storm_gltf::GltfAsset;
 
 use crate::{mesh_explorer::MeshExplorer, new_scene::NewSceneModal};
@@ -44,6 +46,7 @@ impl Default for State {
 
 pub struct App {
     state: State,
+    renderer: Arc<egui::mutex::RwLock<eframe::egui_wgpu::Renderer>>,
     storm_ctx: Context,
     mesh_explorer: MeshExplorer,
     scenes: Arc<RwLock<Vec<Arc<RwLock<Scene>>>>>,
@@ -95,6 +98,7 @@ impl App {
 
         Self {
             state,
+            renderer: wgpu_state.renderer.clone(),
             storm_ctx,
             mesh_explorer,
             scenes,
@@ -254,7 +258,27 @@ impl eframe::App for App {
                                 )
                                 .clicked()
                             {
+                                let mut scene_mut = scene.write().unwrap();
+                                let camera = CameraBuilder::default()
+                                    .node(
+                                        NodeBuilder::default()
+                                            .local_translation([0.0, 0.0, -5.0])
+                                            .local_rotation(Quat::from_rotation_y(PI))
+                                            .build(&mut scene_mut.scene_graph)
+                                            .unwrap(),
+                                    )
+                                    .build(&mut scene_mut);
+                                drop(scene_mut);
+
                                 self.current_scene = scene.clone();
+                                self.current_scene_view = SceneView::new(
+                                    scene.clone(),
+                                    camera,
+                                    300,
+                                    300,
+                                    self.renderer.clone(),
+                                    &self.storm_ctx,
+                                );
                             };
                         });
                     });
@@ -267,32 +291,32 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            // ui.heading("eframe template");
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.state.label);
-            });
+            // ui.horizontal(|ui| {
+            //     ui.label("Write something: ");
+            //     ui.text_edit_singleline(&mut self.state.label);
+            // });
 
-            ui.add(egui::Slider::new(&mut self.state.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.state.value += 1.0;
-            }
+            // ui.add(egui::Slider::new(&mut self.state.value, 0.0..=10.0).text("value"));
+            // if ui.button("Increment").clicked() {
+            //     self.state.value += 1.0;
+            // }
 
-            ui.separator();
+            // ui.separator();
 
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
+            // ui.add(egui::github_link_file!(
+            //     "https://github.com/emilk/eframe_template/blob/main/",
+            //     "Source code."
+            // ));
 
             self.current_scene_view
                 .render(ui, &self.storm_ctx, &mut encoder);
 
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
-                egui::warn_if_debug_build(ui);
-            });
+            // ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            //     powered_by_egui_and_eframe(ui);
+            //     egui::warn_if_debug_build(ui);
+            // });
         });
 
         if let Some(mut scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {

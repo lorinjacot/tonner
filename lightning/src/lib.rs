@@ -46,9 +46,9 @@ pub struct App {
     state: State,
     storm_ctx: Context,
     mesh_explorer: MeshExplorer,
-    scenes: Vec<Arc<RwLock<Scene>>>,
-    main_scene: Arc<RwLock<Scene>>,
-    main_scene_view: SceneView,
+    scenes: Arc<RwLock<Vec<Arc<RwLock<Scene>>>>>,
+    current_scene: Arc<RwLock<Scene>>,
+    current_scene_view: SceneView,
     new_scene_modal: NewSceneModal,
 }
 
@@ -69,18 +69,22 @@ impl App {
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         let storm_ctx = Context::from_device(wgpu_state.device.clone(), wgpu_state.queue.clone());
 
-        let mut scene = SceneBuilder::default().build(&storm_ctx);
+        let mut scene = SceneBuilder::default()
+            .name("Default scene")
+            .build(&storm_ctx);
         let camera = CameraBuilder::default().build(&mut scene);
 
-        let scene = Arc::new(RwLock::new(scene));
-        let main_scene_view = SceneView::new(
-            scene.clone(),
+        let current_scene = Arc::new(RwLock::new(scene));
+        let current_scene_view = SceneView::new(
+            current_scene.clone(),
             camera,
             300,
             300,
             wgpu_state.renderer.clone(),
             &storm_ctx,
         );
+
+        let scenes = Arc::new(RwLock::new(vec![current_scene.clone()]));
 
         let mesh_explorer = MeshExplorer::new(
             storm_ctx.clone(),
@@ -93,9 +97,9 @@ impl App {
             state,
             storm_ctx,
             mesh_explorer,
-            scenes: vec![scene.clone()],
-            main_scene: scene,
-            main_scene_view,
+            scenes,
+            current_scene,
+            current_scene_view,
             new_scene_modal: NewSceneModal::default(),
         }
     }
@@ -103,6 +107,7 @@ impl App {
     fn open_file(&mut self) {
         let ctx = self.storm_ctx.clone();
         let meshes = Arc::clone(self.mesh_explorer.meshes());
+        let scenes = Arc::clone(&self.scenes);
         run(async move {
             if let Some(path) = rfd::AsyncFileDialog::new()
                 .add_filter("glTF", &["gltf", "glb"])
@@ -124,7 +129,12 @@ impl App {
                 meshes.sort_by(|a, b| a.name().cmp(&b.name()));
                 drop(meshes);
 
-                let _scenes = asset.create_scenes(&ctx).unwrap();
+                let new_scenes = asset.create_scenes(&ctx).unwrap();
+                scenes.write().unwrap().extend(
+                    new_scenes
+                        .into_iter()
+                        .map(|scene| Arc::new(RwLock::new(scene))),
+                );
 
                 ctx.queue().submit([encoder.finish()]);
             }
@@ -162,7 +172,7 @@ impl eframe::App for App {
             }
         });
 
-        self.main_scene
+        self.current_scene
             .write()
             .unwrap()
             .simulate(duration, &mut encoder)
@@ -231,6 +241,24 @@ impl eframe::App for App {
                     }
                 });
 
+                ui.label("Current scene:");
+                let current_scene_name = self.current_scene.read().unwrap().name.clone();
+                egui::ComboBox::from_id_salt("current scene ComboBox")
+                    .selected_text(current_scene_name)
+                    .show_ui(ui, |ui| {
+                        self.scenes.read().unwrap().iter().for_each(|scene| {
+                            if ui
+                                .selectable_label(
+                                    Arc::ptr_eq(&self.current_scene, scene),
+                                    &scene.read().unwrap().name,
+                                )
+                                .clicked()
+                            {
+                                self.current_scene = scene.clone();
+                            };
+                        });
+                    });
+
                 ui.add_space(16.0);
 
                 egui::widgets::global_theme_preference_buttons(ui);
@@ -258,7 +286,7 @@ impl eframe::App for App {
                 "Source code."
             ));
 
-            self.main_scene_view
+            self.current_scene_view
                 .render(ui, &self.storm_ctx, &mut encoder);
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -270,8 +298,8 @@ impl eframe::App for App {
         if let Some(mut scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {
             let camera = CameraBuilder::default().build(&mut scene);
             let scene = Arc::new(RwLock::new(scene));
-            self.scenes.push(scene.clone());
-            self.main_scene_view = SceneView::new(
+            self.scenes.write().unwrap().push(scene.clone());
+            self.current_scene_view = SceneView::new(
                 scene.clone(),
                 camera,
                 300,
@@ -279,7 +307,7 @@ impl eframe::App for App {
                 frame.wgpu_render_state().unwrap().renderer.clone(),
                 &self.storm_ctx,
             );
-            self.main_scene = scene;
+            self.current_scene = scene;
         }
 
         self.mesh_explorer.ui(ctx);

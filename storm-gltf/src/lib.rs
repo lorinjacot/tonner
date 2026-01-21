@@ -8,7 +8,7 @@ use std::{
     io::{BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
-use storm::SceneBuilder;
+use storm::{SceneBuilder, environment::Environment};
 use thiserror::Error;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
@@ -190,15 +190,22 @@ impl GltfAsset {
         Ok(meshes)
     }
 
-    pub fn create_scenes(&mut self, ctx: &storm::Context) -> anyhow::Result<Vec<storm::Scene>> {
+    pub fn create_scenes(
+        &mut self,
+        default_environment: Option<&Environment>,
+        ctx: &storm::Context,
+    ) -> anyhow::Result<Vec<storm::Scene>> {
         let mut scenes: Vec<storm::Scene> = self
             .json
             .scenes
             .iter()
             .map(|scene| {
-                SceneBuilder::default()
-                    .name(scene.name().clone().unwrap_or(String::new()))
-                    .build(ctx)
+                let mut builder =
+                    SceneBuilder::default().name(scene.name().clone().unwrap_or(String::new()));
+                if let Some(environment) = default_environment {
+                    builder = builder.environment(environment.clone())
+                }
+                builder.build(ctx)
             })
             .collect();
 

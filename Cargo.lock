@@ -2175,6 +2175,7 @@ dependencies = [
  "egui",
  "env_logger",
  "glam 0.30.8",
+ "image",
  "log",
  "pollster",
  "rfd",

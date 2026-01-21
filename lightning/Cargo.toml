@@ -8,6 +8,7 @@ dashmap.workspace = true
 eframe.workspace = true
 egui.workspace = true
 glam.workspace = true
+image.workspace = true
 log.workspace = true
 rfd.workspace = true
 serde.workspace = true

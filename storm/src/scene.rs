@@ -312,6 +312,7 @@ impl Scene {
 #[derive(Default)]
 pub struct SceneBuilder {
     name: String,
+    environment: Option<Environment>,
 }
 
 impl SceneBuilder {
@@ -320,6 +321,11 @@ impl SceneBuilder {
             name: name.into(),
             ..self
         }
+    }
+
+    pub fn environment(mut self, environment: impl Into<Environment>) -> Self {
+        self.environment = Some(environment.into());
+        self
     }
 
     pub fn build(self, ctx: &Context) -> Scene {
@@ -335,7 +341,9 @@ impl SceneBuilder {
         let animation_manager = AnimationManager::new();
         let light_manager = LightManager::new(&ctx.device);
 
-        let environment = EnvironmentBuilder::default().build(ctx, &mut encoder);
+        let environment = self
+            .environment
+            .unwrap_or_else(|| EnvironmentBuilder::default().build(ctx, &mut encoder));
 
         let render_bind_group_layout = ctx.scene_ctx.render_bind_group_layout.clone();
 

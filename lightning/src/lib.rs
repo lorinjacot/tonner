@@ -6,8 +6,14 @@ use std::{
 
 use egui::containers::menu::SubMenuButton;
 use glam::Quat;
+use image::{DynamicImage, codecs::hdr::HdrDecoder};
 pub use scene_view::SceneView;
-use storm::{Context, Scene, SceneBuilder, camera::CameraBuilder, scene_graph::NodeBuilder};
+use storm::{
+    Context, Scene, SceneBuilder,
+    camera::CameraBuilder,
+    environment::{Environment, EnvironmentBuilder},
+    scene_graph::NodeBuilder,
+};
 use storm_gltf::GltfAsset;
 
 use crate::{mesh_explorer::MeshExplorer, new_scene::NewSceneModal};
@@ -49,6 +55,7 @@ pub struct App {
     renderer: Arc<egui::mutex::RwLock<eframe::egui_wgpu::Renderer>>,
     storm_ctx: Context,
     mesh_explorer: MeshExplorer,
+    default_environment: Arc<Environment>,
     scenes: Arc<RwLock<Vec<Arc<RwLock<Scene>>>>>,
     current_scene: Arc<RwLock<Scene>>,
     current_scene_view: SceneView,
@@ -71,6 +78,24 @@ impl App {
 
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         let storm_ctx = Context::from_device(wgpu_state.device.clone(), wgpu_state.queue.clone());
+
+        let mut encoder =
+            storm_ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::new command encoder"),
+                });
+        let radiance_image = include_bytes!("../../assets/newport_loft.hdr");
+        let radiance_image = std::io::Cursor::new(radiance_image);
+        let radiance_image = HdrDecoder::new(radiance_image).unwrap();
+        let radiance_image = DynamicImage::from_decoder(radiance_image).unwrap();
+        let default_environment = Arc::new(
+            EnvironmentBuilder::default()
+                .name("Default environment")
+                .equirectangular_map(radiance_image)
+                .build(&storm_ctx, &mut encoder),
+        );
+        storm_ctx.queue().submit([encoder.finish()]);
 
         let mut scene = SceneBuilder::default()
             .name("Default scene")
@@ -101,6 +126,7 @@ impl App {
             renderer: wgpu_state.renderer.clone(),
             storm_ctx,
             mesh_explorer,
+            default_environment,
             scenes,
             current_scene,
             current_scene_view,
@@ -112,6 +138,7 @@ impl App {
         let ctx = self.storm_ctx.clone();
         let meshes = Arc::clone(self.mesh_explorer.meshes());
         let scenes = Arc::clone(&self.scenes);
+        let default_environment = self.default_environment.clone();
         run(async move {
             if let Some(path) = rfd::AsyncFileDialog::new()
                 .add_filter("glTF", &["gltf", "glb"])
@@ -133,7 +160,9 @@ impl App {
                 meshes.sort_by(|a, b| a.name().cmp(&b.name()));
                 drop(meshes);
 
-                let new_scenes = asset.create_scenes(&ctx).unwrap();
+                let new_scenes = asset
+                    .create_scenes(Some(&default_environment), &ctx)
+                    .unwrap();
                 scenes.write().unwrap().extend(
                     new_scenes
                         .into_iter()

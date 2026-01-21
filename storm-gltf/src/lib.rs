@@ -208,7 +208,7 @@ impl GltfAsset {
                 label: Some("GltfAsset::create_scenes command encoder"),
             });
         for (scene_index, scene) in scenes.iter_mut().enumerate() {
-            self.load_scene_into(scene_index, &mut encoder, scene, None)?;
+            self.load_scene_into(scene_index, None, scene, ctx, &mut encoder)?;
         }
         ctx.queue().submit([encoder.finish()]);
 

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
@@ -5,6 +7,8 @@ use storm::{
     mesh_instance::MeshInstanceBuilder,
     scene_graph::{NodeBuilder, SceneGraph},
 };
+
+use crate::Mesh;
 
 /// A node in the node hierarchy. When the node contains [skin](Node::skin),
 /// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
@@ -134,6 +138,79 @@ impl Node {
 
         Ok(id)
     }
+
+    fn load_mesh(
+        index: usize,
+        nodes: &[Node],
+        meshes: &mut [Mesh],
+        base_path: &Path,
+        accessors: &[super::Accessor],
+        materials: &mut [super::Material],
+        default_material: &mut Option<storm::material::Material>,
+        textures: &mut [super::Texture],
+        samplers: &mut [super::Sampler],
+        images: &mut [super::Image],
+        buffer_views: &[super::BufferView],
+        buffers: &[super::Buffer],
+        ctx: &storm::Context,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &mut storm::Scene,
+    ) -> Result<()> {
+        let node = &nodes[index];
+        let node_ctx = || format!("failed to load node {index}.");
+
+        if let Some(mesh_index) = node.mesh {
+            let gltf_mesh = meshes
+                .get_mut(mesh_index)
+                .with_context(|| format!("node.mesh {mesh_index} is out of range."))
+                .with_context(node_ctx)?;
+            let storm_mesh = gltf_mesh
+                .load(
+                    base_path,
+                    accessors,
+                    materials,
+                    default_material,
+                    textures,
+                    samplers,
+                    images,
+                    buffer_views,
+                    buffers,
+                    ctx,
+                    encoder,
+                )
+                .with_context(|| format!("Failed to load mesh {mesh_index}."))
+                .with_context(node_ctx)?;
+            let mut builder = MeshInstanceBuilder::new(storm_mesh).node(node.id.unwrap());
+            if let Some(weights) = &node.weights {
+                builder = builder.weights(weights.clone());
+            } else if let Some(weights) = gltf_mesh.weights() {
+                builder = builder.weights(weights.clone());
+            }
+            builder.build(scene).unwrap();
+        }
+
+        for &child_index in node.children.iter() {
+            Self::load_mesh(
+                child_index,
+                nodes,
+                meshes,
+                base_path,
+                accessors,
+                materials,
+                default_material,
+                textures,
+                samplers,
+                images,
+                buffer_views,
+                buffers,
+                ctx,
+                encoder,
+                scene,
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 /// The root nodes of a scene.
@@ -198,9 +275,10 @@ impl super::GltfAsset {
     pub fn load_scene_into(
         &mut self,
         scene_index: usize,
-        _encoder: &mut wgpu::CommandEncoder,
-        scene: &mut storm::Scene,
         base_node: Option<storm::scene_graph::NodeId>,
+        scene: &mut storm::Scene,
+        ctx: &storm::Context,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> Result<Vec<storm::scene_graph::NodeId>> {
         let root_nodes_idx = self
             .json
@@ -213,7 +291,7 @@ impl super::GltfAsset {
         let scene_ctx = || format!("Failed to load scene {scene_index}.");
 
         let mut root_nodes_ids = Vec::with_capacity(root_nodes_idx.len());
-        for node_index in root_nodes_idx {
+        for &node_index in root_nodes_idx.iter() {
             root_nodes_ids.push(
                 Node::load(
                     node_index,
@@ -223,6 +301,27 @@ impl super::GltfAsset {
                 )
                 .with_context(scene_ctx)?,
             );
+        }
+
+        for node_index in root_nodes_idx {
+            Node::load_mesh(
+                node_index,
+                &self.json.nodes,
+                &mut self.json.meshes,
+                &self.base_path,
+                &self.json.accessors,
+                &mut self.json.materials,
+                &mut self.default_material,
+                &mut self.json.textures,
+                &mut self.json.samplers,
+                &mut self.json.images,
+                &self.json.buffer_views,
+                &self.json.buffers,
+                ctx,
+                encoder,
+                scene,
+            )
+            .with_context(scene_ctx)?;
         }
 
         // let mut data = Vec::with_capacity(self.json.skins.len());

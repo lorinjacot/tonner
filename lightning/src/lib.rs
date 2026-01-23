@@ -291,8 +291,7 @@ impl eframe::App for App {
                                 let camera = CameraBuilder::default()
                                     .node(
                                         NodeBuilder::default()
-                                            .local_translation([0.0, 0.0, -5.0])
-                                            .local_rotation(Quat::from_rotation_y(PI))
+                                            .local_translation([0.0, 0.0, 2.0])
                                             .build(&mut scene_mut.scene_graph)
                                             .unwrap(),
                                     )

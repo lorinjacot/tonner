@@ -154,7 +154,7 @@ impl MeshInstanceManager {
                     mesh_instance.node,
                 ))?
                 .global_transformation();
-            let pipeline_index = model_matrix.determinant().is_sign_positive() as usize;
+            let pipeline_index = model_matrix.determinant().is_sign_negative() as usize;
             let joint_offset = match mesh_instance.skin {
                 Some(skin) => skin_manager
                     .index(skin)

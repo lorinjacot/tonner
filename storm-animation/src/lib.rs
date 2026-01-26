@@ -11,11 +11,16 @@ pub struct AnimationManager {
 }
 
 impl AnimationManager {
+    /// This function advance all running animations by `delta_time`. An animation
+    /// can modify any field of `animatable`. This function should be called once per
+    /// frame.
     pub fn update(
         &mut self,
         delta_time: Duration,
         animatable: &mut Animatable,
-    ) -> Result<(), (AnimationId, AnimationError)> {
+    ) -> Result<(), Vec<(AnimationId, AnimationError)>> {
+        let mut errors = Vec::new();
+        let mut animations_to_stop = Vec::new();
         for (&id, animation) in &mut self.running_animations {
             animation.progress += delta_time;
             if animation.progress >= animation.duration {
@@ -25,31 +30,63 @@ impl AnimationManager {
                         animation.progress -= animation.duration;
                     }
                 } else {
-                    todo!("stop animation");
+                    animation.progress = Duration::ZERO;
+                    animations_to_stop.push(id);
+                    continue;
                 }
             }
             for channel in &mut animation.channel {
-                channel
-                    .update(animation.progress, animation.duration, animatable)
-                    .map_err(|error| (id, error))?;
+                if let Err(error) =
+                    channel.update(animation.progress, animation.duration, animatable)
+                {
+                    errors.push((id, error));
+                }
             }
         }
-        Ok(())
+        animations_to_stop.into_iter().for_each(|id| {
+            self.stopped_animations
+                .insert(id, self.running_animations.remove(&id).unwrap());
+        });
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
+    /// Stops the animation if currently running.
+    /// Does nothing if the animation exists but is not running.
+    /// Returns `Err` if the animation does not exist.
+    pub fn stop_animation(&mut self, id: AnimationId) -> Result<(), ()> {
+        match self.running_animations.remove(&id) {
+            Some(mut animation) => {
+                animation.progress = Duration::ZERO;
+                self.stopped_animations.insert(id, animation);
+                Ok(())
+            }
+            None if self.stopped_animations.contains_key(&id) => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    /// All currently running animations.
     pub fn running_animations(&self) -> impl Iterator<Item = (&AnimationId, &Animation)> {
         self.running_animations.iter()
     }
 
+    /// All currently running animations as mutable references.
     pub fn running_animations_mut(
         &mut self,
     ) -> impl Iterator<Item = (&AnimationId, &mut Animation)> {
         self.running_animations.iter_mut()
     }
+
+    /// All currently stopped animations.
     pub fn stopped_animations(&self) -> impl Iterator<Item = (&AnimationId, &Animation)> {
         self.stopped_animations.iter()
     }
 
+    /// All currently stopped running animations as mutable references.
     pub fn stopped_animations_mut(
         &mut self,
     ) -> impl Iterator<Item = (&AnimationId, &mut Animation)> {

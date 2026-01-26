@@ -3620,6 +3620,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "storm-animation"
+version = "0.1.0"
+dependencies = [
+ "storm",
+ "thiserror 2.0.17",
+ "uuid",
+]
+
+[[package]]
 name = "storm-controls"
 version = "0.1.0"
 dependencies = [

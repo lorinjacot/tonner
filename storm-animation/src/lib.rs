@@ -1,4 +1,7 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    time::Duration,
+};
 
 use storm::scene_graph::{NodeNotFoundError, SceneGraph};
 use thiserror::Error;
@@ -54,10 +57,59 @@ impl AnimationManager {
         }
     }
 
-    /// Stops the animation if currently running.
-    /// Does nothing if the animation exists but is not running.
+    /// Starts the animation if not currently running.
+    /// Does nothing and returns `Ok` if the animation is already running.
     /// Returns `Err` if the animation does not exist.
-    pub fn stop_animation(&mut self, id: AnimationId) -> Result<(), ()> {
+    pub fn start(&mut self, id: AnimationId) -> Result<(), ()> {
+        match self.stopped_animations.remove(&id) {
+            Some(animation) => {
+                self.running_animations.insert(id, animation);
+                Ok(())
+            }
+            None if self.running_animations.contains_key(&id) => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    /// Start the animation from the beginning and returns `Ok`. It does not
+    /// matter if the animation is already running or not.
+    /// Returns `Err` if the animation does not exist.
+    pub fn restart(&mut self, id: AnimationId) -> Result<(), ()> {
+        match self.running_animations.entry(id) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().progress = Duration::ZERO;
+                Ok(())
+            }
+            Entry::Vacant(entry) => match self.stopped_animations.remove(&id) {
+                Some(mut animation) => {
+                    animation.progress = Duration::ZERO;
+                    entry.insert(animation);
+                    Ok(())
+                }
+                None => Err(()),
+            },
+        }
+    }
+
+    /// Stops the animation if currently running while leaving [`Animation::progress`] unchanged
+    /// if it is running.
+    /// Does nothing and returns `Ok` if the animation is already stopped.
+    /// Returns `Err` if the animation does not exist.
+    pub fn pause(&mut self, id: AnimationId) -> Result<(), ()> {
+        match self.running_animations.remove(&id) {
+            Some(animation) => {
+                self.stopped_animations.insert(id, animation);
+                Ok(())
+            }
+            None if self.stopped_animations.contains_key(&id) => Ok(()),
+            _ => Err(()),
+        }
+    }
+
+    /// Stops the animation if currently running and sets [`Animation::progress`] to `Duration::ZERO`.
+    /// Does nothing and returns `Ok` if the animation exists but is not running.
+    /// Returns `Err` if the animation does not exist.
+    pub fn stop(&mut self, id: AnimationId) -> Result<(), ()> {
         match self.running_animations.remove(&id) {
             Some(mut animation) => {
                 animation.progress = Duration::ZERO;
@@ -67,6 +119,39 @@ impl AnimationManager {
             None if self.stopped_animations.contains_key(&id) => Ok(()),
             _ => Err(()),
         }
+    }
+
+    /// Returns `true` if the animation exists, `false` otherwise.
+    pub fn contains(&self, id: AnimationId) -> bool {
+        self.running_animations.contains_key(&id) || self.stopped_animations.contains_key(&id)
+    }
+
+    /// Returns a reference to the animation or `None` if it does not exist.
+    pub fn get(&self, id: AnimationId) -> Option<&Animation> {
+        self.running_animations
+            .get(&id)
+            .or_else(|| self.stopped_animations.get(&id))
+    }
+
+    /// Returns a mutable reference to the animation or `None` if it does not exist.
+    pub fn get_mut(&mut self, id: AnimationId) -> Option<&mut Animation> {
+        self.running_animations
+            .get_mut(&id)
+            .or_else(|| self.stopped_animations.get_mut(&id))
+    }
+
+    /// Returns an iterator over both running and stopped animations.
+    pub fn iter(&self) -> impl Iterator<Item = (&AnimationId, &Animation)> {
+        self.running_animations
+            .iter()
+            .chain(self.stopped_animations.iter())
+    }
+
+    /// Returns an iterator over mutable references of both running and stopped animations.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AnimationId, &mut Animation)> {
+        self.running_animations
+            .iter_mut()
+            .chain(self.stopped_animations.iter_mut())
     }
 
     /// All currently running animations.

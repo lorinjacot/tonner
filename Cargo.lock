@@ -3654,6 +3654,7 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "storm",
+ "storm-animation",
  "thiserror 2.0.17",
  "wgpu",
 ]

@@ -1,9 +1,12 @@
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 
 use anyhow::{Context, Result};
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
-use storm::animation;
+use storm_animation::{
+    AnimationManager,
+    key_frame::{Interpolation, KeyFrameChannel, Outputs},
+};
 
 use crate::{Accessor, Buffer, BufferView, Node, accessor::IteratorConsumer};
 
@@ -34,7 +37,7 @@ impl Animation {
         accessors: &[Accessor],
         buffer_views: &[BufferView],
         buffers: &[Buffer],
-        scene: &mut storm::Scene,
+        animation_manager: &mut AnimationManager,
     ) -> Result<()> {
         let mut node_morph_targets_count_channel = Vec::new();
         for (channel_idx, channel) in self.channels.iter().enumerate() {
@@ -64,7 +67,9 @@ impl Animation {
             return Ok(());
         }
 
-        let mut channels = Vec::with_capacity(node_morph_targets_count_channel.len());
+        let mut duration = 0.0;
+        let mut channels: Vec<Box<dyn storm_animation::AnimationChannel>> =
+            Vec::with_capacity(node_morph_targets_count_channel.len());
         for (node, morph_targets_count, channel, channel_ctx) in node_morph_targets_count_channel {
             let sampler = self
                 .samplers
@@ -101,10 +106,16 @@ impl Animation {
                     .with_context(channel_ctx)?
             };
 
+            if let Some(&channel_duration) = inputs.last() {
+                if channel_duration > duration {
+                    duration = channel_duration;
+                }
+            }
+
             let interpolation = match sampler.interpolation {
-                AnimationInterpolation::Step => animation::Interpolation::Step,
-                AnimationInterpolation::Linear => animation::Interpolation::Linear,
-                AnimationInterpolation::Cubicspline => animation::Interpolation::CubicSpline,
+                AnimationInterpolation::Step => Interpolation::Step,
+                AnimationInterpolation::Linear => Interpolation::Linear,
+                AnimationInterpolation::Cubicspline => Interpolation::CubicSpline,
             };
 
             let outputs = {
@@ -152,28 +163,28 @@ impl Animation {
                 }
 
                 match channel.target.path {
-                    AnimationTargetPath::Translation => animation::Outputs::Translations(
+                    AnimationTargetPath::Translation => Outputs::Translations(
                         accessor
                             .iter_vec3(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
                     ),
-                    AnimationTargetPath::Rotation => animation::Outputs::Rotations(
+                    AnimationTargetPath::Rotation => Outputs::Rotations(
                         accessor
                             .iter_vec4(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
                     ),
-                    AnimationTargetPath::Scale => animation::Outputs::Scales(
+                    AnimationTargetPath::Scale => Outputs::Scales(
                         accessor
                             .iter_vec3(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
                     ),
-                    AnimationTargetPath::Weights => animation::Outputs::Weights(
+                    AnimationTargetPath::Weights => Outputs::Weights(
                         accessor
                             .iter_f32(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
@@ -184,18 +195,23 @@ impl Animation {
                 }
             };
 
-            channels.push(animation::Channel {
+            channels.push(Box::new(KeyFrameChannel {
                 node,
                 inputs,
                 interpolation,
                 outputs,
-            });
+            }));
         }
 
-        animation::AnimationBuilder::default()
-            .name(self.name.clone().unwrap_or_default())
-            .channels(channels)
-            .build(scene);
+        let animation = storm_animation::Animation {
+            name: self.name.clone().unwrap_or_default(),
+            channels,
+            repeat: false,
+            progress: Duration::ZERO,
+            duration: Duration::from_secs_f32(duration),
+        };
+
+        animation_manager.insert(animation);
 
         Ok(())
     }

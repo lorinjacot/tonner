@@ -16,6 +16,24 @@ pub struct AnimationManager {
 }
 
 impl AnimationManager {
+    /// Adds `animation` to the manager and returns its id.
+    /// By default, the animation is stopped. To start it,
+    /// use [`AnimationManager::start()`].
+    pub fn insert(&mut self, animation: Animation) -> AnimationId {
+        let id = AnimationId(Uuid::new_v4());
+        self.stopped_animations.insert(id, animation);
+        id
+    }
+
+    /// Remove and returns the animation from the manager. It does
+    /// not if the animation is currently running or not.
+    /// Returns `None` if the animation does not exist.
+    pub fn remove(&mut self, id: AnimationId) -> Option<Animation> {
+        self.stopped_animations
+            .remove(&id)
+            .or_else(|| self.running_animations.remove(&id))
+    }
+
     /// This function advance all running animations by `delta_time`. An animation
     /// can modify any field of `animatable`. This function should be called once per
     /// frame.
@@ -40,7 +58,7 @@ impl AnimationManager {
                     continue;
                 }
             }
-            for channel in &mut animation.channel {
+            for channel in &mut animation.channels {
                 if let Err(error) =
                     channel.update(animation.progress, animation.duration, animatable)
                 {
@@ -188,7 +206,8 @@ pub struct AnimationId(Uuid);
 pub struct Animation {
     /// Name of the animation. Does not need to be unique. Can be used for debugging and displaying.
     pub name: String,
-    pub channel: Vec<Box<dyn AnimationChannel>>,
+    /// The channels contains the actual animation data.
+    pub channels: Vec<Box<dyn AnimationChannel>>,
     /// If `true`, the animation will restart once it has finished.
     pub repeat: bool,
     /// Current progress of the animation. This value can be set to `0` to restart the animation.

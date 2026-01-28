@@ -3623,6 +3623,8 @@ dependencies = [
 name = "storm-animation"
 version = "0.1.0"
 dependencies = [
+ "approx",
+ "glam 0.30.8",
  "storm",
  "thiserror 2.0.17",
  "uuid",

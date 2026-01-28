@@ -7,6 +7,8 @@ use storm::scene_graph::{NodeNotFoundError, SceneGraph};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod key_frame;
+
 #[derive(Default)]
 pub struct AnimationManager {
     running_animations: HashMap<AnimationId, Animation>,

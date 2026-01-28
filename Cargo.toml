@@ -11,6 +11,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+approx = "0.5.1"
 anyhow = "1.0.100"
 bitflags = "2.10.0"
 bytemuck = "1.24.0"

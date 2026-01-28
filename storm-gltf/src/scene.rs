@@ -7,6 +7,7 @@ use storm::{
     mesh_instance::MeshInstanceBuilder,
     scene_graph::{NodeBuilder, SceneGraph},
 };
+use storm_animation::AnimationManager;
 
 use crate::Mesh;
 
@@ -277,6 +278,7 @@ impl super::GltfAsset {
         scene_index: usize,
         base_node: Option<storm::scene_graph::NodeId>,
         scene: &mut storm::Scene,
+        animation_manager: &mut AnimationManager,
         ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<Vec<storm::scene_graph::NodeId>> {

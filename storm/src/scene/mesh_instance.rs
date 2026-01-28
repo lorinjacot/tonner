@@ -117,6 +117,7 @@ pub enum MeshInstanceBuilderError {
     InvalidWeightsCount { expected: usize, actual: usize },
 }
 
+#[derive(Debug)]
 pub(super) struct MeshInstanceManager {
     mesh_instances: HashMap<MeshInstanceId, MeshInstanceData>,
     vertex_buffer: wgpu::Buffer,
@@ -293,6 +294,7 @@ impl MeshInstanceManager {
     }
 }
 
+#[derive(Debug)]
 struct MeshInstanceData {
     id: MeshInstanceId,
     node: NodeId,
@@ -302,6 +304,7 @@ struct MeshInstanceData {
     skin: Option<SkinId>,
 }
 
+#[derive(Debug)]
 struct PrimitiveInstances {
     count: u32,
     data: Vec<PrimitiveInstanceVertex>,
@@ -316,6 +319,7 @@ pub(super) enum UpdateMeshInstanceBufferError {
     InvalidSkin(SkinId),
 }
 
+#[derive(Debug)]
 struct PrimitivesByPipeline(
     HashMap<wgpu::RenderPipeline, HashMap<MeshPrimitiveId, (MeshPrimitive, PrimitiveInstances)>>,
 );

@@ -1,19 +1,18 @@
 use std::{
-    f32::consts::PI,
     sync::{Arc, RwLock, atomic::AtomicBool},
     time::Duration,
 };
 
 use egui::containers::menu::SubMenuButton;
-use glam::Quat;
 use image::{DynamicImage, codecs::hdr::HdrDecoder};
 pub use scene_view::SceneView;
 use storm::{
-    Context, Scene, SceneBuilder,
+    Context, SceneBuilder,
     camera::CameraBuilder,
     environment::{Environment, EnvironmentBuilder},
     scene_graph::NodeBuilder,
 };
+use storm_animation::AnimationManager;
 use storm_gltf::GltfAsset;
 
 use crate::{mesh_explorer::MeshExplorer, new_scene::NewSceneModal};
@@ -48,6 +47,12 @@ impl Default for State {
             detached_mesh_explorer: Arc::new(AtomicBool::new(false)),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct Scene {
+    storm_scene: storm::Scene,
+    animation_manager: AnimationManager,
 }
 
 pub struct App {
@@ -97,12 +102,16 @@ impl App {
         );
         storm_ctx.queue().submit([encoder.finish()]);
 
-        let mut scene = SceneBuilder::default()
+        let mut storm_scene = SceneBuilder::default()
             .name("Default scene")
             .build(&storm_ctx);
-        let camera = CameraBuilder::default().build(&mut scene);
+        let camera = CameraBuilder::default().build(&mut storm_scene);
+        let animation_manager = AnimationManager::default();
 
-        let current_scene = Arc::new(RwLock::new(scene));
+        let current_scene = Arc::new(RwLock::new(Scene {
+            storm_scene,
+            animation_manager,
+        }));
         let current_scene_view = SceneView::new(
             current_scene.clone(),
             camera,
@@ -163,11 +172,14 @@ impl App {
                 let new_scenes = asset
                     .create_scenes(Some(&default_environment), &ctx)
                     .unwrap();
-                scenes.write().unwrap().extend(
-                    new_scenes
-                        .into_iter()
-                        .map(|scene| Arc::new(RwLock::new(scene))),
-                );
+                scenes.write().unwrap().extend(new_scenes.into_iter().map(
+                    |(storm_scene, animation_manager)| {
+                        Arc::new(RwLock::new(Scene {
+                            storm_scene,
+                            animation_manager,
+                        }))
+                    },
+                ));
 
                 ctx.queue().submit([encoder.finish()]);
             }
@@ -208,6 +220,7 @@ impl eframe::App for App {
         self.current_scene
             .write()
             .unwrap()
+            .storm_scene
             .simulate(duration, &mut encoder)
             .unwrap();
 
@@ -275,7 +288,8 @@ impl eframe::App for App {
                 });
 
                 ui.label("Current scene:");
-                let current_scene_name = self.current_scene.read().unwrap().name.clone();
+                let current_scene_name =
+                    self.current_scene.read().unwrap().storm_scene.name.clone();
                 egui::ComboBox::from_id_salt("current scene ComboBox")
                     .selected_text(current_scene_name)
                     .show_ui(ui, |ui| {
@@ -283,7 +297,7 @@ impl eframe::App for App {
                             if ui
                                 .selectable_label(
                                     Arc::ptr_eq(&self.current_scene, scene),
-                                    &scene.read().unwrap().name,
+                                    &scene.read().unwrap().storm_scene.name,
                                 )
                                 .clicked()
                             {
@@ -292,10 +306,10 @@ impl eframe::App for App {
                                     .node(
                                         NodeBuilder::default()
                                             .local_translation([0.0, 0.0, 2.0])
-                                            .build(&mut scene_mut.scene_graph)
+                                            .build(&mut scene_mut.storm_scene.scene_graph)
                                             .unwrap(),
                                     )
-                                    .build(&mut scene_mut);
+                                    .build(&mut scene_mut.storm_scene);
                                 drop(scene_mut);
 
                                 self.current_scene = scene.clone();
@@ -328,9 +342,13 @@ impl eframe::App for App {
 
         self.current_scene_view.update(duration);
 
-        if let Some(mut scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {
-            let camera = CameraBuilder::default().build(&mut scene);
-            let scene = Arc::new(RwLock::new(scene));
+        if let Some(mut storm_scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {
+            let camera = CameraBuilder::default().build(&mut storm_scene);
+            let animation_manager = AnimationManager::default();
+            let scene = Arc::new(RwLock::new(Scene {
+                storm_scene,
+                animation_manager,
+            }));
             self.scenes.write().unwrap().push(scene.clone());
             self.current_scene_view = SceneView::new(
                 scene.clone(),

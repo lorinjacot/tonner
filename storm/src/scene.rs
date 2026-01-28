@@ -31,6 +31,7 @@ pub mod skin;
 ///
 /// To add an object to the scene, attach it to a node. For example, each node can have a mesh. During
 /// rendering, the attached mesh will be rendered at the local space origin.
+#[derive(Debug)]
 pub struct Scene {
     pub name: String,
     pub scene_graph: SceneGraph,

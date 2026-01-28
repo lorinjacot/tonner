@@ -10,11 +10,12 @@ use std::{
 
 use dashmap::DashSet;
 use storm::{
-    Context, Scene, SceneBuilder, camera::CameraBuilder, mesh::Mesh,
-    mesh_instance::MeshInstanceBuilder, scene_graph::NodeBuilder,
+    Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, mesh_instance::MeshInstanceBuilder,
+    scene_graph::NodeBuilder,
 };
+use storm_animation::AnimationManager;
 
-use crate::SceneView;
+use crate::{Scene, SceneView};
 
 #[derive(Clone)]
 pub(super) struct MeshExplorer {
@@ -132,23 +133,28 @@ impl MeshExplorer {
                     egui::Label::new(name.as_str())
                 };
                 if ui.add(label.sense(egui::Sense::click())).double_clicked() {
-                    let mut scene = SceneBuilder::default()
+                    let mut storm_scene = SceneBuilder::default()
                         .name(format!("Preview of {:?}", mesh.id()))
                         .build(&self.ctx);
                     MeshInstanceBuilder::new(mesh.clone())
-                        .build(&mut scene)
+                        .build(&mut storm_scene)
                         .unwrap();
 
                     let camera = CameraBuilder::default()
                         .node(
                             NodeBuilder::default()
                                 .local_translation([0.0, 0.0, 2.0])
-                                .build(&mut scene.scene_graph)
+                                .build(&mut storm_scene.scene_graph)
                                 .unwrap(),
                         )
-                        .build(&mut scene);
+                        .build(&mut storm_scene);
 
-                    let scene = Arc::new(RwLock::new(scene));
+                    let animation_manager = AnimationManager::default();
+
+                    let scene = Arc::new(RwLock::new(Scene {
+                        storm_scene,
+                        animation_manager,
+                    }));
 
                     self.properties_windows.insert(PropertiesWindow {
                         mesh: mesh.clone(),
@@ -181,6 +187,7 @@ impl MeshExplorer {
                 .scene
                 .write()
                 .unwrap()
+                .storm_scene
                 .simulate(duration, &mut encoder)
                 .unwrap();
 

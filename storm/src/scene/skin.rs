@@ -93,6 +93,7 @@ pub enum SkinBuilderError {
 }
 
 /// Manages all skins in a scene.
+#[derive(Debug)]
 pub(super) struct SkinManager {
     skins: HashMap<SkinId, SkinData>,
     buffer: wgpu::Buffer,
@@ -186,6 +187,7 @@ pub enum UpdateSkinBufferError {
     InvalidNode(NodeId),
 }
 
+#[derive(Debug)]
 struct SkinData {
     id: SkinId,
     /// Buffer inddx of the first joint matrix part of the skin,

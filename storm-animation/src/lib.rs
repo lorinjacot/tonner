@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, hash_map::Entry},
-    time::Duration,
+    collections::{HashMap, hash_map::Entry}, fmt::Debug, time::Duration
 };
 
 use storm::scene_graph::{NodeNotFoundError, SceneGraph};
@@ -9,7 +8,7 @@ use uuid::Uuid;
 
 pub mod key_frame;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AnimationManager {
     running_animations: HashMap<AnimationId, Animation>,
     stopped_animations: HashMap<AnimationId, Animation>,
@@ -203,6 +202,7 @@ impl AnimationManager {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnimationId(Uuid);
 
+#[derive(Debug)]
 pub struct Animation {
     /// Name of the animation. Does not need to be unique. Can be used for debugging and displaying.
     pub name: String,
@@ -222,7 +222,7 @@ pub struct Animatable<'a> {
     pub scene_graph: &'a mut SceneGraph,
 }
 
-pub trait AnimationChannel {
+pub trait AnimationChannel: Debug + Send + Sync {
     fn update(
         &mut self,
         progress: Duration,

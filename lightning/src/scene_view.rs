@@ -5,11 +5,13 @@ use std::{
 
 use eframe::egui_wgpu;
 use storm::{
-    Context, Scene,
+    Context,
     camera::Camera,
     render_target::{RenderTarget, RenderTargetBuilder},
 };
 use storm_controls::{EguiControls, orbit::OrbitControls};
+
+use crate::Scene;
 
 pub struct SceneView {
     scene: Arc<RwLock<Scene>>,
@@ -55,7 +57,7 @@ impl SceneView {
 
     pub fn update(&mut self, delta_time: Duration) {
         self.controls.update(
-            &mut self.scene.write().unwrap().scene_graph,
+            &mut self.scene.write().unwrap().storm_scene.scene_graph,
             delta_time,
             self.sized_texture.size.x / self.sized_texture.size.y,
         );
@@ -91,12 +93,16 @@ impl SceneView {
         self.scene
             .read()
             .unwrap()
+            .storm_scene
             .render(&self.render_target, &self.controls.camera, encoder)
             .unwrap();
 
         let response = ui.image(self.sized_texture).interact(egui::Sense::drag());
-        self.controls
-            .handle_response(response, ui, &mut self.scene.write().unwrap().scene_graph);
+        self.controls.handle_response(
+            response,
+            ui,
+            &mut self.scene.write().unwrap().storm_scene.scene_graph,
+        );
     }
 
     fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {

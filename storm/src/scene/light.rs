@@ -92,6 +92,7 @@ pub enum PointLightBuilderError {
 }
 
 /// Manages all point lights
+#[derive(Debug)]
 pub(super) struct LightManager {
     point_lights: HashMap<PointLightId, PointLightData>,
     point_light_buffer: wgpu::Buffer,
@@ -200,6 +201,7 @@ pub(super) enum UpdatePointLightBufferError {
     InvalidNode(NodeId),
 }
 
+#[derive(Debug)]
 struct PointLightData {
     id: PointLightId,
     index: Option<u32>,

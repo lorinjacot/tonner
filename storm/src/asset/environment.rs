@@ -72,7 +72,7 @@ const BRDF_LUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EnvironmentId(Uuid);
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Environment(Arc<EnvironmentData>);
 
 impl Environment {
@@ -467,6 +467,7 @@ impl EnvironmentBuilder {
     }
 }
 
+#[derive(Debug)]
 struct EnvironmentData {
     id: EnvironmentId,
     name: Mutex<String>,

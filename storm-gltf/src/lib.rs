@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use storm::{SceneBuilder, environment::Environment};
+use storm_animation::AnimationManager;
 use thiserror::Error;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
@@ -194,8 +195,8 @@ impl GltfAsset {
         &mut self,
         default_environment: Option<&Environment>,
         ctx: &storm::Context,
-    ) -> anyhow::Result<Vec<storm::Scene>> {
-        let mut scenes: Vec<storm::Scene> = self
+    ) -> anyhow::Result<Vec<(storm::Scene, AnimationManager)>> {
+        let mut scenes: Vec<(storm::Scene, AnimationManager)> = self
             .json
             .scenes
             .iter()
@@ -205,7 +206,9 @@ impl GltfAsset {
                 if let Some(environment) = default_environment {
                     builder = builder.environment(environment.clone())
                 }
-                builder.build(ctx)
+                let scene = builder.build(ctx);
+                let animation_manager = AnimationManager::default();
+                (scene, animation_manager)
             })
             .collect();
 
@@ -214,8 +217,15 @@ impl GltfAsset {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("GltfAsset::create_scenes command encoder"),
             });
-        for (scene_index, scene) in scenes.iter_mut().enumerate() {
-            self.load_scene_into(scene_index, None, scene, ctx, &mut encoder)?;
+        for (scene_index, (scene, animation_manager)) in scenes.iter_mut().enumerate() {
+            self.load_scene_into(
+                scene_index,
+                None,
+                scene,
+                animation_manager,
+                ctx,
+                &mut encoder,
+            )?;
         }
         ctx.queue().submit([encoder.finish()]);
 

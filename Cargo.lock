@@ -2181,6 +2181,7 @@ dependencies = [
  "rfd",
  "serde",
  "storm",
+ "storm-animation",
  "storm-controls",
  "storm-gltf",
  "wasm-bindgen-futures",

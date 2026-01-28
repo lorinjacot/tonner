@@ -11,6 +11,7 @@ use crate::{AnimationChannel, AnimationError};
 /// See https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#animations
 /// and https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-c-interpolation
 /// for more informations.
+#[derive(Debug)]
 pub struct KeyFrameChannel {
     /// The node modified by this channel.
     pub node: NodeId,

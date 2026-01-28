@@ -10,14 +10,10 @@ use crate::{
     camera::Camera,
     environment::{Environment, EnvironmentBuilder},
     render_target::RenderTarget,
-    scene::{
-        animation::AnimationManager, light::LightManager, mesh_instance::MeshInstanceManager,
-        skin::SkinManager,
-    },
+    scene::{light::LightManager, mesh_instance::MeshInstanceManager, skin::SkinManager},
     scene_graph::{NodeId, SceneGraph},
 };
 
-pub mod animation;
 pub mod camera;
 pub mod light;
 pub mod mesh_instance;
@@ -41,7 +37,6 @@ pub struct Scene {
     ctx: Context,
     skin_manager: SkinManager,
     mesh_instance_manager: MeshInstanceManager,
-    animation_manager: AnimationManager,
     light_manager: LightManager,
     environment: Environment,
     render_bind_group_layout: wgpu::BindGroupLayout,
@@ -57,13 +52,9 @@ impl Scene {
 
     pub fn simulate(
         &mut self,
-        duration: Duration,
+        _duration: Duration,
         _encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), SimulateError> {
-        self.animation_manager
-            .simulate(duration, &mut self.scene_graph)
-            .unwrap();
-
         self.light_manager
             .update_point_light_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
             .unwrap();
@@ -338,7 +329,6 @@ impl SceneBuilder {
         let scene_graph = SceneGraph::new(ctx);
         let skin_manager = SkinManager::new(&ctx.device);
         let mesh_instance_manager = MeshInstanceManager::new(&ctx.device);
-        let animation_manager = AnimationManager::new();
         let light_manager = LightManager::new(&ctx.device);
 
         let environment = self
@@ -358,7 +348,6 @@ impl SceneBuilder {
             scene_graph,
             skin_manager,
             mesh_instance_manager,
-            animation_manager,
             light_manager,
             environment,
             render_bind_group_layout,

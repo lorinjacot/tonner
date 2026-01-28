@@ -93,7 +93,7 @@ pub enum PointLightBuilderError {
 
 /// Manages all point lights
 #[derive(Debug)]
-pub(super) struct LightManager {
+pub struct LightManager {
     point_lights: HashMap<PointLightId, PointLightData>,
     point_light_buffer: wgpu::Buffer,
 }

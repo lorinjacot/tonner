@@ -94,7 +94,7 @@ pub enum SkinBuilderError {
 
 /// Manages all skins in a scene.
 #[derive(Debug)]
-pub(super) struct SkinManager {
+pub struct SkinManager {
     skins: HashMap<SkinId, SkinData>,
     buffer: wgpu::Buffer,
 }

@@ -139,12 +139,12 @@ impl RenderTargetBuilder {
 
 #[derive(Debug, Clone)]
 pub(super) struct RenderTargetContext {
-    tone_mapping_shader_module: wgpu::ShaderModule,
-    tone_mapping_bind_group_layout: wgpu::BindGroupLayout,
-    tone_mapping_pipeline_layout: wgpu::PipelineLayout,
+    pub(super) tone_mapping_shader_module: wgpu::ShaderModule,
+    pub(super) tone_mapping_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) tone_mapping_pipeline_layout: wgpu::PipelineLayout,
     pub(super) brightness_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
-    bloom_sampler: wgpu::Sampler,
+    pub(super) bloom_sampler: wgpu::Sampler,
 }
 
 impl RenderTargetContext {

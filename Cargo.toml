@@ -2,8 +2,8 @@
 members = [
     "storm",
     "storm-animation",
-    "storm-gltf",
     "storm-controls",
+    "storm-gltf",
     "glam-js",
     "storm-js",
     "lightning",

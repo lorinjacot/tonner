@@ -118,7 +118,7 @@ pub enum MeshInstanceBuilderError {
 }
 
 #[derive(Debug)]
-pub(super) struct MeshInstanceManager {
+pub struct MeshInstanceManager {
     mesh_instances: HashMap<MeshInstanceId, MeshInstanceData>,
     vertex_buffer: wgpu::Buffer,
     opaque_primitives: PrimitivesByPipeline,

@@ -17,6 +17,7 @@ use crate::{
 pub mod camera;
 pub mod light;
 pub mod mesh_instance;
+pub mod renderer;
 pub mod scene_graph;
 pub mod skin;
 

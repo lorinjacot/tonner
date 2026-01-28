@@ -1,6 +1,6 @@
 pub use asset::{environment, geometry, material, mesh};
 pub use scene::{Scene, SceneBuilder};
-pub use scene::{camera, light, mesh_instance, scene_graph, skin};
+pub use scene::{camera, light, mesh_instance, renderer, scene_graph, skin};
 
 use crate::asset::environment::EnvironmentContext;
 use crate::asset::material::MaterialContext;

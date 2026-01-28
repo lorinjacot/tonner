@@ -395,15 +395,15 @@ impl super::GltfAsset {
         //     }
         // }
 
-        // for animation in &self.json.animations {
-        //     animation.load_into(
-        //         &self.json.nodes,
-        //         &self.json.accessors,
-        //         &self.json.buffer_views,
-        //         &self.json.buffers,
-        //         scene,
-        //     )?;
-        // }
+        for animation in &self.json.animations {
+            let id = animation_manager.insert(animation.load(
+                &self.json.nodes,
+                &self.json.accessors,
+                &self.json.buffer_views,
+                &self.json.buffers,
+            )?);
+            animation_manager.start(id).unwrap();
+        }
 
         for node in &mut self.json.nodes {
             node.id = None;

@@ -3,10 +3,7 @@ use std::{fmt::Display, time::Duration};
 use anyhow::{Context, Result};
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
-use storm_animation::{
-    AnimationManager,
-    key_frame::{Interpolation, KeyFrameChannel, Outputs},
-};
+use storm_animation::key_frame::{Interpolation, KeyFrameChannel, Outputs};
 
 use crate::{Accessor, Buffer, BufferView, Node, accessor::IteratorConsumer};
 
@@ -31,46 +28,34 @@ pub(super) struct Animation {
 }
 
 impl Animation {
-    pub(super) fn load_into(
+    pub(super) fn load(
         &self,
         nodes: &[Node],
         accessors: &[Accessor],
         buffer_views: &[BufferView],
         buffers: &[Buffer],
-        animation_manager: &mut AnimationManager,
-    ) -> Result<()> {
-        let mut node_morph_targets_count_channel = Vec::new();
+    ) -> Result<storm_animation::Animation> {
+        let mut duration = 0.0;
+        let mut channels: Vec<Box<dyn storm_animation::AnimationChannel>> =
+            Vec::with_capacity(self.channels.len());
+
         for (channel_idx, channel) in self.channels.iter().enumerate() {
             let channel_ctx = move || format!("Failed to load animation.channel {channel_idx}.");
 
-            let node = match channel.target.node {
-                Some(node) => node,
+            let node_idx = match channel.target.node {
+                Some(idx) => idx,
                 None => continue,
             };
-            if let Some(id) = nodes
-                .get(node)
-                .with_context(|| format!("channel.target.node {node} is out of range."))
+            let node = match nodes
+                .get(node_idx)
+                .with_context(|| format!("channel.target.node {node_idx} is out of range."))
                 .with_context(channel_ctx)?
                 .id()
             {
-                let morph_targets_count = todo!("get morph_targets_count");
-                // let morph_targets_count = scene[id].weights().len();
-                node_morph_targets_count_channel.push((
-                    id,
-                    morph_targets_count,
-                    channel,
-                    channel_ctx,
-                ));
-            }
-        }
-        if node_morph_targets_count_channel.is_empty() {
-            return Ok(());
-        }
+                Some(id) => id,
+                None => continue,
+            };
 
-        let mut duration = 0.0;
-        let mut channels: Vec<Box<dyn storm_animation::AnimationChannel>> =
-            Vec::with_capacity(node_morph_targets_count_channel.len());
-        for (node, morph_targets_count, channel, channel_ctx) in node_morph_targets_count_channel {
             let sampler = self
                 .samplers
                 .get(channel.sampler)
@@ -190,7 +175,7 @@ impl Animation {
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
                             .with_context(channel_ctx)?,
-                        morph_targets_count,
+                        todo!("get morph target count"),
                     ),
                 }
             };
@@ -203,17 +188,13 @@ impl Animation {
             }));
         }
 
-        let animation = storm_animation::Animation {
+        Ok(storm_animation::Animation {
             name: self.name.clone().unwrap_or_default(),
             channels,
-            repeat: false,
+            repeat: true,
             progress: Duration::ZERO,
             duration: Duration::from_secs_f32(duration),
-        };
-
-        animation_manager.insert(animation);
-
-        Ok(())
+        })
     }
 }
 

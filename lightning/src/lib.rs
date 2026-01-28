@@ -1,4 +1,5 @@
 use std::{
+    ops::DerefMut,
     sync::{Arc, RwLock, atomic::AtomicBool},
     time::Duration,
 };
@@ -12,7 +13,7 @@ use storm::{
     environment::{Environment, EnvironmentBuilder},
     scene_graph::NodeBuilder,
 };
-use storm_animation::AnimationManager;
+use storm_animation::{Animatable, AnimationManager};
 use storm_gltf::GltfAsset;
 
 use crate::{mesh_explorer::MeshExplorer, new_scene::NewSceneModal};
@@ -217,12 +218,19 @@ impl eframe::App for App {
             }
         });
 
-        self.current_scene
-            .write()
-            .unwrap()
-            .storm_scene
-            .simulate(duration, &mut encoder)
+        let mut scene = self.current_scene.write().unwrap();
+        let scene_ref = scene.deref_mut();
+        scene_ref
+            .animation_manager
+            .update(
+                duration,
+                &mut Animatable {
+                    scene_graph: &mut scene_ref.storm_scene.scene_graph,
+                },
+            )
             .unwrap();
+        scene.storm_scene.simulate(duration, &mut encoder).unwrap();
+        drop(scene);
 
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui

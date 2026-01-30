@@ -1,17 +1,14 @@
-use std::{borrow::Borrow, time::Duration, u32};
+use std::{time::Duration, u32};
 
-use bytemuck::{Pod, Zeroable, bytes_of};
-use glam::{Mat4, Vec3, usize};
+use bytemuck::{Pod, Zeroable};
+use glam::{Mat4, Vec3};
 use thiserror::Error;
-use wgpu::util::DeviceExt;
 
 use crate::{
     Context,
-    camera::Camera,
     environment::{Environment, EnvironmentBuilder},
-    render_target::RenderTarget,
     scene::{light::LightManager, mesh_instance::MeshInstanceManager, skin::SkinManager},
-    scene_graph::{NodeId, SceneGraph},
+    scene_graph::SceneGraph,
 };
 
 pub mod camera;
@@ -41,10 +38,6 @@ pub struct Scene {
     mesh_instance_manager: MeshInstanceManager,
     light_manager: LightManager,
     environment: Environment,
-    render_bind_group_layout: wgpu::BindGroupLayout,
-    brightness_pipeline: wgpu::RenderPipeline,
-    gaussian_blur_pipeline: wgpu::RenderPipeline,
-    bloom_amount: usize,
 }
 
 impl Scene {
@@ -131,11 +124,6 @@ impl SceneBuilder {
             .environment
             .unwrap_or_else(|| EnvironmentBuilder::default().build(ctx, &mut encoder));
 
-        let render_bind_group_layout = ctx.scene_ctx.render_bind_group_layout.clone();
-
-        let brightness_pipeline = ctx.scene_ctx.brightness_pipeline.clone();
-        let gaussian_blur_pipeline = ctx.scene_ctx.gaussian_blur_pipeline.clone();
-
         ctx.queue.submit([encoder.finish()]);
 
         Scene {
@@ -146,10 +134,6 @@ impl SceneBuilder {
             mesh_instance_manager,
             light_manager,
             environment,
-            render_bind_group_layout,
-            brightness_pipeline,
-            gaussian_blur_pipeline,
-            bloom_amount: 10,
         }
     }
 }
@@ -157,16 +141,10 @@ impl SceneBuilder {
 #[derive(Debug, Clone)]
 pub(super) struct SceneContext {
     pub(super) render_bind_group_layout: wgpu::BindGroupLayout,
-    brightness_pipeline: wgpu::RenderPipeline,
-    gaussian_blur_pipeline: wgpu::RenderPipeline,
 }
 
 impl SceneContext {
-    pub(super) fn new(
-        brightness_bind_group_layout: &wgpu::BindGroupLayout,
-        gaussian_blur_bind_group_layout: &wgpu::BindGroupLayout,
-        device: &wgpu::Device,
-    ) -> Self {
+    pub(super) fn new(device: &wgpu::Device) -> Self {
         let render_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("render bind group layout"),
@@ -258,99 +236,8 @@ impl SceneContext {
                 ],
             });
 
-        let brightness_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("brightness.wgsl"));
-
-        let brightness_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Brightness pipeline layout"),
-                bind_group_layouts: &[brightness_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let brightness_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Brightness pipeline"),
-            layout: Some(&brightness_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &brightness_shader_module,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &brightness_shader_module,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
-            }),
-            multiview: None,
-            cache: None,
-        });
-
-        let gaussian_blur_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Gaussian blur pipeline layout"),
-                bind_group_layouts: &[gaussian_blur_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let gaussian_blur_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("gaussian_blur.wgsl"));
-
-        let gaussian_blur_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Gaussian blur pipeline"),
-                layout: Some(&gaussian_blur_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &gaussian_blur_shader_module,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &gaussian_blur_shader_module,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
-                }),
-                multiview: None,
-                cache: None,
-            });
-
         Self {
             render_bind_group_layout,
-            brightness_pipeline,
-            gaussian_blur_pipeline,
         }
     }
 }
@@ -367,9 +254,3 @@ struct CameraUniform {
 
 #[derive(Debug, Error)]
 pub enum SimulateError {}
-
-#[derive(Debug, Error)]
-pub enum RenderError {
-    #[error("camera node ({0}) is not part of the scene graph")]
-    InvalidCameraNode(NodeId),
-}

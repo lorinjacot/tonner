@@ -40,9 +40,9 @@ impl Renderer {
                 label: Some("RenderTarget::new() command encoder"),
             });
 
-        let render_bind_group_layout = ctx.scene_ctx.render_bind_group_layout.clone();
-        let brightness_pipeline = ctx.scene_ctx.brightness_pipeline.clone();
-        let gaussian_blur_pipeline = ctx.scene_ctx.gaussian_blur_pipeline.clone();
+        let render_bind_group_layout = ctx.renderer_ctx.render_bind_group_layout.clone();
+        let brightness_pipeline = ctx.renderer_ctx.brightness_pipeline.clone();
+        let gaussian_blur_pipeline = ctx.renderer_ctx.gaussian_blur_pipeline.clone();
 
         let (
             [
@@ -59,9 +59,9 @@ impl Renderer {
             ctx.device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Tone mapping pipeline"),
-                    layout: Some(&ctx.render_target_ctx.tone_mapping_pipeline_layout),
+                    layout: Some(&ctx.renderer_ctx.tone_mapping_pipeline_layout),
                     vertex: wgpu::VertexState {
-                        module: &ctx.render_target_ctx.tone_mapping_shader_module,
+                        module: &ctx.renderer_ctx.tone_mapping_shader_module,
                         entry_point: Some("vs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         buffers: &[],
@@ -82,7 +82,7 @@ impl Renderer {
                         alpha_to_coverage_enabled: false,
                     },
                     fragment: Some(wgpu::FragmentState {
-                        module: &ctx.render_target_ctx.tone_mapping_shader_module,
+                        module: &ctx.renderer_ctx.tone_mapping_shader_module,
                         entry_point: Some("fs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: &[Some(format.into())],
@@ -338,6 +338,324 @@ pub enum RenderError {
     InvalidCameraNode(NodeId),
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RendererContext {
+    render_bind_group_layout: wgpu::BindGroupLayout,
+    brightness_pipeline: wgpu::RenderPipeline,
+    gaussian_blur_pipeline: wgpu::RenderPipeline,
+    tone_mapping_shader_module: wgpu::ShaderModule,
+    tone_mapping_bind_group_layout: wgpu::BindGroupLayout,
+    tone_mapping_pipeline_layout: wgpu::PipelineLayout,
+    brightness_bind_group_layout: wgpu::BindGroupLayout,
+    gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_sampler: wgpu::Sampler,
+}
+
+impl RendererContext {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        let render_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("render bind group layout"),
+                entries: &[
+                    // skins
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // camera
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // lights
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // irradiance map
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // prefilter map
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // BRDF LUT
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 8,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let brightness_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("../brightness.wgsl"));
+
+        let brightness_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Brightness bind group layout"),
+                entries: &[
+                    // opaque texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let brightness_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Brightness pipeline layout"),
+                bind_group_layouts: &[&brightness_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let gaussian_blur_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("../gaussian_blur.wgsl"));
+
+        let gaussian_blur_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Gaussian blur bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let gaussian_blur_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Gaussian blur pipeline layout"),
+                bind_group_layouts: &[&gaussian_blur_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let gaussian_blur_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Gaussian blur pipeline"),
+                layout: Some(&gaussian_blur_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &gaussian_blur_shader_module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &gaussian_blur_shader_module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
+                }),
+                multiview: None,
+                cache: None,
+            });
+
+        let brightness_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Brightness pipeline"),
+            layout: Some(&brightness_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &brightness_shader_module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &brightness_shader_module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        let tone_mapping_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("../tone_mapping.wgsl"));
+
+        let tone_mapping_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Tone mapping bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let tone_mapping_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Tone mapping pipeline layout"),
+                bind_group_layouts: &[&tone_mapping_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Bloom texture samlper"),
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+
+        Self {
+            render_bind_group_layout,
+            brightness_pipeline,
+            gaussian_blur_pipeline,
+            tone_mapping_shader_module,
+            tone_mapping_bind_group_layout,
+            tone_mapping_pipeline_layout,
+            brightness_bind_group_layout,
+            gaussian_blur_bind_group_layout,
+            bloom_sampler,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct CameraUniform {
@@ -407,7 +725,7 @@ fn create_render_attachments(
 
     let brightness_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Brightness bind group"),
-        layout: &ctx.render_target_ctx.brightness_bind_group_layout,
+        layout: &ctx.renderer_ctx.brightness_bind_group_layout,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::TextureView(&opaque_attachment),
@@ -435,7 +753,7 @@ fn create_render_attachments(
         horizontal = !horizontal;
         let bloom_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Bloom bind group"),
-            layout: &ctx.render_target_ctx.gaussian_blur_bind_group_layout,
+            layout: &ctx.renderer_ctx.gaussian_blur_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -443,7 +761,7 @@ fn create_render_attachments(
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&ctx.render_target_ctx.bloom_sampler),
+                    resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -484,7 +802,7 @@ fn create_tone_mapping_bind_group(
 
     ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Tone mapping bind group"),
-        layout: &ctx.render_target_ctx.tone_mapping_bind_group_layout,
+        layout: &ctx.renderer_ctx.tone_mapping_bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -492,7 +810,7 @@ fn create_tone_mapping_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Sampler(&ctx.render_target_ctx.bloom_sampler),
+                resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -502,7 +820,7 @@ fn create_tone_mapping_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: wgpu::BindingResource::Sampler(&ctx.render_target_ctx.bloom_sampler),
+                resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
             },
         ],
     })

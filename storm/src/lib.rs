@@ -7,6 +7,7 @@ use crate::asset::material::MaterialContext;
 use crate::asset::mesh::MeshContext;
 use crate::render_target::RenderTargetContext;
 use crate::scene::SceneContext;
+use crate::scene::renderer::RendererContext;
 use crate::texture::TextureContex;
 
 mod asset {
@@ -42,8 +43,8 @@ pub struct Context {
     material_ctx: MaterialContext,
     mesh_ctx: MeshContext,
     environment_ctx: EnvironmentContext,
-    scene_ctx: SceneContext,
     render_target_ctx: RenderTargetContext,
+    renderer_ctx: RendererContext,
 }
 
 impl Context {
@@ -54,13 +55,10 @@ impl Context {
         });
 
         let render_target_ctx = RenderTargetContext::new(&device);
-        let scene_ctx = SceneContext::new(
-            &render_target_ctx.brightness_bind_group_layout,
-            &render_target_ctx.gaussian_blur_bind_group_layout,
-            &device,
-        );
+        let scene_ctx = SceneContext::new(&device);
         let texture_ctx = TextureContex::new(&device);
         let material_ctx = MaterialContext::new(&device);
+        let renderer_ctx = RendererContext::new(&device);
         let mesh_ctx = MeshContext::new(&scene_ctx.render_bind_group_layout, &device);
         let environment_ctx = EnvironmentContext::new(&device, &mut encoder);
 
@@ -73,8 +71,8 @@ impl Context {
             material_ctx,
             mesh_ctx,
             environment_ctx,
-            scene_ctx,
             render_target_ctx,
+            renderer_ctx,
         }
     }
 

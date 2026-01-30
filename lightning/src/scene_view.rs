@@ -4,11 +4,7 @@ use std::{
 };
 
 use eframe::egui_wgpu;
-use storm::{
-    Context,
-    camera::Camera,
-    render_target::{RenderTarget, RenderTargetBuilder},
-};
+use storm::{Context, camera::Camera};
 use storm_controls::{EguiControls, orbit::OrbitControls};
 
 use crate::Scene;
@@ -16,9 +12,10 @@ use crate::Scene;
 pub struct SceneView {
     scene: Arc<RwLock<Scene>>,
     controls: OrbitControls,
+    wgpu_texture: wgpu::TextureView,
     sized_texture: egui::load::SizedTexture,
-    render_target: RenderTarget<wgpu::TextureView>,
-    renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
+    egui_renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
+    storm_renderer: storm::renderer::Renderer,
 }
 
 impl SceneView {
@@ -39,19 +36,18 @@ impl SceneView {
         );
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
-        let render_target =
-            RenderTargetBuilder::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx)
-                .build(texture_view)
-                .unwrap();
+        let storm_renderer =
+            storm::renderer::Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx);
 
         let controls = OrbitControls::new(camera);
 
         Self {
             scene,
             controls,
+            wgpu_texture: texture_view,
             sized_texture,
-            render_target,
-            renderer,
+            egui_renderer: renderer,
+            storm_renderer,
         }
     }
 
@@ -72,8 +68,9 @@ impl SceneView {
             return;
         }
 
-        if self.render_target.width() != width || self.render_target.height() != height {
-            let mut renderer = self.renderer.write();
+        let texture = self.wgpu_texture.texture();
+        if texture.width() != width || texture.height() != height {
+            let mut renderer = self.egui_renderer.write();
             renderer.free_texture(&self.sized_texture.id);
 
             let texture_view = Self::create_texture_view(width, height, ctx.device());
@@ -84,18 +81,25 @@ impl SceneView {
             );
             self.sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
-            self.render_target =
-                RenderTargetBuilder::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx)
-                    .build(texture_view)
-                    .unwrap();
+            self.wgpu_texture = texture_view;
         }
 
-        self.scene
-            .read()
-            .unwrap()
-            .storm_scene
-            .render(&self.render_target, &self.controls.camera, encoder)
+        let scene = self.scene.read().unwrap();
+        let storm_scene = &scene.storm_scene;
+        self.storm_renderer
+            .render(
+                &self.controls.camera,
+                &self.wgpu_texture,
+                &storm_scene.scene_graph,
+                &storm_scene.skin_manager(),
+                &storm_scene.mesh_manager(),
+                &storm_scene.light_manager(),
+                &storm_scene.environment(),
+                ctx,
+                encoder,
+            )
             .unwrap();
+        drop(scene);
 
         let response = ui.image(self.sized_texture).interact(egui::Sense::drag());
         self.controls.handle_response(
@@ -129,6 +133,8 @@ impl SceneView {
 
 impl Drop for SceneView {
     fn drop(&mut self) {
-        self.renderer.write().free_texture(&self.sized_texture.id);
+        self.egui_renderer
+            .write()
+            .free_texture(&self.sized_texture.id);
     }
 }

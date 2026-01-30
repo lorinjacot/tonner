@@ -52,6 +52,22 @@ impl Scene {
         &self.ctx
     }
 
+    pub fn skin_manager(&self) -> &SkinManager {
+        &self.skin_manager
+    }
+
+    pub fn mesh_manager(&self) -> &MeshInstanceManager {
+        &self.mesh_instance_manager
+    }
+
+    pub fn light_manager(&self) -> &LightManager {
+        &self.light_manager
+    }
+
+    pub fn environment(&self) -> &Environment {
+        &self.environment
+    }
+
     pub fn simulate(
         &mut self,
         _duration: Duration,
@@ -73,228 +89,6 @@ impl Scene {
                 &self.ctx.queue,
             )
             .unwrap();
-
-        Ok(())
-    }
-
-    pub fn render<View: Borrow<wgpu::TextureView>>(
-        &self,
-        target: &RenderTarget<View>,
-        camera: &Camera,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<(), RenderError> {
-        let viewport_aspect_ratio = target.aspect_ratio();
-
-        let projection_matrix = camera.projection_matrix(viewport_aspect_ratio);
-
-        let camera_matrix = self
-            .scene_graph
-            .get(camera.node)
-            .ok_or(RenderError::InvalidCameraNode(camera.node))?
-            .global_transformation();
-        let camera_position = camera_matrix.transform_point3(Vec3::ZERO);
-
-        let view_matrix = Mat4::look_to_rh(
-            camera_position,
-            camera_matrix.transform_vector3(-Vec3::Z),
-            camera_matrix.transform_vector3(Vec3::Y),
-        );
-        let view_projection = projection_matrix * view_matrix;
-        let camera_uniform = CameraUniform {
-            view_projection,
-            view: view_matrix,
-            projection_inverse: projection_matrix.inverse(),
-            position: camera_position,
-            _pad: 0,
-        };
-        let camera_buffer = self
-            .ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Camera buffer"),
-                contents: bytes_of(&camera_uniform),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-
-        let render_bind_group = self
-            .ctx
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("{} render bind group", self.name)),
-                layout: &self.render_bind_group_layout,
-                entries: &[
-                    // skins
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self.skin_manager.buffer().as_entire_binding(),
-                    },
-                    // camera
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: camera_buffer.as_entire_binding(),
-                    },
-                    // lights
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: self.light_manager.point_light_buffer().as_entire_binding(),
-                    },
-                    // irradiance map
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.environment.irradiance_map_view(),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Sampler(
-                            &self.environment.irradiance_map_sampler(),
-                        ),
-                    },
-                    // prefilter map
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.environment.prefilter_map_view(),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Sampler(
-                            &self.environment.prefilter_map_sampler(),
-                        ),
-                    },
-                    // BRDF LUT
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: wgpu::BindingResource::TextureView(
-                            &self.environment.brdf_lut_view(),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::Sampler(
-                            &self.environment.brdf_lut_sampler(),
-                        ),
-                    },
-                ],
-            });
-
-        let mut primitive_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Opaque render pass"),
-            color_attachments: &[
-                Some(wgpu::RenderPassColorAttachment {
-                    view: &target.opaque_attachment,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                }),
-                Some(wgpu::RenderPassColorAttachment {
-                    view: &target.accumulation_attachment,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                }),
-                Some(wgpu::RenderPassColorAttachment {
-                    view: &target.revealage_attachment,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::RED),
-                        store: wgpu::StoreOp::Store,
-                    },
-                }),
-            ],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &target.depth_attachment,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        primitive_render_pass.set_bind_group(0, &render_bind_group, &[]);
-
-        self.mesh_instance_manager
-            .render_opaque_primitives(&mut primitive_render_pass);
-        self.mesh_instance_manager
-            .render_transparent_primitives(&mut primitive_render_pass);
-        drop(primitive_render_pass);
-
-        let mut brightness_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Brightness render pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target.bloom_textures[0].0,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        brightness_render_pass.set_pipeline(&self.brightness_pipeline);
-        brightness_render_pass.set_bind_group(0, &target.brightness_bind_group, &[]);
-        brightness_render_pass.draw(0..3, 0..1);
-        drop(brightness_render_pass);
-
-        let mut horizontal = false;
-        for _ in 0..self.bloom_amount {
-            let source = &target.bloom_textures[horizontal as usize].1;
-            horizontal = !horizontal;
-            let target = &target.bloom_textures[horizontal as usize].0;
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Gaussian blur render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            render_pass.set_pipeline(&self.gaussian_blur_pipeline);
-            render_pass.set_bind_group(0, source, &[]);
-            render_pass.draw(0..3, 0..1);
-        }
-
-        let mut tone_mapping_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Tone mapping render pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target.render_texture_view.borrow(),
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        tone_mapping_render_pass.set_pipeline(&target.tone_mapping_pipeline);
-        tone_mapping_render_pass.set_bind_group(0, &target.tone_mapping_bind_group, &[]);
-        tone_mapping_render_pass.draw(0..3, 0..1);
 
         Ok(())
     }

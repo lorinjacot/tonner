@@ -11,6 +11,7 @@ use crate::{
 };
 use bytemuck::{Pod, Zeroable, bytes_of};
 use glam::{Mat4, Vec3};
+use log::warn;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 
@@ -108,7 +109,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        camera: Camera,
+        camera: &Camera,
         target: &wgpu::TextureView,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
@@ -118,14 +119,20 @@ impl Renderer {
         ctx: &Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
-        assert_eq!(
-            target.texture().width(),
-            self.opaque_attachment.texture().width()
-        );
-        assert_eq!(
-            target.texture().height(),
-            self.opaque_attachment.texture().height()
-        );
+        let target_texture = target.texture();
+        let opaque_texture = self.opaque_attachment.texture();
+        if target_texture.width() != opaque_texture.width()
+            || target_texture.height() != opaque_texture.height()
+            || target_texture.format() != opaque_texture.format()
+        {
+            warn!("Renderer is incompatible with the target. Recreating the renderer");
+            *self = Self::new(
+                target_texture.width(),
+                target_texture.height(),
+                target_texture.format(),
+                ctx,
+            )
+        }
 
         let aspect_ratio = target.texture().width() as f32 / target.texture().height() as f32;
         let projection_matrix = camera.projection_matrix(aspect_ratio);

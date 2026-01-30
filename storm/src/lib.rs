@@ -5,7 +5,6 @@ pub use scene::{camera, light, mesh_instance, renderer, scene_graph, skin};
 use crate::asset::environment::EnvironmentContext;
 use crate::asset::material::MaterialContext;
 use crate::asset::mesh::MeshContext;
-use crate::render_target::RenderTargetContext;
 use crate::scene::SceneContext;
 use crate::scene::renderer::RendererContext;
 use crate::texture::TextureContex;
@@ -17,7 +16,6 @@ mod asset {
     pub mod mesh;
 }
 pub mod math;
-pub mod render_target;
 mod scene;
 pub mod texture;
 
@@ -43,7 +41,6 @@ pub struct Context {
     material_ctx: MaterialContext,
     mesh_ctx: MeshContext,
     environment_ctx: EnvironmentContext,
-    render_target_ctx: RenderTargetContext,
     renderer_ctx: RendererContext,
 }
 
@@ -54,7 +51,6 @@ impl Context {
             label: Some("storm::Context::from_device command encoder"),
         });
 
-        let render_target_ctx = RenderTargetContext::new(&device);
         let scene_ctx = SceneContext::new(&device);
         let texture_ctx = TextureContex::new(&device);
         let material_ctx = MaterialContext::new(&device);
@@ -71,7 +67,6 @@ impl Context {
             material_ctx,
             mesh_ctx,
             environment_ctx,
-            render_target_ctx,
             renderer_ctx,
         }
     }

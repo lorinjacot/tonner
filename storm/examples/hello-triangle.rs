@@ -8,7 +8,7 @@ use storm::geometry::GeometryBuilder;
 use storm::material::MaterialBuilder;
 use storm::mesh::MeshBuilder;
 use storm::mesh_instance::MeshInstanceBuilder;
-use storm::render_target::RenderTargetBuilder;
+use storm::renderer::Renderer;
 use storm::{Context, Scene, SceneBuilder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -19,7 +19,7 @@ use winit::window::{Window, WindowId};
 struct App {
     scene: Option<Scene>,
     surface: Option<wgpu::Surface<'static>>,
-    render_target_builder: Option<RenderTargetBuilder>,
+    renderer: Option<Renderer>,
     camera: Option<Camera>,
     last_redraw: Option<Instant>,
     window: Option<Arc<Window>>,
@@ -88,7 +88,7 @@ impl ApplicationHandler for App {
             .build(&mut scene)
             .unwrap();
 
-        let render_target_builder = RenderTargetBuilder::new(
+        let renderer = Renderer::new(
             size.width,
             size.height,
             wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -100,7 +100,7 @@ impl ApplicationHandler for App {
         self.window = Some(window);
         self.scene = Some(scene);
         self.surface = Some(surface);
-        self.render_target_builder = Some(render_target_builder);
+        self.renderer = Some(renderer);
         self.camera = Some(camera);
         self.last_redraw = Some(Instant::now());
     }
@@ -124,7 +124,6 @@ impl ApplicationHandler for App {
                 let surface_view = surface_texture
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
-                let window = self.window.as_ref().unwrap();
 
                 let now = Instant::now();
                 let duration = now.duration_since(self.last_redraw.replace(now).unwrap());
@@ -135,24 +134,21 @@ impl ApplicationHandler for App {
                     .device()
                     .create_command_encoder(&Default::default());
 
-                let render_target_builder = self.render_target_builder.clone().unwrap();
-                let render_target = match render_target_builder.build(&surface_view) {
-                    Ok(render_target) => render_target,
-                    Err(_) => {
-                        let size = window.inner_size();
-                        let render_target_builder = RenderTargetBuilder::new(
-                            size.width,
-                            size.height,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            scene.context(),
-                        );
-                        self.render_target_builder = Some(render_target_builder.clone());
-                        render_target_builder.build(&surface_view).unwrap()
-                    }
-                };
                 scene.simulate(duration, &mut encoder).unwrap();
-                scene
-                    .render(&render_target, self.camera.as_ref().unwrap(), &mut encoder)
+                self.renderer
+                    .as_mut()
+                    .unwrap()
+                    .render(
+                        self.camera.as_ref().unwrap(),
+                        &surface_view,
+                        &scene.scene_graph,
+                        scene.skin_manager(),
+                        scene.mesh_manager(),
+                        scene.light_manager(),
+                        scene.environment(),
+                        scene.context(),
+                        &mut encoder,
+                    )
                     .unwrap();
                 scene.context().queue().submit([encoder.finish()]);
                 surface_texture.present();

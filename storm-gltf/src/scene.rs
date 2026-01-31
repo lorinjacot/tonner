@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use storm::{
-    mesh_instance::MeshInstanceBuilder,
+    mesh::MeshInstanceBuilder,
     scene_graph::{NodeBuilder, SceneGraph},
 };
 use storm_animation::AnimationManager;
@@ -147,7 +147,7 @@ impl Node {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<storm::material::Material>,
+        default_material: &mut Option<storm::mesh::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],

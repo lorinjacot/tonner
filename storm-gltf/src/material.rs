@@ -12,7 +12,7 @@ use super::transforms::{
 pub(super) struct Material {
     /// [Some] if already loaded.
     #[serde(skip)]
-    loaded: Option<storm::material::Material>,
+    loaded: Option<storm::mesh::material::Material>,
 
     /// The user-defined name of this object. This is not necessarily unique, e.g.,
     /// an accessor and a buffer could have the same name, or two accessors could
@@ -100,22 +100,22 @@ impl Material {
         images: &mut [super::Image],
         ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<storm::material::Material> {
+    ) -> anyhow::Result<storm::mesh::material::Material> {
         if let Some(material) = self.loaded.clone() {
             return Ok(material);
         }
 
         let pbr = &self.pbr_metallic_roughness;
 
-        let mut builder = storm::material::MaterialBuilder::default()
+        let mut builder = storm::mesh::material::MaterialBuilder::default()
             .base_color_factor(pbr.base_color_factor)
             .metallic_factor(pbr.metallic_factor)
             .roughness_factor(pbr.roughness_factor)
             .emissive_factor(self.emissive_factor)
             .alpha_mode(match self.alpha_mode {
-                AlphaMode::Opaque => storm::material::AlphaMode::Opaque,
-                AlphaMode::Mask => storm::material::AlphaMode::Mask,
-                AlphaMode::Blend => storm::material::AlphaMode::Blend,
+                AlphaMode::Opaque => storm::mesh::material::AlphaMode::Opaque,
+                AlphaMode::Mask => storm::mesh::material::AlphaMode::Mask,
+                AlphaMode::Blend => storm::mesh::material::AlphaMode::Blend,
             })
             .alpha_cutoff(self.alpha_cutoff)
             .double_sided(self.double_sided);

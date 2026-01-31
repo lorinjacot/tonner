@@ -6,13 +6,14 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    asset::mesh::{Mesh, MeshPrimitive},
+    Scene,
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
-    material::AlphaMode,
-    mesh::MeshPrimitiveId,
-    scene::{Scene, skin::SkinId},
+    mesh::{
+        asset::{Mesh, MeshPrimitive, MeshPrimitiveId},
+        material::AlphaMode,
+    },
     scene_graph::{NodeBuilder, NodeId, SceneGraph},
-    skin::SkinManager,
+    skin::{SkinId, SkinManager},
 };
 
 /// A unique id for a mesh attached to a node. A mesh instance will always have the same id.
@@ -101,7 +102,7 @@ impl MeshInstanceBuilder {
             skin: self.skin,
         };
 
-        let manager = &mut scene.mesh_instance_manager;
+        let manager = &mut scene.mesh_manager;
         manager.mesh_instances.insert(id, data);
 
         Ok(id)
@@ -118,15 +119,15 @@ pub enum MeshInstanceBuilderError {
 }
 
 #[derive(Debug)]
-pub struct MeshInstanceManager {
+pub struct MeshManager {
     mesh_instances: HashMap<MeshInstanceId, MeshInstanceData>,
     vertex_buffer: wgpu::Buffer,
     opaque_primitives: PrimitivesByPipeline,
     transparent_primitives: PrimitivesByPipeline,
 }
 
-impl MeshInstanceManager {
-    pub(super) fn new(device: &wgpu::Device) -> Self {
+impl MeshManager {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
         let vertex_buffer = Self::create_vertex_buffer(0, false, device);
 
         Self {
@@ -137,7 +138,7 @@ impl MeshInstanceManager {
         }
     }
 
-    pub(super) fn update_buffer(
+    pub(crate) fn update_buffer(
         &mut self,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
@@ -246,7 +247,7 @@ impl MeshInstanceManager {
     /// - `vec4<f32>`-compatible;
     /// - not used;
     /// - not used.
-    pub(super) fn render_opaque_primitives(&self, opaque_render_pass: &mut wgpu::RenderPass) {
+    pub(crate) fn render_opaque_primitives(&self, opaque_render_pass: &mut wgpu::RenderPass) {
         self.render_primitives(&self.opaque_primitives, opaque_render_pass);
     }
 
@@ -254,7 +255,7 @@ impl MeshInstanceManager {
     /// - not used;
     /// - `vec4<f32>`-compatible;
     /// - `f32`-compatible.
-    pub(super) fn render_transparent_primitives(
+    pub(crate) fn render_transparent_primitives(
         &self,
         transparent_render_pass: &mut wgpu::RenderPass,
     ) {
@@ -312,7 +313,7 @@ struct PrimitiveInstances {
 }
 
 #[derive(Debug, Error)]
-pub(super) enum UpdateMeshInstanceBufferError {
+pub(crate) enum UpdateMeshInstanceBufferError {
     #[error("invalid node: {0}")]
     InvalidNode(NodeId),
     #[error("invalid skin: {0}")]

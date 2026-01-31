@@ -81,7 +81,7 @@ pub enum GlbError {
 pub struct GltfAsset {
     base_path: PathBuf,
     json: Gltf,
-    default_material: Option<storm::material::Material>,
+    default_material: Option<storm::mesh::material::Material>,
 }
 
 impl GltfAsset {

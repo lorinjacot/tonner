@@ -10,7 +10,7 @@ use std::{
 
 use dashmap::DashSet;
 use storm::{
-    Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, mesh_instance::MeshInstanceBuilder,
+    Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, mesh::MeshInstanceBuilder,
     scene_graph::NodeBuilder,
 };
 use storm_animation::AnimationManager;

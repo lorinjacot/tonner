@@ -557,7 +557,7 @@ impl Geometry {
         })
     }
 
-    pub(super) fn flags(&self) -> GeometryFlags {
+    pub fn flags(&self) -> GeometryFlags {
         self.0.flags
     }
 
@@ -685,7 +685,7 @@ impl Attribute {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub(super) struct GeometryFlags: u8 {
+    pub struct GeometryFlags: u8 {
         const POSITION    = 1 << 0;
         const NORMAL      = 1 << 1;
         const TANGENT     = 1 << 2;

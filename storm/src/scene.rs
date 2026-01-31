@@ -7,13 +7,13 @@ use thiserror::Error;
 use crate::{
     Context,
     environment::{Environment, EnvironmentBuilder},
-    scene::{light::LightManager, mesh_instance::MeshInstanceManager, skin::SkinManager},
+    mesh::MeshManager,
+    scene::{light::LightManager, skin::SkinManager},
     scene_graph::SceneGraph,
 };
 
 pub mod camera;
 pub mod light;
-pub mod mesh_instance;
 pub mod renderer;
 pub mod scene_graph;
 pub mod skin;
@@ -35,7 +35,7 @@ pub struct Scene {
     pub scene_graph: SceneGraph,
     ctx: Context,
     skin_manager: SkinManager,
-    mesh_instance_manager: MeshInstanceManager,
+    pub(crate) mesh_manager: MeshManager,
     light_manager: LightManager,
     environment: Environment,
 }
@@ -49,8 +49,8 @@ impl Scene {
         &self.skin_manager
     }
 
-    pub fn mesh_manager(&self) -> &MeshInstanceManager {
-        &self.mesh_instance_manager
+    pub fn mesh_manager(&self) -> &MeshManager {
+        &self.mesh_manager
     }
 
     pub fn light_manager(&self) -> &LightManager {
@@ -74,7 +74,7 @@ impl Scene {
             .update_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
             .unwrap();
 
-        self.mesh_instance_manager
+        self.mesh_manager
             .update_buffer(
                 &self.scene_graph,
                 &self.skin_manager,
@@ -117,7 +117,7 @@ impl SceneBuilder {
 
         let scene_graph = SceneGraph::new(ctx);
         let skin_manager = SkinManager::new(&ctx.device);
-        let mesh_instance_manager = MeshInstanceManager::new(&ctx.device);
+        let mesh_manager = MeshManager::new(&ctx.device);
         let light_manager = LightManager::new(&ctx.device);
 
         let environment = self
@@ -131,7 +131,7 @@ impl SceneBuilder {
             ctx: ctx.clone(),
             scene_graph,
             skin_manager,
-            mesh_instance_manager,
+            mesh_manager,
             light_manager,
             environment,
         }

@@ -124,7 +124,7 @@ impl SkinManager {
 
     /// Buffer index of the first joint matrix part of the skin,
     /// or `None` if the skin is not in the buffer yet.
-    pub(super) fn index(&self, skin: SkinId) -> Option<u32> {
+    pub(crate) fn index(&self, skin: SkinId) -> Option<u32> {
         self.skins.get(&skin).and_then(|data| data.index)
     }
 

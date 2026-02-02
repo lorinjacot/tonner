@@ -12,7 +12,7 @@ use crate::Scene;
 pub struct SceneView {
     scene: Arc<RwLock<Scene>>,
     controls: OrbitControls,
-    wgpu_texture: wgpu::TextureView,
+    texture_view: TextureView,
     sized_texture: egui::load::SizedTexture,
     egui_renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
     storm_renderer: storm::renderer::Renderer,
@@ -31,7 +31,7 @@ impl SceneView {
 
         let id = renderer.write().register_native_texture(
             ctx.device(),
-            &texture_view,
+            &texture_view.srgb,
             wgpu::FilterMode::Linear,
         );
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
@@ -44,7 +44,7 @@ impl SceneView {
         Self {
             scene,
             controls,
-            wgpu_texture: texture_view,
+            texture_view,
             sized_texture,
             egui_renderer: renderer,
             storm_renderer,
@@ -68,20 +68,18 @@ impl SceneView {
             return;
         }
 
-        let texture = self.wgpu_texture.texture();
+        let texture = self.texture_view.srgb.texture();
         if texture.width() != width || texture.height() != height {
             let mut renderer = self.egui_renderer.write();
             renderer.free_texture(&self.sized_texture.id);
 
-            let texture_view = Self::create_texture_view(width, height, ctx.device());
+            self.texture_view = Self::create_texture_view(width, height, ctx.device());
             let id = renderer.register_native_texture(
                 ctx.device(),
-                &texture_view,
+                &self.texture_view.rgb,
                 wgpu::FilterMode::Linear,
             );
             self.sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
-
-            self.wgpu_texture = texture_view;
         }
 
         let scene = self.scene.read().unwrap();
@@ -89,7 +87,7 @@ impl SceneView {
         self.storm_renderer
             .render(
                 &self.controls.camera,
-                &self.wgpu_texture,
+                &self.texture_view.srgb,
                 &storm_scene.scene_graph,
                 &storm_scene.skin_manager(),
                 &storm_scene.mesh_manager(),
@@ -109,7 +107,7 @@ impl SceneView {
         );
     }
 
-    fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {
+    fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> TextureView {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("SceneView texture"),
             size: wgpu::Extent3d {
@@ -122,13 +120,25 @@ impl SceneView {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         });
-        texture.create_view(&wgpu::TextureViewDescriptor {
+        let rgb = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("SceneView texture view"),
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
             ..Default::default()
-        })
+        });
+        let srgb = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("SceneView texture view"),
+            format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            ..Default::default()
+        });
+        TextureView { rgb, srgb }
     }
+}
+
+struct TextureView {
+    rgb: wgpu::TextureView,
+    srgb: wgpu::TextureView,
 }
 
 impl Drop for SceneView {

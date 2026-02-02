@@ -16,6 +16,7 @@ use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 pub struct Renderer {
+    format: wgpu::TextureFormat,
     render_bind_group_layout: wgpu::BindGroupLayout,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
@@ -92,6 +93,7 @@ impl Renderer {
                 });
 
         Self {
+            format,
             render_bind_group_layout,
             brightness_pipeline,
             gaussian_blur_pipeline,
@@ -129,7 +131,7 @@ impl Renderer {
             *self = Self::new(
                 target_texture.width(),
                 target_texture.height(),
-                target_texture.format(),
+                self.format,
                 ctx,
             )
         }

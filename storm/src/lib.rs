@@ -5,7 +5,6 @@ pub use scene::{camera, light, renderer, scene_graph, skin};
 use crate::asset::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
-use crate::scene::SceneContext;
 use crate::scene::renderer::RendererContext;
 use crate::texture::TextureContex;
 
@@ -50,11 +49,10 @@ impl Context {
             label: Some("storm::Context::from_device command encoder"),
         });
 
-        let scene_ctx = SceneContext::new(&device);
         let texture_ctx = TextureContex::new(&device);
         let material_ctx = MaterialContext::new(&device);
         let renderer_ctx = RendererContext::new(&device);
-        let mesh_ctx = MeshContext::new(&scene_ctx.render_bind_group_layout, &device);
+        let mesh_ctx = MeshContext::new(&renderer_ctx.render_bind_group_layout, &device);
         let environment_ctx = EnvironmentContext::new(&device, &mut encoder);
 
         queue.submit([encoder.finish()]);

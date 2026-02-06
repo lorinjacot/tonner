@@ -342,7 +342,7 @@ pub enum RenderError {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RendererContext {
-    render_bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) render_bind_group_layout: wgpu::BindGroupLayout,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     tone_mapping_shader_module: wgpu::ShaderModule,

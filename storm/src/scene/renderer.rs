@@ -1,7 +1,7 @@
 use std::iter::repeat_with;
 
 use crate::{
-    Context,
+    Context, GpuCommandQueue,
     camera::Camera,
     environment::Environment,
     mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
@@ -123,8 +123,11 @@ impl Renderer {
         light_manager: &LightManager,
         environment: &Environment,
         ctx: &Context,
-        encoder: &mut wgpu::CommandEncoder,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> Result<(), RenderError> {
+        let mut encoder = gpu_command_queue
+            .create_command_encoder(Some("storm::Renderer::render() command encoder"));
+
         let target_texture = target.texture();
         let opaque_texture = self.opaque_attachment.texture();
         if target_texture.width() != opaque_texture.width()
@@ -267,7 +270,7 @@ impl Renderer {
             mesh_instances,
             scene_graph,
             skin_manager,
-            ctx,
+            gpu_command_queue,
             &mut primitive_render_pass,
         )?;
 
@@ -338,6 +341,10 @@ impl Renderer {
         tone_mapping_render_pass.set_pipeline(&self.tone_mapping_pipeline);
         tone_mapping_render_pass.set_bind_group(0, &self.tone_mapping_bind_group, &[]);
         tone_mapping_render_pass.draw(0..3, 0..1);
+
+        drop(tone_mapping_render_pass);
+
+        gpu_command_queue.add_command_encoder(encoder);
 
         Ok(())
     }

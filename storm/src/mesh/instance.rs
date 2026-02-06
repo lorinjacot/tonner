@@ -1,11 +1,11 @@
 use std::{collections::HashMap, fmt::Display, num::NonZero, ops::Range};
 
-use bytemuck::{Pod, Zeroable, cast_slice_mut};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Vec4};
 use uuid::{NonNilUuid, Uuid};
 
 use crate::{
-    Context,
+    Context, GpuBufferWriter,
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
     mesh::{
         Mesh,
@@ -127,10 +127,11 @@ impl PrimitiveRenderer {
         mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
-        ctx: &Context,
+        gpu_buffer_writer: &mut impl GpuBufferWriter,
         primitive_render_pass: &mut wgpu::RenderPass,
     ) -> Result<(), RenderError> {
-        let primitives = self.prepare(mesh_instances, scene_graph, skin_manager, ctx)?;
+        let primitives =
+            self.prepare(mesh_instances, scene_graph, skin_manager, gpu_buffer_writer)?;
 
         primitives
             .opaque_primitives
@@ -148,7 +149,7 @@ impl PrimitiveRenderer {
         mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
-        ctx: &Context,
+        gpu_buffer_writer: &mut impl GpuBufferWriter,
     ) -> Result<PreparedPrimitives, RenderError> {
         let mut opaque_primitives = PrimitivesByPipeline(HashMap::new());
         let mut transparent_primitives = PrimitivesByPipeline(HashMap::new());
@@ -207,31 +208,25 @@ impl PrimitiveRenderer {
 
         let size = primitive_count * size_of::<PrimitiveInstanceVertex>();
         let mut unmap = false;
-        let mut buffer_view;
-        let buffer: &mut [u8] = if let Some(size) = NonZero::new(size as wgpu::BufferAddress) {
-            match ctx.queue().write_buffer_with(&self.vertex_buffer, 0, size) {
-                Some(view) => {
-                    buffer_view = view;
-                    &mut buffer_view
-                }
-                None => {
-                    self.vertex_buffer = Self::create_vertex_buffer(
-                        wgpu::util::align_to(size.get() as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                        true,
-                        ctx.device(),
-                    );
-                    unmap = true;
+        let mut buffer = if self.vertex_buffer.size() < size as wgpu::BufferAddress {
+            self.vertex_buffer = Self::create_vertex_buffer(
+                wgpu::util::align_to(size as wgpu::BufferAddress, wgpu::COPY_BUFFER_ALIGNMENT),
+                true,
+                gpu_buffer_writer.device(),
+            );
 
-                    &mut self
-                        .vertex_buffer
-                        .get_mapped_range_mut(0..size.get() as wgpu::BufferAddress)
-                }
-            }
+            unmap = true;
+
+            self.vertex_buffer
+                .get_mapped_range_mut(0..size as wgpu::BufferAddress)
         } else {
-            &mut []
+            gpu_buffer_writer.write_buffer_with(
+                &self.vertex_buffer,
+                0,
+                NonZero::new(size as wgpu::BufferAddress).unwrap(),
+            )
         };
 
-        let buffer: &mut [PrimitiveInstanceVertex] = cast_slice_mut(buffer);
         let mut filled_bytes = 0;
         opaque_primitives
             .0
@@ -240,9 +235,9 @@ impl PrimitiveRenderer {
             .for_each(|primitives| {
                 for (_, instances) in primitives.values_mut() {
                     let start = filled_bytes;
-                    let end = start + size_of_val(&instances.data);
+                    let end = start + size_of_val(instances.data.as_slice());
 
-                    buffer[start..end].copy_from_slice(&instances.data);
+                    buffer[start..end].copy_from_slice(cast_slice(instances.data.as_slice()));
                     filled_bytes = end;
 
                     instances.count = instances.data.len() as u32;
@@ -250,6 +245,7 @@ impl PrimitiveRenderer {
                 }
             });
 
+        drop(buffer);
         if unmap {
             self.vertex_buffer.unmap();
         }

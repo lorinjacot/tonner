@@ -3,12 +3,16 @@ use std::time::Instant;
 
 use glam::{vec3, vec4};
 use pollster::block_on;
-use storm::camera::{Camera, CameraBuilder};
+use storm::Context;
+use storm::camera::Camera;
+use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::GeometryBuilder;
-use storm::mesh::{MeshBuilder, MeshInstanceBuilder};
+use storm::light::LightManager;
 use storm::mesh::material::MaterialBuilder;
+use storm::mesh::{MeshBuilder, MeshInstance};
 use storm::renderer::Renderer;
-use storm::{Context, Scene, SceneBuilder};
+use storm::scene_graph::{NodeBuilder, SceneGraph};
+use storm::skin::SkinManager;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -18,8 +22,6 @@ use winit::window::{Window, WindowId};
 struct App {
     scene: Option<Scene>,
     surface: Option<wgpu::Surface<'static>>,
-    renderer: Option<Renderer>,
-    camera: Option<Camera>,
     last_redraw: Option<Instant>,
     window: Option<Arc<Window>>,
 }
@@ -56,7 +58,22 @@ impl ApplicationHandler for App {
             },
         );
 
-        let ctx = Context::from_device(device, queue);
+        let context = Context::from_device(device, queue);
+
+        let mut encoder =
+            context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::resumed command encoder"),
+                });
+
+        let mut scene_graph = SceneGraph::new(&context);
+        let renderer = Renderer::new(
+            size.width,
+            size.height,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            &context,
+        );
 
         let triangle = GeometryBuilder::new(3, 0)
             .name("Triangle")
@@ -66,41 +83,52 @@ impl ApplicationHandler for App {
                 vec3(-0.5, 0.5, -5.0),
             ])
             .unwrap()
-            .build(&ctx)
+            .build(&context)
             .unwrap();
 
         let red = MaterialBuilder::default()
             .name("red")
             .base_color_factor(vec4(1.0, 0.0, 0.0, 1.0))
-            .build(&ctx);
+            .build(&context);
 
         let red_triangle = MeshBuilder::default()
             .name("Triangle")
             .primitive(triangle, red)
-            .build(&ctx)
+            .build(&context)
             .unwrap();
 
-        let mut scene = SceneBuilder::default().build(&ctx);
-
-        MeshInstanceBuilder::new(red_triangle)
-            .name("first triangle")
-            .build(&mut scene)
+        let triangle_node = NodeBuilder::default()
+            .name("Triangle node")
+            .build(&mut scene_graph)
             .unwrap();
+        let instance = red_triangle.new_instance(triangle_node);
 
-        let renderer = Renderer::new(
-            size.width,
-            size.height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-            &ctx,
-        );
+        let camera_node = NodeBuilder::default()
+            .name("Camera node")
+            .build(&mut scene_graph)
+            .unwrap();
+        let camera = Camera::new(camera_node);
 
-        let camera = CameraBuilder::default().build(&mut scene);
+        let skin_manager = SkinManager::new(&context);
+        let light_manager = LightManager::new(&context);
+        let environment = EnvironmentBuilder::default().build(&context, &mut encoder);
 
-        self.window = Some(window);
+        context.queue().submit([encoder.finish()]);
+
+        let scene = Scene {
+            context,
+            scene_graph,
+            triangle: instance,
+            camera,
+            skin_manager,
+            light_manager,
+            environment,
+            renderer,
+        };
+
         self.scene = Some(scene);
+        self.window = Some(window);
         self.surface = Some(surface);
-        self.renderer = Some(renderer);
-        self.camera = Some(camera);
         self.last_redraw = Some(Instant::now());
     }
 
@@ -129,27 +157,25 @@ impl ApplicationHandler for App {
 
                 let scene = self.scene.as_mut().unwrap();
                 let mut encoder = scene
-                    .context()
+                    .context
                     .device()
                     .create_command_encoder(&Default::default());
 
-                scene.simulate(duration, &mut encoder).unwrap();
-                self.renderer
-                    .as_mut()
-                    .unwrap()
+                scene
+                    .renderer
                     .render(
-                        self.camera.as_ref().unwrap(),
+                        &scene.camera,
                         &surface_view,
-                        &scene.scene_graph,
-                        scene.skin_manager(),
-                        scene.mesh_manager(),
-                        scene.light_manager(),
-                        scene.environment(),
-                        scene.context(),
+                        &mut scene.scene_graph,
+                        &scene.skin_manager,
+                        [&scene.triangle],
+                        &scene.light_manager,
+                        &scene.environment,
+                        &scene.context,
                         &mut encoder,
                     )
                     .unwrap();
-                scene.context().queue().submit([encoder.finish()]);
+                scene.context.queue().submit([encoder.finish()]);
                 surface_texture.present();
 
                 // Queue a RedrawRequested event.
@@ -162,6 +188,17 @@ impl ApplicationHandler for App {
             _ => (),
         }
     }
+}
+
+struct Scene {
+    context: Context,
+    scene_graph: SceneGraph,
+    triangle: MeshInstance,
+    camera: Camera,
+    skin_manager: SkinManager,
+    light_manager: LightManager,
+    environment: Environment,
+    renderer: Renderer,
 }
 
 fn main() {

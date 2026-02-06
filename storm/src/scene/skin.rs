@@ -5,7 +5,10 @@ use glam::Mat4;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::scene::scene_graph::{NodeId, SceneGraph};
+use crate::{
+    Context,
+    scene::scene_graph::{NodeId, SceneGraph},
+};
 
 use super::Scene;
 
@@ -101,11 +104,11 @@ pub struct SkinManager {
 
 impl SkinManager {
     /// Create a new empty skin manager.
-    pub(super) fn new(device: &wgpu::Device) -> Self {
+    pub fn new(ctx: &Context) -> Self {
         let buffer = Self::create_buffer(
             wgpu::util::align_to(size_of::<Mat4>() as u64, wgpu::COPY_BUFFER_ALIGNMENT),
             false,
-            device,
+            ctx.device(),
         );
         Self {
             skins: HashMap::new(),

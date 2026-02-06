@@ -1,24 +1,25 @@
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    num::{NonZero, NonZeroUsize},
+    ops::Range,
+};
 
-use bytemuck::{Pod, Zeroable, cast_slice};
+use bytemuck::{Pod, Zeroable, cast_slice, cast_slice_mut};
 use glam::{Mat4, Vec4};
 use thiserror::Error;
-use uuid::Uuid;
+use uuid::{NonNilUuid, Uuid};
 
 use crate::{
-    Scene,
+    Context, Scene,
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
     mesh::{
-        asset::{Mesh, MeshPrimitive, MeshPrimitiveId},
-        material::AlphaMode,
+        MeshInstanceId, asset::{Mesh, MeshPrimitive, MeshPrimitiveId}, material::AlphaMode
     },
+    renderer::RenderError,
     scene_graph::{NodeBuilder, NodeId, SceneGraph},
     skin::{SkinId, SkinManager},
 };
-
-/// A unique id for a mesh attached to a node. A mesh instance will always have the same id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MeshInstanceId(Uuid);
 
 /// A mesh instance builder. This is used to add a mesh to a scene.
 #[must_use]
@@ -92,7 +93,9 @@ impl MeshInstanceBuilder {
             });
         }
         let weights = std::array::from_fn(|i| self.weights.get(i).copied().unwrap_or(0.0));
-        let id = MeshInstanceId(Uuid::new_v4());
+        let id = MeshInstanceId {
+            uuid: NonNilUuid::new(Uuid::new_v4()).unwrap(),
+        };
         let data = MeshInstanceData {
             id,
             node,
@@ -295,53 +298,6 @@ impl MeshManager {
     }
 }
 
-/// A mesh instance is a [Mesh] associated with a scene graph node.
-/// The associated node global transform is used to get the position,
-/// orientation and scale of the mesh.
-/// This struct also stores the morph target weights and an optional skeleton/skin, if supported
-/// by the mesh.
-pub struct MeshInstance {
-    id: MeshInstanceId,
-    pub name: String,
-    mesh: Mesh,
-    pub node: NodeId,
-    weights: [f32; MAX_MORPH_TARGET_COUNT],
-    skin: Option<SkinId>,
-}
-
-impl MeshInstance {
-    /// Unique identifier for the mesh. This will always return the same value.
-    pub fn id(&self) -> MeshInstanceId {
-        self.id
-    }
-
-    /// Mesh instantiated by this struct. This will always return the same value.
-    pub fn mesh(&self) -> &Mesh {
-        &self.mesh
-    }
-
-    /// Morph target weights. Used to deform the mesh. The length of
-    /// the returned slice will always match [`Mesh::morph_target_count()`].
-    pub fn weights(&self) -> &[f32] {
-        &self.weights
-    }
-
-    /// Sets the morph target weights. The length of `weights` must match
-    /// [`Mesh::morph_target_count()`].
-    ///
-    /// ## Panics
-    /// This function will panic if the length of `weights` differs from [`Mesh::morph_target_count()`].
-    pub fn set_weights(&mut self, weights: &[f32]) {
-        self.weights[0..self.mesh.morph_target_count()].copy_from_slice(weights);
-    }
-
-    /// If supported by the mesh, this skin/skeleton will be applied
-    /// to it.
-    pub fn skin(&self) -> Option<SkinId> {
-        self.skin
-    }
-}
-
 #[derive(Debug)]
 struct MeshInstanceData {
     id: MeshInstanceId,
@@ -352,32 +308,10 @@ struct MeshInstanceData {
     skin: Option<SkinId>,
 }
 
-#[derive(Debug)]
-struct PrimitiveInstances {
-    count: u32,
-    data: Vec<PrimitiveInstanceVertex>,
-    bounds: Range<u64>,
-}
-
 #[derive(Debug, Error)]
 pub(crate) enum UpdateMeshInstanceBufferError {
     #[error("invalid node: {0}")]
     InvalidNode(NodeId),
     #[error("invalid skin: {0}")]
     InvalidSkin(SkinId),
-}
-
-#[derive(Debug)]
-struct PrimitivesByPipeline(
-    HashMap<wgpu::RenderPipeline, HashMap<MeshPrimitiveId, (MeshPrimitive, PrimitiveInstances)>>,
-);
-
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-#[repr(C)]
-pub(crate) struct PrimitiveInstanceVertex {
-    model_matrix: Mat4,
-    weights_0: Vec4,
-    weights_1: Vec4,
-    joint_offset: u32,
-    _pad: [u32; 3],
 }

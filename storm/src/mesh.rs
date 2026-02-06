@@ -6,18 +6,18 @@ use crate::{
     environment::PREFILTER_MAP_MIP_COUNT,
     geometry::GeometryFlags,
     mesh::{
-        manager::PrimitiveInstanceVertex,
+        instance::PrimitiveInstanceVertex,
         material::{AlphaMode, MaterialFlags},
     },
 };
 
 pub use asset::{Mesh, MeshBuilder, MeshBuilderError, MeshId};
-pub use manager::{
-    MeshInstance, MeshInstanceBuilder, MeshInstanceBuilderError, MeshInstanceId, MeshManager,
-};
+pub use instance::{MeshInstance, MeshInstanceId};
+
+pub(crate) use instance::PrimitiveRenderer;
 
 mod asset;
-mod manager;
+mod instance;
 pub mod material;
 
 #[derive(Debug, Clone)]

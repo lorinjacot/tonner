@@ -1,4 +1,4 @@
-use std::{time::Duration, u32};
+use std::{collections::HashMap, time::Duration, u32};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::{
     Context,
     environment::{Environment, EnvironmentBuilder},
-    mesh::MeshManager,
+    mesh::{MeshInstance, MeshInstanceId},
     scene::{light::LightManager, skin::SkinManager},
     scene_graph::SceneGraph,
 };
@@ -35,7 +35,7 @@ pub struct Scene {
     pub scene_graph: SceneGraph,
     ctx: Context,
     skin_manager: SkinManager,
-    pub(crate) mesh_manager: MeshManager,
+    pub mesh_instances: HashMap<MeshInstanceId, MeshInstance>,
     light_manager: LightManager,
     environment: Environment,
 }
@@ -47,10 +47,6 @@ impl Scene {
 
     pub fn skin_manager(&self) -> &SkinManager {
         &self.skin_manager
-    }
-
-    pub fn mesh_manager(&self) -> &MeshManager {
-        &self.mesh_manager
     }
 
     pub fn light_manager(&self) -> &LightManager {
@@ -72,15 +68,6 @@ impl Scene {
 
         self.skin_manager
             .update_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
-            .unwrap();
-
-        self.mesh_manager
-            .update_buffer(
-                &self.scene_graph,
-                &self.skin_manager,
-                &self.ctx.device,
-                &self.ctx.queue,
-            )
             .unwrap();
 
         Ok(())
@@ -116,9 +103,8 @@ impl SceneBuilder {
             });
 
         let scene_graph = SceneGraph::new(ctx);
-        let skin_manager = SkinManager::new(&ctx.device);
-        let mesh_manager = MeshManager::new(&ctx.device);
-        let light_manager = LightManager::new(&ctx.device);
+        let skin_manager = SkinManager::new(ctx);
+        let light_manager = LightManager::new(ctx);
 
         let environment = self
             .environment
@@ -131,7 +117,7 @@ impl SceneBuilder {
             ctx: ctx.clone(),
             scene_graph,
             skin_manager,
-            mesh_manager,
+            mesh_instances: HashMap::new(),
             light_manager,
             environment,
         }

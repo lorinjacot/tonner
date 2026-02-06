@@ -152,6 +152,18 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Create a new Camera. By default, the name is an empty string and uses
+    /// the default [PerspectiveProjection].
+    pub fn new(node: NodeId) -> Self {
+        let projection = Projection::Perspective(PerspectiveProjection::default());
+
+        Camera {
+            name: String::new(),
+            node,
+            projection,
+        }
+    }
+
     /// - If self is an orthographic camera, returns the orthographic projection data;
     /// - Returns `None` otherwise.
     pub fn orthographic_projection(&self) -> Option<&OrthographicProjection> {

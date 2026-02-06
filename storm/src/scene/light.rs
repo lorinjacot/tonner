@@ -5,9 +5,12 @@ use glam::Vec3;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::scene::{
-    Scene,
-    scene_graph::{NodeBuilder, NodeId, SceneGraph},
+use crate::{
+    Context,
+    scene::{
+        Scene,
+        scene_graph::{NodeBuilder, NodeId, SceneGraph},
+    },
 };
 
 /// A unique id for a point light. A point light has one and only one id.
@@ -100,8 +103,8 @@ pub struct LightManager {
 
 impl LightManager {
     /// Creates an empty light manager.
-    pub(super) fn new(device: &wgpu::Device) -> Self {
-        let point_light_buffer = Self::create_point_light_buffer(&[], device);
+    pub fn new(ctx: &Context) -> Self {
+        let point_light_buffer = Self::create_point_light_buffer(&[], ctx.device());
 
         Self {
             point_lights: HashMap::new(),

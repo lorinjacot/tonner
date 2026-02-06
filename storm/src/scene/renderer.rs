@@ -4,9 +4,10 @@ use crate::{
     Context,
     camera::Camera,
     environment::Environment,
-    scene::{LightManager, MeshManager},
+    mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
+    scene::LightManager,
     scene_graph::{NodeId, SceneGraph},
-    skin::SkinManager,
+    skin::{SkinId, SkinManager},
     texture::TextureBuilder,
 };
 use bytemuck::{Pod, Zeroable, bytes_of};
@@ -18,6 +19,7 @@ use wgpu::util::DeviceExt;
 pub struct Renderer {
     format: wgpu::TextureFormat,
     render_bind_group_layout: wgpu::BindGroupLayout,
+    primitive_renderer: PrimitiveRenderer,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     bloom_amount: usize,
@@ -42,6 +44,7 @@ impl Renderer {
             });
 
         let render_bind_group_layout = ctx.renderer_ctx.render_bind_group_layout.clone();
+        let primitive_renderer = PrimitiveRenderer::new(ctx);
         let brightness_pipeline = ctx.renderer_ctx.brightness_pipeline.clone();
         let gaussian_blur_pipeline = ctx.renderer_ctx.gaussian_blur_pipeline.clone();
 
@@ -95,6 +98,7 @@ impl Renderer {
         Self {
             format,
             render_bind_group_layout,
+            primitive_renderer,
             brightness_pipeline,
             gaussian_blur_pipeline,
             bloom_amount: 10,
@@ -109,13 +113,13 @@ impl Renderer {
         }
     }
 
-    pub fn render(
+    pub fn render<'a>(
         &mut self,
         camera: &Camera,
         target: &wgpu::TextureView,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
-        mesh_manager: &MeshManager,
+        mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
         light_manager: &LightManager,
         environment: &Environment,
         ctx: &Context,
@@ -259,8 +263,14 @@ impl Renderer {
         });
         primitive_render_pass.set_bind_group(0, &render_bind_group, &[]);
 
-        mesh_manager.render_opaque_primitives(&mut primitive_render_pass);
-        mesh_manager.render_transparent_primitives(&mut primitive_render_pass);
+        self.primitive_renderer.render(
+            mesh_instances,
+            scene_graph,
+            skin_manager,
+            ctx,
+            &mut primitive_render_pass,
+        )?;
+
         drop(primitive_render_pass);
 
         let mut brightness_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -334,8 +344,15 @@ impl Renderer {
 }
 
 /// Error when [`Renderer::render()`] fails.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum RenderError {
+    #[error("mesh instance ({0}) node ({1}) is not part of the scene graph")]
+    InvalidMeshInstanceNode(MeshInstanceId, NodeId),
+
+    #[error("mesh instance ({0}) skin ({1}) is not part of the skin manager")]
+    InvalidMeshInstanceSkin(MeshInstanceId, SkinId),
+
     #[error("camera node ({0}) is not part of the scene graph")]
     InvalidCameraNode(NodeId),
 }

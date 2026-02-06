@@ -12,7 +12,9 @@ use crate::{
 };
 
 pub use asset::{Mesh, MeshBuilder, MeshBuilderError, MeshId};
-pub use manager::{MeshInstanceBuilder, MeshInstanceBuilderError, MeshInstanceId, MeshManager};
+pub use manager::{
+    MeshInstance, MeshInstanceBuilder, MeshInstanceBuilderError, MeshInstanceId, MeshManager,
+};
 
 mod asset;
 mod manager;

@@ -295,6 +295,53 @@ impl MeshManager {
     }
 }
 
+/// A mesh instance is a [Mesh] associated with a scene graph node.
+/// The associated node global transform is used to get the position,
+/// orientation and scale of the mesh.
+/// This struct also stores the morph target weights and an optional skeleton/skin, if supported
+/// by the mesh.
+pub struct MeshInstance {
+    id: MeshInstanceId,
+    pub name: String,
+    mesh: Mesh,
+    pub node: NodeId,
+    weights: [f32; MAX_MORPH_TARGET_COUNT],
+    skin: Option<SkinId>,
+}
+
+impl MeshInstance {
+    /// Unique identifier for the mesh. This will always return the same value.
+    pub fn id(&self) -> MeshInstanceId {
+        self.id
+    }
+
+    /// Mesh instantiated by this struct. This will always return the same value.
+    pub fn mesh(&self) -> &Mesh {
+        &self.mesh
+    }
+
+    /// Morph target weights. Used to deform the mesh. The length of
+    /// the returned slice will always match [`Mesh::morph_target_count()`].
+    pub fn weights(&self) -> &[f32] {
+        &self.weights
+    }
+
+    /// Sets the morph target weights. The length of `weights` must match
+    /// [`Mesh::morph_target_count()`].
+    ///
+    /// ## Panics
+    /// This function will panic if the length of `weights` differs from [`Mesh::morph_target_count()`].
+    pub fn set_weights(&mut self, weights: &[f32]) {
+        self.weights[0..self.mesh.morph_target_count()].copy_from_slice(weights);
+    }
+
+    /// If supported by the mesh, this skin/skeleton will be applied
+    /// to it.
+    pub fn skin(&self) -> Option<SkinId> {
+        self.skin
+    }
+}
+
 #[derive(Debug)]
 struct MeshInstanceData {
     id: MeshInstanceId,

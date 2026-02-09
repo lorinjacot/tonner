@@ -1,4 +1,4 @@
-use storm::{Scene, SceneBuilder};
+use storm::{GpuCommandQueue, Scene, SceneBuilder};
 
 #[derive(Debug, Default)]
 pub(super) struct NewSceneModal {
@@ -10,7 +10,7 @@ impl NewSceneModal {
     pub(super) fn ui(
         &mut self,
         egui_ctx: &egui::Context,
-        storm_ctx: &storm::Context,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> Option<Scene> {
         if !self.open {
             return None;
@@ -34,7 +34,7 @@ impl NewSceneModal {
                             Some(
                                 SceneBuilder::default()
                                     .name(self.name.clone())
-                                    .build(storm_ctx),
+                                    .build(gpu_command_queue),
                             )
                         } else {
                             None

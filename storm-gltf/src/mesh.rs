@@ -5,7 +5,7 @@ use bytemuck::cast_slice;
 use glam::{UVec4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use storm::{geometry::GeometryBuilder, mesh::MeshBuilder};
+use storm::{GpuCommandQueue, geometry::GeometryBuilder, mesh::MeshBuilder};
 
 use super::accessor::IteratorConsumer;
 use crate::{
@@ -55,8 +55,7 @@ impl Mesh {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &storm::Context,
-        encoder: &mut wgpu::CommandEncoder,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> anyhow::Result<storm::mesh::Mesh> {
         if let Some(mesh) = self.loaded.clone() {
             return Ok(mesh);
@@ -81,8 +80,7 @@ impl Mesh {
                             buffer_views,
                             buffers,
                             images,
-                            ctx,
-                            encoder,
+                            gpu_command_queue,
                         )
                         .with_context(|| format!("Failed to load primitive.material {index}."))
                         .with_context(primitive_ctx)?,
@@ -97,8 +95,7 @@ impl Mesh {
                                     buffer_views,
                                     buffers,
                                     images,
-                                    ctx,
-                                    encoder,
+                                    gpu_command_queue,
                                 )
                                 .context("Failed to load default material.")
                                 .with_context(primitive_ctx)?;
@@ -359,12 +356,12 @@ impl Mesh {
                     }
                 }
 
-                let geometry = builder.build(ctx).unwrap();
+                let geometry = builder.build(gpu_command_queue.context()).unwrap();
                 mesh_builder = mesh_builder.primitive(geometry, material);
             }
         }
 
-        let mesh = mesh_builder.build(ctx).unwrap();
+        let mesh = mesh_builder.build(gpu_command_queue.context()).unwrap();
         self.loaded = Some(mesh.clone());
         Ok(mesh)
     }

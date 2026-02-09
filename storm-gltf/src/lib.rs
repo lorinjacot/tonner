@@ -8,7 +8,7 @@ use std::{
     io::{BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
-use storm::{SceneBuilder, environment::Environment};
+use storm::{GpuCommandQueue, SceneBuilder, environment::Environment};
 use storm_animation::AnimationManager;
 use thiserror::Error;
 
@@ -167,8 +167,7 @@ impl GltfAsset {
 
     pub fn load_meshes(
         &mut self,
-        ctx: &storm::Context,
-        encoder: &mut wgpu::CommandEncoder,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> anyhow::Result<Vec<storm::mesh::Mesh>> {
         let mut meshes = Vec::with_capacity(self.json.meshes.len());
 
@@ -183,8 +182,7 @@ impl GltfAsset {
                 &mut self.json.images,
                 &self.json.buffer_views,
                 &self.json.buffers,
-                ctx,
-                encoder,
+                gpu_command_queue,
             )?);
         }
 
@@ -194,7 +192,7 @@ impl GltfAsset {
     pub fn create_scenes(
         &mut self,
         default_environment: Option<&Environment>,
-        ctx: &storm::Context,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> anyhow::Result<Vec<(storm::Scene, AnimationManager)>> {
         let mut scenes: Vec<(storm::Scene, AnimationManager)> = self
             .json
@@ -206,28 +204,21 @@ impl GltfAsset {
                 if let Some(environment) = default_environment {
                     builder = builder.environment(environment.clone())
                 }
-                let scene = builder.build(ctx);
+                let scene = builder.build(gpu_command_queue);
                 let animation_manager = AnimationManager::default();
                 (scene, animation_manager)
             })
             .collect();
 
-        let mut encoder = ctx
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GltfAsset::create_scenes command encoder"),
-            });
         for (scene_index, (scene, animation_manager)) in scenes.iter_mut().enumerate() {
             self.load_scene_into(
                 scene_index,
                 None,
                 scene,
                 animation_manager,
-                ctx,
-                &mut encoder,
+                gpu_command_queue,
             )?;
         }
-        ctx.queue().submit([encoder.finish()]);
 
         Ok(scenes)
     }

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use storm::{
-    mesh::MeshInstanceBuilder,
+    GpuCommandQueue,
     scene_graph::{NodeBuilder, SceneGraph},
 };
 use storm_animation::AnimationManager;
@@ -153,8 +153,7 @@ impl Node {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &storm::Context,
-        encoder: &mut wgpu::CommandEncoder,
+        gpu_command_queue: &mut GpuCommandQueue,
         scene: &mut storm::Scene,
     ) -> Result<()> {
         let node = &nodes[index];
@@ -176,18 +175,16 @@ impl Node {
                     images,
                     buffer_views,
                     buffers,
-                    ctx,
-                    encoder,
+                    gpu_command_queue,
                 )
                 .with_context(|| format!("Failed to load mesh {mesh_index}."))
                 .with_context(node_ctx)?;
-            let mut builder = MeshInstanceBuilder::new(storm_mesh).node(node.id.unwrap());
+            let mut instance = storm_mesh.new_instance(node.id.unwrap());
             if let Some(weights) = &node.weights {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             } else if let Some(weights) = gltf_mesh.weights() {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             }
-            builder.build(scene).unwrap();
         }
 
         for &child_index in node.children.iter() {
@@ -204,8 +201,7 @@ impl Node {
                 images,
                 buffer_views,
                 buffers,
-                ctx,
-                encoder,
+                gpu_command_queue,
                 scene,
             )?;
         }
@@ -279,8 +275,7 @@ impl super::GltfAsset {
         base_node: Option<storm::scene_graph::NodeId>,
         scene: &mut storm::Scene,
         animation_manager: &mut AnimationManager,
-        ctx: &storm::Context,
-        encoder: &mut wgpu::CommandEncoder,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> Result<Vec<storm::scene_graph::NodeId>> {
         let root_nodes_idx = self
             .json
@@ -319,8 +314,7 @@ impl super::GltfAsset {
                 &mut self.json.images,
                 &self.json.buffer_views,
                 &self.json.buffers,
-                ctx,
-                encoder,
+                gpu_command_queue,
                 scene,
             )
             .with_context(scene_ctx)?;
@@ -417,7 +411,7 @@ impl super::GltfAsset {
         index: usize,
         parent: Option<storm::scene_graph::NodeId>,
         scene: &mut storm::Scene,
-        encoder: &mut wgpu::CommandEncoder,
+        gpu_command_queue: &mut GpuCommandQueue,
     ) -> anyhow::Result<storm::scene_graph::NodeId> {
         let node = self
             .json
@@ -468,19 +462,17 @@ impl super::GltfAsset {
                     &mut self.json.images,
                     &self.json.buffer_views,
                     &self.json.buffers,
-                    scene.context(),
-                    encoder,
+                    gpu_command_queue,
                 )
                 .with_context(|| format!("Failed to load mesh {mesh_index}."))
                 .with_context(node_ctx)?;
 
-            let mut builder = MeshInstanceBuilder::new(storm_mesh).node(id);
+            let mut instance = storm_mesh.new_instance(node.id.unwrap());
             if let Some(weights) = &node.weights {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             } else if let Some(weights) = gltf_mesh.weights() {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             }
-            builder.build(scene).unwrap();
         }
 
         // node.id = Some(id);
@@ -495,7 +487,7 @@ impl super::GltfAsset {
         }
 
         for child in children {
-            self.load_node(child, Some(id), scene, encoder)?;
+            self.load_node(child, Some(id), scene, gpu_command_queue)?;
         }
 
         Ok(id)

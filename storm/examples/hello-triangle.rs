@@ -110,7 +110,6 @@ impl ApplicationHandler for App {
         command_queue.submit();
 
         let scene = Scene {
-            context,
             scene_graph,
             triangle: instance,
             camera,
@@ -178,7 +177,6 @@ impl ApplicationHandler for App {
 }
 
 struct Scene {
-    context: Context,
     scene_graph: SceneGraph,
     triangle: MeshInstance,
     camera: Camera,

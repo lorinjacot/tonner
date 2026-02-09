@@ -10,7 +10,7 @@ use std::{
 
 use dashmap::DashSet;
 use storm::{
-    Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, mesh::MeshInstanceBuilder,
+    Context, GpuCommandQueue, SceneBuilder, camera::CameraBuilder, mesh::Mesh,
     scene_graph::NodeBuilder,
 };
 use storm_animation::AnimationManager;
@@ -22,7 +22,7 @@ pub(super) struct MeshExplorer {
     show: Arc<AtomicBool>,
     detached: Arc<AtomicBool>,
     meshes: Arc<Mutex<Vec<Mesh>>>,
-    ctx: Context,
+    gpu_command_queue: Arc<Mutex<GpuCommandQueue>>,
     renderer: Arc<egui::mutex::RwLock<eframe::egui_wgpu::Renderer>>,
     properties_windows: Arc<DashSet<PropertiesWindow>>,
 }
@@ -58,7 +58,7 @@ impl MeshExplorer {
             show,
             detached,
             meshes: Arc::new(Mutex::new(Vec::new())),
-            ctx: storm_ctx,
+            gpu_command_queue: Arc::new(Mutex::new(GpuCommandQueue::new(storm_ctx, 1e6 as u64))),
             renderer,
             properties_windows: Arc::new(DashSet::new()),
         }
@@ -121,6 +121,7 @@ impl MeshExplorer {
 
     fn content(&self, ui: &mut egui::Ui) {
         let meshes = self.meshes.lock().unwrap();
+        let mut gpu_command_queue = self.gpu_command_queue.lock().unwrap();
 
         if meshes.is_empty() {
             ui.label(egui::RichText::new("No meshes loaded").italics());
@@ -135,10 +136,12 @@ impl MeshExplorer {
                 if ui.add(label.sense(egui::Sense::click())).double_clicked() {
                     let mut storm_scene = SceneBuilder::default()
                         .name(format!("Preview of {:?}", mesh.id()))
-                        .build(&self.ctx);
-                    MeshInstanceBuilder::new(mesh.clone())
-                        .build(&mut storm_scene)
+                        .build(&mut gpu_command_queue);
+                    let node = NodeBuilder::default()
+                        .build(&mut storm_scene.scene_graph)
                         .unwrap();
+                    let instance = mesh.new_instance(node);
+                    storm_scene.mesh_instances.insert(instance.id(), instance);
 
                     let camera = CameraBuilder::default()
                         .node(
@@ -165,19 +168,13 @@ impl MeshExplorer {
                             400,
                             400,
                             self.renderer.clone(),
-                            &self.ctx,
+                            &mut gpu_command_queue,
                         )),
                     });
                 }
             });
         }
 
-        let mut encoder =
-            self.ctx
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Mesh preview command encoder"),
-                });
         let duration = Duration::from_secs_f32(ui.input(|input_state| input_state.stable_dt));
 
         self.properties_windows.retain(|properties_window| {
@@ -188,7 +185,7 @@ impl MeshExplorer {
                 .write()
                 .unwrap()
                 .storm_scene
-                .simulate(duration, &mut encoder)
+                .simulate(duration, &mut gpu_command_queue)
                 .unwrap();
 
             let mut name = properties_window.mesh.name();
@@ -215,18 +212,18 @@ impl MeshExplorer {
                                 ui.text_edit_singleline(name.deref_mut());
                             },
                         );
-                        properties_window.preview.lock().unwrap().render(
-                            ui,
-                            &self.ctx,
-                            &mut encoder,
-                        );
+                        properties_window
+                            .preview
+                            .lock()
+                            .unwrap()
+                            .render(ui, &mut gpu_command_queue);
                     });
                 });
 
             open
         });
 
-        self.ctx.queue().submit([encoder.finish()]);
+        gpu_command_queue.submit();
         ui.ctx().request_repaint();
     }
 }

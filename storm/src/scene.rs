@@ -60,7 +60,7 @@ impl Scene {
     pub fn simulate(
         &mut self,
         _duration: Duration,
-        _encoder: &mut wgpu::CommandEncoder,
+        _gpu_command_queue: &mut GpuCommandQueue,
     ) -> Result<(), SimulateError> {
         self.light_manager
             .update_point_light_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)

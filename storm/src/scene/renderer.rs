@@ -37,13 +37,13 @@ pub struct Renderer {
 impl Renderer {
     /// Create a new builder. If possible, a builder should be reused, as calling
     /// [`RenderTargetBuilder::new`] is recreating multiple [`wgpu::Texture`], [`wgpu::BindGroup`] and [`wgpu::RenderPipeline`].
-    pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: &Context) -> Self {
-        let mut encoder = ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("RenderTarget::new() command encoder"),
-            });
-
+    pub fn new(
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        gpu_command_queue: &mut GpuCommandQueue,
+    ) -> Self {
+        let ctx = gpu_command_queue.context();
         let render_bind_group_layout = ctx.renderer_ctx.render_bind_group_layout.clone();
         let primitive_renderer = PrimitiveRenderer::new(ctx);
         let skybox_pipeline = ctx.renderer_ctx.skybox_pipeline.clone();
@@ -59,43 +59,54 @@ impl Renderer {
             ],
             bloom_textures,
             [brightness_bind_group, tone_mapping_bind_group],
-        ) = create_render_attachments(width, height, 10, ctx, &mut encoder);
+        ) = create_render_attachments(width, height, 10, gpu_command_queue);
 
-        let tone_mapping_pipeline =
-            ctx.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Tone mapping pipeline"),
-                    layout: Some(&ctx.renderer_ctx.tone_mapping_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &ctx.renderer_ctx.tone_mapping_shader_module,
-                        entry_point: Some("vs_main"),
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                        buffers: &[],
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        unclipped_depth: false,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &ctx.renderer_ctx.tone_mapping_shader_module,
-                        entry_point: Some("fs_main"),
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                        targets: &[Some(format.into())],
-                    }),
-                    multiview: None,
-                    cache: None,
-                });
+        let tone_mapping_pipeline = gpu_command_queue.context().device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("Tone mapping pipeline"),
+                layout: Some(
+                    &gpu_command_queue
+                        .context()
+                        .renderer_ctx
+                        .tone_mapping_pipeline_layout,
+                ),
+                vertex: wgpu::VertexState {
+                    module: &gpu_command_queue
+                        .context()
+                        .renderer_ctx
+                        .tone_mapping_shader_module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &gpu_command_queue
+                        .context()
+                        .renderer_ctx
+                        .tone_mapping_shader_module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(format.into())],
+                }),
+                multiview: None,
+                cache: None,
+            },
+        );
 
         Self {
             format,
@@ -125,7 +136,6 @@ impl Renderer {
         mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
         light_manager: &LightManager,
         environment: &Environment,
-        ctx: &Context,
         gpu_command_queue: &mut GpuCommandQueue,
     ) -> Result<(), RenderError> {
         let mut encoder = gpu_command_queue
@@ -142,7 +152,7 @@ impl Renderer {
                 target_texture.width(),
                 target_texture.height(),
                 self.format,
-                ctx,
+                gpu_command_queue,
             )
         }
 
@@ -168,62 +178,78 @@ impl Renderer {
             position: camera_position,
             _pad: 0,
         };
-        let camera_buffer = ctx
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let camera_buffer = gpu_command_queue.context().device().create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("Camera buffer"),
                 contents: bytes_of(&camera_uniform),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        );
 
-        let render_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("render bind group"),
-            layout: &self.render_bind_group_layout,
-            entries: &[
-                // skins
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: skin_manager.buffer().as_entire_binding(),
-                },
-                // camera
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                // lights
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: light_manager.point_light_buffer().as_entire_binding(),
-                },
-                // irradiance map
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(environment.irradiance_map_view()),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(environment.irradiance_map_sampler()),
-                },
-                // prefilter map
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(environment.prefilter_map_view()),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Sampler(environment.prefilter_map_sampler()),
-                },
-                // BRDF LUT
-                wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: wgpu::BindingResource::TextureView(environment.brdf_lut_view()),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 9,
-                    resource: wgpu::BindingResource::Sampler(environment.brdf_lut_sampler()),
-                },
-            ],
-        });
+        let render_bind_group =
+            gpu_command_queue
+                .context()
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("render bind group"),
+                    layout: &self.render_bind_group_layout,
+                    entries: &[
+                        // skins
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: skin_manager.buffer().as_entire_binding(),
+                        },
+                        // camera
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: camera_buffer.as_entire_binding(),
+                        },
+                        // lights
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: light_manager.point_light_buffer().as_entire_binding(),
+                        },
+                        // irradiance map
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(
+                                environment.irradiance_map_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(
+                                environment.irradiance_map_sampler(),
+                            ),
+                        },
+                        // prefilter map
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: wgpu::BindingResource::TextureView(
+                                environment.prefilter_map_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: wgpu::BindingResource::Sampler(
+                                environment.prefilter_map_sampler(),
+                            ),
+                        },
+                        // BRDF LUT
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: wgpu::BindingResource::TextureView(
+                                environment.brdf_lut_view(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: wgpu::BindingResource::Sampler(
+                                environment.brdf_lut_sampler(),
+                            ),
+                        },
+                    ],
+                });
 
         let mut primitive_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Opaque render pass"),
@@ -782,8 +808,7 @@ fn create_render_attachments(
     width: u32,
     height: u32,
     bloom_amount: usize,
-    ctx: &Context,
-    encoder: &mut wgpu::CommandEncoder,
+    gpu_command_queue: &mut GpuCommandQueue,
 ) -> (
     [wgpu::TextureView; 4],
     [(wgpu::TextureView, wgpu::BindGroup); 2],
@@ -799,7 +824,7 @@ fn create_render_attachments(
         .name("Opaque render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(ctx, encoder)
+        .build(gpu_command_queue)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Opaque render attachment"),
             ..Default::default()
@@ -809,7 +834,7 @@ fn create_render_attachments(
         .name("Accumulation render attachment")
         .empty(size, wgpu::TextureFormat::Rgba16Float)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(ctx, encoder)
+        .build(gpu_command_queue)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Accumulation render attachment"),
             ..Default::default()
@@ -819,7 +844,7 @@ fn create_render_attachments(
         .name("Revealage render attachment")
         .empty(size, wgpu::TextureFormat::R8Unorm)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        .build(ctx, encoder)
+        .build(gpu_command_queue)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Revealage render attachment"),
             ..Default::default()
@@ -829,20 +854,27 @@ fn create_render_attachments(
         .name("Depth render attachment")
         .empty(size, wgpu::TextureFormat::Depth24Plus)
         .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
-        .build(ctx, encoder)
+        .build(gpu_command_queue)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Depth render attachment"),
             ..Default::default()
         });
 
-    let brightness_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Brightness bind group"),
-        layout: &ctx.renderer_ctx.brightness_bind_group_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&opaque_attachment),
-        }],
-    });
+    let brightness_bind_group =
+        gpu_command_queue
+            .context()
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Brightness bind group"),
+                layout: &gpu_command_queue
+                    .context()
+                    .renderer_ctx
+                    .brightness_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&opaque_attachment),
+                }],
+            });
 
     let mut horizontal = true;
     let bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2] = repeat_with(|| {
@@ -850,37 +882,46 @@ fn create_render_attachments(
             .name("Bloom texture")
             .empty(size, wgpu::TextureFormat::Rgba16Float)
             .usage(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT)
-            .build(ctx, encoder)
+            .build(gpu_command_queue)
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("Bloom texture view"),
                 ..Default::default()
             });
-        let horizontal_buffer =
-            ctx.device()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Gaussian blur horizontal buffer"),
-                    contents: bytes_of(&(horizontal as u32)),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let horizontal_buffer = gpu_command_queue.context().device().create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Gaussian blur horizontal buffer"),
+                contents: bytes_of(&(horizontal as u32)),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
         horizontal = !horizontal;
-        let bloom_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Bloom bind group"),
-            layout: &ctx.renderer_ctx.gaussian_blur_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: horizontal_buffer.as_entire_binding(),
-                },
-            ],
-        });
+        let bloom_bind_group =
+            gpu_command_queue
+                .context()
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Bloom bind group"),
+                    layout: &gpu_command_queue
+                        .context()
+                        .renderer_ctx
+                        .gaussian_blur_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&texture),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(
+                                &gpu_command_queue.context().renderer_ctx.bloom_sampler,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: horizontal_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
         (texture, bloom_bind_group)
     })
@@ -889,8 +930,12 @@ fn create_render_attachments(
     .try_into()
     .unwrap();
 
-    let tone_mapping_bind_group =
-        create_tone_mapping_bind_group(ctx, &opaque_attachment, &bloom_textures, bloom_amount);
+    let tone_mapping_bind_group = create_tone_mapping_bind_group(
+        gpu_command_queue.context(),
+        &opaque_attachment,
+        &bloom_textures,
+        bloom_amount,
+    );
 
     (
         [

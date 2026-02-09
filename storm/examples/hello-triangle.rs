@@ -61,19 +61,12 @@ impl ApplicationHandler for App {
         let context = Context::from_device(device, queue);
         let mut command_queue = GpuCommandQueue::new(context.clone(), 1e7 as wgpu::BufferAddress);
 
-        let mut encoder =
-            context
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("App::resumed command encoder"),
-                });
-
         let mut scene_graph = SceneGraph::new(&context);
         let renderer = Renderer::new(
             size.width,
             size.height,
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            &context,
+            &mut command_queue,
         );
 
         let triangle = GeometryBuilder::new(3, 0)
@@ -112,7 +105,7 @@ impl ApplicationHandler for App {
 
         let skin_manager = SkinManager::new(&context);
         let light_manager = LightManager::new(&context);
-        let environment = EnvironmentBuilder::default().build(&context, &mut encoder);
+        let environment = EnvironmentBuilder::default().build(&mut command_queue);
 
         command_queue.submit();
 
@@ -166,7 +159,6 @@ impl ApplicationHandler for App {
                         [&scene.triangle],
                         &scene.light_manager,
                         &scene.environment,
-                        &scene.context,
                         &mut scene.command_queue,
                     )
                     .unwrap();

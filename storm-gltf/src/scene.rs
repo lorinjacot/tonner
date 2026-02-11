@@ -1,12 +1,15 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use glam::{Mat4, Quat, Vec3};
+use anyhow::{Context, Result, anyhow};
+use glam::{Mat4, Quat};
 use serde::{Deserialize, Serialize};
-use storm::scene_graph::{NodeBuilder, SceneGraph};
+use storm::{
+    scene_graph::{NodeBuilder, SceneGraph},
+    skin::{SkinBuilder, SkinId},
+};
 use storm_animation::AnimationManager;
 
-use crate::Mesh;
+use crate::{Accessor, Buffer, BufferView, Mesh, accessor::IteratorConsumer};
 
 /// A node in the node hierarchy. When the node contains [skin](Node::skin),
 /// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
@@ -140,6 +143,7 @@ impl Node {
     fn load_mesh(
         index: usize,
         nodes: &[Node],
+        skins: &mut [Skin],
         meshes: &mut [Mesh],
         base_path: &Path,
         accessors: &[super::Accessor],
@@ -156,6 +160,24 @@ impl Node {
     ) -> Result<()> {
         let node = &nodes[index];
         let node_ctx = || format!("failed to load node {index}.");
+
+        let skin = if let Some(skin_index) = node.skin {
+            if node.mesh.is_none() {
+                return Err(anyhow!(
+                    "A node can only have a skin if it also has a mesh."
+                ))
+                .with_context(node_ctx);
+            }
+
+            let skin = skins
+                .get_mut(skin_index)
+                .with_context(|| format!("node.skin {skin_index} is out of range."))
+                .with_context(node_ctx)?;
+
+            Some(skin.load(nodes, accessors, buffer_views, buffers, scene)?)
+        } else {
+            None
+        };
 
         if let Some(mesh_index) = node.mesh {
             let gltf_mesh = meshes
@@ -178,7 +200,10 @@ impl Node {
                 )
                 .with_context(|| format!("Failed to load mesh {mesh_index}."))
                 .with_context(node_ctx)?;
-            let mut instance = storm_mesh.new_instance(node.id.unwrap());
+            let mut instance = match skin {
+                Some(skin) => storm_mesh.new_instance_with_skin(node.id.unwrap(), skin),
+                None => storm_mesh.new_instance(node.id.unwrap()),
+            };
             if let Some(weights) = &node.weights {
                 instance.set_weights(weights);
             } else if let Some(weights) = gltf_mesh.weights() {
@@ -191,6 +216,7 @@ impl Node {
             Self::load_mesh(
                 child_index,
                 nodes,
+                skins,
                 meshes,
                 base_path,
                 accessors,
@@ -239,9 +265,9 @@ impl Scene {
 // Joints and matrices defining a skin.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Skin {
-    /// Nodes using this skin. Cleared once the scene has been loaded.
+    /// [SkinId][storm::skin::SkinId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    nodes: Vec<storm::scene_graph::NodeId>,
+    id: Option<storm::skin::SkinId>,
 
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
@@ -267,6 +293,60 @@ pub(super) struct Skin {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+}
+
+impl Skin {
+    fn load(
+        &mut self,
+        nodes: &[Node],
+        accessors: &[Accessor],
+        buffer_views: &[BufferView],
+        buffers: &[Buffer],
+        scene: &mut storm::Scene,
+    ) -> Result<SkinId> {
+        if let Some(id) = self.id {
+            return Ok(id);
+        }
+
+        let mut joints = Vec::with_capacity(self.joints.len());
+        for (joint_idx, &index) in self.joints.iter().enumerate() {
+            joints.push(
+                nodes
+                    .get(index)
+                    .with_context(|| format!("skin.nodes[{joint_idx}] {index} is out of range."))?
+                    .id
+                    .with_context(|| {
+                        format!("skin.nodes[{joint_idx}] {index} is not part of scene.")
+                    })?,
+            );
+        }
+
+        let mut builder = SkinBuilder::default().nodes(joints);
+        if let Some(inverse_bind_matrices) = self.inverse_bind_matrices {
+            struct RegisterBindMatrices {
+                builder: SkinBuilder,
+            }
+
+            impl IteratorConsumer<'_, Mat4> for RegisterBindMatrices {
+                type Return = SkinBuilder;
+
+                fn consume<I: Iterator<Item = Mat4>>(self, iter: I) -> Result<Self::Return> {
+                    Ok(self.builder.inverse_bind_matrices(iter))
+                }
+            }
+
+            let consumer = RegisterBindMatrices { builder };
+            let accessor = accessors.get(inverse_bind_matrices).with_context(|| {
+                format!("inverse_bind_matrices {inverse_bind_matrices} is out of range")
+            })?;
+
+            builder = accessor.iter_mat4(buffer_views, buffers, consumer)?;
+        }
+
+        let id = builder.build(scene).unwrap();
+        self.id = Some(id);
+        Ok(id)
+    }
 }
 
 impl super::GltfAsset {
@@ -306,6 +386,7 @@ impl super::GltfAsset {
             Node::load_mesh(
                 node_index,
                 &self.json.nodes,
+                &mut self.json.skins,
                 &mut self.json.meshes,
                 &self.base_path,
                 &self.json.accessors,
@@ -409,92 +490,92 @@ impl super::GltfAsset {
         Ok(root_nodes_ids)
     }
 
-    fn load_node(
-        &mut self,
-        index: usize,
-        parent: Option<storm::scene_graph::NodeId>,
-        scene: &mut storm::Scene,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<storm::scene_graph::NodeId> {
-        let node = self
-            .json
-            .nodes
-            .get(index)
-            .with_context(|| format!("node {index} is out of range."))?;
+    // fn load_node(
+    //     &mut self,
+    //     index: usize,
+    //     parent: Option<storm::scene_graph::NodeId>,
+    //     scene: &mut storm::Scene,
+    //     encoder: &mut wgpu::CommandEncoder,
+    // ) -> anyhow::Result<storm::scene_graph::NodeId> {
+    //     let node = self
+    //         .json
+    //         .nodes
+    //         .get(index)
+    //         .with_context(|| format!("node {index} is out of range."))?;
 
-        let children = node.children.clone();
-        let node_ctx = || format!("Failed to load node {index}.");
+    //     let children = node.children.clone();
+    //     let node_ctx = || format!("Failed to load node {index}.");
 
-        let mut builder = NodeBuilder::default().name(node.name.clone().unwrap_or("".to_string()));
-        if let Some(parent) = parent {
-            builder = builder.parent(parent);
-        }
-        builder = match &node.matrix {
-            Some(matrix) => {
-                let (scale, rotation, translation) =
-                    Mat4::from_cols_array(matrix).to_scale_rotation_translation();
-                builder
-                    .local_scale(scale)
-                    .local_rotation(rotation)
-                    .local_translation(translation)
-            }
-            None => builder
-                .local_scale(node.scale.map_or(Vec3::ZERO, Vec3::from_array))
-                .local_rotation(node.rotation.map_or(Quat::IDENTITY, Quat::from_array))
-                .local_translation(node.translation.map_or(Vec3::ONE, Vec3::from_array)),
-        };
-        let id = builder
-            .build(&mut scene.scene_graph)
-            .with_context(node_ctx)?;
+    //     let mut builder = NodeBuilder::default().name(node.name.clone().unwrap_or("".to_string()));
+    //     if let Some(parent) = parent {
+    //         builder = builder.parent(parent);
+    //     }
+    //     builder = match &node.matrix {
+    //         Some(matrix) => {
+    //             let (scale, rotation, translation) =
+    //                 Mat4::from_cols_array(matrix).to_scale_rotation_translation();
+    //             builder
+    //                 .local_scale(scale)
+    //                 .local_rotation(rotation)
+    //                 .local_translation(translation)
+    //         }
+    //         None => builder
+    //             .local_scale(node.scale.map_or(Vec3::ZERO, Vec3::from_array))
+    //             .local_rotation(node.rotation.map_or(Quat::IDENTITY, Quat::from_array))
+    //             .local_translation(node.translation.map_or(Vec3::ONE, Vec3::from_array)),
+    //     };
+    //     let id = builder
+    //         .build(&mut scene.scene_graph)
+    //         .with_context(node_ctx)?;
 
-        if let Some(mesh_index) = node.mesh {
-            let gltf_mesh = self
-                .json
-                .meshes
-                .get_mut(mesh_index)
-                .with_context(|| format!("node.mesh {mesh_index} is out of range."))
-                .with_context(node_ctx)?;
-            let storm_mesh = gltf_mesh
-                .load(
-                    &self.base_path,
-                    &self.json.accessors,
-                    &mut self.json.materials,
-                    &mut self.default_material,
-                    &mut self.json.textures,
-                    &mut self.json.samplers,
-                    &mut self.json.images,
-                    &self.json.buffer_views,
-                    &self.json.buffers,
-                    scene.context(),
-                    encoder,
-                )
-                .with_context(|| format!("Failed to load mesh {mesh_index}."))
-                .with_context(node_ctx)?;
+    //     if let Some(mesh_index) = node.mesh {
+    //         let gltf_mesh = self
+    //             .json
+    //             .meshes
+    //             .get_mut(mesh_index)
+    //             .with_context(|| format!("node.mesh {mesh_index} is out of range."))
+    //             .with_context(node_ctx)?;
+    //         let storm_mesh = gltf_mesh
+    //             .load(
+    //                 &self.base_path,
+    //                 &self.json.accessors,
+    //                 &mut self.json.materials,
+    //                 &mut self.default_material,
+    //                 &mut self.json.textures,
+    //                 &mut self.json.samplers,
+    //                 &mut self.json.images,
+    //                 &self.json.buffer_views,
+    //                 &self.json.buffers,
+    //                 scene.context(),
+    //                 encoder,
+    //             )
+    //             .with_context(|| format!("Failed to load mesh {mesh_index}."))
+    //             .with_context(node_ctx)?;
 
-            let mut instance = storm_mesh.new_instance(node.id.unwrap());
-            if let Some(weights) = &node.weights {
-                instance.set_weights(weights);
-            } else if let Some(weights) = gltf_mesh.weights() {
-                instance.set_weights(weights);
-            }
-            scene.mesh_instances.insert(instance.id(), instance);
-        }
+    //         let mut instance = storm_mesh.new_instance(node.id.unwrap());
+    //         if let Some(weights) = &node.weights {
+    //             instance.set_weights(weights);
+    //         } else if let Some(weights) = gltf_mesh.weights() {
+    //             instance.set_weights(weights);
+    //         }
+    //         scene.mesh_instances.insert(instance.id(), instance);
+    //     }
 
-        // node.id = Some(id);
-        if let Some(index) = node.skin {
-            self.json
-                .skins
-                .get_mut(index)
-                .with_context(|| format!("node.skin {index} is out of range."))
-                .with_context(node_ctx)?
-                .nodes
-                .push(id);
-        }
+    //     // node.id = Some(id);
+    //     if let Some(index) = node.skin {
+    //         self.json
+    //             .skins
+    //             .get_mut(index)
+    //             .with_context(|| format!("node.skin {index} is out of range."))
+    //             .with_context(node_ctx)?
+    //             .nodes
+    //             .push(id);
+    //     }
 
-        for child in children {
-            self.load_node(child, Some(id), scene, encoder)?;
-        }
+    //     for child in children {
+    //         self.load_node(child, Some(id), scene, encoder)?;
+    //     }
 
-        Ok(id)
-    }
+    //     Ok(id)
+    // }
 }

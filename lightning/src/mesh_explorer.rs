@@ -9,10 +9,7 @@ use std::{
 };
 
 use dashmap::DashSet;
-use storm::{
-    Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, mesh::MeshInstanceBuilder,
-    scene_graph::NodeBuilder,
-};
+use storm::{Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, scene_graph::NodeBuilder};
 use storm_animation::AnimationManager;
 
 use crate::{Scene, SceneView};
@@ -136,9 +133,11 @@ impl MeshExplorer {
                     let mut storm_scene = SceneBuilder::default()
                         .name(format!("Preview of {:?}", mesh.id()))
                         .build(&self.ctx);
-                    MeshInstanceBuilder::new(mesh.clone())
-                        .build(&mut storm_scene)
+                    let node = NodeBuilder::default()
+                        .build(&mut storm_scene.scene_graph)
                         .unwrap();
+                    let instance = mesh.new_instance(node);
+                    storm_scene.mesh_instances.insert(instance.id(), instance);
 
                     let camera = CameraBuilder::default()
                         .node(

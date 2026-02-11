@@ -3,10 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
-use storm::{
-    mesh::MeshInstanceBuilder,
-    scene_graph::{NodeBuilder, SceneGraph},
-};
+use storm::scene_graph::{NodeBuilder, SceneGraph};
 use storm_animation::AnimationManager;
 
 use crate::Mesh;
@@ -181,13 +178,13 @@ impl Node {
                 )
                 .with_context(|| format!("Failed to load mesh {mesh_index}."))
                 .with_context(node_ctx)?;
-            let mut builder = MeshInstanceBuilder::new(storm_mesh).node(node.id.unwrap());
+            let mut instance = storm_mesh.new_instance(node.id.unwrap());
             if let Some(weights) = &node.weights {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             } else if let Some(weights) = gltf_mesh.weights() {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             }
-            builder.build(scene).unwrap();
+            scene.mesh_instances.insert(instance.id(), instance);
         }
 
         for &child_index in node.children.iter() {
@@ -474,13 +471,13 @@ impl super::GltfAsset {
                 .with_context(|| format!("Failed to load mesh {mesh_index}."))
                 .with_context(node_ctx)?;
 
-            let mut builder = MeshInstanceBuilder::new(storm_mesh).node(id);
+            let mut instance = storm_mesh.new_instance(node.id.unwrap());
             if let Some(weights) = &node.weights {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             } else if let Some(weights) = gltf_mesh.weights() {
-                builder = builder.weights(weights.clone());
+                instance.set_weights(weights);
             }
-            builder.build(scene).unwrap();
+            scene.mesh_instances.insert(instance.id(), instance);
         }
 
         // node.id = Some(id);

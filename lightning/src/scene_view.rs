@@ -90,7 +90,7 @@ impl SceneView {
                 &self.texture_view.srgb,
                 &storm_scene.scene_graph,
                 &storm_scene.skin_manager(),
-                &storm_scene.mesh_manager(),
+                storm_scene.mesh_instances.values(),
                 &storm_scene.light_manager(),
                 &storm_scene.environment(),
                 ctx,

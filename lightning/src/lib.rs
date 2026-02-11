@@ -8,7 +8,7 @@ use egui::containers::menu::SubMenuButton;
 use image::{DynamicImage, codecs::hdr::HdrDecoder};
 pub use scene_view::SceneView;
 use storm::{
-    Context, GpuCommandQueue, SceneBuilder,
+    Context, SceneBuilder,
     camera::CameraBuilder,
     environment::{Environment, EnvironmentBuilder},
     scene_graph::NodeBuilder,
@@ -59,7 +59,7 @@ pub struct Scene {
 pub struct App {
     state: State,
     renderer: Arc<egui::mutex::RwLock<eframe::egui_wgpu::Renderer>>,
-    gpu_command_queue: GpuCommandQueue,
+    storm_ctx: Context,
     mesh_explorer: MeshExplorer,
     default_environment: Arc<Environment>,
     scenes: Arc<RwLock<Vec<Arc<RwLock<Scene>>>>>,
@@ -84,8 +84,13 @@ impl App {
 
         let wgpu_state = cc.wgpu_render_state.as_ref().unwrap();
         let storm_ctx = Context::from_device(wgpu_state.device.clone(), wgpu_state.queue.clone());
-        let mut gpu_command_queue = GpuCommandQueue::new(storm_ctx, 1e6 as u64);
 
+        let mut encoder =
+            storm_ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::new command encoder"),
+                });
         let radiance_image = include_bytes!("../../assets/newport_loft.hdr");
         let radiance_image = std::io::Cursor::new(radiance_image);
         let radiance_image = HdrDecoder::new(radiance_image).unwrap();
@@ -94,13 +99,13 @@ impl App {
             EnvironmentBuilder::default()
                 .name("Default environment")
                 .equirectangular_map(radiance_image)
-                .build(&mut gpu_command_queue),
+                .build(&storm_ctx, &mut encoder),
         );
-        gpu_command_queue.submit();
+        storm_ctx.queue().submit([encoder.finish()]);
 
         let mut storm_scene = SceneBuilder::default()
             .name("Default scene")
-            .build(&mut gpu_command_queue);
+            .build(&storm_ctx);
         let camera = CameraBuilder::default().build(&mut storm_scene);
         let animation_manager = AnimationManager::default();
 
@@ -114,13 +119,13 @@ impl App {
             300,
             300,
             wgpu_state.renderer.clone(),
-            &mut gpu_command_queue,
+            &storm_ctx,
         );
 
         let scenes = Arc::new(RwLock::new(vec![current_scene.clone()]));
 
         let mesh_explorer = MeshExplorer::new(
-            gpu_command_queue.context().clone(),
+            storm_ctx.clone(),
             wgpu_state.renderer.clone(),
             state.show_mesh_explorer.clone(),
             state.detached_mesh_explorer.clone(),
@@ -129,7 +134,7 @@ impl App {
         Self {
             state,
             renderer: wgpu_state.renderer.clone(),
-            gpu_command_queue,
+            storm_ctx,
             mesh_explorer,
             default_environment,
             scenes,
@@ -140,8 +145,7 @@ impl App {
     }
 
     fn open_file(&mut self) {
-        let mut gpu_command_queue =
-            GpuCommandQueue::new(self.gpu_command_queue.context().clone(), 1e6 as u64);
+        let ctx = self.storm_ctx.clone();
         let meshes = Arc::clone(self.mesh_explorer.meshes());
         let scenes = Arc::clone(&self.scenes);
         let default_environment = self.default_environment.clone();
@@ -153,7 +157,13 @@ impl App {
             {
                 let mut asset = GltfAsset::open(path.path()).unwrap();
 
-                let mut new_meshes = asset.load_meshes(&mut gpu_command_queue).unwrap();
+                let mut encoder =
+                    ctx.device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("lighting::App:open_file command encoder"),
+                        });
+
+                let mut new_meshes = asset.load_meshes(&ctx, &mut encoder).unwrap();
 
                 let mut meshes = meshes.lock().unwrap();
                 meshes.append(&mut new_meshes);
@@ -161,7 +171,7 @@ impl App {
                 drop(meshes);
 
                 let new_scenes = asset
-                    .create_scenes(Some(&default_environment), &mut gpu_command_queue)
+                    .create_scenes(Some(&default_environment), &ctx)
                     .unwrap();
                 scenes.write().unwrap().extend(new_scenes.into_iter().map(
                     |(storm_scene, animation_manager)| {
@@ -172,7 +182,7 @@ impl App {
                     },
                 ));
 
-                gpu_command_queue.submit();
+                ctx.queue().submit([encoder.finish()]);
             }
         });
     }
@@ -186,6 +196,12 @@ impl eframe::App for App {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let mut encoder =
+            self.storm_ctx
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::update command encoder"),
+                });
         let duration = Duration::from_secs_f32(ctx.input(|input_state| input_state.stable_dt));
 
         ctx.input_mut(|input_state| {
@@ -213,10 +229,7 @@ impl eframe::App for App {
                 },
             )
             .unwrap();
-        scene
-            .storm_scene
-            .simulate(duration, &mut self.gpu_command_queue)
-            .unwrap();
+        scene.storm_scene.simulate(duration, &mut encoder).unwrap();
         drop(scene);
 
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
@@ -314,7 +327,7 @@ impl eframe::App for App {
                                     300,
                                     300,
                                     self.renderer.clone(),
-                                    &mut self.gpu_command_queue,
+                                    &self.storm_ctx,
                                 );
                             };
                         });
@@ -328,7 +341,7 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.current_scene_view
-                .render(ui, &mut self.gpu_command_queue);
+                .render(ui, &self.storm_ctx, &mut encoder);
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 egui::warn_if_debug_build(ui);
@@ -337,7 +350,7 @@ impl eframe::App for App {
 
         self.current_scene_view.update(duration);
 
-        if let Some(mut storm_scene) = self.new_scene_modal.ui(ctx, &mut self.gpu_command_queue) {
+        if let Some(mut storm_scene) = self.new_scene_modal.ui(ctx, &self.storm_ctx) {
             let camera = CameraBuilder::default().build(&mut storm_scene);
             let animation_manager = AnimationManager::default();
             let scene = Arc::new(RwLock::new(Scene {
@@ -351,14 +364,14 @@ impl eframe::App for App {
                 300,
                 300,
                 frame.wgpu_render_state().unwrap().renderer.clone(),
-                &mut self.gpu_command_queue,
+                &self.storm_ctx,
             );
             self.current_scene = scene;
         }
 
         self.mesh_explorer.ui(ctx);
 
-        self.gpu_command_queue.submit();
+        self.storm_ctx.queue().submit([encoder.finish()]);
         ctx.request_repaint();
     }
 }

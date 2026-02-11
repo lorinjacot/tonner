@@ -2,7 +2,6 @@ use std::path::Path;
 
 use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
-use storm::GpuCommandQueue;
 
 use super::transforms::{
     default_4x10, default_05, default_10, is_0, is_3x00, is_4x10, is_05, is_10, is_false,
@@ -99,7 +98,8 @@ impl Material {
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
         images: &mut [super::Image],
-        gpu_command_queue: &mut GpuCommandQueue,
+        ctx: &storm::Context,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<storm::mesh::material::Material> {
         if let Some(material) = self.loaded.clone() {
             return Ok(material);
@@ -134,7 +134,8 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    gpu_command_queue,
+                    ctx,
+                    encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.base_color_texture {}", info.index)
@@ -159,7 +160,8 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    gpu_command_queue,
+                    ctx,
+                    encoder,
                 )
                 .with_context(|| {
                     format!(
@@ -187,7 +189,8 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    gpu_command_queue,
+                    ctx,
+                    encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.normal_texture {}", info.index)
@@ -213,7 +216,8 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    gpu_command_queue,
+                    ctx,
+                    encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.occlusion_texture {}", info.index)
@@ -239,7 +243,8 @@ impl Material {
                     images,
                     buffer_views,
                     buffers,
-                    gpu_command_queue,
+                    ctx,
+                    encoder,
                 )
                 .with_context(|| {
                     format!("Failed to load material.emissive_texture {}", info.index)
@@ -250,7 +255,7 @@ impl Material {
                 .emissive_tex_coord(info.tex_coord as u32);
         }
 
-        let material = builder.build(gpu_command_queue.context());
+        let material = builder.build(ctx);
         self.loaded = Some(material.clone());
         Ok(material)
     }

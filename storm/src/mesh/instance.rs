@@ -1,11 +1,11 @@
 use std::{collections::HashMap, fmt::Display, num::NonZero, ops::Range};
 
-use bytemuck::{Pod, Zeroable, cast_slice};
+use bytemuck::{Pod, Zeroable, cast_slice_mut};
 use glam::{Mat4, Vec4};
 use uuid::{NonNilUuid, Uuid};
 
 use crate::{
-    Context, GpuBufferWriter,
+    Context,
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
     mesh::{
         Mesh,
@@ -122,13 +122,34 @@ impl PrimitiveRenderer {
         Self { vertex_buffer }
     }
 
-    pub(crate) fn prepare<'a, 'b>(
-        &'a mut self,
-        mesh_instances: impl IntoIterator<Item = &'b MeshInstance>,
+    pub(crate) fn render<'a>(
+        &mut self,
+        mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
-        gpu_buffer_writer: &mut impl GpuBufferWriter,
-    ) -> Result<PreparedPrimitives<'a>, RenderError> {
+        ctx: &Context,
+        primitive_render_pass: &mut wgpu::RenderPass,
+    ) -> Result<(), RenderError> {
+        let primitives = self.prepare(mesh_instances, scene_graph, skin_manager, ctx)?;
+
+        primitives
+            .opaque_primitives
+            .render(&self.vertex_buffer, primitive_render_pass);
+
+        primitives
+            .transparent_primitives
+            .render(&self.vertex_buffer, primitive_render_pass);
+
+        Ok(())
+    }
+
+    fn prepare<'a>(
+        &mut self,
+        mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
+        scene_graph: &SceneGraph,
+        skin_manager: &SkinManager,
+        ctx: &Context,
+    ) -> Result<PreparedPrimitives, RenderError> {
         let mut opaque_primitives = PrimitivesByPipeline(HashMap::new());
         let mut transparent_primitives = PrimitivesByPipeline(HashMap::new());
 
@@ -186,25 +207,31 @@ impl PrimitiveRenderer {
 
         let size = primitive_count * size_of::<PrimitiveInstanceVertex>();
         let mut unmap = false;
-        let mut buffer = if self.vertex_buffer.size() < size as wgpu::BufferAddress {
-            self.vertex_buffer = Self::create_vertex_buffer(
-                wgpu::util::align_to(size as wgpu::BufferAddress, wgpu::COPY_BUFFER_ALIGNMENT),
-                true,
-                gpu_buffer_writer.device(),
-            );
+        let mut buffer_view;
+        let buffer: &mut [u8] = if let Some(size) = NonZero::new(size as wgpu::BufferAddress) {
+            match ctx.queue().write_buffer_with(&self.vertex_buffer, 0, size) {
+                Some(view) => {
+                    buffer_view = view;
+                    &mut buffer_view
+                }
+                None => {
+                    self.vertex_buffer = Self::create_vertex_buffer(
+                        wgpu::util::align_to(size.get() as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+                        true,
+                        ctx.device(),
+                    );
+                    unmap = true;
 
-            unmap = true;
-
-            self.vertex_buffer
-                .get_mapped_range_mut(0..size as wgpu::BufferAddress)
+                    &mut self
+                        .vertex_buffer
+                        .get_mapped_range_mut(0..size.get() as wgpu::BufferAddress)
+                }
+            }
         } else {
-            gpu_buffer_writer.write_buffer_with(
-                &self.vertex_buffer,
-                0,
-                NonZero::new(size as wgpu::BufferAddress).unwrap(),
-            )
+            &mut []
         };
 
+        let buffer: &mut [PrimitiveInstanceVertex] = cast_slice_mut(buffer);
         let mut filled_bytes = 0;
         opaque_primitives
             .0
@@ -213,9 +240,9 @@ impl PrimitiveRenderer {
             .for_each(|primitives| {
                 for (_, instances) in primitives.values_mut() {
                     let start = filled_bytes;
-                    let end = start + size_of_val(instances.data.as_slice());
+                    let end = start + size_of_val(&instances.data);
 
-                    buffer[start..end].copy_from_slice(cast_slice(instances.data.as_slice()));
+                    buffer[start..end].copy_from_slice(&instances.data);
                     filled_bytes = end;
 
                     instances.count = instances.data.len() as u32;
@@ -223,13 +250,11 @@ impl PrimitiveRenderer {
                 }
             });
 
-        drop(buffer);
         if unmap {
             self.vertex_buffer.unmap();
         }
 
         Ok(PreparedPrimitives {
-            vertex_buffer: &self.vertex_buffer,
             opaque_primitives,
             transparent_primitives,
         })
@@ -298,26 +323,7 @@ impl PrimitivesByPipeline {
     }
 }
 
-pub(crate) struct PreparedPrimitives<'a> {
-    vertex_buffer: &'a wgpu::Buffer,
+struct PreparedPrimitives {
     opaque_primitives: PrimitivesByPipeline,
     transparent_primitives: PrimitivesByPipeline,
-}
-
-impl<'a> PreparedPrimitives<'a> {
-    pub(crate) fn render_opaque_primitives(
-        &self,
-        primitive_render_pass: &mut wgpu::RenderPass<'_>,
-    ) {
-        self.opaque_primitives
-            .render(&self.vertex_buffer, primitive_render_pass);
-    }
-
-    pub(crate) fn render_transparent_primitives(
-        &self,
-        primitive_render_pass: &mut wgpu::RenderPass<'_>,
-    ) {
-        self.transparent_primitives
-            .render(&self.vertex_buffer, primitive_render_pass);
-    }
 }

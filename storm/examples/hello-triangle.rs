@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use glam::{vec3, vec4};
 use pollster::block_on;
+use storm::Context;
 use storm::camera::Camera;
 use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::GeometryBuilder;
@@ -12,7 +13,6 @@ use storm::mesh::{MeshBuilder, MeshInstance};
 use storm::renderer::Renderer;
 use storm::scene_graph::{NodeBuilder, SceneGraph};
 use storm::skin::SkinManager;
-use storm::{Context, GpuCommandQueue};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -59,21 +59,27 @@ impl ApplicationHandler for App {
         );
 
         let context = Context::from_device(device, queue);
-        let mut command_queue = GpuCommandQueue::new(context.clone(), 1e7 as wgpu::BufferAddress);
+
+        let mut encoder =
+            context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::resumed command encoder"),
+                });
 
         let mut scene_graph = SceneGraph::new(&context);
         let renderer = Renderer::new(
             size.width,
             size.height,
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            &mut command_queue,
+            &context,
         );
 
         let triangle = GeometryBuilder::new(3, 0)
             .name("Triangle")
             .positions([
-                vec3(0.0, -0.5, -5.0),
                 vec3(0.5, 0.5, -5.0),
+                vec3(0.0, -0.5, -5.0),
                 vec3(-0.5, 0.5, -5.0),
             ])
             .unwrap()
@@ -105,18 +111,18 @@ impl ApplicationHandler for App {
 
         let skin_manager = SkinManager::new(&context);
         let light_manager = LightManager::new(&context);
-        let environment = EnvironmentBuilder::default().build(&mut command_queue);
+        let environment = EnvironmentBuilder::default().build(&context, &mut encoder);
 
-        command_queue.submit();
+        context.queue().submit([encoder.finish()]);
 
         let scene = Scene {
+            context,
             scene_graph,
             triangle: instance,
             camera,
             skin_manager,
             light_manager,
             environment,
-            command_queue,
             renderer,
         };
 
@@ -146,7 +152,14 @@ impl ApplicationHandler for App {
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
+                let now = Instant::now();
+                let duration = now.duration_since(self.last_redraw.replace(now).unwrap());
+
                 let scene = self.scene.as_mut().unwrap();
+                let mut encoder = scene
+                    .context
+                    .device()
+                    .create_command_encoder(&Default::default());
 
                 scene
                     .renderer
@@ -158,10 +171,11 @@ impl ApplicationHandler for App {
                         [&scene.triangle],
                         &scene.light_manager,
                         &scene.environment,
-                        &mut scene.command_queue,
+                        &scene.context,
+                        &mut encoder,
                     )
                     .unwrap();
-                scene.command_queue.submit();
+                scene.context.queue().submit([encoder.finish()]);
                 surface_texture.present();
 
                 // Queue a RedrawRequested event.
@@ -177,13 +191,13 @@ impl ApplicationHandler for App {
 }
 
 struct Scene {
+    context: Context,
     scene_graph: SceneGraph,
     triangle: MeshInstance,
     camera: Camera,
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
-    command_queue: GpuCommandQueue,
     renderer: Renderer,
 }
 

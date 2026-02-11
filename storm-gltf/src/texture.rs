@@ -5,7 +5,6 @@ use data_url::{DataUrl, DataUrlError};
 use image::{ImageFormat, ImageReader};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use storm::GpuCommandQueue;
 
 /// Image data used to create a texture. Image **MAY** be referenced by an URI (or IRI) or a buffer view index.
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,7 +49,8 @@ impl Image {
         base_path: &Path,
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        gpu_command_queue: &mut GpuCommandQueue,
+        ctx: &storm::Context,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<wgpu::TextureView> {
         if let Some(image) = &self.wgpu {
             return Ok(image.clone());
@@ -108,7 +108,7 @@ impl Image {
             .name(name)
             .from_dynamic_image(&image, srgb)
             // .generate_mips()
-            .build(gpu_command_queue)
+            .build(ctx, encoder)
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some(name.unwrap_or_default()),
                 ..Default::default()
@@ -317,7 +317,8 @@ impl Texture {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        gpu_command_queue: &mut GpuCommandQueue,
+        ctx: &storm::Context,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<(wgpu::TextureView, wgpu::Sampler)> {
         let sampler = self.sampler;
         let source = self.source.context("image.source must be defined.")?;
@@ -327,7 +328,7 @@ impl Texture {
                 samplers
                     .get_mut(index)
                     .with_context(|| format!("texture.sampler {index} is out of range."))?
-                    .load(gpu_command_queue.context())
+                    .load(ctx)
                     .with_context(|| format!("Failed to load texture.sampler {index}."))?,
             ),
             None => None,
@@ -336,19 +337,16 @@ impl Texture {
         let source = images
             .get_mut(source)
             .with_context(|| format!("texture.image {source} is out of range."))?
-            .load(srgb, base_path, buffer_views, buffers, gpu_command_queue)
+            .load(srgb, base_path, buffer_views, buffers, ctx, encoder)
             .with_context(|| format!("Failed to load texture.image {source}."))?;
 
         Ok((
             source.clone(),
             sampler.clone().unwrap_or_else(|| {
-                gpu_command_queue
-                    .context()
-                    .device()
-                    .create_sampler(&wgpu::SamplerDescriptor {
-                        label: Some("Default glTF texture sampler"),
-                        ..Default::default()
-                    })
+                ctx.device().create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("Default glTF texture sampler"),
+                    ..Default::default()
+                })
             }),
         ))
     }

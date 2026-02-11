@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use image::DynamicImage;
 use wgpu::util::DeviceExt;
 
-use crate::GpuCommandQueue;
+use crate::Context;
 
 #[derive(Debug, Clone)]
 pub(super) struct TextureContex {
@@ -108,10 +108,11 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
-    pub(crate) fn build_callback(
+    pub fn build_callback(
         mut self,
-        gpu_command_queue: &mut GpuCommandQueue,
-        callback: impl FnOnce(&wgpu::Texture, &mut GpuCommandQueue),
+        ctx: &Context,
+        encoder: &mut wgpu::CommandEncoder,
+        callback: impl FnOnce(&wgpu::Texture, &mut wgpu::CommandEncoder),
     ) -> wgpu::Texture {
         let size = match self.source {
             Source::Empty { size, .. } => size,
@@ -130,91 +131,79 @@ impl<'a> TextureBuilder<'a> {
             }
         }
 
-        let (texture, format) =
-            match self.source {
-                Source::Empty { format, .. } => {
-                    let texture = gpu_command_queue.context().device.create_texture(
-                        &wgpu::TextureDescriptor {
-                            label: self.name,
-                            size,
-                            mip_level_count: self.mip_level_count,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format,
-                            usage: self.usage,
-                            view_formats: &[],
-                        },
-                    );
-                    (texture, format)
+        let (texture, format) = match self.source {
+            Source::Empty { format, .. } => {
+                let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+                    label: self.name,
+                    size,
+                    mip_level_count: self.mip_level_count,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: self.usage,
+                    view_formats: &[],
+                });
+                (texture, format)
+            }
+            Source::DynamicImage {
+                dynamic_image,
+                srgb,
+            } => {
+                use DynamicImage::*;
+                let (dynamic_image, mut format) = match dynamic_image {
+                    ImageRgb8(_) => (
+                        &ImageRgba8(dynamic_image.to_rgba8()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    ),
+                    ImageRgba8(_) => (dynamic_image, wgpu::TextureFormat::Rgba8Unorm),
+                    ImageRgb16(_) => (
+                        &ImageRgba16(dynamic_image.to_rgba16()),
+                        wgpu::TextureFormat::Rgba16Unorm,
+                    ),
+                    ImageRgba16(_) => (dynamic_image, wgpu::TextureFormat::Rgba16Unorm),
+                    ImageRgb32F(_) => (
+                        &ImageRgba32F(dynamic_image.to_rgba32f()),
+                        wgpu::TextureFormat::Rgba32Float,
+                    ),
+                    ImageRgba32F(_) => (dynamic_image, wgpu::TextureFormat::Rgba32Float),
+                    _ => unimplemented!(),
+                };
+                if srgb {
+                    format = format.add_srgb_suffix();
                 }
-                Source::DynamicImage {
-                    dynamic_image,
-                    srgb,
-                } => {
-                    use DynamicImage::*;
-                    let (dynamic_image, mut format) = match dynamic_image {
-                        ImageRgb8(_) => (
-                            &ImageRgba8(dynamic_image.to_rgba8()),
-                            wgpu::TextureFormat::Rgba8Unorm,
-                        ),
-                        ImageRgba8(_) => (dynamic_image, wgpu::TextureFormat::Rgba8Unorm),
-                        ImageRgb16(_) => (
-                            &ImageRgba16(dynamic_image.to_rgba16()),
-                            wgpu::TextureFormat::Rgba16Unorm,
-                        ),
-                        ImageRgba16(_) => (dynamic_image, wgpu::TextureFormat::Rgba16Unorm),
-                        ImageRgb32F(_) => (
-                            &ImageRgba32F(dynamic_image.to_rgba32f()),
-                            wgpu::TextureFormat::Rgba32Float,
-                        ),
-                        ImageRgba32F(_) => (dynamic_image, wgpu::TextureFormat::Rgba32Float),
-                        _ => unimplemented!(),
-                    };
-                    if srgb {
-                        format = format.add_srgb_suffix();
-                    }
-                    let texture = gpu_command_queue.context().device.create_texture_with_data(
-                        &gpu_command_queue.context().queue,
-                        &wgpu::TextureDescriptor {
-                            label: self.name,
-                            size,
-                            mip_level_count: self.mip_level_count,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format,
-                            usage: self.usage,
-                            view_formats: &[],
-                        },
-                        wgpu::util::TextureDataOrder::LayerMajor,
-                        dynamic_image.as_bytes(),
-                    );
-                    (texture, format)
-                }
-            };
+                let texture = ctx.device.create_texture_with_data(
+                    &ctx.queue,
+                    &wgpu::TextureDescriptor {
+                        label: self.name,
+                        size,
+                        mip_level_count: self.mip_level_count,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: self.usage,
+                        view_formats: &[],
+                    },
+                    wgpu::util::TextureDataOrder::LayerMajor,
+                    dynamic_image.as_bytes(),
+                );
+                (texture, format)
+            }
+        };
 
-        callback(&texture, gpu_command_queue);
+        callback(&texture, encoder);
 
         if self.generate_mips {
-            let mut encoder = gpu_command_queue
-                .create_command_encoder(Some("storm::TextureBuilder command encoder"));
-
-            let pipeline = gpu_command_queue
-                .context()
+            let pipeline = ctx
                 .texture_ctx
                 .generate_mips_pipelines
                 .entry(format)
                 .or_insert_with(|| {
-                    gpu_command_queue.context().device.create_render_pipeline(
-                        &wgpu::RenderPipelineDescriptor {
+                    ctx.device
+                        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                             label: Some("Generate mips pipeline"),
-                            layout: Some(
-                                &gpu_command_queue
-                                    .context()
-                                    .texture_ctx
-                                    .generate_mips_pipeline_layout,
-                            ),
+                            layout: Some(&ctx.texture_ctx.generate_mips_pipeline_layout),
                             vertex: wgpu::VertexState {
-                                module: &gpu_command_queue.context().texture_ctx.shader_module,
+                                module: &ctx.texture_ctx.shader_module,
                                 entry_point: Some("vs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 buffers: &[],
@@ -235,15 +224,14 @@ impl<'a> TextureBuilder<'a> {
                                 alpha_to_coverage_enabled: false,
                             },
                             fragment: Some(wgpu::FragmentState {
-                                module: &gpu_command_queue.context().texture_ctx.shader_module,
+                                module: &ctx.texture_ctx.shader_module,
                                 entry_point: Some("fs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 targets: &[Some(format.into())],
                             }),
                             multiview: None,
                             cache: None,
-                        },
-                    )
+                        })
                 });
 
             for layer in 0..size.depth_or_array_layers {
@@ -258,30 +246,22 @@ impl<'a> TextureBuilder<'a> {
                         ..Default::default()
                     });
 
-                    let bind_group = gpu_command_queue.context().device.create_bind_group(
-                        &wgpu::BindGroupDescriptor {
-                            label: Some("Generate mips bind group"),
-                            layout: &gpu_command_queue
-                                .context()
-                                .texture_ctx
-                                .generate_mips_bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&sample_view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(
-                                        &gpu_command_queue
-                                            .context()
-                                            .texture_ctx
-                                            .generate_mips_sampler,
-                                    ),
-                                },
-                            ],
-                        },
-                    );
+                    let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Generate mips bind group"),
+                        layout: &ctx.texture_ctx.generate_mips_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&sample_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &ctx.texture_ctx.generate_mips_sampler,
+                                ),
+                            },
+                        ],
+                    });
 
                     let render_view = texture.create_view(&wgpu::TextureViewDescriptor {
                         label: Some("Generate mips render view"),
@@ -313,15 +293,12 @@ impl<'a> TextureBuilder<'a> {
                     render_pass.draw(0..3, 0..1);
                 }
             }
-            drop(pipeline);
-
-            gpu_command_queue.add_command_encoder(encoder);
         }
         texture
     }
 
-    pub fn build(self, gpu_command_queue: &mut GpuCommandQueue) -> wgpu::Texture {
-        self.build_callback(gpu_command_queue, |_, _| ())
+    pub fn build(self, ctx: &Context, encoder: &mut wgpu::CommandEncoder) -> wgpu::Texture {
+        self.build_callback(ctx, encoder, |_, _| ())
     }
 }
 

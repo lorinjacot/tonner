@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3};
 use thiserror::Error;
 
 use crate::{
-    Context, GpuCommandQueue,
+    Context,
     environment::{Environment, EnvironmentBuilder},
     mesh::{MeshInstance, MeshInstanceId},
     scene::{light::LightManager, skin::SkinManager},
@@ -60,7 +60,7 @@ impl Scene {
     pub fn simulate(
         &mut self,
         _duration: Duration,
-        _gpu_command_queue: &mut GpuCommandQueue,
+        _encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), SimulateError> {
         self.light_manager
             .update_point_light_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
@@ -95,19 +95,26 @@ impl SceneBuilder {
         self
     }
 
-    pub fn build(self, gpu_command_queue: &mut GpuCommandQueue) -> Scene {
-        let ctx = gpu_command_queue.context().clone();
-        let scene_graph = SceneGraph::new(&ctx);
-        let skin_manager = SkinManager::new(&ctx);
-        let light_manager = LightManager::new(&ctx);
+    pub fn build(self, ctx: &Context) -> Scene {
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+                label: Some("Engine builder encoder"),
+            });
+
+        let scene_graph = SceneGraph::new(ctx);
+        let skin_manager = SkinManager::new(ctx);
+        let light_manager = LightManager::new(ctx);
 
         let environment = self
             .environment
-            .unwrap_or_else(|| EnvironmentBuilder::default().build(gpu_command_queue));
+            .unwrap_or_else(|| EnvironmentBuilder::default().build(ctx, &mut encoder));
+
+        ctx.queue.submit([encoder.finish()]);
 
         Scene {
             name: self.name,
-            ctx,
+            ctx: ctx.clone(),
             scene_graph,
             skin_manager,
             mesh_instances: HashMap::new(),

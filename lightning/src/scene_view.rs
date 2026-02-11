@@ -4,7 +4,7 @@ use std::{
 };
 
 use eframe::egui_wgpu;
-use storm::{GpuCommandQueue, GpuContext, camera::Camera};
+use storm::{Context, camera::Camera};
 use storm_controls::{EguiControls, orbit::OrbitControls};
 
 use crate::Scene;
@@ -25,23 +25,19 @@ impl SceneView {
         width: u32,
         height: u32,
         renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
-        gpu_command_queue: &mut GpuCommandQueue,
+        ctx: &Context,
     ) -> Self {
-        let texture_view = Self::create_texture_view(width, height, gpu_command_queue.device());
+        let texture_view = Self::create_texture_view(width, height, ctx.device());
 
         let id = renderer.write().register_native_texture(
-            gpu_command_queue.device(),
+            ctx.device(),
             &texture_view.srgb,
             wgpu::FilterMode::Linear,
         );
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
-        let storm_renderer = storm::renderer::Renderer::new(
-            width,
-            height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-            gpu_command_queue,
-        );
+        let storm_renderer =
+            storm::renderer::Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx);
 
         let controls = OrbitControls::new(camera);
 
@@ -63,7 +59,7 @@ impl SceneView {
         );
     }
 
-    pub fn render(&mut self, ui: &mut egui::Ui, gpu_command_queue: &mut GpuCommandQueue) {
+    pub fn render(&mut self, ui: &mut egui::Ui, ctx: &Context, encoder: &mut wgpu::CommandEncoder) {
         let size = ui.available_size();
         let width = size.x as u32;
         let height = size.y as u32;
@@ -77,10 +73,9 @@ impl SceneView {
             let mut renderer = self.egui_renderer.write();
             renderer.free_texture(&self.sized_texture.id);
 
-            self.texture_view =
-                Self::create_texture_view(width, height, gpu_command_queue.device());
+            self.texture_view = Self::create_texture_view(width, height, ctx.device());
             let id = renderer.register_native_texture(
-                gpu_command_queue.device(),
+                ctx.device(),
                 &self.texture_view.rgb,
                 wgpu::FilterMode::Linear,
             );
@@ -95,10 +90,11 @@ impl SceneView {
                 &self.texture_view.srgb,
                 &storm_scene.scene_graph,
                 &storm_scene.skin_manager(),
-                storm_scene.mesh_instances.values(),
+                &storm_scene.mesh_manager(),
                 &storm_scene.light_manager(),
                 &storm_scene.environment(),
-                gpu_command_queue,
+                ctx,
+                encoder,
             )
             .unwrap();
         drop(scene);

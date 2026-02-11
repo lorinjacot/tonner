@@ -20,6 +20,7 @@ pub struct Renderer {
     format: wgpu::TextureFormat,
     render_bind_group_layout: wgpu::BindGroupLayout,
     primitive_renderer: PrimitiveRenderer,
+    skybox_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     bloom_amount: usize,
@@ -45,6 +46,7 @@ impl Renderer {
 
         let render_bind_group_layout = ctx.renderer_ctx.render_bind_group_layout.clone();
         let primitive_renderer = PrimitiveRenderer::new(ctx);
+        let skybox_pipeline = ctx.renderer_ctx.skybox_pipeline.clone();
         let brightness_pipeline = ctx.renderer_ctx.brightness_pipeline.clone();
         let gaussian_blur_pipeline = ctx.renderer_ctx.gaussian_blur_pipeline.clone();
 
@@ -99,6 +101,7 @@ impl Renderer {
             format,
             render_bind_group_layout,
             primitive_renderer,
+            skybox_pipeline,
             brightness_pipeline,
             gaussian_blur_pipeline,
             bloom_amount: 10,
@@ -263,13 +266,17 @@ impl Renderer {
         });
         primitive_render_pass.set_bind_group(0, &render_bind_group, &[]);
 
-        self.primitive_renderer.render(
-            mesh_instances,
-            scene_graph,
-            skin_manager,
-            ctx,
-            &mut primitive_render_pass,
-        )?;
+        let mut prepared_primitives =
+            self.primitive_renderer
+                .prepare(mesh_instances, scene_graph, skin_manager, ctx)?;
+
+        prepared_primitives.render_opaque_primitives(&mut primitive_render_pass);
+
+        primitive_render_pass.set_pipeline(&self.skybox_pipeline);
+        primitive_render_pass.set_bind_group(1, environment.skybox_bind_group(), &[]);
+        primitive_render_pass.draw(0..3, 0..1);
+
+        prepared_primitives.render_transparent_primitives(&mut primitive_render_pass);
 
         drop(primitive_render_pass);
 
@@ -360,6 +367,7 @@ pub enum RenderError {
 #[derive(Debug, Clone)]
 pub(crate) struct RendererContext {
     pub(crate) render_bind_group_layout: wgpu::BindGroupLayout,
+    skybox_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     tone_mapping_shader_module: wgpu::ShaderModule,
@@ -371,7 +379,10 @@ pub(crate) struct RendererContext {
 }
 
 impl RendererContext {
-    pub(crate) fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        skybox_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let render_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("render bind group layout"),
@@ -462,6 +473,57 @@ impl RendererContext {
                     },
                 ],
             });
+
+        let skybox_shader_module = device.create_shader_module(wgpu::include_wgsl!("skybox.wgsl"));
+        let skybox_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Skybox pipeline layout"),
+                bind_group_layouts: &[&render_bind_group_layout, skybox_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Skybox pipeline"),
+            layout: Some(&skybox_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &skybox_shader_module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth24Plus,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &skybox_shader_module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[
+                    Some(wgpu::TextureFormat::Rgba16Float.into()),
+                    Some(wgpu::TextureFormat::Rgba16Float.into()),
+                    Some(wgpu::TextureFormat::R8Unorm.into()),
+                ],
+            }),
+            multiview: None,
+            cache: None,
+        });
 
         let brightness_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("../brightness.wgsl"));
@@ -663,6 +725,7 @@ impl RendererContext {
 
         Self {
             render_bind_group_layout,
+            skybox_pipeline,
             brightness_pipeline,
             gaussian_blur_pipeline,
             tone_mapping_shader_module,

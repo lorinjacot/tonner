@@ -484,7 +484,7 @@ pub(crate) struct EnvironmentContext {
     radiance_sampler: wgpu::Sampler,
     brdf_lut_view: wgpu::TextureView,
     brdf_lut_sampler: wgpu::Sampler,
-    skybox_bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) skybox_bind_group_layout: wgpu::BindGroupLayout,
     radiance_bind_group_layout: wgpu::BindGroupLayout,
     prefilter_roughness_bind_group_layout: wgpu::BindGroupLayout,
     environment_map_sampler: wgpu::Sampler,

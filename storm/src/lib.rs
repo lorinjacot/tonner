@@ -51,9 +51,9 @@ impl Context {
 
         let texture_ctx = TextureContex::new(&device);
         let material_ctx = MaterialContext::new(&device);
-        let renderer_ctx = RendererContext::new(&device);
-        let mesh_ctx = MeshContext::new(&renderer_ctx.render_bind_group_layout, &device);
         let environment_ctx = EnvironmentContext::new(&device, &mut encoder);
+        let renderer_ctx = RendererContext::new(&device, &environment_ctx.skybox_bind_group_layout);
+        let mesh_ctx = MeshContext::new(&renderer_ctx.render_bind_group_layout, &device);
 
         queue.submit([encoder.finish()]);
 

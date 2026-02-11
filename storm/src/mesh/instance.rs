@@ -122,34 +122,13 @@ impl PrimitiveRenderer {
         Self { vertex_buffer }
     }
 
-    pub(crate) fn render<'a>(
-        &mut self,
-        mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
+    pub(crate) fn prepare<'a, 'b>(
+        &'a mut self,
+        mesh_instances: impl IntoIterator<Item = &'b MeshInstance>,
         scene_graph: &SceneGraph,
         skin_manager: &SkinManager,
         ctx: &Context,
-        primitive_render_pass: &mut wgpu::RenderPass,
-    ) -> Result<(), RenderError> {
-        let primitives = self.prepare(mesh_instances, scene_graph, skin_manager, ctx)?;
-
-        primitives
-            .opaque_primitives
-            .render(&self.vertex_buffer, primitive_render_pass);
-
-        primitives
-            .transparent_primitives
-            .render(&self.vertex_buffer, primitive_render_pass);
-
-        Ok(())
-    }
-
-    fn prepare<'a>(
-        &mut self,
-        mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
-        scene_graph: &SceneGraph,
-        skin_manager: &SkinManager,
-        ctx: &Context,
-    ) -> Result<PreparedPrimitives, RenderError> {
+    ) -> Result<PreparedPrimitives<'a>, RenderError> {
         let mut opaque_primitives = PrimitivesByPipeline(HashMap::new());
         let mut transparent_primitives = PrimitivesByPipeline(HashMap::new());
 
@@ -235,6 +214,7 @@ impl PrimitiveRenderer {
         }
 
         Ok(PreparedPrimitives {
+            vertex_buffer: &self.vertex_buffer,
             opaque_primitives,
             transparent_primitives,
         })
@@ -303,7 +283,20 @@ impl PrimitivesByPipeline {
     }
 }
 
-struct PreparedPrimitives {
+pub(crate) struct PreparedPrimitives<'a> {
+    vertex_buffer: &'a wgpu::Buffer,
     opaque_primitives: PrimitivesByPipeline,
     transparent_primitives: PrimitivesByPipeline,
+}
+
+impl<'a> PreparedPrimitives<'a> {
+    pub(crate) fn render_opaque_primitives(&mut self, render_pass: &mut wgpu::RenderPass) {
+        self.opaque_primitives
+            .render(self.vertex_buffer, render_pass);
+    }
+
+    pub(crate) fn render_transparent_primitives(&mut self, render_pass: &mut wgpu::RenderPass) {
+        self.transparent_primitives
+            .render(self.vertex_buffer, render_pass);
+    }
 }

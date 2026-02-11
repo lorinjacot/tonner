@@ -78,8 +78,8 @@ impl ApplicationHandler for App {
         let triangle = GeometryBuilder::new(3, 0)
             .name("Triangle")
             .positions([
-                vec3(0.5, 0.5, -5.0),
                 vec3(0.0, -0.5, -5.0),
+                vec3(0.5, 0.5, -5.0),
                 vec3(-0.5, 0.5, -5.0),
             ])
             .unwrap()
@@ -151,9 +151,6 @@ impl ApplicationHandler for App {
                 let surface_view = surface_texture
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
-
-                let now = Instant::now();
-                let duration = now.duration_since(self.last_redraw.replace(now).unwrap());
 
                 let scene = self.scene.as_mut().unwrap();
                 let mut encoder = scene

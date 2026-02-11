@@ -1,6 +1,6 @@
-use std::{collections::HashMap, fmt::Display, num::NonZero, ops::Range};
+use std::{collections::HashMap, fmt::Display, ops::Range};
 
-use bytemuck::{Pod, Zeroable, cast_slice_mut};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::{Mat4, Vec4};
 use uuid::{NonNilUuid, Uuid};
 
@@ -205,53 +205,33 @@ impl PrimitiveRenderer {
             }
         }
 
-        let size = primitive_count * size_of::<PrimitiveInstanceVertex>();
-        let mut unmap = false;
-        let mut buffer_view;
-        let buffer: &mut [u8] = if let Some(size) = NonZero::new(size as wgpu::BufferAddress) {
-            match ctx.queue().write_buffer_with(&self.vertex_buffer, 0, size) {
-                Some(view) => {
-                    buffer_view = view;
-                    &mut buffer_view
-                }
-                None => {
-                    self.vertex_buffer = Self::create_vertex_buffer(
-                        wgpu::util::align_to(size.get() as u64, wgpu::COPY_BUFFER_ALIGNMENT),
-                        true,
-                        ctx.device(),
-                    );
-                    unmap = true;
-
-                    &mut self
-                        .vertex_buffer
-                        .get_mapped_range_mut(0..size.get() as wgpu::BufferAddress)
-                }
-            }
-        } else {
-            &mut []
-        };
-
-        let buffer: &mut [PrimitiveInstanceVertex] = cast_slice_mut(buffer);
-        let mut filled_bytes = 0;
+        let mut data = Vec::with_capacity(primitive_count);
+        let size = size_of::<PrimitiveInstanceVertex>();
         opaque_primitives
             .0
             .values_mut()
             .chain(transparent_primitives.0.values_mut())
             .for_each(|primitives| {
                 for (_, instances) in primitives.values_mut() {
-                    let start = filled_bytes;
-                    let end = start + size_of_val(&instances.data);
-
-                    buffer[start..end].copy_from_slice(&instances.data);
-                    filled_bytes = end;
-
                     instances.count = instances.data.len() as u32;
+                    let start = data.len() * size;
+                    data.append(&mut instances.data);
+                    let end = data.len() * size;
                     instances.bounds = start as u64..end as u64;
                 }
             });
 
-        if unmap {
+        let size = data.len() * size_of::<PrimitiveInstanceVertex>();
+        let aligned_size = wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT);
+        if self.vertex_buffer.size() < size as u64 {
+            self.vertex_buffer = Self::create_vertex_buffer(aligned_size, true, ctx.device());
+            let mut view = self.vertex_buffer.get_mapped_range_mut(..);
+            view[..size].copy_from_slice(cast_slice(&data));
+            drop(view);
             self.vertex_buffer.unmap();
+        } else {
+            ctx.queue()
+                .write_buffer(&self.vertex_buffer, 0, cast_slice(&data));
         }
 
         Ok(PreparedPrimitives {

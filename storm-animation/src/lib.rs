@@ -1,5 +1,7 @@
 use std::{
-    collections::{HashMap, hash_map::Entry}, fmt::Debug, time::Duration
+    collections::{HashMap, hash_map::Entry},
+    fmt::Debug,
+    time::Duration,
 };
 
 use storm::scene_graph::{NodeNotFoundError, SceneGraph};

@@ -121,13 +121,15 @@ impl Renderer {
         camera: &Camera,
         target: &wgpu::TextureView,
         scene_graph: &SceneGraph,
-        skin_manager: &SkinManager,
+        skin_manager: &mut SkinManager,
         mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
         light_manager: &LightManager,
         environment: &Environment,
         ctx: &Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
+        skin_manager.update_buffer(scene_graph, ctx).unwrap();
+
         let target_texture = target.texture();
         let opaque_texture = self.opaque_attachment.texture();
         if target_texture.width() != opaque_texture.width()

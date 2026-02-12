@@ -164,7 +164,7 @@ impl ApplicationHandler for App {
                         &scene.camera,
                         &surface_view,
                         &mut scene.scene_graph,
-                        &scene.skin_manager,
+                        &mut scene.skin_manager,
                         [&scene.triangle],
                         &scene.light_manager,
                         &scene.environment,

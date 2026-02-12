@@ -126,7 +126,7 @@ impl PrimitiveRenderer {
         &'a mut self,
         mesh_instances: impl IntoIterator<Item = &'b MeshInstance>,
         scene_graph: &SceneGraph,
-        skin_manager: &SkinManager,
+        skin_manager: &mut SkinManager,
         ctx: &Context,
     ) -> Result<PreparedPrimitives<'a>, RenderError> {
         let mut opaque_primitives = PrimitivesByPipeline(HashMap::new());

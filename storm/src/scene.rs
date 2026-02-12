@@ -34,27 +34,15 @@ pub struct Scene {
     pub name: String,
     pub scene_graph: SceneGraph,
     ctx: Context,
-    skin_manager: SkinManager,
+    pub skin_manager: SkinManager,
     pub mesh_instances: HashMap<MeshInstanceId, MeshInstance>,
-    light_manager: LightManager,
-    environment: Environment,
+    pub light_manager: LightManager,
+    pub environment: Environment,
 }
 
 impl Scene {
     pub fn context(&self) -> &Context {
         &self.ctx
-    }
-
-    pub fn skin_manager(&self) -> &SkinManager {
-        &self.skin_manager
-    }
-
-    pub fn light_manager(&self) -> &LightManager {
-        &self.light_manager
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
     }
 
     pub fn simulate(
@@ -67,7 +55,7 @@ impl Scene {
             .unwrap();
 
         self.skin_manager
-            .update_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
+            .update_buffer(&self.scene_graph, &self.ctx)
             .unwrap();
 
         Ok(())

@@ -106,7 +106,10 @@ impl SkinManager {
     /// Create a new empty skin manager.
     pub fn new(ctx: &Context) -> Self {
         let buffer = Self::create_buffer(
-            wgpu::util::align_to(size_of::<Mat4>() as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+            wgpu::util::align_to(
+                size_of::<Mat4>() as wgpu::BufferAddress,
+                wgpu::COPY_BUFFER_ALIGNMENT,
+            ),
             false,
             ctx.device(),
         );
@@ -138,16 +141,15 @@ impl SkinManager {
     }
 
     /// Update the skin buffer with the current state of the skins.
-    pub(super) fn update_buffer(
+    pub(crate) fn update_buffer(
         &mut self,
         scene_graph: &SceneGraph,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        ctx: &Context,
     ) -> Result<(), UpdateSkinBufferError> {
         let mut joint_matrices =
             Vec::with_capacity(self.skins.values_mut().map(|data| data.joints.len()).sum());
         for (index, skin) in self.skins.values_mut().enumerate() {
-            skin.index = Some(index as u32);
+            skin.index = Some(index as u32 + 1);
             for &Joint {
                 node,
                 inverse_bind_matrix,
@@ -163,19 +165,22 @@ impl SkinManager {
             }
         }
 
-        let size = joint_matrices.len() * size_of::<Mat4>();
+        let offset = size_of::<Mat4>();
+        let size = (1 + joint_matrices.len()) * size_of::<Mat4>();
+        let wgpu_size = size as wgpu::BufferAddress;
         let joint_matrices = cast_slice(&joint_matrices);
 
-        if self.buffer.size() >= size as u64 {
-            queue.write_buffer(&self.buffer, 0, joint_matrices);
+        if self.buffer.size() >= wgpu_size {
+            ctx.queue()
+                .write_buffer(&self.buffer, offset as wgpu::BufferAddress, joint_matrices);
         } else {
             self.buffer = Self::create_buffer(
-                wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
+                wgpu::util::align_to(wgpu_size, wgpu::COPY_BUFFER_ALIGNMENT),
                 true,
-                device,
+                ctx.device(),
             );
             let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
-            buffer_view[..size].copy_from_slice(joint_matrices);
+            buffer_view[offset..size].copy_from_slice(joint_matrices);
             drop(buffer_view);
             self.buffer.unmap();
         }

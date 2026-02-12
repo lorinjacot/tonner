@@ -82,20 +82,23 @@ impl SceneView {
             self.sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
         }
 
-        let scene = self.scene.read().unwrap();
-        let storm_scene = &scene.storm_scene;
+        let mut scene = self.scene.write().unwrap();
+        let storm_scene = &mut scene.storm_scene;
         self.storm_renderer
             .render(
                 &self.controls.camera,
                 &self.texture_view.srgb,
                 &storm_scene.scene_graph,
-                &storm_scene.skin_manager(),
+                &mut storm_scene.skin_manager,
                 storm_scene.mesh_instances.values(),
-                &storm_scene.light_manager(),
-                &storm_scene.environment(),
+                &storm_scene.light_manager,
+                &storm_scene.environment,
                 ctx,
                 encoder,
             )
+            .map_err(|err| {
+                dbg!(err, storm_scene.mesh_instances.len());
+            })
             .unwrap();
         drop(scene);
 

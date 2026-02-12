@@ -226,6 +226,7 @@ impl eframe::App for App {
                 duration,
                 &mut Animatable {
                     scene_graph: &mut scene_ref.storm_scene.scene_graph,
+                    mesh_instance: &mut scene_ref.storm_scene.mesh_instances,
                 },
             )
             .unwrap();

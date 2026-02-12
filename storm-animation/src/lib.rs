@@ -4,7 +4,10 @@ use std::{
     time::Duration,
 };
 
-use storm::scene_graph::{NodeNotFoundError, SceneGraph};
+use storm::{
+    mesh::{MeshInstance, MeshInstanceId},
+    scene_graph::{NodeNotFoundError, SceneGraph},
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -222,6 +225,7 @@ pub struct Animation {
 
 pub struct Animatable<'a> {
     pub scene_graph: &'a mut SceneGraph,
+    pub mesh_instance: &'a mut HashMap<MeshInstanceId, MeshInstance>,
 }
 
 pub trait AnimationChannel: Debug + Send + Sync {

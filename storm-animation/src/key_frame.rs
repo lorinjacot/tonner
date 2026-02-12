@@ -1,6 +1,6 @@
 use approx::abs_diff_eq;
 use glam::{Quat, Vec3, Vec4};
-use storm::scene_graph::NodeId;
+use storm::{mesh::MeshInstanceId, scene_graph::NodeId};
 
 use crate::{AnimationChannel, AnimationError};
 
@@ -12,7 +12,13 @@ use crate::{AnimationChannel, AnimationError};
 /// and https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-c-interpolation
 /// for more informations.
 #[derive(Debug)]
-pub struct KeyFrameChannel {
+pub enum KeyFrameChannel {
+    Node(NodeChannel),
+    MeshInstance(MeshInstanceChannel),
+}
+
+#[derive(Debug)]
+pub struct NodeChannel {
     /// The node modified by this channel.
     pub node: NodeId,
     /// Linear time in seconds.
@@ -21,7 +27,21 @@ pub struct KeyFrameChannel {
     /// pairs.
     pub interpolation: Interpolation,
     /// Animated property values.
-    pub outputs: Outputs,
+    pub outputs: NodeOutputs,
+}
+
+#[derive(Debug)]
+pub struct MeshInstanceChannel {
+    /// The mesh instance modified by this channel.
+    pub instance: MeshInstanceId,
+    /// Linear time in seconds.
+    pub inputs: Vec<f32>,
+    /// Sets the interpolation method between two `input`/`output`
+    /// pairs.
+    pub interpolation: Interpolation,
+    /// Animated property values.
+    pub weights: Vec<f32>,
+    pub morph_target_count: usize,
 }
 
 impl AnimationChannel for KeyFrameChannel {
@@ -32,40 +52,56 @@ impl AnimationChannel for KeyFrameChannel {
         animatable: &mut crate::Animatable,
     ) -> Result<(), AnimationError> {
         let progress = progress.as_secs_f32();
-        match &self.outputs {
-            Outputs::Translations(slice) => {
-                animatable.scene_graph.set_local_transformation(
-                    self.node,
-                    interpolate_vec3(progress, &self.inputs, self.interpolation, &slice),
-                    None,
-                    None,
-                )?;
-            }
-            Outputs::Rotations(slice) => {
-                animatable.scene_graph.set_local_transformation(
-                    self.node,
-                    None,
-                    interpolate_quat(progress, &self.inputs, self.interpolation, &slice),
-                    None,
-                )?;
-            }
-            Outputs::Scales(slice) => {
-                animatable.scene_graph.set_local_transformation(
-                    self.node,
-                    None,
-                    None,
-                    interpolate_vec3(progress, &self.inputs, self.interpolation, &slice),
-                )?;
-            }
-            Outputs::Weights(_slice, _count) => {
-                // node.weights = interpolate_weights(
-                //     self.current_timestamp,
-                //     &channel.inputs,
-                //     channel.interpolation,
-                //     &slice,
-                //     *count,
-                // )
-                todo!()
+        match self {
+            KeyFrameChannel::Node(NodeChannel {
+                node,
+                inputs,
+                interpolation,
+                outputs,
+            }) => match outputs {
+                NodeOutputs::Translations(slice) => {
+                    animatable.scene_graph.set_local_transformation(
+                        *node,
+                        interpolate_vec3(progress, inputs, *interpolation, slice),
+                        None,
+                        None,
+                    )?;
+                }
+                NodeOutputs::Rotations(slice) => {
+                    animatable.scene_graph.set_local_transformation(
+                        *node,
+                        None,
+                        interpolate_quat(progress, inputs, *interpolation, slice),
+                        None,
+                    )?;
+                }
+                NodeOutputs::Scales(slice) => {
+                    animatable.scene_graph.set_local_transformation(
+                        *node,
+                        None,
+                        None,
+                        interpolate_vec3(progress, inputs, *interpolation, slice),
+                    )?;
+                }
+            },
+            KeyFrameChannel::MeshInstance(MeshInstanceChannel {
+                instance,
+                inputs,
+                interpolation,
+                weights,
+                morph_target_count,
+            }) => {
+                animatable
+                    .mesh_instance
+                    .get_mut(instance)
+                    .unwrap()
+                    .set_weights(&interpolate_weights(
+                        progress,
+                        inputs,
+                        *interpolation,
+                        weights,
+                        *morph_target_count,
+                    ));
             }
         }
         Ok(())
@@ -80,10 +116,14 @@ pub enum Interpolation {
 }
 
 #[derive(Debug)]
-pub enum Outputs {
+pub enum NodeOutputs {
     Translations(Vec<[f32; 3]>),
     Rotations(Vec<[f32; 4]>),
     Scales(Vec<[f32; 3]>),
+}
+
+#[derive(Debug)]
+pub enum MeshInstanceOutputs {
     Weights(Vec<f32>, usize),
 }
 
@@ -226,7 +266,7 @@ fn interpolate<const N: usize, T>(
     }
 }
 
-fn _interpolate_weights(
+fn interpolate_weights(
     current_timestamp: f32,
     inputs: &[f32],
     interpolation: Interpolation,

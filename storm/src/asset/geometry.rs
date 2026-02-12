@@ -176,12 +176,13 @@ impl GeometryBuilder {
         values: Values,
     ) -> Result<Self, MorphTargetAttributeError> {
         if target < self.morph_target_count {
-            return Err(MorphTargetAttributeError::InvalidMorphTarget {
+            Ok(self.update_attributes(update, values, 1 + target)?)
+        } else {
+            Err(MorphTargetAttributeError::InvalidMorphTarget {
                 max: self.morph_target_count,
                 actual: target,
-            });
+            })
         }
-        Ok(self.update_attributes(update, values, 1 + target)?)
     }
 
     /// Set/update the morph target positions.

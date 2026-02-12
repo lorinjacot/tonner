@@ -1,9 +1,12 @@
-use std::{fmt::Display, time::Duration};
+use std::{collections::HashMap, fmt::Display, time::Duration};
 
 use anyhow::{Context, Result};
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
-use storm_animation::key_frame::{Interpolation, KeyFrameChannel, Outputs};
+use storm::mesh::{MeshInstance, MeshInstanceId};
+use storm_animation::key_frame::{
+    Interpolation, KeyFrameChannel, MeshInstanceChannel, NodeChannel, NodeOutputs,
+};
 
 use crate::{Accessor, Buffer, BufferView, Node, accessor::IteratorConsumer};
 
@@ -34,6 +37,7 @@ impl Animation {
         accessors: &[Accessor],
         buffer_views: &[BufferView],
         buffers: &[Buffer],
+        mesh_instaces: &HashMap<MeshInstanceId, MeshInstance>,
     ) -> Result<storm_animation::Animation> {
         let mut duration = 0.0;
         let mut channels: Vec<Box<dyn storm_animation::AnimationChannel>> =
@@ -103,7 +107,7 @@ impl Animation {
                 AnimationInterpolation::Cubicspline => Interpolation::CubicSpline,
             };
 
-            let outputs = {
+            let channel = {
                 let accessor = accessors
                     .get(sampler.output)
                     .with_context(|| format!("sampler.output {} is out of range.", sampler.output))
@@ -148,44 +152,77 @@ impl Animation {
                 }
 
                 match channel.target.path {
-                    AnimationTargetPath::Translation => Outputs::Translations(
-                        accessor
-                            .iter_vec3(buffer_views, buffers, OutputsConsumer)
-                            .with_context(output_ctx)
-                            .with_context(sampler_ctx)
-                            .with_context(channel_ctx)?,
-                    ),
-                    AnimationTargetPath::Rotation => Outputs::Rotations(
-                        accessor
-                            .iter_vec4(buffer_views, buffers, OutputsConsumer)
-                            .with_context(output_ctx)
-                            .with_context(sampler_ctx)
-                            .with_context(channel_ctx)?,
-                    ),
-                    AnimationTargetPath::Scale => Outputs::Scales(
-                        accessor
-                            .iter_vec3(buffer_views, buffers, OutputsConsumer)
-                            .with_context(output_ctx)
-                            .with_context(sampler_ctx)
-                            .with_context(channel_ctx)?,
-                    ),
-                    AnimationTargetPath::Weights => Outputs::Weights(
-                        accessor
+                    AnimationTargetPath::Translation => {
+                        let outputs = NodeOutputs::Translations(
+                            accessor
+                                .iter_vec3(buffer_views, buffers, OutputsConsumer)
+                                .with_context(output_ctx)
+                                .with_context(sampler_ctx)
+                                .with_context(channel_ctx)?,
+                        );
+                        KeyFrameChannel::Node(NodeChannel {
+                            node,
+                            inputs,
+                            interpolation,
+                            outputs,
+                        })
+                    }
+                    AnimationTargetPath::Rotation => {
+                        let outputs = NodeOutputs::Rotations(
+                            accessor
+                                .iter_vec4(buffer_views, buffers, OutputsConsumer)
+                                .with_context(output_ctx)
+                                .with_context(sampler_ctx)
+                                .with_context(channel_ctx)?,
+                        );
+                        KeyFrameChannel::Node(NodeChannel {
+                            node,
+                            inputs,
+                            interpolation,
+                            outputs,
+                        })
+                    }
+                    AnimationTargetPath::Scale => {
+                        let outputs = NodeOutputs::Scales(
+                            accessor
+                                .iter_vec3(buffer_views, buffers, OutputsConsumer)
+                                .with_context(output_ctx)
+                                .with_context(sampler_ctx)
+                                .with_context(channel_ctx)?,
+                        );
+                        KeyFrameChannel::Node(NodeChannel {
+                            node,
+                            inputs,
+                            interpolation,
+                            outputs,
+                        })
+                    }
+                    AnimationTargetPath::Weights => {
+                        let (id, instance) = match mesh_instaces
+                            .iter()
+                            .find(|(_, instance)| instance.node == node)
+                        {
+                            Some((&id, instance)) => (id, instance),
+                            None => continue,
+                        };
+
+                        let weights = accessor
                             .iter_f32(buffer_views, buffers, OutputsConsumer)
                             .with_context(output_ctx)
                             .with_context(sampler_ctx)
-                            .with_context(channel_ctx)?,
-                        todo!("get morph target count"),
-                    ),
+                            .with_context(channel_ctx)?;
+                        KeyFrameChannel::MeshInstance(MeshInstanceChannel {
+                            instance: id,
+                            inputs,
+                            interpolation,
+                            weights,
+                            morph_target_count: instance.mesh().morph_target_count(),
+                        })
+                    }
                 }
             };
 
-            channels.push(Box::new(KeyFrameChannel {
-                node,
-                inputs,
-                interpolation,
-                outputs,
-            }));
+            channels.push(Box::new(channel));
         }
 
         Ok(storm_animation::Animation {

@@ -7,7 +7,7 @@ use crate::{
     mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
     scene::LightManager,
     scene_graph::{NodeId, SceneGraph},
-    skin::{SkinId, SkinManager},
+    skin::{SkinError, SkinId, SkinManager},
     texture::TextureBuilder,
 };
 use bytemuck::{Pod, Zeroable, bytes_of};
@@ -128,7 +128,7 @@ impl Renderer {
         ctx: &Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
-        skin_manager.update_buffer(scene_graph, ctx).unwrap();
+        let prepared_skins = skin_manager.prepare(scene_graph, ctx)?;
 
         let target_texture = target.texture();
         let opaque_texture = self.opaque_attachment.texture();
@@ -182,7 +182,7 @@ impl Renderer {
                 // skins
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: skin_manager.buffer().as_entire_binding(),
+                    resource: prepared_skins.buffer().as_entire_binding(),
                 },
                 // camera
                 wgpu::BindGroupEntry {
@@ -270,7 +270,7 @@ impl Renderer {
 
         let mut prepared_primitives =
             self.primitive_renderer
-                .prepare(mesh_instances, scene_graph, skin_manager, ctx)?;
+                .prepare(mesh_instances, scene_graph, prepared_skins, ctx)?;
 
         prepared_primitives.render_opaque_primitives(&mut primitive_render_pass);
 
@@ -358,6 +358,9 @@ impl Renderer {
 pub enum RenderError {
     #[error("mesh instance ({0}) node ({1}) is not part of the scene graph")]
     InvalidMeshInstanceNode(MeshInstanceId, NodeId),
+
+    #[error("invalid skin: {0}")]
+    InvalidSkin(#[from] SkinError),
 
     #[error("mesh instance ({0}) skin ({1}) is not part of the skin manager")]
     InvalidMeshInstanceSkin(MeshInstanceId, SkinId),

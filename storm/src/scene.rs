@@ -54,10 +54,6 @@ impl Scene {
             .update_point_light_buffer(&self.scene_graph, &self.ctx.device, &self.ctx.queue)
             .unwrap();
 
-        self.skin_manager
-            .update_buffer(&self.scene_graph, &self.ctx)
-            .unwrap();
-
         Ok(())
     }
 }

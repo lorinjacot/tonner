@@ -343,8 +343,9 @@ impl Skin {
             builder = accessor.iter_mat4(buffer_views, buffers, consumer)?;
         }
 
-        let id = builder.build(scene).unwrap();
-        self.id = Some(id);
+        let skin = builder.build().unwrap();
+        let id = skin.id();
+        scene.skin_manager.skins.insert(skin);
         Ok(id)
     }
 }

@@ -14,7 +14,7 @@ use crate::{
     },
     renderer::RenderError,
     scene_graph::{NodeId, SceneGraph},
-    skin::{SkinId, SkinManager},
+    skin::{PreparedSkins, SkinId},
 };
 
 /// A unique id for a [mesh instance][MeshInstance]. A mesh instance will always have the same id.
@@ -126,7 +126,7 @@ impl PrimitiveRenderer {
         &'a mut self,
         mesh_instances: impl IntoIterator<Item = &'b MeshInstance>,
         scene_graph: &SceneGraph,
-        skin_manager: &mut SkinManager,
+        prepared_skins: PreparedSkins,
         ctx: &Context,
     ) -> Result<PreparedPrimitives<'a>, RenderError> {
         let mut opaque_primitives = PrimitivesByPipeline(HashMap::new());
@@ -143,8 +143,8 @@ impl PrimitiveRenderer {
                 .global_transformation();
             let pipeline_index = model_matrix.determinant().is_sign_negative() as usize;
             let joint_offset = match mesh_instance.skin {
-                Some(skin) => skin_manager
-                    .index(skin)
+                Some(skin) => prepared_skins
+                    .offset(skin)
                     .ok_or(RenderError::InvalidMeshInstanceSkin(mesh_instance.id, skin))?,
                 None => 0,
             };

@@ -5,7 +5,6 @@ members = [
     "storm-controls",
     "storm-gltf",
     "glam-js",
-    "storm-js",
     "lightning",
 ]
 resolver = "2"

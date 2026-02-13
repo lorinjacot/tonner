@@ -11,7 +11,7 @@ use uuid::{NonNilUuid, Uuid};
 
 use crate::{
     Context,
-    scene::scene_graph::{NodeId, SceneGraph},
+    scene_graph::{NodeId, SceneGraph},
 };
 
 /// A unique id for a skin. A skin can only have one id.

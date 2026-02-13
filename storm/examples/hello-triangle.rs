@@ -4,15 +4,15 @@ use std::time::Instant;
 use glam::{vec3, vec4};
 use pollster::block_on;
 use storm::Context;
-use storm::camera::Camera;
 use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::GeometryBuilder;
-use storm::light::LightManager;
+use storm::geometry::skin::SkinManager;
 use storm::mesh::material::MaterialBuilder;
 use storm::mesh::{MeshBuilder, MeshInstance};
 use storm::renderer::Renderer;
+use storm::renderer::camera::Camera;
+use storm::renderer::light::LightManager;
 use storm::scene_graph::{NodeBuilder, SceneGraph};
-use storm::skin::SkinManager;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -166,7 +166,7 @@ impl ApplicationHandler for App {
                         &mut scene.scene_graph,
                         &mut scene.skin_manager,
                         [&scene.triangle],
-                        &scene.light_manager,
+                        &mut scene.light_manager,
                         &scene.environment,
                         &scene.context,
                         &mut encoder,

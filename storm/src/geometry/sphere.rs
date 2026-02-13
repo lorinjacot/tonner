@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     Context,
-    asset::geometry::{Geometry, GeometryBuilder},
+    geometry::{Geometry, GeometryBuilder},
 };
 
 /// A sphere geometry builder.

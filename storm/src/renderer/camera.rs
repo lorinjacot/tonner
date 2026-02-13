@@ -1,10 +1,7 @@
 use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 
-use crate::{
-    scene::{Scene, scene_graph::NodeId},
-    scene_graph::{NodeBuilder, NodeNotFoundError, SceneGraph},
-};
+use crate::scene_graph::{NodeBuilder, NodeId, NodeNotFoundError, SceneGraph};
 
 /// A builder for camera.
 #[must_use]
@@ -53,11 +50,11 @@ impl CameraBuilder {
     }
 
     /// Build the camera.
-    pub fn build(self, scene: &mut Scene) -> Camera {
+    pub fn build(self, scene_graph: &mut SceneGraph) -> Camera {
         let node = self.node.unwrap_or_else(|| {
             NodeBuilder::default()
                 .name(&self.name)
-                .build(&mut scene.scene_graph)
+                .build(scene_graph)
                 .unwrap()
         });
 

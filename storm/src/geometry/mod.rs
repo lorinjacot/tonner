@@ -14,6 +14,7 @@ use crate::Context;
 
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
 
+pub mod skin;
 mod sphere;
 
 pub const MAX_MORPH_TARGET_COUNT: usize = 8;

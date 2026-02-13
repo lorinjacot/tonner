@@ -34,7 +34,7 @@ impl MeshContext {
         device: &wgpu::Device,
     ) -> Self {
         let primitive_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("mesh/primitive.wgsl"));
+            device.create_shader_module(wgpu::include_wgsl!("primitive.wgsl"));
 
         let primitive_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

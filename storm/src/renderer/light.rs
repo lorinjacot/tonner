@@ -7,10 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     Context,
-    scene::{
-        Scene,
-        scene_graph::{NodeBuilder, NodeId, SceneGraph},
-    },
+    scene_graph::{NodeBuilder, NodeId, SceneGraph},
 };
 
 /// A unique id for a point light. A point light has one and only one id.
@@ -59,18 +56,22 @@ impl PointLightBuilder {
     }
 
     /// Create the light.
-    pub fn build(self, scene: &mut Scene) -> Result<PointLightId, PointLightBuilderError> {
+    pub fn build(
+        self,
+        scene_graph: &mut SceneGraph,
+        light_manager: &mut LightManager,
+    ) -> Result<PointLightId, PointLightBuilderError> {
         let name = self.name.unwrap_or_default();
         let node = match self.node {
             Some(node) => {
-                if !scene.scene_graph.contains(node) {
+                if !scene_graph.contains(node) {
                     return Err(PointLightBuilderError::InvalidNode(node));
                 }
                 node
             }
             None => NodeBuilder::default()
                 .name(name.clone())
-                .build(&mut scene.scene_graph)
+                .build(scene_graph)
                 .unwrap(),
         };
         let color = self.color.unwrap_or(Vec3::ONE);
@@ -78,11 +79,11 @@ impl PointLightBuilder {
         let data = PointLightData {
             id,
             index: None,
-            name,
+            _name: name,
             node,
             color,
         };
-        scene.light_manager.point_lights.insert(id, data);
+        light_manager.point_lights.insert(id, data);
         Ok(id)
     }
 }
@@ -161,14 +162,14 @@ impl LightManager {
         scene_graph: &SceneGraph,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<(), UpdatePointLightBufferError> {
+    ) -> Result<(), LightError> {
         let mut uniforms = Vec::with_capacity(self.point_lights.len());
         for (i, data) in self.point_lights.values_mut().enumerate() {
             data.index = Some(i as u32);
             uniforms.push(PointLightUniform {
                 position: scene_graph
                     .get(data.node)
-                    .ok_or(UpdatePointLightBufferError::InvalidNode(data.node))?
+                    .ok_or(LightError::InvalidNode(data.id, data.node))?
                     .global_transformation()
                     .transform_point3(Vec3::ZERO)
                     .to_array(),
@@ -198,17 +199,18 @@ impl LightManager {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
-pub(super) enum UpdatePointLightBufferError {
+pub enum LightError {
     #[error("invalid node {0}")]
-    InvalidNode(NodeId),
+    InvalidNode(PointLightId, NodeId),
 }
 
 #[derive(Debug)]
 struct PointLightData {
     id: PointLightId,
     index: Option<u32>,
-    name: String,
+    _name: String,
     node: NodeId,
     color: Vec3,
 }

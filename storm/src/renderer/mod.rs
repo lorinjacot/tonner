@@ -2,12 +2,14 @@ use std::iter::repeat_with;
 
 use crate::{
     Context,
-    camera::Camera,
     environment::Environment,
-    light::LightManager,
+    geometry::skin::{SkinError, SkinId, SkinManager},
     mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
+    renderer::{
+        camera::Camera,
+        light::{LightError, LightManager},
+    },
     scene_graph::{NodeId, SceneGraph},
-    skin::{SkinError, SkinId, SkinManager},
     texture::TextureBuilder,
 };
 use bytemuck::{Pod, Zeroable, bytes_of};
@@ -15,6 +17,9 @@ use glam::{Mat4, Vec3};
 use log::warn;
 use thiserror::Error;
 use wgpu::util::DeviceExt;
+
+pub mod camera;
+pub mod light;
 
 pub struct Renderer {
     format: wgpu::TextureFormat,
@@ -132,11 +137,12 @@ impl Renderer {
         scene_graph: &SceneGraph,
         skin_manager: &mut SkinManager,
         mesh_instances: impl IntoIterator<Item = &'a MeshInstance>,
-        light_manager: &LightManager,
+        light_manager: &mut LightManager,
         environment: &Environment,
         ctx: &Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
+        light_manager.update_point_light_buffer(scene_graph, ctx.device(), ctx.queue())?;
         let prepared_skins = skin_manager.prepare(scene_graph, ctx)?;
 
         let target_texture = target.texture();
@@ -409,6 +415,9 @@ impl Renderer {
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum RenderError {
+    #[error("invalid light: {0}")]
+    InvalidLight(#[from] LightError),
+
     #[error("mesh instance ({0}) node ({1}) is not part of the scene graph")]
     InvalidMeshInstanceNode(MeshInstanceId, NodeId),
 

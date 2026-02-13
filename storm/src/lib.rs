@@ -1,21 +1,15 @@
-pub use asset::{environment, geometry};
-pub use scene::{Scene, SceneBuilder};
-pub use scene::{camera, light, scene_graph, skin};
-
-use crate::asset::environment::EnvironmentContext;
+use crate::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
 
-pub mod mesh;
-mod asset {
-    pub mod environment;
-    pub mod geometry;
-}
+pub mod environment;
+pub mod geometry;
 pub mod math;
+pub mod mesh;
 pub mod renderer;
-mod scene;
+pub mod scene_graph;
 pub mod texture;
 
 /// Contains everything long-lived and shared by the engine.

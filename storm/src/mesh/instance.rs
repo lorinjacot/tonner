@@ -6,6 +6,7 @@ use uuid::{NonNilUuid, Uuid};
 
 use crate::{
     Context,
+    geometry::skin::{PreparedSkins, SkinId},
     geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
     mesh::{
         Mesh,
@@ -14,7 +15,6 @@ use crate::{
     },
     renderer::RenderError,
     scene_graph::{NodeId, SceneGraph},
-    skin::{PreparedSkins, SkinId},
 };
 
 /// A unique id for a [mesh instance][MeshInstance]. A mesh instance will always have the same id.
@@ -295,7 +295,10 @@ impl<'a> PreparedPrimitives<'a> {
             .render(self.vertex_buffer, opaque_render_pass);
     }
 
-    pub(crate) fn render_transparent_primitives(&mut self, transparent_render_pass: &mut wgpu::RenderPass) {
+    pub(crate) fn render_transparent_primitives(
+        &mut self,
+        transparent_render_pass: &mut wgpu::RenderPass,
+    ) {
         self.transparent_primitives
             .render(self.vertex_buffer, transparent_render_pass);
     }

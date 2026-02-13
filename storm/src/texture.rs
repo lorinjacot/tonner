@@ -151,12 +151,12 @@ impl<'a> TextureBuilder<'a> {
             } => {
                 use DynamicImage::*;
                 let (dynamic_image, mut format) = match dynamic_image {
-                    ImageRgb8(_) => (
+                    ImageRgb8(_) | ImageLuma8(_) | ImageLumaA8(_) => (
                         &ImageRgba8(dynamic_image.to_rgba8()),
                         wgpu::TextureFormat::Rgba8Unorm,
                     ),
                     ImageRgba8(_) => (dynamic_image, wgpu::TextureFormat::Rgba8Unorm),
-                    ImageRgb16(_) => (
+                    ImageRgb16(_) | ImageLuma16(_) | ImageLumaA16(_) => (
                         &ImageRgba16(dynamic_image.to_rgba16()),
                         wgpu::TextureFormat::Rgba16Unorm,
                     ),

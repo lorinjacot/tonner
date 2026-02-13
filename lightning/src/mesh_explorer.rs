@@ -1,15 +1,23 @@
 use std::{
+    collections::HashMap,
     hash::Hash,
     ops::DerefMut,
     sync::{
-        Arc, Mutex, RwLock,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 use dashmap::DashSet;
-use storm::{Context, SceneBuilder, camera::CameraBuilder, mesh::Mesh, scene_graph::NodeBuilder};
+use storm::{
+    Context,
+    environment::Environment,
+    geometry::skin::SkinManager,
+    mesh::Mesh,
+    renderer::{camera::CameraBuilder, light::LightManager},
+    scene_graph::{NodeBuilder, SceneGraph},
+};
 use storm_animation::AnimationManager;
 
 use crate::{Scene, SceneView};
@@ -22,11 +30,11 @@ pub(super) struct MeshExplorer {
     ctx: Context,
     renderer: Arc<egui::mutex::RwLock<eframe::egui_wgpu::Renderer>>,
     properties_windows: Arc<DashSet<PropertiesWindow>>,
+    environment: Environment,
 }
 
 struct PropertiesWindow {
     mesh: Mesh,
-    scene: Arc<RwLock<Scene>>,
     preview: Mutex<SceneView>,
 }
 
@@ -50,6 +58,7 @@ impl MeshExplorer {
         renderer: Arc<egui::mutex::RwLock<eframe::egui_wgpu::Renderer>>,
         show: Arc<AtomicBool>,
         detached: Arc<AtomicBool>,
+        environment: Environment,
     ) -> Self {
         Self {
             show,
@@ -58,6 +67,7 @@ impl MeshExplorer {
             ctx: storm_ctx,
             renderer,
             properties_windows: Arc::new(DashSet::new()),
+            environment,
         }
     }
 
@@ -130,34 +140,34 @@ impl MeshExplorer {
                     egui::Label::new(name.as_str())
                 };
                 if ui.add(label.sense(egui::Sense::click())).double_clicked() {
-                    let mut storm_scene = SceneBuilder::default()
-                        .name(format!("Preview of {:?}", mesh.id()))
-                        .build(&self.ctx);
+                    let mut scene = Scene {
+                        name: mesh.name().to_string(),
+                        scene_graph: SceneGraph::new(&self.ctx),
+                        mesh_instances: HashMap::new(),
+                        skin_manager: SkinManager::new(&self.ctx),
+                        animation_manager: AnimationManager::default(),
+                        light_manager: LightManager::new(&self.ctx),
+                        environment: self.environment.clone(),
+                    };
                     let node = NodeBuilder::default()
-                        .build(&mut storm_scene.scene_graph)
+                        .build(&mut scene.scene_graph)
                         .unwrap();
                     let instance = mesh.new_instance(node);
-                    storm_scene.mesh_instances.insert(instance.id(), instance);
+                    scene.mesh_instances.insert(instance.id(), instance);
 
                     let camera = CameraBuilder::default()
                         .node(
                             NodeBuilder::default()
                                 .local_translation([0.0, 0.0, 2.0])
-                                .build(&mut storm_scene.scene_graph)
+                                .build(&mut scene.scene_graph)
                                 .unwrap(),
                         )
-                        .build(&mut storm_scene);
+                        .build(&mut scene.scene_graph);
 
-                    let animation_manager = AnimationManager::default();
-
-                    let scene = Arc::new(RwLock::new(Scene {
-                        storm_scene,
-                        animation_manager,
-                    }));
+                    let scene = Arc::new(Mutex::new(scene));
 
                     self.properties_windows.insert(PropertiesWindow {
                         mesh: mesh.clone(),
-                        scene: scene.clone(),
                         preview: Mutex::new(SceneView::new(
                             scene,
                             camera,
@@ -181,14 +191,6 @@ impl MeshExplorer {
 
         self.properties_windows.retain(|properties_window| {
             properties_window.preview.lock().unwrap().update(duration);
-
-            properties_window
-                .scene
-                .write()
-                .unwrap()
-                .storm_scene
-                .simulate(duration, &mut encoder)
-                .unwrap();
 
             let mut name = properties_window.mesh.name();
             let window = if name.is_empty() {

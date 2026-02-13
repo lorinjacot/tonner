@@ -3,12 +3,17 @@ use bytemuck::bytes_of_mut;
 use data_url::forgiving_base64::InvalidBase64;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fmt::Display,
     fs::File,
     io::{BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
-use storm::{SceneBuilder, environment::Environment};
+use storm::{
+    geometry::skin::SkinManager,
+    mesh::{MeshInstance, MeshInstanceId},
+    scene_graph::SceneGraph,
+};
 use storm_animation::AnimationManager;
 use thiserror::Error;
 
@@ -17,15 +22,17 @@ use animation::Animation;
 use buffer::{Buffer, BufferView};
 use material::Material;
 use mesh::Mesh;
-use scene::{Node, Scene, Skin};
 use texture::{Image, Sampler, Texture};
+
+use crate::{node::Node, skin::Skin};
 
 mod accessor;
 mod animation;
 mod buffer;
 mod material;
 mod mesh;
-mod scene;
+mod node;
+mod skin;
 mod texture;
 mod transforms;
 
@@ -191,49 +198,82 @@ impl GltfAsset {
         Ok(meshes)
     }
 
-    pub fn create_scenes(
-        &mut self,
-        default_environment: Option<&Environment>,
-        ctx: &storm::Context,
-    ) -> anyhow::Result<Vec<(storm::Scene, AnimationManager)>> {
-        let mut scenes: Vec<(storm::Scene, AnimationManager)> = self
-            .json
-            .scenes
-            .iter()
-            .map(|scene| {
-                let mut builder =
-                    SceneBuilder::default().name(scene.name().clone().unwrap_or(String::new()));
-                if let Some(environment) = default_environment {
-                    builder = builder.environment(environment.clone())
-                }
-                let scene = builder.build(ctx);
-                let animation_manager = AnimationManager::default();
-                (scene, animation_manager)
-            })
-            .collect();
-
-        let mut encoder = ctx
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GltfAsset::create_scenes command encoder"),
-            });
-        for (scene_index, (scene, animation_manager)) in scenes.iter_mut().enumerate() {
-            self.load_scene_into(
-                scene_index,
-                None,
-                scene,
-                animation_manager,
-                ctx,
-                &mut encoder,
-            )?;
-        }
-        ctx.queue().submit([encoder.finish()]);
-
-        Ok(scenes)
+    pub fn scenes(&self) -> &[Scene] {
+        &self.json.scenes
     }
 
     pub fn default_scene(&self) -> Option<usize> {
         self.json.scene
+    }
+
+    pub fn load_scene_into(
+        &mut self,
+        scene_index: usize,
+        base_node: Option<storm::scene_graph::NodeId>,
+        scene_graph: &mut SceneGraph,
+        mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
+        skin_manager: &mut SkinManager,
+        animation_manager: &mut AnimationManager,
+        ctx: &storm::Context,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<Vec<storm::scene_graph::NodeId>> {
+        let root_nodes_idx = self
+            .json
+            .scenes
+            .get(scene_index)
+            .with_context(|| format!("scene {scene_index} is out of range."))?
+            .nodes
+            .clone();
+
+        let scene_ctx = || format!("Failed to load scene {scene_index}.");
+
+        let mut root_nodes_ids = Vec::with_capacity(root_nodes_idx.len());
+        for &node_index in root_nodes_idx.iter() {
+            root_nodes_ids.push(
+                Node::load(node_index, &mut self.json.nodes, base_node, scene_graph)
+                    .with_context(scene_ctx)?,
+            );
+        }
+
+        for node_index in root_nodes_idx {
+            Node::load_mesh(
+                node_index,
+                &self.json.nodes,
+                &mut self.json.skins,
+                &mut self.json.meshes,
+                &self.base_path,
+                &self.json.accessors,
+                &mut self.json.materials,
+                &mut self.default_material,
+                &mut self.json.textures,
+                &mut self.json.samplers,
+                &mut self.json.images,
+                &self.json.buffer_views,
+                &self.json.buffers,
+                mesh_instances,
+                skin_manager,
+                ctx,
+                encoder,
+            )
+            .with_context(scene_ctx)?;
+        }
+
+        for animation in &self.json.animations {
+            let id = animation_manager.insert(animation.load(
+                &self.json.nodes,
+                &self.json.accessors,
+                &self.json.buffer_views,
+                &self.json.buffers,
+                mesh_instances,
+            )?);
+            animation_manager.start(id).unwrap();
+        }
+
+        for node in &mut self.json.nodes {
+            node.id = None;
+        }
+
+        Ok(root_nodes_ids)
     }
 }
 
@@ -468,4 +508,29 @@ enum CameraType {
 
     #[serde(rename = "orthographic")]
     Orthographic,
+}
+
+/// The root nodes of a scene.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Scene {
+    /// The indices of each root node.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    nodes: Vec<usize>,
+
+    /// The user-defined name of this object. This is not necessarily unique, e.g.,
+    /// an accessor and a buffer could have the same name, or two accessors could
+    /// even have the same name.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+impl Scene {
+    /// The user-defined name of this object. This is not necessarily unique, e.g.,
+    /// an accessor and a buffer could have the same name, or two accessors could
+    /// even have the same name.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
 }

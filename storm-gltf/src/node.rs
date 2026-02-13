@@ -1,15 +1,15 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result, anyhow};
 use glam::{Mat4, Quat};
 use serde::{Deserialize, Serialize};
 use storm::{
+    geometry::skin::SkinManager,
+    mesh::{MeshInstance, MeshInstanceId},
     scene_graph::{NodeBuilder, SceneGraph},
-    skin::{SkinBuilder, SkinId},
 };
-use storm_animation::AnimationManager;
 
-use crate::{Accessor, Buffer, BufferView, Mesh, accessor::IteratorConsumer};
+use crate::{Mesh, skin::Skin};
 
 /// A node in the node hierarchy. When the node contains [skin](Node::skin),
 /// all [mesh.primitives](Mesh::primitives) **MUST** contain [JOINTS_0](PrimitiveAttributes::joints_0)
@@ -26,7 +26,7 @@ use crate::{Accessor, Buffer, BufferView, Mesh, accessor::IteratorConsumer};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    id: Option<storm::scene_graph::NodeId>,
+    pub(super) id: Option<storm::scene_graph::NodeId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -87,12 +87,7 @@ pub(super) struct Node {
 }
 
 impl Node {
-    /// Storm storage id, if the resource has been loaded. Cleared once the scene has been loaded.
-    pub(super) fn id(&self) -> Option<storm::scene_graph::NodeId> {
-        self.id
-    }
-
-    fn load(
+    pub(super) fn load(
         index: usize,
         nodes: &mut [Node],
         parent: Option<storm::scene_graph::NodeId>,
@@ -140,7 +135,7 @@ impl Node {
         Ok(id)
     }
 
-    fn load_mesh(
+    pub(super) fn load_mesh(
         index: usize,
         nodes: &[Node],
         skins: &mut [Skin],
@@ -154,9 +149,10 @@ impl Node {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
+        mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
+        skin_manager: &mut SkinManager,
         ctx: &storm::Context,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &mut storm::Scene,
     ) -> Result<()> {
         let node = &nodes[index];
         let node_ctx = || format!("failed to load node {index}.");
@@ -174,7 +170,7 @@ impl Node {
                 .with_context(|| format!("node.skin {skin_index} is out of range."))
                 .with_context(node_ctx)?;
 
-            Some(skin.load(nodes, accessors, buffer_views, buffers, scene)?)
+            Some(skin.load(nodes, accessors, buffer_views, buffers, skin_manager)?)
         } else {
             None
         };
@@ -209,7 +205,7 @@ impl Node {
             } else if let Some(weights) = gltf_mesh.weights() {
                 instance.set_weights(weights);
             }
-            scene.mesh_instances.insert(instance.id(), instance);
+            mesh_instances.insert(instance.id(), instance);
         }
 
         for &child_index in node.children.iter() {
@@ -227,199 +223,13 @@ impl Node {
                 images,
                 buffer_views,
                 buffers,
+                mesh_instances,
+                skin_manager,
                 ctx,
                 encoder,
-                scene,
             )?;
         }
 
         Ok(())
-    }
-}
-
-/// The root nodes of a scene.
-#[derive(Debug, Serialize, Deserialize)]
-pub(super) struct Scene {
-    /// The indices of each root node.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    nodes: Vec<usize>,
-
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-}
-
-impl Scene {
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    pub(super) fn name(&self) -> &Option<String> {
-        &self.name
-    }
-}
-
-// Joints and matrices defining a skin.
-#[derive(Debug, Serialize, Deserialize)]
-pub(super) struct Skin {
-    /// [SkinId][storm::skin::SkinId], if the resource has been loaded. Cleared once the scene has been loaded.
-    #[serde(skip)]
-    id: Option<storm::skin::SkinId>,
-
-    /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
-    /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to
-    /// the number of elements of the joints array. When undefined, each matrix is a 4x4
-    /// identity matrix.
-    #[serde(rename = "inverseBindMatrices")]
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    inverse_bind_matrices: Option<usize>,
-
-    /// The index of the node used as a skeleton root. The node **MUST** be the closest common
-    /// root of the joints hierarchy or a direct or indirect parent node of the closest common root.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    skeleton: Option<usize>,
-
-    /// Indices of skeleton nodes, used as joints in this skin.
-    joints: Vec<usize>,
-
-    /// The user-defined name of this object. This is not necessarily unique, e.g.,
-    /// an accessor and a buffer could have the same name, or two accessors could
-    /// even have the same name.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-}
-
-impl Skin {
-    fn load(
-        &mut self,
-        nodes: &[Node],
-        accessors: &[Accessor],
-        buffer_views: &[BufferView],
-        buffers: &[Buffer],
-        scene: &mut storm::Scene,
-    ) -> Result<SkinId> {
-        if let Some(id) = self.id {
-            return Ok(id);
-        }
-
-        let mut joints = Vec::with_capacity(self.joints.len());
-        for (joint_idx, &index) in self.joints.iter().enumerate() {
-            joints.push(
-                nodes
-                    .get(index)
-                    .with_context(|| format!("skin.nodes[{joint_idx}] {index} is out of range."))?
-                    .id
-                    .with_context(|| {
-                        format!("skin.nodes[{joint_idx}] {index} is not part of scene.")
-                    })?,
-            );
-        }
-
-        let mut builder = SkinBuilder::default().nodes(joints);
-        if let Some(inverse_bind_matrices) = self.inverse_bind_matrices {
-            struct RegisterBindMatrices {
-                builder: SkinBuilder,
-            }
-
-            impl IteratorConsumer<'_, Mat4> for RegisterBindMatrices {
-                type Return = SkinBuilder;
-
-                fn consume<I: Iterator<Item = Mat4>>(self, iter: I) -> Result<Self::Return> {
-                    Ok(self.builder.inverse_bind_matrices(iter))
-                }
-            }
-
-            let consumer = RegisterBindMatrices { builder };
-            let accessor = accessors.get(inverse_bind_matrices).with_context(|| {
-                format!("inverse_bind_matrices {inverse_bind_matrices} is out of range")
-            })?;
-
-            builder = accessor.iter_mat4(buffer_views, buffers, consumer)?;
-        }
-
-        let skin = builder.build().unwrap();
-        let id = skin.id();
-        scene.skin_manager.skins.insert(skin);
-        Ok(id)
-    }
-}
-
-impl super::GltfAsset {
-    pub fn load_scene_into(
-        &mut self,
-        scene_index: usize,
-        base_node: Option<storm::scene_graph::NodeId>,
-        scene: &mut storm::Scene,
-        animation_manager: &mut AnimationManager,
-        ctx: &storm::Context,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<storm::scene_graph::NodeId>> {
-        let root_nodes_idx = self
-            .json
-            .scenes
-            .get(scene_index)
-            .with_context(|| format!("scene {scene_index} is out of range."))?
-            .nodes
-            .clone();
-
-        let scene_ctx = || format!("Failed to load scene {scene_index}.");
-
-        let mut root_nodes_ids = Vec::with_capacity(root_nodes_idx.len());
-        for &node_index in root_nodes_idx.iter() {
-            root_nodes_ids.push(
-                Node::load(
-                    node_index,
-                    &mut self.json.nodes,
-                    base_node,
-                    &mut scene.scene_graph,
-                )
-                .with_context(scene_ctx)?,
-            );
-        }
-
-        for node_index in root_nodes_idx {
-            Node::load_mesh(
-                node_index,
-                &self.json.nodes,
-                &mut self.json.skins,
-                &mut self.json.meshes,
-                &self.base_path,
-                &self.json.accessors,
-                &mut self.json.materials,
-                &mut self.default_material,
-                &mut self.json.textures,
-                &mut self.json.samplers,
-                &mut self.json.images,
-                &self.json.buffer_views,
-                &self.json.buffers,
-                ctx,
-                encoder,
-                scene,
-            )
-            .with_context(scene_ctx)?;
-        }
-
-        for animation in &self.json.animations {
-            let id = animation_manager.insert(animation.load(
-                &self.json.nodes,
-                &self.json.accessors,
-                &self.json.buffer_views,
-                &self.json.buffers,
-                &scene.mesh_instances,
-            )?);
-            animation_manager.start(id).unwrap();
-        }
-
-        for node in &mut self.json.nodes {
-            node.id = None;
-        }
-
-        Ok(root_nodes_ids)
     }
 }

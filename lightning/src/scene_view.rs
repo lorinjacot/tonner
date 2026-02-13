@@ -1,16 +1,18 @@
 use std::{
-    sync::{Arc, RwLock},
+    ops::DerefMut,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 use eframe::egui_wgpu;
-use storm::{Context, camera::Camera};
+use storm::{Context, renderer::camera::Camera};
+use storm_animation::Animatable;
 use storm_controls::{EguiControls, orbit::OrbitControls};
 
 use crate::Scene;
 
 pub struct SceneView {
-    scene: Arc<RwLock<Scene>>,
+    scene: Arc<Mutex<Scene>>,
     controls: OrbitControls,
     texture_view: TextureView,
     sized_texture: egui::load::SizedTexture,
@@ -20,7 +22,7 @@ pub struct SceneView {
 
 impl SceneView {
     pub fn new(
-        scene: Arc<RwLock<Scene>>,
+        scene: Arc<Mutex<Scene>>,
         camera: Camera,
         width: u32,
         height: u32,
@@ -52,11 +54,23 @@ impl SceneView {
     }
 
     pub fn update(&mut self, delta_time: Duration) {
+        let mut scene = self.scene.lock().unwrap();
+        let scene = scene.deref_mut();
         self.controls.update(
-            &mut self.scene.write().unwrap().storm_scene.scene_graph,
+            &mut scene.scene_graph,
             delta_time,
             self.sized_texture.size.x / self.sized_texture.size.y,
         );
+        scene
+            .animation_manager
+            .update(
+                delta_time,
+                &mut Animatable {
+                    scene_graph: &mut scene.scene_graph,
+                    mesh_instance: &mut scene.mesh_instances,
+                },
+            )
+            .unwrap();
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui, ctx: &Context, encoder: &mut wgpu::CommandEncoder) {
@@ -82,32 +96,25 @@ impl SceneView {
             self.sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
         }
 
-        let mut scene = self.scene.write().unwrap();
-        let storm_scene = &mut scene.storm_scene;
+        let mut scene = self.scene.lock().unwrap();
+        let scene = scene.deref_mut();
         self.storm_renderer
             .render(
                 &self.controls.camera,
                 &self.texture_view.srgb,
-                &storm_scene.scene_graph,
-                &mut storm_scene.skin_manager,
-                storm_scene.mesh_instances.values(),
-                &storm_scene.light_manager,
-                &storm_scene.environment,
+                &scene.scene_graph,
+                &mut scene.skin_manager,
+                scene.mesh_instances.values(),
+                &mut scene.light_manager,
+                &scene.environment,
                 ctx,
                 encoder,
             )
-            .map_err(|err| {
-                dbg!(err, storm_scene.mesh_instances.len());
-            })
             .unwrap();
-        drop(scene);
 
         let response = ui.image(self.sized_texture).interact(egui::Sense::drag());
-        self.controls.handle_response(
-            response,
-            ui,
-            &mut self.scene.write().unwrap().storm_scene.scene_graph,
-        );
+        self.controls
+            .handle_response(response, ui, &mut scene.scene_graph);
     }
 
     fn create_texture_view(width: u32, height: u32, device: &wgpu::Device) -> TextureView {

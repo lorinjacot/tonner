@@ -54,7 +54,7 @@ impl Animation {
                 .get(node_idx)
                 .with_context(|| format!("channel.target.node {node_idx} is out of range."))
                 .with_context(channel_ctx)?
-                .id()
+                .id
             {
                 Some(id) => id,
                 None => continue,

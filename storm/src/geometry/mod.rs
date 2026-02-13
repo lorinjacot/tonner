@@ -5,7 +5,7 @@ use std::{
 
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use glam::{UVec4, Vec2, Vec3, Vec4};
+use glam::{UVec4, Vec2, Vec3, Vec4, vec4};
 use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
@@ -349,6 +349,7 @@ impl GeometryBuilder {
             };
 
             if generate_normals {
+                dbg!(generate_normals);
                 for target in 0..=self.morph_target_count {
                     let start = target * self.vertex_count;
                     let end = start + self.vertex_count;
@@ -359,6 +360,7 @@ impl GeometryBuilder {
             }
 
             if let Some(normal_tex_coord) = self.normal_tex_coord {
+                dbg!(normal_tex_coord);
                 for target in 0..=self.morph_target_count {
                     let start = target * self.vertex_count;
                     let end = start + self.vertex_count;
@@ -528,7 +530,8 @@ impl<'a> mikktspace::Geometry for MikkTSpace<'a> {
     }
 
     fn set_tangent_encoded(&mut self, tangent: [f32; 4], face: usize, vert: usize) {
-        self.attribute_mut(face, vert).tangent = Vec4::from_array(tangent);
+        self.attribute_mut(face, vert).tangent =
+            vec4(tangent[0], tangent[1], tangent[2], -tangent[3]);
     }
 }
 

@@ -1,11 +1,11 @@
 pub use asset::{environment, geometry};
 pub use scene::{Scene, SceneBuilder};
-pub use scene::{camera, light, renderer, scene_graph, skin};
+pub use scene::{camera, light, scene_graph, skin};
 
 use crate::asset::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
-use crate::scene::renderer::RendererContext;
+use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
 
 pub mod mesh;
@@ -14,6 +14,7 @@ mod asset {
     pub mod geometry;
 }
 pub mod math;
+pub mod renderer;
 mod scene;
 pub mod texture;
 

@@ -4,8 +4,8 @@ use crate::{
     Context,
     camera::Camera,
     environment::Environment,
+    light::LightManager,
     mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
-    scene::LightManager,
     scene_graph::{NodeId, SceneGraph},
     skin::{SkinError, SkinId, SkinManager},
     texture::TextureBuilder,
@@ -582,7 +582,7 @@ impl RendererContext {
         });
 
         let brightness_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("../brightness.wgsl"));
+            device.create_shader_module(wgpu::include_wgsl!("brightness.wgsl"));
 
         let brightness_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -610,7 +610,7 @@ impl RendererContext {
             });
 
         let gaussian_blur_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("../gaussian_blur.wgsl"));
+            device.create_shader_module(wgpu::include_wgsl!("gaussian_blur.wgsl"));
 
         let gaussian_blur_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -807,7 +807,7 @@ impl RendererContext {
         });
 
         let tone_mapping_shader_module =
-            device.create_shader_module(wgpu::include_wgsl!("../tone_mapping.wgsl"));
+            device.create_shader_module(wgpu::include_wgsl!("tone_mapping.wgsl"));
 
         let tone_mapping_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

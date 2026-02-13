@@ -151,12 +151,12 @@ impl LightManager {
 
     /// Buffer containing the point light data. This is used when a gpu shader need point light access. The return
     /// buffer should not be keep as this method could return another buffer on another call.
-    pub(super) fn point_light_buffer(&self) -> &wgpu::Buffer {
+    pub(crate) fn point_light_buffer(&self) -> &wgpu::Buffer {
         &self.point_light_buffer
     }
 
     /// Update the point light buffer with the current state of the nodes.
-    pub(super) fn update_point_light_buffer(
+    pub(crate) fn update_point_light_buffer(
         &mut self,
         scene_graph: &SceneGraph,
         device: &wgpu::Device,

@@ -1,0 +1,15 @@
+[package]
+name = "glam-js"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+glam.workspace = true
+paste.workspace = true
+wasm-bindgen.workspace = true
+
+[dev-dependencies]
+wasm-bindgen-test.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "storm-controls"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bitflags.workspace = true
+egui = { workspace = true, optional = true }
+glam.workspace = true
+log.workspace = true
+storm.workspace = true
+
+[features]
+default = ["orbit"]
+orbit = []
+egui = ["dep:egui"]

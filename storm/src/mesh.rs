@@ -207,9 +207,33 @@ impl MeshContext {
                     Some(wgpu::Face::Back)
                 };
 
-                let depth_write_enabled = match parameters.alpha_mode {
-                    AlphaMode::Opaque | AlphaMode::Mask => true,
-                    AlphaMode::Blend => false,
+                let (targets, depth_write_enabled) = match parameters.alpha_mode {
+                    AlphaMode::Opaque | AlphaMode::Mask => (
+                        &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
+                        true,
+                    ),
+                    AlphaMode::Blend => (
+                        &[
+                            None,
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(wgpu::BlendState {
+                                    color: Self::ACCUMULATION_BLEND,
+                                    alpha: Self::ACCUMULATION_BLEND,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R8Unorm,
+                                blend: Some(wgpu::BlendState {
+                                    color: Self::REVEALAGE_BLEND,
+                                    alpha: Self::REVEALAGE_BLEND,
+                                }),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
+                        false,
+                    ),
                 };
 
                 let mut desc = wgpu::RenderPipelineDescriptor {
@@ -264,29 +288,7 @@ impl MeshContext {
                             constants,
                             zero_initialize_workgroup_memory: true,
                         },
-                        targets: &[
-                            Some(wgpu::ColorTargetState {
-                                format: wgpu::TextureFormat::Rgba16Float,
-                                blend: None,
-                                write_mask: wgpu::ColorWrites::all(),
-                            }),
-                            Some(wgpu::ColorTargetState {
-                                format: wgpu::TextureFormat::Rgba16Float,
-                                blend: Some(wgpu::BlendState {
-                                    color: Self::ACCUMULATION_BLEND,
-                                    alpha: Self::ACCUMULATION_BLEND,
-                                }),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            }),
-                            Some(wgpu::ColorTargetState {
-                                format: wgpu::TextureFormat::R8Unorm,
-                                blend: Some(wgpu::BlendState {
-                                    color: Self::REVEALAGE_BLEND,
-                                    alpha: Self::REVEALAGE_BLEND,
-                                }),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            }),
-                        ],
+                        targets,
                     }),
                     multiview: None,
                     cache: None,

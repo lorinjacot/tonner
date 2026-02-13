@@ -21,6 +21,7 @@ pub struct Renderer {
     render_bind_group_layout: wgpu::BindGroupLayout,
     primitive_renderer: PrimitiveRenderer,
     skybox_pipeline: wgpu::RenderPipeline,
+    compose_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
     bloom_amount: usize,
@@ -28,6 +29,7 @@ pub struct Renderer {
     accumulation_attachment: wgpu::TextureView,
     revealage_attachment: wgpu::TextureView,
     depth_attachment: wgpu::TextureView,
+    compose_bind_group: wgpu::BindGroup,
     brightness_bind_group: wgpu::BindGroup,
     bloom_textures: [(wgpu::TextureView, wgpu::BindGroup); 2],
     tone_mapping_bind_group: wgpu::BindGroup,
@@ -47,6 +49,7 @@ impl Renderer {
         let render_bind_group_layout = ctx.renderer_ctx.render_bind_group_layout.clone();
         let primitive_renderer = PrimitiveRenderer::new(ctx);
         let skybox_pipeline = ctx.renderer_ctx.skybox_pipeline.clone();
+        let compose_pipeline = ctx.renderer_ctx.compose_pipeline.clone();
         let brightness_pipeline = ctx.renderer_ctx.brightness_pipeline.clone();
         let gaussian_blur_pipeline = ctx.renderer_ctx.gaussian_blur_pipeline.clone();
 
@@ -58,7 +61,11 @@ impl Renderer {
                 depth_attachment,
             ],
             bloom_textures,
-            [brightness_bind_group, tone_mapping_bind_group],
+            [
+                compose_bind_group,
+                brightness_bind_group,
+                tone_mapping_bind_group,
+            ],
         ) = create_render_attachments(width, height, 10, ctx, &mut encoder);
 
         let tone_mapping_pipeline =
@@ -102,6 +109,7 @@ impl Renderer {
             render_bind_group_layout,
             primitive_renderer,
             skybox_pipeline,
+            compose_pipeline,
             brightness_pipeline,
             gaussian_blur_pipeline,
             bloom_amount: 10,
@@ -109,6 +117,7 @@ impl Renderer {
             accumulation_attachment,
             revealage_attachment,
             depth_attachment,
+            compose_bind_group,
             brightness_bind_group,
             bloom_textures,
             tone_mapping_bind_group,
@@ -224,7 +233,7 @@ impl Renderer {
             ],
         });
 
-        let mut primitive_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut opaque_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Opaque render pass"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
@@ -236,6 +245,38 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 }),
+                None,
+                None,
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_attachment,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        opaque_render_pass.set_bind_group(0, &render_bind_group, &[]);
+
+        let mut prepared_primitives =
+            self.primitive_renderer
+                .prepare(mesh_instances, scene_graph, prepared_skins, ctx)?;
+
+        prepared_primitives.render_opaque_primitives(&mut opaque_render_pass);
+
+        opaque_render_pass.set_pipeline(&self.skybox_pipeline);
+        opaque_render_pass.set_bind_group(1, environment.skybox_bind_group(), &[]);
+        opaque_render_pass.draw(0..3, 0..1);
+
+        drop(opaque_render_pass);
+
+        let mut transparent_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Transparent render pass"),
+            color_attachments: &[
+                None,
                 Some(wgpu::RenderPassColorAttachment {
                     view: &self.accumulation_attachment,
                     depth_slice: None,
@@ -258,7 +299,7 @@ impl Renderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_attachment,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -266,21 +307,33 @@ impl Renderer {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        primitive_render_pass.set_bind_group(0, &render_bind_group, &[]);
+        transparent_render_pass.set_bind_group(0, &render_bind_group, &[]);
 
-        let mut prepared_primitives =
-            self.primitive_renderer
-                .prepare(mesh_instances, scene_graph, prepared_skins, ctx)?;
+        prepared_primitives.render_transparent_primitives(&mut transparent_render_pass);
 
-        prepared_primitives.render_opaque_primitives(&mut primitive_render_pass);
+        drop(transparent_render_pass);
 
-        primitive_render_pass.set_pipeline(&self.skybox_pipeline);
-        primitive_render_pass.set_bind_group(1, environment.skybox_bind_group(), &[]);
-        primitive_render_pass.draw(0..3, 0..1);
+        let mut compose_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Compose render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.opaque_attachment,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-        prepared_primitives.render_transparent_primitives(&mut primitive_render_pass);
+        compose_render_pass.set_pipeline(&self.compose_pipeline);
+        compose_render_pass.set_bind_group(0, &self.compose_bind_group, &[]);
+        compose_render_pass.draw(0..3, 0..1);
 
-        drop(primitive_render_pass);
+        drop(compose_render_pass);
 
         let mut brightness_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Brightness render pass"),
@@ -373,8 +426,10 @@ pub enum RenderError {
 pub(crate) struct RendererContext {
     pub(crate) render_bind_group_layout: wgpu::BindGroupLayout,
     skybox_pipeline: wgpu::RenderPipeline,
+    compose_pipeline: wgpu::RenderPipeline,
     brightness_pipeline: wgpu::RenderPipeline,
     gaussian_blur_pipeline: wgpu::RenderPipeline,
+    compose_bind_group_layout: wgpu::BindGroupLayout,
     tone_mapping_shader_module: wgpu::ShaderModule,
     tone_mapping_bind_group_layout: wgpu::BindGroupLayout,
     tone_mapping_pipeline_layout: wgpu::PipelineLayout,
@@ -520,11 +575,7 @@ impl RendererContext {
                 module: &skybox_shader_module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
-                    Some(wgpu::TextureFormat::Rgba16Float.into()),
-                    Some(wgpu::TextureFormat::Rgba16Float.into()),
-                    Some(wgpu::TextureFormat::R8Unorm.into()),
-                ],
+                targets: &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
             }),
             multiview: None,
             cache: None,
@@ -636,6 +687,91 @@ impl RendererContext {
                 cache: None,
             });
 
+        let composer_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("compose.wgsl"));
+
+        let compose_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Compose bind group layout"),
+                entries: &[
+                    // accumulation texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // revealage texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let compose_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compose pipeline layout"),
+                bind_group_layouts: &[&compose_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        const COMPOSE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let compose_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Compose pipeline"),
+            layout: Some(&compose_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &composer_shader_module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &composer_shader_module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: Some(wgpu::BlendState {
+                        color: COMPOSE_BLEND,
+                        alpha: COMPOSE_BLEND,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
         let brightness_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Brightness pipeline"),
             layout: Some(&brightness_pipeline_layout),
@@ -731,8 +867,10 @@ impl RendererContext {
         Self {
             render_bind_group_layout,
             skybox_pipeline,
+            compose_pipeline,
             brightness_pipeline,
             gaussian_blur_pipeline,
+            compose_bind_group_layout,
             tone_mapping_shader_module,
             tone_mapping_bind_group_layout,
             tone_mapping_pipeline_layout,
@@ -762,7 +900,7 @@ fn create_render_attachments(
 ) -> (
     [wgpu::TextureView; 4],
     [(wgpu::TextureView, wgpu::BindGroup); 2],
-    [wgpu::BindGroup; 2],
+    [wgpu::BindGroup; 3],
 ) {
     let size = wgpu::Extent3d {
         width,
@@ -809,6 +947,21 @@ fn create_render_attachments(
             label: Some("Depth render attachment"),
             ..Default::default()
         });
+
+    let compose_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Compose bind group"),
+        layout: &ctx.renderer_ctx.compose_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&accumulation_attachment),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&revealage_attachment),
+            },
+        ],
+    });
 
     let brightness_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Brightness bind group"),
@@ -875,7 +1028,11 @@ fn create_render_attachments(
             depth_attachment,
         ],
         bloom_textures,
-        [brightness_bind_group, tone_mapping_bind_group],
+        [
+            compose_bind_group,
+            brightness_bind_group,
+            tone_mapping_bind_group,
+        ],
     )
 }
 

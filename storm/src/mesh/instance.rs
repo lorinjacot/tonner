@@ -290,13 +290,13 @@ pub(crate) struct PreparedPrimitives<'a> {
 }
 
 impl<'a> PreparedPrimitives<'a> {
-    pub(crate) fn render_opaque_primitives(&mut self, render_pass: &mut wgpu::RenderPass) {
+    pub(crate) fn render_opaque_primitives(&mut self, opaque_render_pass: &mut wgpu::RenderPass) {
         self.opaque_primitives
-            .render(self.vertex_buffer, render_pass);
+            .render(self.vertex_buffer, opaque_render_pass);
     }
 
-    pub(crate) fn render_transparent_primitives(&mut self, render_pass: &mut wgpu::RenderPass) {
+    pub(crate) fn render_transparent_primitives(&mut self, transparent_render_pass: &mut wgpu::RenderPass) {
         self.transparent_primitives
-            .render(self.vertex_buffer, render_pass);
+            .render(self.vertex_buffer, transparent_render_pass);
     }
 }

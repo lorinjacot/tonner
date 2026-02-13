@@ -347,7 +347,7 @@ impl MaterialBuilder {
 
     /// The alpha rendering mode of the material. Default to [`AlphaMode::Opaque`].
     pub fn alpha_mode(mut self, alpha_mode: impl Into<AlphaMode>) -> Self {
-        self.alpha_mode = alpha_mode.into();
+        self.alpha_mode = dbg!(alpha_mode.into());
         self
     }
 

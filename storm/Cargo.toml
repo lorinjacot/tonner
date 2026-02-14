@@ -18,4 +18,4 @@ uuid = { workspace = true, features = ["js", "serde", "v4"] }
 wgpu = { workspace = true }
 
 [dev-dependencies]
-winit = "0.30.12"
+winit.workspace = true

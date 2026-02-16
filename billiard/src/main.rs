@@ -3,6 +3,8 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use pollster::block_on;
+use pyo3::prelude::*;
+use pyo3_ffi::c_str;
 use storm::Context;
 use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::skin::SkinManager;
@@ -33,6 +35,7 @@ struct State {
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
+    py_update: Py<PyAny>,
 }
 
 impl State {
@@ -94,6 +97,22 @@ impl State {
         let environment = EnvironmentBuilder::default()
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
+
+        let py_update = Python::attach(|py| -> PyResult<Py<PyAny>> {
+            Ok(PyModule::from_code(
+                py,
+                c_str!(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/scripts/update.py"
+                ))),
+                c"update.py",
+                c"",
+            )?
+            .getattr("update")?
+            .into())
+        })
+        .unwrap();
+
         ctx.queue().submit([encoder.finish()]);
 
         let state = State {
@@ -109,6 +128,7 @@ impl State {
             light_manager: LightManager::new(&ctx),
             environment,
             ctx: ctx,
+            py_update,
         };
 
         state.configure_surface();
@@ -154,6 +174,12 @@ impl State {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("render command encoder"),
                 });
+
+        Python::attach(|py| -> PyResult<()> {
+            self.py_update.call0(py)?;
+            Ok(())
+        })
+        .unwrap();
 
         self.renderer
             .render(

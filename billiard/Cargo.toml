@@ -10,6 +10,6 @@ log.workspace = true
 pollster.workspace = true
 pyo3 = { workspace = true, features = ["auto-initialize"] }
 pyo3-ffi.workspace = true
-storm.workspace = true
+storm = { workspace = true, features = ["pyo3"] }
 wgpu.workspace = true
 winit.workspace = true

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
-use std::fs::File;
-use std::io::{Cursor, Read};
+use std::fs::read_to_string;
+use std::io::Cursor;
 use std::sync::Arc;
 
 use log::warn;
@@ -37,12 +37,12 @@ struct State {
     size: PhysicalSize<u32>,
     renderer: Renderer,
     camera: Camera,
-    scene_graph: SceneGraph,
+    scene_graph: Py<SceneGraph>,
     mesh_instances: HashMap<MeshInstanceId, MeshInstance>,
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
-    update_content: String,
+    update_file: String,
     py_update: Py<PyAny>,
 }
 
@@ -106,24 +106,24 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let mut update_file = File::open(UPDATE_FILE_PATH).expect("failed to open update.py");
-        let mut update_content = String::new();
-        update_file
-            .read_to_string(&mut update_content)
-            .expect("failed to read update.py");
+        let update_file = read_to_string(UPDATE_FILE_PATH).expect("failed to read update.py");
+        let (scene_graph, py_update) =
+            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyAny>)> {
+                let scene_graph = Bound::new(py, scene_graph)?.into();
 
-        let py_update = Python::attach(|py| -> PyResult<Py<PyAny>> {
-            Ok(PyModule::from_code(
-                py,
-                &CString::new(update_content.clone())
-                    .expect("failed to convert update.py to a CString"),
-                UPDATE_FILE_NAME,
-                c"",
-            )?
-            .getattr("update")?
-            .into())
-        })
-        .unwrap();
+                let py_update: Py<PyAny> = PyModule::from_code(
+                    py,
+                    &CString::new(update_file.clone())
+                        .expect("failed to convert update.py to a CString"),
+                    UPDATE_FILE_NAME,
+                    c"",
+                )?
+                .getattr("update")?
+                .into();
+
+                Ok((scene_graph, py_update))
+            })
+            .unwrap();
 
         ctx.queue().submit([encoder.finish()]);
 
@@ -140,7 +140,7 @@ impl State {
             light_manager: LightManager::new(&ctx),
             environment,
             ctx: ctx,
-            update_content,
+            update_file,
             py_update,
         };
 
@@ -188,19 +188,14 @@ impl State {
                     label: Some("render command encoder"),
                 });
 
-        let mut update_file = File::open(UPDATE_FILE_PATH).expect("failed to open update.py");
-        let mut update_content = String::new();
-        update_file
-            .read_to_string(&mut update_content)
-            .expect("failed to read update.py");
-
+        let update_file = read_to_string(UPDATE_FILE_PATH).expect("failed to read update.py");
         Python::attach(|py| -> PyResult<()> {
-            if self.update_content != update_content {
+            if self.update_file != update_file {
                 warn!("update.py changed, reloading ...");
+                self.update_file = update_file.clone();
                 self.py_update = PyModule::from_code(
                     py,
-                    &CString::new(update_content.clone())
-                        .expect("failed to convert update.py to a CString"),
+                    &CString::new(update_file).expect("failed to convert update.py to a CString"),
                     UPDATE_FILE_NAME,
                     c"",
                 )?
@@ -208,24 +203,26 @@ impl State {
                 .into();
             }
 
-            self.py_update.call0(py)?;
+            let args = (&self.scene_graph,);
+            self.py_update.call1(py, args)?;
+
+            self.renderer
+                .render(
+                    &self.camera,
+                    &texture_view,
+                    &self.scene_graph.borrow(py),
+                    &mut self.skin_manager,
+                    self.mesh_instances.values(),
+                    &mut self.light_manager,
+                    &self.environment,
+                    &self.ctx,
+                    &mut encoder,
+                )
+                .expect("failed to render");
+
             Ok(())
         })
         .expect("failed to run python");
-
-        self.renderer
-            .render(
-                &self.camera,
-                &texture_view,
-                &self.scene_graph,
-                &mut self.skin_manager,
-                self.mesh_instances.values(),
-                &mut self.light_manager,
-                &self.environment,
-                &self.ctx,
-                &mut encoder,
-            )
-            .expect("failed to render");
 
         self.ctx.queue().submit([encoder.finish()]);
         self.window.pre_present_notify();

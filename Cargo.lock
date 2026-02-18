@@ -3691,6 +3691,7 @@ dependencies = [
  "log",
  "mikktspace",
  "pollster",
+ "pyo3",
  "thiserror 2.0.18",
  "uuid",
  "wgpu",

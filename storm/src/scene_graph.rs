@@ -9,12 +9,16 @@ use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 use uuid::{NonNilUuid, Uuid};
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 use crate::Context;
 
 /// A Scene Graph works as a tree-like structure establishing parent-child relationships between scene elements,
 /// creating logical groupings where transformations (position, rotation, scale) applied to parent nodes automatically
 /// affect all their children - simplifying complex object manipulation and animation.
 #[derive(Debug)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct SceneGraph {
     nodes: HashMap<NodeId, Node>,
     root_nodes: Vec<NodeId>,
@@ -97,6 +101,14 @@ impl SceneGraph {
             }
         };
         self.recursively_update_global_transformation(node, parent_transformation)
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl SceneGraph {
+    fn node_count(&self) -> usize {
+        self.nodes.len()
     }
 }
 
@@ -226,17 +238,12 @@ impl<'a> ExactSizeIterator for NodeMutIter<'a> {
 
 impl<'a> FusedIterator for NodeMutIter<'a> {}
 
-// impl<'a> IntoIterator for &'a SceneGraph {
-//     type Item = (NodeId, &'a Node);
-
-//     fn into_iter(self) -> Self::IntoIter {}
-// }
-
 /// A unique id for a Scene Graph node. Each node has one and only one id. The id for a given node will never change.
 ///
 /// Node that `Option<NodeId>` takes up the same space as `NodeId`.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct NodeId {
     uuid: NonNilUuid,
 }
@@ -249,6 +256,7 @@ impl Display for NodeId {
 
 /// A Scene Graph's node. See [SceneGraph] for more informations.
 #[derive(Debug)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct Node {
     /// Name of the node. Does not need to be unique. Can be used for debugging and displaying.
     pub name: String,

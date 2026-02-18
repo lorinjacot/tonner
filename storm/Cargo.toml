@@ -13,9 +13,13 @@ image.workspace = true
 log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
 pollster.workspace = true
+pyo3 = { workspace = true, optional = true }
 thiserror.workspace = true
 uuid = { workspace = true, features = ["js", "serde", "v4"] }
 wgpu = { workspace = true }
 
 [dev-dependencies]
 winit.workspace = true
+
+[features]
+pyo3 = ["dep:pyo3"]

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::io::Cursor;
+use std::ffi::CString;
+use std::fs::File;
+use std::io::{Cursor, Read};
 use std::sync::Arc;
 
+use log::warn;
 use pollster::block_on;
 use pyo3::prelude::*;
-use pyo3_ffi::c_str;
 use storm::Context;
 use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::skin::SkinManager;
@@ -35,6 +37,7 @@ struct State {
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
+    update_content: String,
     py_update: Py<PyAny>,
 }
 
@@ -98,13 +101,18 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
+        let mut update_file = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"))
+            .expect("failed to open update.py");
+        let mut update_content = String::new();
+        update_file
+            .read_to_string(&mut update_content)
+            .expect("failed to read update.py");
+
         let py_update = Python::attach(|py| -> PyResult<Py<PyAny>> {
             Ok(PyModule::from_code(
                 py,
-                c_str!(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/scripts/update.py"
-                ))),
+                &CString::new(update_content.clone())
+                    .expect("failed to convert update.py to a CString"),
                 c"update.py",
                 c"",
             )?
@@ -128,6 +136,7 @@ impl State {
             light_manager: LightManager::new(&ctx),
             environment,
             ctx: ctx,
+            update_content,
             py_update,
         };
 
@@ -175,11 +184,31 @@ impl State {
                     label: Some("render command encoder"),
                 });
 
+        let mut update_file = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"))
+            .expect("failed to open update.py");
+        let mut update_content = String::new();
+        update_file
+            .read_to_string(&mut update_content)
+            .expect("failed to read update.py");
+
         Python::attach(|py| -> PyResult<()> {
+            if self.update_content != update_content {
+                warn!("update.py changed, reloading ...");
+                self.py_update = PyModule::from_code(
+                    py,
+                    &CString::new(update_content.clone())
+                        .expect("failed to convert update.py to a CString"),
+                    c"update.py",
+                    c"",
+                )?
+                .getattr("update")?
+                .into();
+            }
+
             self.py_update.call0(py)?;
             Ok(())
         })
-        .unwrap();
+        .expect("failed to run python");
 
         self.renderer
             .render(

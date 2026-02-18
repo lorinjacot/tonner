@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
@@ -7,6 +7,7 @@ use std::sync::Arc;
 use log::warn;
 use pollster::block_on;
 use pyo3::prelude::*;
+use pyo3_ffi::c_str;
 use storm::Context;
 use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::skin::SkinManager;
@@ -23,6 +24,10 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+
+const UPDATE_FILE_PATH: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py");
+const UPDATE_FILE_NAME: &'static CStr =
+    c_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"));
 
 struct State {
     ctx: Context,
@@ -101,8 +106,7 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let mut update_file = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"))
-            .expect("failed to open update.py");
+        let mut update_file = File::open(UPDATE_FILE_PATH).expect("failed to open update.py");
         let mut update_content = String::new();
         update_file
             .read_to_string(&mut update_content)
@@ -113,7 +117,7 @@ impl State {
                 py,
                 &CString::new(update_content.clone())
                     .expect("failed to convert update.py to a CString"),
-                c"update.py",
+                UPDATE_FILE_NAME,
                 c"",
             )?
             .getattr("update")?
@@ -184,8 +188,7 @@ impl State {
                     label: Some("render command encoder"),
                 });
 
-        let mut update_file = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"))
-            .expect("failed to open update.py");
+        let mut update_file = File::open(UPDATE_FILE_PATH).expect("failed to open update.py");
         let mut update_content = String::new();
         update_file
             .read_to_string(&mut update_content)
@@ -198,7 +201,7 @@ impl State {
                     py,
                     &CString::new(update_content.clone())
                         .expect("failed to convert update.py to a CString"),
-                    c"update.py",
+                    UPDATE_FILE_NAME,
                     c"",
                 )?
                 .getattr("update")?

@@ -32,11 +32,6 @@ impl SceneGraph {
         }
     }
 
-    /// Returns `true` if the scene graph contains the specified node.
-    pub fn contains(&self, node: NodeId) -> bool {
-        self.nodes.contains_key(&node)
-    }
-
     /// Returns a reference to the node corresponding to the id.
     pub fn get(&self, node: NodeId) -> Option<&Node> {
         self.nodes.get(&node)
@@ -107,8 +102,13 @@ impl SceneGraph {
 #[cfg(feature = "pyo3")]
 #[pymethods]
 impl SceneGraph {
-    fn node_count(&self) -> usize {
-        self.nodes.len()
+    fn nodes(&self) -> Vec<NodeId> {
+        self.nodes.iter().map(|(&id, _)| id).collect()
+    }
+
+    /// Returns `true` if the scene graph contains the specified node.
+    pub fn contains(&self, node: NodeId) -> bool {
+        self.nodes.contains_key(&node)
     }
 }
 
@@ -243,7 +243,7 @@ impl<'a> FusedIterator for NodeMutIter<'a> {}
 /// Node that `Option<NodeId>` takes up the same space as `NodeId`.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, str, from_py_object))]
 pub struct NodeId {
     uuid: NonNilUuid,
 }
@@ -256,7 +256,6 @@ impl Display for NodeId {
 
 /// A Scene Graph's node. See [SceneGraph] for more informations.
 #[derive(Debug)]
-#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct Node {
     /// Name of the node. Does not need to be unique. Can be used for debugging and displaying.
     pub name: String,
@@ -312,6 +311,52 @@ impl Node {
     /// When the node has no parent, the global transformation is identical to the local transformation.
     pub fn global_transformation(&self) -> Mat4 {
         self.global_transformation
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pyclass(frozen)]
+struct PyNode {
+    id: NodeId,
+    scene_graph: Py<SceneGraph>,
+}
+
+#[cfg(feature = "pyo3")]
+impl PyNode {
+    fn deleted_error(id: NodeId) -> PyErr {
+        pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "Node {id} has been deleted from the scene graph"
+        ))
+    }
+
+    fn get<'a>(&self, scene_graph: &'a SceneGraph) -> PyResult<&'a Node> {
+        scene_graph
+            .get(self.id)
+            .ok_or_else(|| Self::deleted_error(self.id))
+    }
+
+    fn get_mut<'a>(&self, scene_graph: &'a mut SceneGraph) -> PyResult<&'a mut Node> {
+        scene_graph
+            .get_mut(self.id)
+            .ok_or_else(|| Self::deleted_error(self.id))
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl PyNode {
+    fn id(&self) -> NodeId {
+        self.id
+    }
+
+    fn parent(&self, py: Python) -> PyResult<Option<PyNode>> {
+        Ok(self
+            .get(&self.scene_graph.borrow(py))?
+            .parent
+            .map(|id| PyNode {
+                id,
+                scene_graph: self.scene_graph.clone_ref(py),
+            }))
     }
 }
 
@@ -440,4 +485,5 @@ pub enum NodeBuilderError {
 
 #[derive(Debug, Error)]
 #[error("no node found for {0}")]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct NodeNotFoundError(pub NodeId);

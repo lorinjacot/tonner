@@ -12,6 +12,7 @@ glam = { workspace = true, features = ["bytemuck"] }
 image.workspace = true
 log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
+numpy = { workspace = true, optional = true }
 pollster.workspace = true
 pyo3 = { workspace = true, optional = true }
 thiserror.workspace = true
@@ -22,4 +23,4 @@ wgpu = { workspace = true }
 winit.workspace = true
 
 [features]
-pyo3 = ["dep:pyo3"]
+pyo3 = ["dep:pyo3", "dep:numpy"]

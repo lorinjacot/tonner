@@ -10,6 +10,8 @@ use thiserror::Error;
 use uuid::{NonNilUuid, Uuid};
 
 #[cfg(feature = "pyo3")]
+use numpy::PyArray1;
+#[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
 use crate::Context;
@@ -102,8 +104,15 @@ impl SceneGraph {
 #[cfg(feature = "pyo3")]
 #[pymethods]
 impl SceneGraph {
-    fn nodes(&self) -> Vec<NodeId> {
-        self.nodes.iter().map(|(&id, _)| id).collect()
+    fn nodes(slf: &Bound<'_, Self>) -> Vec<PyNode> {
+        slf.borrow()
+            .nodes
+            .iter()
+            .map(|(&id, _)| PyNode {
+                id,
+                scene_graph: slf.clone().into(),
+            })
+            .collect()
     }
 
     /// Returns `true` if the scene graph contains the specified node.
@@ -357,6 +366,11 @@ impl PyNode {
                 id,
                 scene_graph: self.scene_graph.clone_ref(py),
             }))
+    }
+
+    fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
+        Ok(PyArray1::from_slice(py, &translation.to_array()))
     }
 }
 

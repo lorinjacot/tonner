@@ -10,7 +10,7 @@ use thiserror::Error;
 use uuid::{NonNilUuid, Uuid};
 
 #[cfg(feature = "pyo3")]
-use numpy::PyArray1;
+use numpy::{PyArray1, PyArray2, PyReadonlyArray1};
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
@@ -371,6 +371,42 @@ impl PyNode {
     fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
         Ok(PyArray1::from_slice(py, &translation.to_array()))
+    }
+
+    fn set_local_translation<'py>(
+        &self,
+        translation: PyReadonlyArray1<'py, f32>,
+        py: Python<'py>,
+    ) -> PyResult<()> {
+        use glam::vec3;
+
+        let translation = translation.as_array();
+        if translation.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "translation.shape must be (3,)",
+            ));
+        }
+        self.scene_graph
+            .borrow_mut(py)
+            .set_local_transformation(
+                self.id,
+                vec3(translation[0], translation[1], translation[2]),
+                None,
+                None,
+            )
+            .map_err(|_| Self::deleted_error(self.id))
+    }
+
+    fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        use numpy::ndarray::aview2;
+
+        let transformation = self
+            .get(&self.scene_graph.borrow(py))?
+            .local_transformation()
+            .transpose()
+            .to_cols_array_2d();
+        let array = aview2(&transformation);
+        Ok(PyArray2::from_array(py, &array))
     }
 }
 

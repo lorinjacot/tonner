@@ -19,6 +19,7 @@ use storm::renderer::light::LightManager;
 use storm::scene_graph::{NodeBuilder, SceneGraph};
 use wgpu::Instance;
 use winit::dpi::PhysicalSize;
+use winit::event::{DeviceEvent, MouseScrollDelta};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -47,7 +48,7 @@ struct State {
     light_manager: LightManager,
     environment: Environment,
     update_file: String,
-    py_update: Py<PyAny>,
+    py_callbacks: PyCallbacks,
     last_render: Instant,
 }
 
@@ -75,7 +76,7 @@ impl State {
 
         let size = window.inner_size();
         let capabilities = surface.get_capabilities(&adapter);
-        let surface_format = dbg!(capabilities.formats[0]);
+        let surface_format = capabilities.formats[0];
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
@@ -112,21 +113,11 @@ impl State {
             .build(&ctx, &mut encoder);
 
         let update_file = read_to_string(UPDATE_FILE_PATH).expect("failed to read update.py");
-        let (scene_graph, py_update) =
-            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyAny>)> {
+        let (scene_graph, py_callbacks) =
+            Python::attach(|py| -> PyResult<(Py<SceneGraph>, PyCallbacks)> {
                 let scene_graph = Bound::new(py, scene_graph)?.into();
-
-                let py_update: Py<PyAny> = PyModule::from_code(
-                    py,
-                    &CString::new(update_file.clone())
-                        .expect("failed to convert update.py to a CString"),
-                    UPDATE_FILE_NAME,
-                    c"",
-                )?
-                .getattr("update")?
-                .into();
-
-                Ok((scene_graph, py_update))
+                let py_callbacks = PyCallbacks::from_file_content(py, update_file.clone())?;
+                Ok((scene_graph, py_callbacks))
             })
             .unwrap();
 
@@ -146,7 +137,7 @@ impl State {
             environment,
             ctx: ctx,
             update_file,
-            py_update,
+            py_callbacks,
             last_render: Instant::now(),
         };
 
@@ -172,6 +163,22 @@ impl State {
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.size = new_size;
         self.configure_surface();
+    }
+
+    fn mouse_motion(&mut self, x: f64, y: f64) {
+        Python::attach(|py| -> PyResult<()> {
+            self.py_callbacks.mouse_motion.call1(py, (x, y))?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn mouse_wheel(&mut self, x: f64, y: f64) {
+        Python::attach(|py| -> PyResult<()> {
+            self.py_callbacks.mouse_wheel.call1(py, (x, y))?;
+            Ok(())
+        })
+        .unwrap();
     }
 
     fn render(&mut self) {
@@ -205,18 +212,11 @@ impl State {
             if self.update_file != update_file {
                 warn!("update.py changed, reloading ...");
                 self.update_file = update_file.clone();
-                self.py_update = PyModule::from_code(
-                    py,
-                    &CString::new(update_file).expect("failed to convert update.py to a CString"),
-                    UPDATE_FILE_NAME,
-                    c"",
-                )?
-                .getattr("update")?
-                .into();
+                self.py_callbacks = PyCallbacks::from_file_content(py, update_file)?;
             }
 
             let args = (delta_time, &self.scene_graph);
-            self.py_update.call1(py, args)?;
+            self.py_callbacks.update.call1(py, args)?;
 
             self.renderer
                 .render(
@@ -239,6 +239,33 @@ impl State {
         self.ctx.queue().submit([encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
+    }
+}
+
+struct PyCallbacks {
+    update: Py<PyAny>,
+    mouse_motion: Py<PyAny>,
+    mouse_wheel: Py<PyAny>,
+}
+
+impl PyCallbacks {
+    fn from_file_content(py: Python<'_>, update_file: String) -> PyResult<Self> {
+        let update_module = PyModule::from_code(
+            py,
+            &CString::new(update_file.clone()).expect("failed to convert update.py to a CString"),
+            UPDATE_FILE_NAME,
+            c"",
+        )?;
+
+        let update = update_module.getattr("update")?.into();
+        let mouse_motion = update_module.getattr("mouse_motion")?.into();
+        let mouse_wheel = update_module.getattr("mouse_wheel")?.into();
+
+        Ok(PyCallbacks {
+            update,
+            mouse_motion,
+            mouse_wheel,
+        })
     }
 }
 
@@ -270,6 +297,31 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => {
                 state.resize(size);
+            }
+            _ => (),
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        let state = self.state.as_mut().unwrap();
+        match event {
+            DeviceEvent::MouseMotion { delta: (x, y) } => {
+                state.mouse_motion(x, y);
+            }
+            DeviceEvent::MouseWheel {
+                delta: MouseScrollDelta::LineDelta(x, y),
+            } => {
+                state.mouse_wheel(x as f64, y as f64);
+            }
+            DeviceEvent::MouseWheel {
+                delta: MouseScrollDelta::PixelDelta(delta),
+            } => {
+                state.mouse_wheel(delta.x, delta.y);
             }
             _ => (),
         }

@@ -3,6 +3,7 @@ use std::ffi::{CStr, CString};
 use std::fs::read_to_string;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Instant;
 
 use log::warn;
 use pollster::block_on;
@@ -29,6 +30,9 @@ const UPDATE_FILE_PATH: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scr
 const UPDATE_FILE_NAME: &'static CStr =
     c_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"));
 
+const MAX_DELTA_TIME: f32 = 1.0 / 60.0;
+const MIN_DELTA_TIME: f32 = 0.001;
+
 struct State {
     ctx: Context,
     window: Arc<Window>,
@@ -44,6 +48,7 @@ struct State {
     environment: Environment,
     update_file: String,
     py_update: Py<PyAny>,
+    last_render: Instant,
 }
 
 impl State {
@@ -142,6 +147,7 @@ impl State {
             ctx: ctx,
             update_file,
             py_update,
+            last_render: Instant::now(),
         };
 
         state.configure_surface();
@@ -169,6 +175,12 @@ impl State {
     }
 
     fn render(&mut self) {
+        let now = Instant::now();
+        let delta_time = (now - self.last_render)
+            .as_secs_f32()
+            .clamp(MIN_DELTA_TIME, MAX_DELTA_TIME);
+        self.last_render = now;
+
         let surface_texture = self
             .surface
             .get_current_texture()
@@ -203,7 +215,7 @@ impl State {
                 .into();
             }
 
-            let args = (&self.scene_graph,);
+            let args = (delta_time, &self.scene_graph);
             self.py_update.call1(py, args)?;
 
             self.renderer

@@ -10,7 +10,7 @@ use thiserror::Error;
 use uuid::{NonNilUuid, Uuid};
 
 #[cfg(feature = "pyo3")]
-use numpy::{PyArray1, PyArray2, PyReadonlyArray1};
+use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1};
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
@@ -354,8 +354,20 @@ impl PyNode {
 #[cfg(feature = "pyo3")]
 #[pymethods]
 impl PyNode {
+    #[getter]
     fn id(&self) -> NodeId {
         self.id
+    }
+
+    #[getter]
+    fn name(&self, py: Python) -> PyResult<String> {
+        Ok(self.get(&self.scene_graph.borrow(py))?.name.clone())
+    }
+
+    #[setter]
+    fn set_name(&self, py: Python, name: String) -> PyResult<()> {
+        self.get_mut(&mut self.scene_graph.borrow_mut(py))?.name = name;
+        Ok(())
     }
 
     fn parent(&self, py: Python) -> PyResult<Option<PyNode>> {
@@ -368,15 +380,17 @@ impl PyNode {
             }))
     }
 
+    #[getter]
     fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
         Ok(PyArray1::from_slice(py, &translation.to_array()))
     }
 
+    #[setter]
     fn set_local_translation<'py>(
         &self,
-        translation: PyReadonlyArray1<'py, f32>,
         py: Python<'py>,
+        translation: PyArrayLike1<'py, f32, AllowTypeChange>,
     ) -> PyResult<()> {
         use glam::vec3;
 
@@ -397,12 +411,26 @@ impl PyNode {
             .map_err(|_| Self::deleted_error(self.id))
     }
 
+    #[getter]
     fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
         use numpy::ndarray::aview2;
 
         let transformation = self
             .get(&self.scene_graph.borrow(py))?
             .local_transformation()
+            .transpose()
+            .to_cols_array_2d();
+        let array = aview2(&transformation);
+        Ok(PyArray2::from_array(py, &array))
+    }
+
+    #[getter]
+    fn global_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        use numpy::ndarray::aview2;
+
+        let transformation = self
+            .get(&self.scene_graph.borrow(py))?
+            .global_transformation()
             .transpose()
             .to_cols_array_2d();
         let array = aview2(&transformation);

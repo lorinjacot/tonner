@@ -165,7 +165,15 @@ impl State {
         self.configure_surface();
     }
 
-    fn mouse_motion(&mut self, x: f64, y: f64) {
+    fn mouse_input(&self, button: &'static str, state: &'static str) {
+        Python::attach(|py| -> PyResult<()> {
+            self.py_callbacks.mouse_input.call1(py, (button, state))?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn mouse_motion(&self, x: f64, y: f64) {
         Python::attach(|py| -> PyResult<()> {
             self.py_callbacks.mouse_motion.call1(py, (x, y))?;
             Ok(())
@@ -173,7 +181,7 @@ impl State {
         .unwrap();
     }
 
-    fn mouse_wheel(&mut self, x: f64, y: f64) {
+    fn mouse_wheel(&self, x: f64, y: f64) {
         Python::attach(|py| -> PyResult<()> {
             self.py_callbacks.mouse_wheel.call1(py, (x, y))?;
             Ok(())
@@ -244,6 +252,7 @@ impl State {
 
 struct PyCallbacks {
     update: Py<PyAny>,
+    mouse_input: Py<PyAny>,
     mouse_motion: Py<PyAny>,
     mouse_wheel: Py<PyAny>,
 }
@@ -258,11 +267,13 @@ impl PyCallbacks {
         )?;
 
         let update = update_module.getattr("update")?.into();
+        let mouse_input = update_module.getattr("mouse_input")?.into();
         let mouse_motion = update_module.getattr("mouse_motion")?.into();
         let mouse_wheel = update_module.getattr("mouse_wheel")?.into();
 
         Ok(PyCallbacks {
             update,
+            mouse_input,
             mouse_motion,
             mouse_wheel,
         })
@@ -298,6 +309,35 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => {
                 state.resize(size);
             }
+            WindowEvent::MouseWheel {
+                delta: MouseScrollDelta::LineDelta(x, y),
+                ..
+            } => {
+                state.mouse_wheel(x as f64, y as f64);
+            }
+            WindowEvent::MouseWheel {
+                delta: MouseScrollDelta::PixelDelta(delta),
+                ..
+            } => {
+                state.mouse_wheel(delta.x, delta.y);
+            }
+            WindowEvent::MouseInput {
+                button,
+                state: elt_state,
+                ..
+            } => {
+                let button = match button {
+                    winit::event::MouseButton::Left => "Left",
+                    winit::event::MouseButton::Right => "Right",
+                    winit::event::MouseButton::Middle => "Middle",
+                    _ => return,
+                };
+                let elt_state = match elt_state {
+                    winit::event::ElementState::Pressed => "Pressed",
+                    winit::event::ElementState::Released => "Released",
+                };
+                state.mouse_input(button, elt_state);
+            }
             _ => (),
         }
     }
@@ -312,16 +352,6 @@ impl ApplicationHandler for App {
         match event {
             DeviceEvent::MouseMotion { delta: (x, y) } => {
                 state.mouse_motion(x, y);
-            }
-            DeviceEvent::MouseWheel {
-                delta: MouseScrollDelta::LineDelta(x, y),
-            } => {
-                state.mouse_wheel(x as f64, y as f64);
-            }
-            DeviceEvent::MouseWheel {
-                delta: MouseScrollDelta::PixelDelta(delta),
-            } => {
-                state.mouse_wheel(delta.x, delta.y);
             }
             _ => (),
         }

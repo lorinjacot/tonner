@@ -412,6 +412,63 @@ impl PyNode {
     }
 
     #[getter]
+    fn local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let rotation = self.get(&self.scene_graph.borrow(py))?.local_rotation;
+        Ok(PyArray1::from_slice(py, &rotation.to_array()))
+    }
+
+    #[setter]
+    fn set_local_rotation<'py>(
+        &self,
+        py: Python<'py>,
+        rotation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::quat;
+
+        let rotation = rotation.as_array();
+        if rotation.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "rotation.shape must be (4,)",
+            ));
+        }
+        self.scene_graph
+            .borrow_mut(py)
+            .set_local_transformation(
+                self.id,
+                None,
+                quat(rotation[0], rotation[1], rotation[2], rotation[3]),
+                None,
+            )
+            .map_err(|_| Self::deleted_error(self.id))
+    }
+
+    #[getter]
+    fn local_scale<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let scale = self.get(&self.scene_graph.borrow(py))?.local_scale;
+        Ok(PyArray1::from_slice(py, &scale.to_array()))
+    }
+
+    #[setter]
+    fn set_local_scale<'py>(
+        &self,
+        py: Python<'py>,
+        scale: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::vec3;
+
+        let scale = scale.as_array();
+        if scale.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "scale.shape must be (3,)",
+            ));
+        }
+        self.scene_graph
+            .borrow_mut(py)
+            .set_local_transformation(self.id, None, None, vec3(scale[0], scale[1], scale[2]))
+            .map_err(|_| Self::deleted_error(self.id))
+    }
+
+    #[getter]
     fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
         use numpy::ndarray::aview2;
 

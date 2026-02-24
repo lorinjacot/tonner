@@ -5,6 +5,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
 
+use glam::Vec3;
 use log::warn;
 use pollster::block_on;
 use pyo3::prelude::*;
@@ -93,6 +94,7 @@ impl State {
         let mut scene_graph = SceneGraph::new(&ctx);
         let camera_node = NodeBuilder::default()
             .name("Camera node")
+            .local_translation(Vec3::X)
             .build(&mut scene_graph)
             .unwrap();
         let camera = Camera::new(camera_node);

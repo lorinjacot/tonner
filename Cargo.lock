@@ -624,6 +624,7 @@ name = "billiard"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "glam 0.30.10",
  "image",
  "log",
  "pollster",

@@ -325,13 +325,17 @@ impl Node {
 
 #[cfg(feature = "pyo3")]
 #[pyclass(frozen)]
-struct PyNode {
+pub struct PyNode {
     id: NodeId,
     scene_graph: Py<SceneGraph>,
 }
 
 #[cfg(feature = "pyo3")]
 impl PyNode {
+    pub fn new(id: NodeId, scene_graph: Py<SceneGraph>) -> Self {
+        Self { id, scene_graph }
+    }
+    
     fn deleted_error(id: NodeId) -> PyErr {
         pyo3::exceptions::PyRuntimeError::new_err(format!(
             "Node {id} has been deleted from the scene graph"
@@ -426,7 +430,7 @@ impl PyNode {
         use glam::quat;
 
         let rotation = rotation.as_array();
-        if rotation.dim() != 3 {
+        if rotation.dim() != 4 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "rotation.shape must be (4,)",
             ));

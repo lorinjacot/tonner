@@ -17,7 +17,7 @@ use storm::mesh::{MeshInstance, MeshInstanceId};
 use storm::renderer::Renderer;
 use storm::renderer::camera::Camera;
 use storm::renderer::light::LightManager;
-use storm::scene_graph::{NodeBuilder, SceneGraph};
+use storm::scene_graph::{NodeBuilder, PyNode, SceneGraph};
 use wgpu::Instance;
 use winit::dpi::PhysicalSize;
 use winit::event::{DeviceEvent, MouseScrollDelta};
@@ -50,6 +50,7 @@ struct State {
     environment: Environment,
     update_file: String,
     py_callbacks: PyCallbacks,
+    camera_node: Py<PyNode>,
     last_render: Instant,
 }
 
@@ -115,13 +116,16 @@ impl State {
             .build(&ctx, &mut encoder);
 
         let update_file = read_to_string(UPDATE_FILE_PATH).expect("failed to read update.py");
-        let (scene_graph, py_callbacks) =
-            Python::attach(|py| -> PyResult<(Py<SceneGraph>, PyCallbacks)> {
-                let scene_graph = Bound::new(py, scene_graph)?.into();
+        let (scene_graph, py_callbacks, camera_node) = Python::attach(
+            |py| -> PyResult<(Py<SceneGraph>, PyCallbacks, Py<PyNode>)> {
+                let scene_graph: Py<SceneGraph> = Bound::new(py, scene_graph)?.into();
                 let py_callbacks = PyCallbacks::from_file_content(py, update_file.clone())?;
-                Ok((scene_graph, py_callbacks))
-            })
-            .unwrap();
+                let camera_node =
+                    Bound::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?.into();
+                Ok((scene_graph, py_callbacks, camera_node))
+            },
+        )
+        .unwrap();
 
         ctx.queue().submit([encoder.finish()]);
 
@@ -140,6 +144,7 @@ impl State {
             ctx: ctx,
             update_file,
             py_callbacks,
+            camera_node,
             last_render: Instant::now(),
         };
 
@@ -225,7 +230,7 @@ impl State {
                 self.py_callbacks = PyCallbacks::from_file_content(py, update_file)?;
             }
 
-            let args = (delta_time, &self.scene_graph);
+            let args = (delta_time, &self.scene_graph, &self.camera_node);
             self.py_callbacks.update.call1(py, args)?;
 
             self.renderer

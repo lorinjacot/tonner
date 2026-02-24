@@ -335,7 +335,7 @@ impl PyNode {
     pub fn new(id: NodeId, scene_graph: Py<SceneGraph>) -> Self {
         Self { id, scene_graph }
     }
-    
+
     fn deleted_error(id: NodeId) -> PyErr {
         pyo3::exceptions::PyRuntimeError::new_err(format!(
             "Node {id} has been deleted from the scene graph"
@@ -418,7 +418,10 @@ impl PyNode {
     #[getter]
     fn local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let rotation = self.get(&self.scene_graph.borrow(py))?.local_rotation;
-        Ok(PyArray1::from_slice(py, &rotation.to_array()))
+        Ok(PyArray1::from_slice(
+            py,
+            &[rotation.w, rotation.x, rotation.y, rotation.z],
+        ))
     }
 
     #[setter]
@@ -440,7 +443,7 @@ impl PyNode {
             .set_local_transformation(
                 self.id,
                 None,
-                quat(rotation[0], rotation[1], rotation[2], rotation[3]),
+                quat(rotation[1], rotation[2], rotation[3], rotation[0]),
                 None,
             )
             .map_err(|_| Self::deleted_error(self.id))

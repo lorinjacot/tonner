@@ -628,6 +628,7 @@ dependencies = [
  "image",
  "log",
  "notify",
+ "numpy",
  "pollster",
  "pyo3",
  "pyo3-ffi",

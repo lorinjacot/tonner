@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ffi::CString,
     fs,
     path::Path,
@@ -11,12 +10,14 @@ use notify::Watcher;
 use pyo3::{prelude::*, types::PyList};
 use storm::scene_graph::{PyNode, SceneGraph};
 
+use crate::ball::Ball;
+
 const SCRIPTS_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
 
 #[derive(Debug)]
 pub struct PyScripts {
     #[allow(dead_code)] // need to keep watcher in order to continues watching for changes
-    watcher: Option<notify::INotifyWatcher>,
+    watcher: Option<notify::RecommendedWatcher>,
     watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
     update: Option<Py<PyAny>>,
     mouse_input: Option<Py<PyAny>>,
@@ -62,7 +63,7 @@ impl PyScripts {
     }
 
     fn with_watcher(
-        watcher: Option<notify::INotifyWatcher>,
+        watcher: Option<notify::RecommendedWatcher>,
         watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
     ) -> PyScripts {
         let mut scripts = PyScripts {
@@ -114,7 +115,7 @@ impl PyScripts {
         delta_time: f32,
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
-        balls: &HashMap<u8, Py<PyNode>>,
+        balls: &[Py<Ball>],
     ) {
         if let Some(rx) = &self.watcher_receiver {
             use notify::EventKind::*;

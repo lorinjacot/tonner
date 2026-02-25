@@ -21,6 +21,8 @@ camera_distance = 1
 camera_mouse_wheel_zoom_speed = 1
 camera_mouse_motion_zoom_speed = 1
 
+reset = True
+
 
 def mouse_input(
     button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"]
@@ -39,6 +41,10 @@ def mouse_input(
         elif camera_action == "Zoom" and state == "Released":
             camera_action = None
 
+    elif button == "Right" and state == "Released":
+        global reset
+        reset = True
+
 
 def mouse_motion(x: float, y: float):
     if camera_action == "Rotate":
@@ -55,7 +61,7 @@ def mouse_wheel(x: float, y: float):
     pass
 
 
-def update(delta_time: float, scene_graph, camera_node, balls: dict):
+def update(delta_time: float, scene_graph, camera_node, balls: list):
     r = camera_distance
     theta = camera_horizontal_angle
     phi = camera_vertical_angle
@@ -82,4 +88,6 @@ def update(delta_time: float, scene_graph, camera_node, balls: dict):
     rot = quaternion.from_rotation_matrix(rot)
     camera_node.local_rotation = quaternion.as_float_array(rot)
 
-    integrate(balls)
+    global reset
+    integrate(delta_time, balls, reset)
+    reset = False

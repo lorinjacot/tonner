@@ -66,10 +66,11 @@ def update(delta_time: float, scene_graph, camera_node):
 
     up = np.array([0, 1, 0])
     right = np.cross(dir, up)
+    right = right / np.linalg.norm(right)
 
     up = np.cross(right, dir)
     rot = np.stack([
         right, up, -dir
-    ])
+    ]).T
     rot = quaternion.from_rotation_matrix(rot)
     camera_node.local_rotation = quaternion.as_float_array(rot)

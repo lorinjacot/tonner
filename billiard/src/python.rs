@@ -1,13 +1,22 @@
-use std::{ffi::CString, fs, path::Path};
+use std::{
+    ffi::CString,
+    fs,
+    path::Path,
+    sync::mpsc::{Receiver, channel},
+};
 
-use log::error;
+use log::{error, info};
+use notify::Watcher;
 use pyo3::{prelude::*, types::PyList};
 use storm::scene_graph::{PyNode, SceneGraph};
 
 const SCRIPTS_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PyScripts {
+    #[allow(dead_code)] // need to keep watcher in order to continues watching for changes
+    watcher: Option<notify::INotifyWatcher>,
+    watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
     update: Option<Py<PyAny>>,
     mouse_input: Option<Py<PyAny>>,
     mouse_motion: Option<Py<PyAny>>,
@@ -32,7 +41,37 @@ impl PyScripts {
     }
 
     pub fn new() -> PyScripts {
-        let mut scripts = PyScripts::default();
+        let path = Path::new(SCRIPTS_DIR);
+        let (tx, rx) = channel();
+        let watcher = notify::recommended_watcher(tx)
+            .and_then(|mut watcher| {
+                watcher
+                    .watch(path, notify::RecursiveMode::Recursive)
+                    .map(|()| watcher)
+            })
+            .inspect_err(|e| {
+                error!(
+                    "Failed to start watcher: {e}.\nScript hot reloading will not be available."
+                );
+            })
+            .ok();
+        let watcher_receiver = if watcher.is_some() { Some(rx) } else { None };
+
+        PyScripts::with_watcher(watcher, watcher_receiver)
+    }
+
+    fn with_watcher(
+        watcher: Option<notify::INotifyWatcher>,
+        watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
+    ) -> PyScripts {
+        let mut scripts = PyScripts {
+            watcher,
+            watcher_receiver,
+            update: None,
+            mouse_input: None,
+            mouse_motion: None,
+            mouse_wheel: None,
+        };
 
         let path = Path::new(SCRIPTS_DIR);
         let main_content = match fs::read_to_string(path.join("main.py")) {
@@ -69,12 +108,32 @@ impl PyScripts {
     }
 
     pub fn update(
-        &self,
+        &mut self,
         py: Python,
         delta_time: f32,
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
     ) {
+        if let Some(rx) = &self.watcher_receiver {
+            use notify::EventKind::*;
+
+            let mut need_reloading = false;
+            for res in rx.try_iter() {
+                match res {
+                    Ok(event) => match event.kind {
+                        Create(_) | Modify(_) | Remove(_) => need_reloading = true,
+                        _ => (),
+                    },
+                    Err(e) => {
+                        error!("File watching error: {e}.");
+                    }
+                }
+            }
+            if need_reloading {
+                info!("File change detected. Reloading scripts.");
+                *self = PyScripts::with_watcher(self.watcher.take(), self.watcher_receiver.take());
+            }
+        }
         if let Some(func) = self.update.as_ref() {
             if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node)) {
                 error!("Failed to run update(): {e}.");

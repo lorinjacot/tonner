@@ -1,15 +1,11 @@
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
-use std::fs::read_to_string;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
 
 use glam::Vec3;
-use log::warn;
 use pollster::block_on;
 use pyo3::prelude::*;
-use pyo3_ffi::c_str;
 use storm::Context;
 use storm::environment::{Environment, EnvironmentBuilder};
 use storm::geometry::skin::SkinManager;
@@ -28,9 +24,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-const UPDATE_FILE_PATH: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py");
-const UPDATE_FILE_NAME: &'static CStr =
-    c_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/update.py"));
+mod python;
 
 const MAX_DELTA_TIME: f32 = 1.0 / 60.0;
 const MIN_DELTA_TIME: f32 = 0.001;
@@ -48,8 +42,7 @@ struct State {
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
-    update_file: String,
-    py_callbacks: PyCallbacks,
+    scripts: python::PyScripts,
     camera_node: Py<PyNode>,
     last_render: Instant,
 }
@@ -115,17 +108,16 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let update_file = read_to_string(UPDATE_FILE_PATH).expect("failed to read update.py");
-        let (scene_graph, py_callbacks, camera_node) = Python::attach(
-            |py| -> PyResult<(Py<SceneGraph>, PyCallbacks, Py<PyNode>)> {
+        let (scene_graph, camera_node) =
+            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyNode>)> {
                 let scene_graph: Py<SceneGraph> = Bound::new(py, scene_graph)?.into();
-                let py_callbacks = PyCallbacks::from_file_content(py, update_file.clone())?;
                 let camera_node =
                     Bound::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?.into();
-                Ok((scene_graph, py_callbacks, camera_node))
-            },
-        )
-        .unwrap();
+                Ok((scene_graph, camera_node))
+            })
+            .unwrap();
+
+        let scripts = python::PyScripts::new();
 
         ctx.queue().submit([encoder.finish()]);
 
@@ -142,8 +134,7 @@ impl State {
             light_manager: LightManager::new(&ctx),
             environment,
             ctx: ctx,
-            update_file,
-            py_callbacks,
+            scripts,
             camera_node,
             last_render: Instant::now(),
         };
@@ -172,30 +163,6 @@ impl State {
         self.configure_surface();
     }
 
-    fn mouse_input(&self, button: &'static str, state: &'static str) {
-        Python::attach(|py| -> PyResult<()> {
-            self.py_callbacks.mouse_input.call1(py, (button, state))?;
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    fn mouse_motion(&self, x: f64, y: f64) {
-        Python::attach(|py| -> PyResult<()> {
-            self.py_callbacks.mouse_motion.call1(py, (x, y))?;
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    fn mouse_wheel(&self, x: f64, y: f64) {
-        Python::attach(|py| -> PyResult<()> {
-            self.py_callbacks.mouse_wheel.call1(py, (x, y))?;
-            Ok(())
-        })
-        .unwrap();
-    }
-
     fn render(&mut self) {
         let now = Instant::now();
         let delta_time = (now - self.last_render)
@@ -222,16 +189,9 @@ impl State {
                     label: Some("render command encoder"),
                 });
 
-        let update_file = read_to_string(UPDATE_FILE_PATH).expect("failed to read update.py");
         Python::attach(|py| -> PyResult<()> {
-            if self.update_file != update_file {
-                warn!("update.py changed, reloading ...");
-                self.update_file = update_file.clone();
-                self.py_callbacks = PyCallbacks::from_file_content(py, update_file)?;
-            }
-
-            let args = (delta_time, &self.scene_graph, &self.camera_node);
-            self.py_callbacks.update.call1(py, args)?;
+            self.scripts
+                .update(py, delta_time, &self.scene_graph, &self.camera_node);
 
             self.renderer
                 .render(
@@ -254,36 +214,6 @@ impl State {
         self.ctx.queue().submit([encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
-    }
-}
-
-struct PyCallbacks {
-    update: Py<PyAny>,
-    mouse_input: Py<PyAny>,
-    mouse_motion: Py<PyAny>,
-    mouse_wheel: Py<PyAny>,
-}
-
-impl PyCallbacks {
-    fn from_file_content(py: Python<'_>, update_file: String) -> PyResult<Self> {
-        let update_module = PyModule::from_code(
-            py,
-            &CString::new(update_file.clone()).expect("failed to convert update.py to a CString"),
-            UPDATE_FILE_NAME,
-            c"",
-        )?;
-
-        let update = update_module.getattr("update")?.into();
-        let mouse_input = update_module.getattr("mouse_input")?.into();
-        let mouse_motion = update_module.getattr("mouse_motion")?.into();
-        let mouse_wheel = update_module.getattr("mouse_wheel")?.into();
-
-        Ok(PyCallbacks {
-            update,
-            mouse_input,
-            mouse_motion,
-            mouse_wheel,
-        })
     }
 }
 
@@ -320,13 +250,13 @@ impl ApplicationHandler for App {
                 delta: MouseScrollDelta::LineDelta(x, y),
                 ..
             } => {
-                state.mouse_wheel(x as f64, y as f64);
+                state.scripts.mouse_wheel(x as f64, y as f64);
             }
             WindowEvent::MouseWheel {
                 delta: MouseScrollDelta::PixelDelta(delta),
                 ..
             } => {
-                state.mouse_wheel(delta.x, delta.y);
+                state.scripts.mouse_wheel(delta.x, delta.y);
             }
             WindowEvent::MouseInput {
                 button,
@@ -343,7 +273,7 @@ impl ApplicationHandler for App {
                     winit::event::ElementState::Pressed => "Pressed",
                     winit::event::ElementState::Released => "Released",
                 };
-                state.mouse_input(button, elt_state);
+                state.scripts.mouse_input(button, elt_state);
             }
             _ => (),
         }
@@ -358,7 +288,7 @@ impl ApplicationHandler for App {
         let state = self.state.as_mut().unwrap();
         match event {
             DeviceEvent::MouseMotion { delta: (x, y) } => {
-                state.mouse_motion(x, y);
+                state.scripts.mouse_motion(x, y);
             }
             _ => (),
         }
@@ -367,6 +297,7 @@ impl ApplicationHandler for App {
 
 fn main() -> Result<(), winit::error::EventLoopError> {
     env_logger::init();
+    python::PyScripts::init();
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);

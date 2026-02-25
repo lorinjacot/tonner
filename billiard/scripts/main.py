@@ -10,7 +10,7 @@ debugpy.listen(5678, in_process_debug_adapter=True)
 if "physics" in sys.modules:
     importlib.reload(sys.modules["physics"])
 
-from physics import integrate
+from physics import simulate
 
 camera_action: Literal["Rotate", "Zoom"] | None = None
 camera_horizontal_angle: float = 0
@@ -89,5 +89,5 @@ def update(delta_time: float, scene_graph, camera_node, balls: list):
     camera_node.local_rotation = quaternion.as_float_array(rot)
 
     global reset
-    integrate(delta_time, balls, reset)
+    simulate(delta_time, balls, reset)
     reset = False

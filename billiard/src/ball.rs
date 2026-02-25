@@ -20,9 +20,10 @@ pub struct Ball {
 
 impl Ball {
     #[rustfmt::skip]
-    pub const NUMBER_NAME_COLOR_POSITION_VELOCITY: &'static [(u8, &'static str, [u8; 4], Vec3, Vec3); 2] =
+    pub const NUMBER_NAME_COLOR_POSITION_VELOCITY: &'static [(u8, &'static str, [u8; 4], Vec3, Vec3)] =
         &[
             (1, "solid yellow", [255, 217, 15, 255], vec3(0.3, 0.0, 0.0), Vec3::ZERO),
+            (1, "solid blue", [5, 7, 255, 255], vec3(0.15, 0.0, 0.0), Vec3::ZERO),
             (8, "solid back", [0, 0, 0, 255], vec3(0.0, 0.0, 0.0), vec3(0.3, 0.0, 0.0))
         ];
 

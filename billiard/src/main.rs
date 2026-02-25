@@ -8,8 +8,10 @@ use pollster::block_on;
 use pyo3::prelude::*;
 use storm::Context;
 use storm::environment::{Environment, EnvironmentBuilder};
+use storm::geometry::SphereBuilder;
 use storm::geometry::skin::SkinManager;
-use storm::mesh::{MeshInstance, MeshInstanceId};
+use storm::mesh::material::MaterialBuilder;
+use storm::mesh::{MeshBuilder, MeshInstance, MeshInstanceId};
 use storm::renderer::Renderer;
 use storm::renderer::camera::Camera;
 use storm::renderer::light::LightManager;
@@ -44,6 +46,7 @@ struct State {
     environment: Environment,
     scripts: python::PyScripts,
     camera_node: Py<PyNode>,
+    balls: HashMap<u8, Py<PyNode>>,
     last_render: Instant,
 }
 
@@ -93,6 +96,31 @@ impl State {
             .unwrap();
         let camera = Camera::new(camera_node);
 
+        let mut mesh_instances = HashMap::new();
+        let mut balls = HashMap::new();
+
+        let ball = SphereBuilder::default()
+            .name("Ball")
+            .radius(0.025)
+            .build(&ctx);
+        let black = MaterialBuilder::default()
+            .name("Black")
+            .base_color_factor([0.0, 0.0, 0.0, 1.0])
+            .metallic_factor(0.0)
+            .build(&ctx);
+        let black_ball = MeshBuilder::default()
+            .name("Black ball")
+            .primitive(ball, black)
+            .build(&ctx)
+            .unwrap();
+
+        let black_ball_node = NodeBuilder::default()
+            .name("Black ball")
+            .build(&mut scene_graph)
+            .unwrap();
+        let black_ball = black_ball.new_instance(black_ball_node);
+        mesh_instances.insert(black_ball.id(), black_ball);
+
         let mut encoder = ctx
             .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -113,6 +141,12 @@ impl State {
                 let scene_graph: Py<SceneGraph> = Bound::new(py, scene_graph)?.into();
                 let camera_node =
                     Bound::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?.into();
+
+                balls.insert(
+                    8,
+                    Bound::new(py, PyNode::new(black_ball_node, scene_graph.clone_ref(py)))?.into(),
+                );
+
                 Ok((scene_graph, camera_node))
             })
             .unwrap();
@@ -129,13 +163,14 @@ impl State {
             renderer,
             camera,
             scene_graph,
-            mesh_instances: HashMap::new(),
+            mesh_instances,
             skin_manager: SkinManager::new(&ctx),
             light_manager: LightManager::new(&ctx),
             environment,
             ctx: ctx,
             scripts,
             camera_node,
+            balls,
             last_render: Instant::now(),
         };
 
@@ -191,7 +226,7 @@ impl State {
 
         Python::attach(|py| -> PyResult<()> {
             self.scripts
-                .update(py, delta_time, &self.scene_graph, &self.camera_node);
+                .update(py, delta_time, &self.scene_graph, &self.camera_node, &self.balls);
 
             self.renderer
                 .render(
@@ -226,7 +261,7 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window = Arc::new(
             event_loop
-                .create_window(Window::default_attributes())
+                .create_window(Window::default_attributes().with_title("Billiard"))
                 .expect("failed to create windown"),
         );
 

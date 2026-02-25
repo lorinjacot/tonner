@@ -1,16 +1,23 @@
 from typing import Literal
+import importlib, sys
+
 import debugpy
 import numpy as np
 import quaternion
 
 debugpy.listen(5678, in_process_debug_adapter=True)
 
+if "physics" in sys.modules:
+    importlib.reload(sys.modules["physics"])
+
+from physics import integrate
+
 camera_action: Literal["Rotate", "Zoom"] | None = None
 camera_horizontal_angle: float = 0
 camera_horizontal_speed = 1e-3
 camera_vertical_angle: float = 0
 camera_vertical_speed = 1e-3
-camera_distance = 5
+camera_distance = 1
 camera_mouse_wheel_zoom_speed = 1
 camera_mouse_motion_zoom_speed = 1
 
@@ -48,7 +55,7 @@ def mouse_wheel(x: float, y: float):
     pass
 
 
-def update(delta_time: float, scene_graph, camera_node):
+def update(delta_time: float, scene_graph, camera_node, balls: dict):
     r = camera_distance
     theta = camera_horizontal_angle
     phi = camera_vertical_angle
@@ -74,3 +81,5 @@ def update(delta_time: float, scene_graph, camera_node):
     ]).T
     rot = quaternion.from_rotation_matrix(rot)
     camera_node.local_rotation = quaternion.as_float_array(rot)
+
+    integrate(balls)

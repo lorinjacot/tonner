@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::CString,
     fs,
     path::Path,
@@ -36,7 +37,7 @@ impl PyScripts {
                 .unwrap()
                 .cast_into::<PyList>()
                 .unwrap();
-            syspath.insert(0, path).unwrap();
+            syspath.insert(0, path.to_str()).unwrap();
         });
     }
 
@@ -113,6 +114,7 @@ impl PyScripts {
         delta_time: f32,
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
+        balls: &HashMap<u8, Py<PyNode>>,
     ) {
         if let Some(rx) = &self.watcher_receiver {
             use notify::EventKind::*;
@@ -135,7 +137,7 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node)) {
+            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node, balls)) {
                 error!("Failed to run update(): {e}.");
             }
         }

@@ -349,7 +349,6 @@ impl GeometryBuilder {
             };
 
             if generate_normals {
-                dbg!(generate_normals);
                 for target in 0..=self.morph_target_count {
                     let start = target * self.vertex_count;
                     let end = start + self.vertex_count;

@@ -2,14 +2,15 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::Vec3;
+use glam::{Vec3, vec3};
 use pollster::block_on;
 use pyo3::prelude::*;
 use storm::Context;
 use storm::environment::{Environment, EnvironmentBuilder};
-use storm::geometry::SphereBuilder;
 use storm::geometry::skin::SkinManager;
-use storm::mesh::MeshInstance;
+use storm::geometry::{GeometryBuilder, SphereBuilder};
+use storm::mesh::material::MaterialBuilder;
+use storm::mesh::{MeshBuilder, MeshInstance};
 use storm::renderer::Renderer;
 use storm::renderer::camera::Camera;
 use storm::renderer::light::LightManager;
@@ -103,6 +104,62 @@ impl State {
             .name("Ball")
             .radius(0.025)
             .build(&ctx);
+
+        let table_node = NodeBuilder::default()
+            .name("Table")
+            .build(&mut scene_graph)
+            .unwrap();
+
+        #[rustfmt::skip]
+        let table = GeometryBuilder::new(8, 0)
+            .name("Table")
+            .positions([
+                vec3(-0.65, 0.0, -1.25),
+                vec3(-0.65, 0.0, 1.25),
+                vec3(0.65, 0.0, 1.25),
+                vec3(0.65, 0.0, -1.25),
+                vec3(-0.65, -0.1, -1.25),
+                vec3(-0.65, -0.1, 1.25),
+                vec3(0.65, -0.1, 1.25),
+                vec3(0.65, -0.1, -1.25),
+            ])
+            .unwrap()
+            .indices_u16([
+                // top face
+                0, 1, 2,
+                2, 3, 0,
+                // large side 1
+                1, 0, 4,
+                4, 5, 1,
+                // large side 2
+                3, 2, 6,
+                6, 7, 3,
+                // small side 1
+                2, 1, 5, 
+                5, 6, 2, 
+                // small side 2
+                0, 3, 7, 
+                7, 4, 0, 
+                // bottom face
+                4, 6, 5, 
+                6, 4, 7,
+            ])
+            .build(&ctx)
+            .unwrap();
+        let table_material = MaterialBuilder::default()
+            .name("Table")
+            .base_color_factor([1.0, 0.0, 0.0, 1.0])
+            .metallic_factor(1.0)
+            .roughness_factor(0.2)
+            .double_sided(false)
+            .build(&ctx);
+        let table = MeshBuilder::default()
+            .name("Table")
+            .primitive(table, table_material)
+            .build(&ctx)
+            .unwrap()
+            .new_instance(table_node);
+        mesh_instances.push(table);
 
         let mut encoder = ctx
             .device()

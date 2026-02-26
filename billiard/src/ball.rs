@@ -8,6 +8,8 @@ use storm::{
     scene_graph::{NodeBuilder, PyNode, SceneGraph},
 };
 
+const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
+
 #[pyclass]
 pub struct Ball {
     #[pyo3(get)]
@@ -20,12 +22,41 @@ pub struct Ball {
 
 impl Ball {
     #[rustfmt::skip]
-    pub const NUMBER_NAME_COLOR_POSITION_VELOCITY: &'static [(u8, &'static str, [u8; 4], Vec3, Vec3)] =
-        &[
-            (1, "solid yellow", [255, 217, 15, 255], vec3(0.3, 0.025, 0.0), Vec3::ZERO),
-            (1, "solid blue", [5, 7, 255, 255], vec3(0.15, 0.025, 0.0), Vec3::ZERO),
-            (8, "solid back", [0, 0, 0, 255], vec3(0.0, 0.025, 0.0), vec3(0.3, 0.0, 0.0))
-        ];
+    pub fn settings() -> Vec<(u8, &'static str, [u8; 4], Vec3, Vec3)> {
+        // Standard spacing: dx = ball_diameter, dz = ball_diameter * sqrt(3)/2
+        let d = 0.05; 
+        let row_spacing = (3.0f32).sqrt() / 2.0 * d;
+
+        vec![
+            // Row 1
+            (1, "solid yellow", [255, 217, 15, 255], BASE_POS + vec3(0.0, 0.0, 0.0), Vec3::ZERO),
+
+            // Row 2
+            (2, "solid blue", [5, 7, 255, 255], BASE_POS + vec3(row_spacing, 0.0, -0.5 * d), Vec3::ZERO),
+            (9, "yellow stripe", [255, 217, 15, 255], BASE_POS + vec3(row_spacing, 0.0, 0.5 * d), Vec3::ZERO),
+
+            // Row 3
+            (3, "solid red", [255, 0, 0, 255], BASE_POS + vec3(2.0 * row_spacing, 0.0, -1.0 * d), Vec3::ZERO),
+            (8, "solid black", [0, 0, 0, 255], BASE_POS + vec3(2.0 * row_spacing, 0.0, 0.0), Vec3::ZERO), 
+            (10, "blue stripe", [5, 7, 255, 255], BASE_POS + vec3(2.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
+
+            // Row 4
+            (4, "solid purple", [128, 0, 128, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, -1.5 * d), Vec3::ZERO),
+            (11, "red stripe", [255, 0, 0, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, -0.5 * d), Vec3::ZERO),
+            (5, "solid orange", [255, 165, 0, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, 0.5 * d), Vec3::ZERO),
+            (12, "purple stripe", [128, 0, 128, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, 1.5 * d), Vec3::ZERO),
+
+            // Row 5
+            (6, "solid green", [0, 255, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, -2.0 * d), Vec3::ZERO),
+            (13, "orange stripe", [255, 165, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, -1.0 * d), Vec3::ZERO),
+            (7, "solid maroon", [128, 0, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 0.0), Vec3::ZERO),
+            (14, "green stripe", [0, 255, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
+            (15, "maroon stripe", [128, 0, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 2.0 * d), Vec3::ZERO),
+
+            // white
+            (0, "white", [255; 4], vec3(0.0, 0.025, -0.8), Vec3::ZERO),
+        ]
+    }
 
     pub fn new<'py>(
         py: Python<'py>,

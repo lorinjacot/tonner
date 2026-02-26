@@ -302,7 +302,7 @@ impl State {
                 let camera_node =
                     Bound::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?.into();
 
-                Ball::NUMBER_NAME_COLOR_POSITION_VELOCITY.iter().for_each(
+                Ball::settings().iter().for_each(
                     |(number, name, color, position, velocity)| {
                         let (ball, mesh_instance) = Ball::new(
                             py,

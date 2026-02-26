@@ -105,11 +105,6 @@ impl State {
             .radius(0.025)
             .build(&ctx);
 
-        let table_node = NodeBuilder::default()
-            .name("Table")
-            .build(&mut scene_graph)
-            .unwrap();
-
         #[rustfmt::skip]
         let table = GeometryBuilder::new(8, 0)
             .name("Table")
@@ -146,6 +141,73 @@ impl State {
             ])
             .build(&ctx)
             .unwrap();
+        #[rustfmt::skip]
+        let long_border = GeometryBuilder::new(8, 0)
+            .name("Long border")
+            .positions([
+                vec3(-0.01, 0.1, -1.25),
+                vec3(-0.01, 0.1, 1.25),
+                vec3(0.01, 0.1, 1.25),
+                vec3(0.01, 0.1, -1.25),
+                vec3(-0.01, 0.0, -1.25),
+                vec3(-0.01, 0.0, 1.25),
+                vec3(0.01, 0.0, 1.25),
+                vec3(0.01, 0.0, -1.25),
+            ])
+            .unwrap()
+            .indices_u16([
+                // top face
+                0, 1, 2,
+                2, 3, 0,
+                // large side 1
+                1, 0, 4,
+                4, 5, 1,
+                // large side 2
+                3, 2, 6,
+                6, 7, 3,
+                // small side 1
+                2, 1, 5, 
+                5, 6, 2, 
+                // small side 2
+                0, 3, 7, 
+                7, 4, 0,
+            ])
+            .build(&ctx)
+            .unwrap();
+        #[rustfmt::skip]
+        let short_border = GeometryBuilder::new(8, 0)
+            .name("Short border")
+            .positions([
+                vec3(-0.63, 0.1, -0.01),
+                vec3(-0.63, 0.1, 0.01),
+                vec3(0.63, 0.1, 0.01),
+                vec3(0.63, 0.1, -0.01),
+                vec3(-0.63, 0.0, -0.01),
+                vec3(-0.63, 0.0, 0.01),
+                vec3(0.63, 0.0, 0.01),
+                vec3(0.63, 0.0, -0.01),
+            ])
+            .unwrap()
+            .indices_u16([
+                // top face
+                0, 1, 2,
+                2, 3, 0,
+                // large side 1
+                1, 0, 4,
+                4, 5, 1,
+                // large side 2
+                3, 2, 6,
+                6, 7, 3,
+                // small side 1
+                2, 1, 5, 
+                5, 6, 2, 
+                // small side 2
+                0, 3, 7, 
+                7, 4, 0,
+            ])
+            .build(&ctx)
+            .unwrap();
+
         let table_material = MaterialBuilder::default()
             .name("Table")
             .base_color_factor([1.0, 0.0, 0.0, 1.0])
@@ -153,13 +215,71 @@ impl State {
             .roughness_factor(0.2)
             .double_sided(false)
             .build(&ctx);
+
+        let table_node = NodeBuilder::default()
+            .name("Table")
+            .build(&mut scene_graph)
+            .unwrap();
         let table = MeshBuilder::default()
             .name("Table")
-            .primitive(table, table_material)
+            .primitive(table, table_material.clone())
             .build(&ctx)
             .unwrap()
             .new_instance(table_node);
-        mesh_instances.push(table);
+
+        let long_border1_node = NodeBuilder::default()
+            .name("Table long border 1")
+            .parent(table_node)
+            .local_translation(vec3(-0.64, 0.0, 0.0))
+            .build(&mut scene_graph)
+            .unwrap();
+        let long_border1 = MeshBuilder::default()
+            .name("Table long border 1")
+            .primitive(long_border.clone(), table_material.clone())
+            .build(&ctx)
+            .unwrap()
+            .new_instance(long_border1_node);
+
+        let long_border2_node = NodeBuilder::default()
+            .name("Table long border 2")
+            .parent(table_node)
+            .local_translation(vec3(0.64, 0.0, 0.0))
+            .build(&mut scene_graph)
+            .unwrap();
+        let long_border2 = MeshBuilder::default()
+            .name("Table long border 2")
+            .primitive(long_border, table_material.clone())
+            .build(&ctx)
+            .unwrap()
+            .new_instance(long_border2_node);
+
+        let short_border1_node = NodeBuilder::default()
+            .name("Table short border 1")
+            .parent(table_node)
+            .local_translation(vec3(0.0, 0.0, -1.24))
+            .build(&mut scene_graph)
+            .unwrap();
+        let short_border1 = MeshBuilder::default()
+            .name("Table short border 1")
+            .primitive(short_border.clone(), table_material.clone())
+            .build(&ctx)
+            .unwrap()
+            .new_instance(short_border1_node);
+
+        let short_border2_node = NodeBuilder::default()
+            .name("Table short border 2")
+            .parent(table_node)
+            .local_translation(vec3(0.0, 0.0, 1.24))
+            .build(&mut scene_graph)
+            .unwrap();
+        let short_border2 = MeshBuilder::default()
+            .name("Table short border 2")
+            .primitive(short_border, table_material)
+            .build(&ctx)
+            .unwrap()
+            .new_instance(short_border2_node);
+
+        mesh_instances.extend([table, long_border1, long_border2, short_border1, short_border2]);
 
         let mut encoder = ctx
             .device()

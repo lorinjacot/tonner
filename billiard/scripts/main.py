@@ -9,6 +9,8 @@ debugpy.listen(5678, in_process_debug_adapter=True)
 
 if "physics" in sys.modules:
     importlib.reload(sys.modules["physics"])
+if "constraints" in sys.modules:
+    importlib.reload(sys.modules["constraints"])
 
 from physics import simulate
 
@@ -17,7 +19,7 @@ camera_horizontal_angle: float = 0
 camera_horizontal_speed = 1e-3
 camera_vertical_angle: float = 0
 camera_vertical_speed = 1e-3
-camera_distance = 1
+camera_distance = 2
 camera_mouse_wheel_zoom_speed = 1
 camera_mouse_motion_zoom_speed = 1
 

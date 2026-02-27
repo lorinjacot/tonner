@@ -53,7 +53,7 @@ impl PyScripts {
             })
             .inspect_err(|e| {
                 error!(
-                    "Failed to start watcher: {e}.\nScript hot reloading will not be available."
+                    "Failed to start watcher: {e}."
                 );
             })
             .ok();
@@ -79,14 +79,14 @@ impl PyScripts {
         let main_content = match fs::read_to_string(path.join("main.py")) {
             Ok(content) => content,
             Err(e) => {
-                error!("Failed to read main.py: {e}.\nSkipping python...");
+                error!("Failed to read main.py: {e}.");
                 return scripts;
             }
         };
         let main_content = match CString::new(main_content) {
             Ok(content) => content,
             Err(e) => {
-                error!("Failed to convert main.py to a C-string: {e}.\nSkipping python...");
+                error!("Failed to convert main.py to a C-string: {e}.");
                 c"".to_owned()
             }
         };
@@ -95,7 +95,7 @@ impl PyScripts {
             let main_module = match PyModule::from_code(py, &main_content, c"main.py", c"") {
                 Ok(module) => module,
                 Err(e) => {
-                    error!("Failed to load main.py: {e}.\nSkipping python...");
+                    error!("Failed to load main.py: {e}.");
                     return;
                 }
             };
@@ -133,7 +133,7 @@ impl PyScripts {
                 }
             }
             if need_reloading {
-                info!("File change detected. Reloading scripts.");
+                info!("File change detected. Reloading python scripts.");
                 *self = PyScripts::with_watcher(self.watcher.take(), self.watcher_receiver.take());
             }
         }

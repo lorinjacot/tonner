@@ -3,7 +3,7 @@ import numpy as np
 import constraints
 
 g = np.array([0.0, -1.0, 0.0])
-N = 100
+N = 10
 
 C: List[constraints.Constraint] = [
     constraints.TableConstraint(),
@@ -76,7 +76,7 @@ def simulate(delta_time: float, balls: list, reset: bool):
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
-            [0.2, 0.0, 3.0],
+            [0.0, 0.0, 3.0],
         ])
 
     dt = delta_time / N

@@ -12,7 +12,7 @@ class Constraint(ABC):
         pass
 
     def alpha(self) -> np.floating:
-        return np.float64(0.00001)
+        return np.float64(1e-6)
 
 
 class DistanceConstraint(Constraint):
@@ -76,6 +76,3 @@ class TableConstraint(Constraint):
         grad[:,2][zs > self.MAX_Z] = - 1.0
         grad[:,2][zs < self.MIN_Z] = 1.0
         return grad
-    
-    def alpha(self) -> np.floating:
-        return np.float64(0.00001)

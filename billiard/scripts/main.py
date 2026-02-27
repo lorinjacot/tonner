@@ -15,11 +15,11 @@ if "constraints" in sys.modules:
 from physics import simulate
 
 camera_action: Literal["Rotate", "Zoom"] | None = None
-camera_horizontal_angle: float = 0
-camera_horizontal_speed = 1e-3
-camera_vertical_angle: float = 0
+camera_horizontal_angle: float = np.pi / 4.0
+camera_horizontal_speed = -1e-3
+camera_vertical_angle: float = np.pi / 8.0
 camera_vertical_speed = 1e-3
-camera_distance = 2
+camera_distance = 3
 camera_mouse_wheel_zoom_speed = 1
 camera_mouse_motion_zoom_speed = 1
 

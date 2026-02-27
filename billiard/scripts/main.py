@@ -56,7 +56,7 @@ def mouse_motion(x: float, y: float):
 
     elif camera_action == "Zoom":
         global camera_distance
-        camera_distance *= 1 - y * camera_mouse_motion_zoom_speed
+        camera_distance *= 1 + y * camera_mouse_motion_zoom_speed
 
 
 def mouse_wheel(x: float, y: float):

@@ -30,7 +30,7 @@ use crate::ball::Ball;
 mod ball;
 mod python;
 
-const MAX_DELTA_TIME: f32 = 1.0 / 60.0;
+const MAX_DELTA_TIME: f32 = 1.0 / 30.0;
 const MIN_DELTA_TIME: f32 = 0.001;
 
 struct State {
@@ -213,7 +213,6 @@ impl State {
             .base_color_factor([1.0, 0.0, 0.0, 1.0])
             .metallic_factor(1.0)
             .roughness_factor(0.2)
-            .double_sided(false)
             .build(&ctx);
 
         let table_node = NodeBuilder::default()

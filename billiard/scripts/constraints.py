@@ -12,6 +12,7 @@ class Constraint(ABC):
         pass
 
     def alpha(self) -> np.floating:
+        """compliance (inverse stiffness)"""
         return np.float64(1e-6)
 
 

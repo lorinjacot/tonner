@@ -80,18 +80,21 @@ def simulate(delta_time: float, balls: list, reset: bool):
         ])
 
     dt = delta_time / N
+    lambdas = np.zeros(len(C))
+    alphas = np.array([c.alpha() / dt**2 for c in C])
 
     for _ in range(N):
         vel = vel + dt * g
         old_pos = pos
         pos = pos + dt * vel
 
-        for c in C:
+        for i, c in enumerate(C):
             loss = c(pos)
             if np.abs(loss) > 1e-6:
                 grad = c.grad(pos)
-                lambd = - loss / (np.sum(np.square(grad)) + c.alpha() / dt**2)
-                pos = pos + lambd * grad
+                delta_lambda = (- loss - alphas[i] * lambdas[i]) / (np.sum(np.square(grad)) + alphas[i])
+                lambdas[i] = lambdas[i] + delta_lambda
+                pos = pos + delta_lambda * grad
 
         vel = (pos - old_pos) / dt
 

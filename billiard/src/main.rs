@@ -402,6 +402,9 @@ impl State {
                 delta_time,
                 &self.scene_graph,
                 &self.camera_node,
+                self.camera.projection_matrix(
+                    surface_texture.texture.width() as f32 / surface_texture.texture.height() as f32
+                ),
                 &self.balls,
             );
 

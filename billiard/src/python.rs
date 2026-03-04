@@ -5,8 +5,10 @@ use std::{
     sync::mpsc::{Receiver, channel},
 };
 
+use glam::Mat4;
 use log::{error, info};
 use notify::Watcher;
+use numpy::{PyArray2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
 use storm::scene_graph::{PyNode, SceneGraph};
 
@@ -52,9 +54,7 @@ impl PyScripts {
                     .map(|()| watcher)
             })
             .inspect_err(|e| {
-                error!(
-                    "Failed to start watcher: {e}."
-                );
+                error!("Failed to start watcher: {e}.");
             })
             .ok();
         let watcher_receiver = if watcher.is_some() { Some(rx) } else { None };
@@ -115,6 +115,7 @@ impl PyScripts {
         delta_time: f32,
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
+        projection_matrix: Mat4,
         balls: &[Py<Ball>],
     ) {
         if let Some(rx) = &self.watcher_receiver {
@@ -138,7 +139,21 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node, balls)) {
+            let projection_matrix = PyArray2::from_array(
+                py,
+                &aview2(&projection_matrix.transpose().to_cols_array_2d()),
+            );
+
+            if let Err(e) = func.call1(
+                py,
+                (
+                    delta_time,
+                    scene_graph,
+                    camera_node,
+                    projection_matrix,
+                    balls,
+                ),
+            ) {
                 error!("Failed to run update(): {e}.");
             }
         }

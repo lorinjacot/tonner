@@ -64,7 +64,12 @@ def mouse_wheel(x: float, y: float):
     camera_distance *= 1 + y * camera_mouse_wheel_zoom_speed
 
 
-def update(delta_time: float, scene_graph, camera_node, balls: list):
+def update(
+        delta_time: float,
+        scene_graph, camera_node,
+        projection_matrix: np.ndarray,
+        balls: list
+    ):
     r = camera_distance
     theta = camera_horizontal_angle
     phi = camera_vertical_angle

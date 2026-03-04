@@ -1,0 +1,25 @@
+{ pkgs ? import <nixpkgs> { config = {}; overlays = []; } }:
+let 
+  libPath = with pkgs; lib.makeLibraryPath [
+    wayland
+    libxkbcommon
+    vulkan-loader
+  ];
+in
+pkgs.mkShell {
+  strictDeps = true;
+  nativeBuildInputs = with pkgs; [
+    cargo
+    rustc
+    pkg-config
+  ];
+  LD_LIBRARY_PATH = libPath;
+
+  packages = with pkgs; [
+    (python3.withPackages (python-pkgs: with python-pkgs; [
+      debugpy
+      numpy
+      quaternion
+    ]))
+  ];
+}

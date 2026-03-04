@@ -3,6 +3,7 @@ import numpy as np
 import constraints
 
 g = np.array([0.0, -1.0, 0.0])
+drag_coefficient = 0.5
 N = 10
 
 C: List[constraints.Constraint] = [
@@ -13,6 +14,10 @@ for i in range(15):
         C.append(constraints.DistanceConstraint(i, j))
 
 BASE_POS = np.array([0.0, 0.025, 0.65])
+
+def f(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
+    f_drag = - drag_coefficient * vel
+    return f_drag + g
 
 def simulate(delta_time: float, balls: list, reset: bool):
     pos = np.stack([ball.node.local_translation for ball in balls])
@@ -84,7 +89,7 @@ def simulate(delta_time: float, balls: list, reset: bool):
     alphas = np.array([c.alpha() / dt**2 for c in C])
 
     for _ in range(N):
-        vel = vel + dt * g
+        vel = vel + dt * f(pos, vel)
         old_pos = pos
         pos = pos + dt * vel
 

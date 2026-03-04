@@ -20,7 +20,7 @@ camera_horizontal_speed = -1e-3
 camera_vertical_angle: float = np.pi / 8.0
 camera_vertical_speed = 1e-3
 camera_distance = 3
-camera_mouse_wheel_zoom_speed = 1.2
+camera_mouse_wheel_zoom_speed = 1e-3
 camera_mouse_motion_zoom_speed = 1e-3
 
 reset = False
@@ -61,10 +61,7 @@ def mouse_motion(x: float, y: float):
 
 def mouse_wheel(x: float, y: float):
     global camera_distance
-    if y > 0:
-        camera_distance /= y * camera_mouse_wheel_zoom_speed
-    else:
-        camera_distance *= - y * camera_mouse_wheel_zoom_speed
+    camera_distance *= 1 + y * camera_mouse_wheel_zoom_speed
 
 
 def update(delta_time: float, scene_graph, camera_node, balls: list):

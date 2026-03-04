@@ -462,7 +462,8 @@ impl ApplicationHandler for App {
                 delta: MouseScrollDelta::LineDelta(x, y),
                 ..
             } => {
-                state.scripts.mouse_wheel(x as f64, y as f64);
+                const LINE_HEIGHT: f64 = 24.0;
+                state.scripts.mouse_wheel(x as f64 * LINE_HEIGHT, y as f64 * LINE_HEIGHT);
             }
             WindowEvent::MouseWheel {
                 delta: MouseScrollDelta::PixelDelta(delta),

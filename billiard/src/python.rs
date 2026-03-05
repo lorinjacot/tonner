@@ -23,6 +23,7 @@ pub struct PyScripts {
     watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
     update: Option<Py<PyAny>>,
     mouse_input: Option<Py<PyAny>>,
+    mouse_moved: Option<Py<PyAny>>,
     mouse_motion: Option<Py<PyAny>>,
     mouse_wheel: Option<Py<PyAny>>,
 }
@@ -71,6 +72,7 @@ impl PyScripts {
             watcher_receiver,
             update: None,
             mouse_input: None,
+            mouse_moved: None,
             mouse_motion: None,
             mouse_wheel: None,
         };
@@ -102,6 +104,7 @@ impl PyScripts {
 
             scripts.update = load_function(&main_module, "update");
             scripts.mouse_input = load_function(&main_module, "mouse_input");
+            scripts.mouse_moved = load_function(&main_module, "mouse_moved");
             scripts.mouse_motion = load_function(&main_module, "mouse_motion");
             scripts.mouse_wheel = load_function(&main_module, "mouse_wheel");
         });
@@ -138,15 +141,7 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(
-                py,
-                (
-                    delta_time,
-                    scene_graph,
-                    camera_node,
-                    balls,
-                ),
-            ) {
+            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node, balls)) {
                 error!("Failed to run update(): {e}.");
             }
         }
@@ -160,16 +155,30 @@ impl PyScripts {
         }
     }
 
-    pub fn mouse_motion(&self, x: f64, y: f64, camera_node: &Py<PyNode>, projection_matrix: Mat4, balls: &[Py<Ball>]) {
-        if let Some(func) = self.mouse_motion.as_ref() {
+    pub fn mouse_moved(
+        &self,
+        x: f64,
+        y: f64,
+        camera_node: &Py<PyNode>,
+        projection_matrix: Mat4,
+        balls: &[Py<Ball>],
+    ) {
+        if let Some(func) = self.mouse_moved.as_ref() {
             if let Err(e) = Python::attach(|py| {
                 let projection_matrix = PyArray2::from_array(
                     py,
                     &aview2(&projection_matrix.transpose().to_cols_array_2d()),
                 );
-
                 func.call1(py, (x, y, camera_node, projection_matrix, balls))
             }) {
+                error!("Failed to run mouse_motion(): {e}.");
+            }
+        }
+    }
+
+    pub fn mouse_motion(&self, dx: f64, dy: f64) {
+        if let Some(func) = self.mouse_motion.as_ref() {
+            if let Err(e) = Python::attach(|py| func.call1(py, (dx, dy))) {
                 error!("Failed to run mouse_motion(): {e}.");
             }
         }

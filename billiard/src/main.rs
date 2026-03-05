@@ -488,6 +488,17 @@ impl ApplicationHandler for App {
                 };
                 state.scripts.mouse_input(button, elt_state);
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                let w = state.size.width as f64;
+                let h = state.size.height as f64;
+                state.scripts.mouse_moved(
+                    2.0 * position.x / w - 1.0,
+                    1.0 - 2.0 * position.y / h,
+                    &state.camera_node,
+                    state.camera.projection_matrix((w / h) as f32),
+                    &state.balls
+                );
+            }
             _ => (),
         }
     }
@@ -504,11 +515,6 @@ impl ApplicationHandler for App {
                 state.scripts.mouse_motion(
                     x, 
                     y,
-                    &state.camera_node,
-                    state.camera.projection_matrix(
-                        state.size.width as f32 / state.size.height as f32
-                    ),
-                    &state.balls,
                 );
             }
             _ => (),

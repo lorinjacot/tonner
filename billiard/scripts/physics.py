@@ -3,7 +3,7 @@ import numpy as np
 import constraints
 
 g = np.array([0.0, -1.0, 0.0])
-drag_coefficient = 0.3
+drag_coefficient = 0.7
 N = 10
 
 C: List[constraints.Constraint] = [

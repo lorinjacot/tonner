@@ -14,8 +14,8 @@ if "constraints" in sys.modules:
 
 from physics import simulate
 
-camera_action: Literal["Rotate", "Zoom"] | None = None
-mouse_action: Literal["Rotate", "Zoom"] | None = None
+mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
+mouse_over_ball = False
 
 camera_horizontal_angle: float = np.pi / 4.0
 camera_horizontal_speed = -1e-3
@@ -31,39 +31,43 @@ reset = False
 def mouse_input(
     button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"]
 ):
-    global camera_action
+    global mouse_action
 
     if button == "Left":
-        if camera_action == None and state == "Pressed":
-            camera_action = "Rotate"
-        elif camera_action == "Rotate" and state == "Released":
-            camera_action = None
+        if mouse_action == None and state == "Pressed":
+            mouse_action = "Rotate"
+        elif mouse_action == "Rotate" and state == "Released":
+            mouse_action = None
 
     elif button == "Middle":
-        if camera_action == None and state == "Pressed":
-            camera_action = "Zoom"
-        elif camera_action == "Zoom" and state == "Released":
-            camera_action = None
+        if mouse_action == None and state == "Pressed":
+            mouse_action = "Zoom"
+        elif mouse_action == "Zoom" and state == "Released":
+            mouse_action = None
 
     elif button == "Right" and state == "Released":
         global reset
         reset = True
 
 
-def mouse_motion(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list):
-    if camera_action == "Rotate":
+def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list):
+    pass
+
+
+def mouse_motion(dx: float, dy: float):
+    if mouse_action == "Rotate":
         global camera_horizontal_angle, camera_vertical_angle
-        camera_horizontal_angle += x * camera_horizontal_speed
-        camera_vertical_angle += y * camera_vertical_speed
+        camera_horizontal_angle += dx * camera_horizontal_speed
+        camera_vertical_angle += dy * camera_vertical_speed
 
-    elif camera_action == "Zoom":
+    elif mouse_action == "Zoom":
         global camera_distance
-        camera_distance *= 1 + y * camera_mouse_motion_zoom_speed
+        camera_distance *= 1 + dy * camera_mouse_motion_zoom_speed
 
 
-def mouse_wheel(x: float, y: float):
+def mouse_wheel(dx: float, dy: float):
     global camera_distance
-    camera_distance *= 1 - y * camera_mouse_wheel_zoom_speed
+    camera_distance *= 1 - dy * camera_mouse_wheel_zoom_speed
 
 
 def update(

@@ -11,6 +11,7 @@ pkgs.mkShell {
   nativeBuildInputs = with pkgs; [
     cargo
     rustc
+    rustfmt
     rust-analyzer
     pkg-config
   ];

@@ -15,6 +15,8 @@ if "constraints" in sys.modules:
 from physics import simulate
 
 camera_action: Literal["Rotate", "Zoom"] | None = None
+mouse_action: Literal["Rotate", "Zoom"] | None = None
+
 camera_horizontal_angle: float = np.pi / 4.0
 camera_horizontal_speed = -1e-3
 camera_vertical_angle: float = np.pi / 8.0
@@ -48,7 +50,7 @@ def mouse_input(
         reset = True
 
 
-def mouse_motion(x: float, y: float):
+def mouse_motion(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list):
     if camera_action == "Rotate":
         global camera_horizontal_angle, camera_vertical_angle
         camera_horizontal_angle += x * camera_horizontal_speed
@@ -61,13 +63,12 @@ def mouse_motion(x: float, y: float):
 
 def mouse_wheel(x: float, y: float):
     global camera_distance
-    camera_distance *= 1 + y * camera_mouse_wheel_zoom_speed
+    camera_distance *= 1 - y * camera_mouse_wheel_zoom_speed
 
 
 def update(
         delta_time: float,
         scene_graph, camera_node,
-        projection_matrix: np.ndarray,
         balls: list
     ):
     r = camera_distance

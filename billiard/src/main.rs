@@ -402,9 +402,6 @@ impl State {
                 delta_time,
                 &self.scene_graph,
                 &self.camera_node,
-                self.camera.projection_matrix(
-                    surface_texture.texture.width() as f32 / surface_texture.texture.height() as f32
-                ),
                 &self.balls,
             );
 
@@ -504,7 +501,15 @@ impl ApplicationHandler for App {
         let state = self.state.as_mut().unwrap();
         match event {
             DeviceEvent::MouseMotion { delta: (x, y) } => {
-                state.scripts.mouse_motion(x, y);
+                state.scripts.mouse_motion(
+                    x, 
+                    y,
+                    &state.camera_node,
+                    state.camera.projection_matrix(
+                        state.size.width as f32 / state.size.height as f32
+                    ),
+                    &state.balls,
+                );
             }
             _ => (),
         }

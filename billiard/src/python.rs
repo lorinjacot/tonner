@@ -115,7 +115,6 @@ impl PyScripts {
         delta_time: f32,
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
-        projection_matrix: Mat4,
         balls: &[Py<Ball>],
     ) {
         if let Some(rx) = &self.watcher_receiver {
@@ -139,18 +138,12 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            let projection_matrix = PyArray2::from_array(
-                py,
-                &aview2(&projection_matrix.transpose().to_cols_array_2d()),
-            );
-
             if let Err(e) = func.call1(
                 py,
                 (
                     delta_time,
                     scene_graph,
                     camera_node,
-                    projection_matrix,
                     balls,
                 ),
             ) {
@@ -167,9 +160,16 @@ impl PyScripts {
         }
     }
 
-    pub fn mouse_motion(&self, x: f64, y: f64) {
+    pub fn mouse_motion(&self, x: f64, y: f64, camera_node: &Py<PyNode>, projection_matrix: Mat4, balls: &[Py<Ball>]) {
         if let Some(func) = self.mouse_motion.as_ref() {
-            if let Err(e) = Python::attach(|py| func.call1(py, (x, y))) {
+            if let Err(e) = Python::attach(|py| {
+                let projection_matrix = PyArray2::from_array(
+                    py,
+                    &aview2(&projection_matrix.transpose().to_cols_array_2d()),
+                );
+
+                func.call1(py, (x, y, camera_node, projection_matrix, balls))
+            }) {
                 error!("Failed to run mouse_motion(): {e}.");
             }
         }

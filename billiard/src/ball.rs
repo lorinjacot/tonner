@@ -9,6 +9,7 @@ use storm::{
 };
 
 const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
+const BALL_RADIUS: f64 = 0.025;
 
 #[pyclass]
 pub struct Ball {
@@ -16,6 +17,8 @@ pub struct Ball {
     number: u8,
     #[pyo3(get)]
     node: Py<PyNode>,
+    #[pyo3(get)]
+    radius: f64,
     #[pyo3(get, set)]
     velocity: Py<PyArray1<f64>>,
 }
@@ -93,6 +96,7 @@ impl Ball {
         let ball = Ball {
             number,
             node: Py::new(py, PyNode::new(node_id, scene_graph)).unwrap(),
+            radius: BALL_RADIUS,
             velocity: velocity.into(),
         };
 

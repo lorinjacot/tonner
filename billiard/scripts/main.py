@@ -11,8 +11,11 @@ if "physics" in sys.modules:
     importlib.reload(sys.modules["physics"])
 if "constraints" in sys.modules:
     importlib.reload(sys.modules["constraints"])
+if "ray" in sys.modules:
+    importlib.reload(sys.modules["ray"])
 
 from physics import simulate
+from ray import Ray
 
 mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
 mouse_over_ball = False
@@ -51,7 +54,22 @@ def mouse_input(
 
 
 def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list):
-    pass
+    view_proj_inv = camera_node.global_transformation @ np.linalg.inv(projection_matrix)
+    
+    origin = view_proj_inv @ np.array([x, y, 0.0, 1.0])
+    origin = origin[:3] / origin[3]
+
+    point = view_proj_inv @ np.array([x, y, 0.1, 1.0])
+    point = point[:3] / point[3]
+    dir = point - origin
+    dir = dir / np.linalg.norm(dir)
+    
+    ray = Ray(origin, dir)
+    for ball in balls:
+        if ball.number == 0:
+            global mouse_over_ball
+            mouse_over_ball = ray.intersects(ball)
+            break
 
 
 def mouse_motion(dx: float, dy: float):

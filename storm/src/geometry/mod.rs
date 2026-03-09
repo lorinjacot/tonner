@@ -12,8 +12,10 @@ use wgpu::util::DeviceExt;
 
 use crate::Context;
 
+pub use cylinder::CylinderBuilder;
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
 
+mod cylinder;
 pub mod skin;
 mod sphere;
 

@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// A sphere geometry builder.
-/// Based on [three.js' `SphereGeometry`](https://threejs.org/docs/#api/en/geometries/SphereGeometry).
+/// Based on [three.js `SphereGeometry`](https://threejs.org/docs/#SphereGeometry).
 ///
 /// The geometry is created by sweeping and calculating vertexes around the Y axis (horizontal sweep)
 /// and the Z axis (vertical sweep). Thus, incomplete spheres (akin to 'sphere slices') can be created
@@ -112,6 +112,7 @@ impl SphereBuilder {
         }
     }
 
+    /// Creates and returns the sphere geometry.
     pub fn build(self, ctx: &Context) -> Geometry {
         let theta_end = (self.theta_start + self.theta_length).min(PI);
 

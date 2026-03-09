@@ -24,9 +24,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
+use crate::arrow::Arrow;
 use crate::ball::Ball;
 use crate::table::table;
 
+mod arrow;
 mod ball;
 mod python;
 mod table;
@@ -49,6 +51,7 @@ struct State {
     scripts: python::PyScripts,
     camera_node: Py<PyNode>,
     balls: Vec<Py<Ball>>,
+    arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
     last_render: Instant,
 }
@@ -123,11 +126,10 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let (scene_graph, camera_node) =
-            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyNode>)> {
-                let scene_graph: Py<SceneGraph> = Bound::new(py, scene_graph)?.into();
-                let camera_node =
-                    Bound::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?.into();
+        let (scene_graph, camera_node, arrow) =
+            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyNode>, Py<Arrow>)> {
+                let scene_graph = Py::new(py, scene_graph)?;
+                let camera_node = Py::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?;
 
                 Ball::settings()
                     .iter()
@@ -147,7 +149,9 @@ impl State {
                         mesh_instances.push(mesh_instance);
                     });
 
-                Ok((scene_graph, camera_node))
+                let arrow = Py::new(py, Arrow::new(py, scene_graph.clone_ref(py), &ctx))?;
+
+                Ok((scene_graph, camera_node, arrow))
             })
             .unwrap();
 
@@ -170,6 +174,7 @@ impl State {
             scripts,
             camera_node,
             balls,
+            arrow,
             mesh_instances,
             last_render: Instant::now(),
         };
@@ -239,7 +244,9 @@ impl State {
                     &texture_view,
                     &self.scene_graph.borrow(py),
                     &mut self.skin_manager,
-                    &self.mesh_instances,
+                    self.mesh_instances
+                        .iter()
+                        .chain(self.arrow.borrow(py).mesh_instances()),
                     &mut self.light_manager,
                     &self.environment,
                     &self.ctx,
@@ -316,7 +323,7 @@ impl ApplicationHandler for App {
                     winit::event::ElementState::Pressed => "Pressed",
                     winit::event::ElementState::Released => "Released",
                 };
-                state.scripts.mouse_input(button, elt_state);
+                state.scripts.mouse_input(button, elt_state, &state.arrow);
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let w = state.size.width as f64;
@@ -327,6 +334,7 @@ impl ApplicationHandler for App {
                     &state.camera_node,
                     state.camera.projection_matrix((w / h) as f32),
                     &state.balls,
+                    &state.arrow,
                 );
             }
             _ => (),

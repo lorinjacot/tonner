@@ -12,7 +12,7 @@ use numpy::{PyArray2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
 use storm::scene_graph::{PyNode, SceneGraph};
 
-use crate::ball::Ball;
+use crate::{arrow::Arrow, ball::Ball};
 
 const SCRIPTS_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
 
@@ -147,9 +147,9 @@ impl PyScripts {
         }
     }
 
-    pub fn mouse_input(&self, button: &'static str, state: &'static str) {
+    pub fn mouse_input(&self, button: &'static str, state: &'static str, arrow: &Py<Arrow>) {
         if let Some(func) = self.mouse_input.as_ref() {
-            if let Err(e) = Python::attach(|py| func.call1(py, (button, state))) {
+            if let Err(e) = Python::attach(|py| func.call1(py, (button, state, arrow))) {
                 error!("Failed to run mouse_input(): {e}.");
             }
         }
@@ -162,6 +162,7 @@ impl PyScripts {
         camera_node: &Py<PyNode>,
         projection_matrix: Mat4,
         balls: &[Py<Ball>],
+        arrow: &Py<Arrow>,
     ) {
         if let Some(func) = self.mouse_moved.as_ref() {
             if let Err(e) = Python::attach(|py| {
@@ -169,7 +170,7 @@ impl PyScripts {
                     py,
                     &aview2(&projection_matrix.transpose().to_cols_array_2d()),
                 );
-                func.call1(py, (x, y, camera_node, projection_matrix, balls))
+                func.call1(py, (x, y, camera_node, projection_matrix, balls, arrow))
             }) {
                 error!("Failed to run mouse_motion(): {e}.");
             }

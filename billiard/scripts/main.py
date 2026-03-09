@@ -32,13 +32,21 @@ reset = False
 
 
 def mouse_input(
-    button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"]
+    button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"], arrow,
 ):
     global mouse_action
 
     if button == "Left":
         if mouse_action == None and state == "Pressed":
-            mouse_action = "Rotate"
+            if mouse_over_ball:
+                mouse_action = "Throw"
+                arrow.show = True
+            else:
+                mouse_action = "Rotate"
+        elif mouse_action == "Throw" and state == "Released":
+            print("throwing ball")
+            mouse_action = None
+            arrow.show = False
         elif mouse_action == "Rotate" and state == "Released":
             mouse_action = None
 
@@ -53,23 +61,59 @@ def mouse_input(
         reset = True
 
 
-def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list):
-    view_proj_inv = camera_node.global_transformation @ np.linalg.inv(projection_matrix)
-    
-    origin = view_proj_inv @ np.array([x, y, 0.0, 1.0])
-    origin = origin[:3] / origin[3]
+def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list, arrow):
+    def pointer_ray():
+        view_proj_inv = camera_node.global_transformation @ np.linalg.inv(projection_matrix)
+        
+        origin = view_proj_inv @ np.array([x, y, 0.0, 1.0])
+        origin = origin[:3] / origin[3]
 
-    point = view_proj_inv @ np.array([x, y, 0.1, 1.0])
-    point = point[:3] / point[3]
-    dir = point - origin
-    dir = dir / np.linalg.norm(dir)
+        point = view_proj_inv @ np.array([x, y, 0.1, 1.0])
+        point = point[:3] / point[3]
+        dir = point - origin
+        dir = dir / np.linalg.norm(dir)
+        
+        return Ray(origin, dir)
+
+    if mouse_action is None:
+        ray = pointer_ray()
+
+        white_ball = balls[0]
+        assert white_ball.number == 0
+
+        global mouse_over_ball
+        mouse_over_ball = ray.intersects_ball(white_ball)
     
-    ray = Ray(origin, dir)
-    for ball in balls:
-        if ball.number == 0:
-            global mouse_over_ball
-            mouse_over_ball = ray.intersects(ball)
-            break
+    elif mouse_action == "Throw":
+        white_ball = balls[0]
+        assert white_ball.number == 0
+        ball_pos = (white_ball.node.global_transformation @ np.array([0, 0, 0, 1]))[:3]
+
+        ray = pointer_ray()
+        butt = ray.intersection_table()
+        if butt is None:
+            return
+        butt[1] = ball_pos[1]
+        
+        dir = ball_pos - butt
+        norm = np.linalg.norm(dir)
+        if norm <= white_ball.radius:
+            return
+        dir = dir / norm
+
+        center = butt + dir * (norm - white_ball.radius) / 2
+        arrow.node.local_translation = center
+        
+        x_axis = np.array([1, 0, 0])
+        y_axis = dir
+        z_axis = np.cross(x_axis, y_axis)
+        z_axis = z_axis / np.linalg.norm(z_axis)
+        x_axis = np.cross(y_axis, z_axis)
+        rot = np.stack([x_axis, y_axis, z_axis]).T
+        rot = quaternion.from_rotation_matrix(rot)
+        arrow.node.local_rotation = quaternion.as_float_array(rot)
+
+        arrow.node.local_scale = [1, norm - white_ball.radius, 1]
 
 
 def mouse_motion(dx: float, dy: float):

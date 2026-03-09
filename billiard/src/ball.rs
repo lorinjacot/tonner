@@ -31,6 +31,9 @@ impl Ball {
         let row_spacing = (3.0f32).sqrt() / 2.0 * d;
 
         vec![
+            // white
+            (0, "white", [255; 4], vec3(0.0, 0.025, -0.8), Vec3::ZERO),
+            
             // Row 1
             (1, "solid yellow", [255, 217, 15, 255], BASE_POS + vec3(0.0, 0.0, 0.0), Vec3::ZERO),
 
@@ -55,9 +58,6 @@ impl Ball {
             (7, "solid maroon", [128, 0, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 0.0), Vec3::ZERO),
             (14, "green stripe", [0, 255, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
             (15, "maroon stripe", [128, 0, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 2.0 * d), Vec3::ZERO),
-
-            // white
-            (0, "white", [255; 4], vec3(0.0, 0.025, -0.8), Vec3::ZERO),
         ]
     }
 

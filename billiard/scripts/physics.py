@@ -19,9 +19,11 @@ def f(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     f_drag = - drag_coefficient * vel
     return f_drag + g
 
-def simulate(delta_time: float, balls: list, reset: bool):
+def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np.ndarray):
     pos = np.stack([ball.node.local_translation for ball in balls])
     vel = np.stack([ball.velocity for ball in balls])
+
+    vel[0] += white_ball_impulse
 
     if reset:
         d = 0.05
@@ -66,7 +68,7 @@ def simulate(delta_time: float, balls: list, reset: bool):
         ])
 
         vel = np.array([
-            [0.0, 0.0, 3.0],
+            [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],

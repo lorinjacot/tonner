@@ -19,6 +19,9 @@ from ray import Ray
 
 mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
 mouse_over_ball = False
+throwing_arrow: np.ndarray | None = None
+IMPULSE_FACTOR = 1
+white_ball_impulse: np.ndarray = np.zeros(3)
 
 camera_horizontal_angle: float = np.pi / 4.0
 camera_horizontal_speed = -1e-3
@@ -34,13 +37,14 @@ reset = False
 def mouse_input(
     button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"], arrow,
 ):
-    global mouse_action
+    global mouse_action, throwing_arrow, white_ball_impulse, reset
 
     if button == "Left":
         if mouse_action == None and state == "Pressed":
             mouse_action = "Throw" if mouse_over_ball else "Rotate"
-        elif mouse_action == "Throw" and state == "Released":
-            print("throwing ball")
+        elif mouse_action == "Throw" and state == "Released" and throwing_arrow is not None:
+            white_ball_impulse += throwing_arrow * IMPULSE_FACTOR
+            throwing_arrow = None
             mouse_action = None
             arrow.show = False
         elif mouse_action == "Rotate" and state == "Released":
@@ -53,7 +57,6 @@ def mouse_input(
             mouse_action = None
 
     elif button == "Right" and state == "Released":
-        global reset
         reset = True
 
 
@@ -87,8 +90,10 @@ def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, 
 
         ray = pointer_ray()
         butt = ray.intersection_table()
+        global throwing_arrow
         if butt is None:
             arrow.show = False
+            throwing_arrow = None
             return
         butt[1] = ball_pos[1]
         
@@ -96,10 +101,14 @@ def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, 
         norm = np.linalg.norm(dir)
         if norm <= white_ball.radius:
             arrow.show = False
+            throwing_arrow = None
             return
         dir = dir / norm
+        length = norm - white_ball.radius
 
-        center = butt + dir * (norm - white_ball.radius) / 2
+        throwing_arrow = dir * length
+
+        center = butt + dir * length / 2
         arrow.node.local_translation = center
         
         x_axis = np.array([0, 1, 0])
@@ -109,7 +118,7 @@ def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, 
         rot = quaternion.from_rotation_matrix(rot)
         arrow.node.local_rotation = quaternion.as_float_array(rot)
 
-        arrow.node.local_scale = [1, norm - white_ball.radius, 1]
+        arrow.node.local_scale = [1, length, 1]
 
         arrow.show = True
 
@@ -161,6 +170,7 @@ def update(
     rot = quaternion.from_rotation_matrix(rot)
     camera_node.local_rotation = quaternion.as_float_array(rot)
 
-    global reset
-    simulate(delta_time, balls, reset)
+    global reset, white_ball_impulse
+    simulate(delta_time, balls, reset, white_ball_impulse)
     reset = False
+    white_ball_impulse = np.zeros(3)

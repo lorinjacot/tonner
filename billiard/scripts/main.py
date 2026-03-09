@@ -38,11 +38,7 @@ def mouse_input(
 
     if button == "Left":
         if mouse_action == None and state == "Pressed":
-            if mouse_over_ball:
-                mouse_action = "Throw"
-                arrow.show = True
-            else:
-                mouse_action = "Rotate"
+            mouse_action = "Throw" if mouse_over_ball else "Rotate"
         elif mouse_action == "Throw" and state == "Released":
             print("throwing ball")
             mouse_action = None
@@ -92,28 +88,30 @@ def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, 
         ray = pointer_ray()
         butt = ray.intersection_table()
         if butt is None:
+            arrow.show = False
             return
         butt[1] = ball_pos[1]
         
         dir = ball_pos - butt
         norm = np.linalg.norm(dir)
         if norm <= white_ball.radius:
+            arrow.show = False
             return
         dir = dir / norm
 
         center = butt + dir * (norm - white_ball.radius) / 2
         arrow.node.local_translation = center
         
-        x_axis = np.array([1, 0, 0])
+        x_axis = np.array([0, 1, 0])
         y_axis = dir
         z_axis = np.cross(x_axis, y_axis)
-        z_axis = z_axis / np.linalg.norm(z_axis)
-        x_axis = np.cross(y_axis, z_axis)
         rot = np.stack([x_axis, y_axis, z_axis]).T
         rot = quaternion.from_rotation_matrix(rot)
         arrow.node.local_rotation = quaternion.as_float_array(rot)
 
         arrow.node.local_scale = [1, norm - white_ball.radius, 1]
+
+        arrow.show = True
 
 
 def mouse_motion(dx: float, dy: float):

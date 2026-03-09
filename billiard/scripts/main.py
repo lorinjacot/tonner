@@ -1,11 +1,11 @@
 from typing import Literal
 import importlib, sys
 
-import debugpy
 import numpy as np
 import quaternion
 
-debugpy.listen(5678, in_process_debug_adapter=True)
+# import debugpy
+# debugpy.listen(5678, in_process_debug_adapter=True)
 
 if "physics" in sys.modules:
     importlib.reload(sys.modules["physics"])

@@ -14,10 +14,12 @@ use crate::Context;
 
 pub use cylinder::CylinderBuilder;
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
+pub use cone::ConeBuilder;
 
 mod cylinder;
 pub mod skin;
 mod sphere;
+mod cone;
 
 pub const MAX_MORPH_TARGET_COUNT: usize = 8;
 

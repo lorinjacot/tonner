@@ -1,6 +1,9 @@
-use glam::{Vec2, Vec3};
+use glam::{Vec3, vec2, vec3};
 
-use crate::{Context, geometry::Geometry};
+use crate::{
+    Context,
+    geometry::{Geometry, GeometryBuilder},
+};
 
 /// A box geometry builder.
 /// Based on [three.js `BoxGeometry`](https://threejs.org/docs/#BoxGeometry).
@@ -9,9 +12,6 @@ pub struct BoxBuilder {
     width: f32,
     height: f32,
     depth: f32,
-    width_segments: usize,
-    height_segments: usize,
-    depth_segments: usize,
 }
 
 impl Default for BoxBuilder {
@@ -21,9 +21,6 @@ impl Default for BoxBuilder {
             width: 1.0,
             height: 1.0,
             depth: 1.0,
-            width_segments: 1,
-            height_segments: 1,
-            depth_segments: 1,
         }
     }
 }
@@ -53,75 +50,122 @@ impl BoxBuilder {
         self
     }
 
-    /// Number of segmented rectangular faces along the width of the sides. Default is `1.`.
-    pub fn width_segments(mut self, segments: usize) -> Self {
-        self.width_segments = segments;
-        self
-    }
-
-    /// Number of segmented rectangular faces along the height of the sides. Default is `1.`.
-    pub fn height_segments(mut self, segments: usize) -> Self {
-        self.height_segments = segments;
-        self
-    }
-
-    /// Number of segmented rectangular faces along the depth of the sides. Default is `1.`.
-    pub fn depth_segments(mut self, segments: usize) -> Self {
-        self.depth_segments = segments;
-        self
-    }
-
     /// Creates and returns the cylinder geometry.
     pub fn build(self, ctx: &Context) -> Geometry {
-        let half_width = self.width / 2.0;
-        let half_height = self.height / 2.0;
-        let half_depth = self.depth / 2.0;
+        let x = self.width / 2.0;
+        let y = self.height / 2.0;
+        let z = self.depth / 2.0;
 
-        todo!()
+        GeometryBuilder::new(6 * 4, 0)
+            .name(self.name)
+            .positions([
+                // face 0
+                vec3(x, y, z),
+                vec3(x, y, -z),
+                vec3(x, -y, -z),
+                vec3(x, -y, z),
+                // face 1
+                vec3(-x, y, -z),
+                vec3(x, y, -z),
+                vec3(x, y, z),
+                vec3(-x, y, z),
+                // face 2
+                vec3(-x, y, z),
+                vec3(x, y, z),
+                vec3(x, -y, z),
+                vec3(-x, -y, z),
+                // face 3
+                vec3(-x, -y, -z),
+                vec3(x, -y, -z),
+                vec3(x, y, -z),
+                vec3(-x, y, -z),
+                // face 4
+                vec3(-x, -y, z),
+                vec3(x, -y, z),
+                vec3(x, -y, -z),
+                vec3(-x, -y, -z),
+                // face 5
+                vec3(-x, y, -z),
+                vec3(-x, y, z),
+                vec3(-x, -y, z),
+                vec3(-x, -y, -z),
+            ])
+            .unwrap()
+            .normals([
+                // face 0
+                Vec3::X,
+                Vec3::X,
+                Vec3::X,
+                Vec3::X,
+                // face 1
+                Vec3::Y,
+                Vec3::Y,
+                Vec3::Y,
+                Vec3::Y,
+                // face 2
+                Vec3::Z,
+                Vec3::Z,
+                Vec3::Z,
+                Vec3::Z,
+                // face 3
+                Vec3::NEG_Z,
+                Vec3::NEG_Z,
+                Vec3::NEG_Z,
+                Vec3::NEG_Z,
+                // face 4
+                Vec3::NEG_Y,
+                Vec3::NEG_Y,
+                Vec3::NEG_Y,
+                Vec3::NEG_Y,
+                // face 5
+                Vec3::NEG_X,
+                Vec3::NEG_X,
+                Vec3::NEG_X,
+                Vec3::NEG_X,
+            ])
+            .unwrap()
+            .tex_coords_0([
+                // face 0
+                vec2(0.5, 0.25),
+                vec2(0.75, 0.25),
+                vec2(0.75, 0.5),
+                vec2(0.5, 0.5),
+                // face 1
+                vec2(0.25, 0.0),
+                vec2(0.5, 0.0),
+                vec2(0.5, 0.25),
+                vec2(0.25, 0.25),
+                // face 2
+                vec2(0.25, 0.25),
+                vec2(0.5, 0.25),
+                vec2(0.5, 0.5),
+                vec2(0.25, 0.5),
+                // face 3
+                vec2(0.25, 0.75),
+                vec2(0.5, 0.75),
+                vec2(0.5, 1.0),
+                vec2(0.25, 1.0),
+                // face 4
+                vec2(0.25, 0.5),
+                vec2(0.5, 0.5),
+                vec2(0.5, 0.75),
+                vec2(0.25, 0.75),
+                // face 5
+                vec2(0.0, 0.25),
+                vec2(0.25, 0.25),
+                vec2(0.25, 0.5),
+                vec2(0.0, 0.5),
+            ])
+            .unwrap()
+            .indices_u16([
+                0, 1, 2, 2, 3, 0, // face 0
+                4, 5, 6, 6, 7, 4, // face 1
+                8, 9, 10, 10, 11, 8, // face 2
+                12, 13, 14, 14, 15, 12, // face 3
+                16, 17, 18, 18, 19, 16, // face 4
+                20, 21, 22, 22, 23, 20, // face 5
+            ])
+            .build(ctx)
+            .unwrap()
     }
-}
-
-fn generate_face(
-    top_left_position: Vec3,
-    top_left_uv: Vec2,
-    top_right_position: Vec3,
-    top_right_uv: Vec2,
-    bottom_left_position: Vec3,
-    bottom_left_uv: Vec2,
-    horizontal_segments: usize,
-    vertical_segments: usize,
-    normal: Vec3,
-    positions: &mut Vec<Vec3>,
-    normals: &mut Vec<Vec3>,
-    uvs: &mut Vec<Vec2>,
-    indices: &mut Vec<u32>,
-) {
-    let base_index = positions.len() as u32;
-    let delta_x = top_right_position - top_left_position;
-    let delta_y = bottom_left_position - top_left_position;
-    let delta_u = top_right_uv - top_left_uv;
-    let delta_v = bottom_left_uv - top_left_uv;
-    for x in 0..=horizontal_segments {
-        for y in 0..=vertical_segments {
-            let u = x as f32 / horizontal_segments as f32;
-            let v = y as f32 / vertical_segments as f32;
-            positions.push(top_left_position + u * delta_x + v * delta_y);
-            normals.push(normal);
-            uvs.push(top_left_uv + u * delta_u + v * delta_v);
-        }
-    }
-    for x in 0..horizontal_segments {
-        for y in 0..vertical_segments {
-            let a = base_index + vertex_index(x, y, vertical_segments);
-            let b = base_index + vertex_index(x, y + 1, vertical_segments);
-            let c = base_index + vertex_index(x + 1, y + 1, vertical_segments);
-            let d = base_index + vertex_index(x + 1, y, vertical_segments);
-
-            indices.extend_from_slice(&[a, b, c, c, d, a]);
-        }
-    }
-}
-
-fn vertex_index(x: usize, y: usize, y_segments: usize) -> u32 {
-    (x * (y_segments + 1) + y) as u32
 }

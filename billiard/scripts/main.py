@@ -20,7 +20,7 @@ from ray import Ray
 mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
 mouse_over_ball = False
 throwing_arrow: np.ndarray | None = None
-IMPULSE_FACTOR = 1
+IMPULSE_FACTOR = 4
 white_ball_impulse: np.ndarray = np.zeros(3)
 
 camera_horizontal_angle: float = np.pi / 4.0
@@ -57,7 +57,12 @@ def mouse_input(
             mouse_action = None
 
     elif button == "Right" and state == "Released":
-        reset = True
+        if mouse_action == "Throw":
+            throwing_arrow = None
+            mouse_action = None
+            arrow.show = False
+        else:
+            reset = True
 
 
 def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list, arrow):

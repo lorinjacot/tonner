@@ -3,7 +3,7 @@ import numpy as np
 import constraints
 
 g = np.array([0.0, -1.0, 0.0])
-drag_coefficient = 0.7
+drag_coefficient = 0.1
 N = 10
 
 C: List[constraints.Constraint] = [
@@ -15,9 +15,14 @@ for i in range(15):
 
 BASE_POS = np.array([0.0, 0.025, 0.65])
 
-def f(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
-    f_drag = - drag_coefficient * vel
-    return f_drag + g
+def f(pos: np.ndarray, vel: np.ndarray, dt: float) -> np.ndarray:
+    norms = np.linalg.norm(vel, axis=-1)
+    non_zero = norms > 1e-3
+    safe_vel = vel[non_zero,:]
+    norms = np.linalg.norm(safe_vel, axis=-1)
+    vel[non_zero,:] -= drag_coefficient * dt * safe_vel / norms[:,np.newaxis]
+    # vel -= drag_coefficient * dt * vel / np.linalg.norm(vel, axis=-1)
+    return g
 
 def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np.ndarray):
     pos = np.stack([ball.node.local_translation for ball in balls])
@@ -91,7 +96,7 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
     alphas = np.array([c.alpha() / dt**2 for c in C])
 
     for _ in range(N):
-        vel = vel + dt * f(pos, vel)
+        vel = vel + dt * f(pos, vel, dt)
         old_pos = pos
         pos = pos + dt * vel
 

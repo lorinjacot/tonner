@@ -109,7 +109,7 @@ impl State {
             .radius(0.025)
             .build(&ctx);
 
-        mesh_instances.extend(table(&mut scene_graph, &ctx));
+        mesh_instances.push(table(&mut scene_graph, &ctx));
 
         let mut encoder = ctx
             .device()

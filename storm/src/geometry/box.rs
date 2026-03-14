@@ -6,7 +6,31 @@ use crate::{
 };
 
 /// A box geometry builder.
-/// Based on [three.js `BoxGeometry`](https://threejs.org/docs/#BoxGeometry).
+/// 
+/// ## Texture layout
+/// ```text
+/// (0,0)                                         (1,0)
+///  +-----------+-----------+-----------+-----------+
+///  |           |  FACE 1   |           |           |
+///  |           |   (Top)   |           |           |
+///  |           |  w x d    |           |           |
+///  +-----------+-----------+-----------+-----------+
+///  |  FACE 5   |  FACE 2   |  FACE 0   |           |
+///  |  (Left)   |  (Front)  |  (Right)  |           |
+///  |  d x h    |  w x h    |  d x h    |           |
+///  +-----------+-----------+-----------+-----------+
+///  |           |  FACE 4   |           |           |
+///  |           | (Bottom)  |           |           |
+///  |           |  w x d    |           |           |
+///  +-----------+-----------+-----------+-----------+
+///  |           |  FACE 3   |           |           |
+///  |           |  (Back)   |           |           |
+///  |           |  w x h    |           |           |
+///  +-----------+-----------+-----------+-----------+
+/// (0,1)                                         (1,1)
+/// ```
+/// 
+/// where `w = width`, `h = height` and `d = depth`.
 #[derive(Debug, Clone)]
 pub struct BoxBuilder {
     name: String,

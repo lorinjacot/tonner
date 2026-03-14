@@ -6,9 +6,7 @@ g = np.array([0.0, -1.0, 0.0])
 drag_coefficient = 0.1
 N = 10
 
-C: List[constraints.Constraint] = [
-    constraints.TableConstraint(),
-]
+C: List[constraints.Constraint] = [constraints.TableConstraint(i) for i in range(16)]
 for i in range(15):
     for j in range(i + 1, 16):
         C.append(constraints.DistanceConstraint(i, j))
@@ -21,7 +19,6 @@ def f(pos: np.ndarray, vel: np.ndarray, dt: float) -> np.ndarray:
     safe_vel = vel[non_zero,:]
     norms = np.linalg.norm(safe_vel, axis=-1)
     vel[non_zero,:] -= drag_coefficient * dt * safe_vel / norms[:,np.newaxis]
-    # vel -= drag_coefficient * dt * vel / np.linalg.norm(vel, axis=-1)
     return g
 
 def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np.ndarray):

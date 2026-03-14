@@ -12,16 +12,16 @@ use wgpu::util::DeviceExt;
 
 use crate::Context;
 
+pub use r#box::BoxBuilder;
+pub use cone::ConeBuilder;
 pub use cylinder::CylinderBuilder;
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
-pub use cone::ConeBuilder;
-pub use r#box::BoxBuilder;
 
+mod r#box;
+mod cone;
 mod cylinder;
 pub mod skin;
 mod sphere;
-mod cone;
-mod r#box;
 
 pub const MAX_MORPH_TARGET_COUNT: usize = 8;
 

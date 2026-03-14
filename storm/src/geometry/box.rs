@@ -7,11 +7,13 @@ use crate::{
 
 /// A box geometry builder.
 /// Based on [three.js `BoxGeometry`](https://threejs.org/docs/#BoxGeometry).
+#[derive(Debug, Clone)]
 pub struct BoxBuilder {
     name: String,
     width: f32,
     height: f32,
     depth: f32,
+    translation: Vec3,
 }
 
 impl Default for BoxBuilder {
@@ -21,6 +23,7 @@ impl Default for BoxBuilder {
             width: 1.0,
             height: 1.0,
             depth: 1.0,
+            translation: Vec3::ZERO,
         }
     }
 }
@@ -50,6 +53,13 @@ impl BoxBuilder {
         self
     }
 
+    /// Applies `translation` to the resulting box. The resulting box will be
+    /// centered on `translation`. Default is [`Vec3::ZERO`].
+    pub fn translate(mut self, translation: impl Into<Vec3>) -> Self {
+        self.translation = translation.into();
+        self
+    }
+
     /// Creates and returns the cylinder geometry.
     pub fn build(self, ctx: &Context) -> Geometry {
         let x = self.width / 2.0;
@@ -58,38 +68,42 @@ impl BoxBuilder {
 
         GeometryBuilder::new(6 * 4, 0)
             .name(self.name)
-            .positions([
-                // face 0
-                vec3(x, y, z),
-                vec3(x, y, -z),
-                vec3(x, -y, -z),
-                vec3(x, -y, z),
-                // face 1
-                vec3(-x, y, -z),
-                vec3(x, y, -z),
-                vec3(x, y, z),
-                vec3(-x, y, z),
-                // face 2
-                vec3(-x, y, z),
-                vec3(x, y, z),
-                vec3(x, -y, z),
-                vec3(-x, -y, z),
-                // face 3
-                vec3(-x, -y, -z),
-                vec3(x, -y, -z),
-                vec3(x, y, -z),
-                vec3(-x, y, -z),
-                // face 4
-                vec3(-x, -y, z),
-                vec3(x, -y, z),
-                vec3(x, -y, -z),
-                vec3(-x, -y, -z),
-                // face 5
-                vec3(-x, y, -z),
-                vec3(-x, y, z),
-                vec3(-x, -y, z),
-                vec3(-x, -y, -z),
-            ])
+            .positions(
+                [
+                    // face 0
+                    vec3(x, y, z),
+                    vec3(x, y, -z),
+                    vec3(x, -y, -z),
+                    vec3(x, -y, z),
+                    // face 1
+                    vec3(-x, y, -z),
+                    vec3(x, y, -z),
+                    vec3(x, y, z),
+                    vec3(-x, y, z),
+                    // face 2
+                    vec3(-x, y, z),
+                    vec3(x, y, z),
+                    vec3(x, -y, z),
+                    vec3(-x, -y, z),
+                    // face 3
+                    vec3(-x, -y, -z),
+                    vec3(x, -y, -z),
+                    vec3(x, y, -z),
+                    vec3(-x, y, -z),
+                    // face 4
+                    vec3(-x, -y, z),
+                    vec3(x, -y, z),
+                    vec3(x, -y, -z),
+                    vec3(-x, -y, -z),
+                    // face 5
+                    vec3(-x, y, -z),
+                    vec3(-x, y, z),
+                    vec3(-x, -y, z),
+                    vec3(-x, -y, -z),
+                ]
+                .into_iter()
+                .map(|p| p + self.translation),
+            )
             .unwrap()
             .normals([
                 // face 0
@@ -157,14 +171,18 @@ impl BoxBuilder {
                 vec2(0.0, 0.5),
             ])
             .unwrap()
-            .indices_u16([
-                0, 1, 2, 2, 3, 0, // face 0
-                4, 5, 6, 6, 7, 4, // face 1
-                8, 9, 10, 10, 11, 8, // face 2
-                12, 13, 14, 14, 15, 12, // face 3
-                16, 17, 18, 18, 19, 16, // face 4
-                20, 21, 22, 22, 23, 20, // face 5
-            ])
+            .indices_u16(
+                [
+                    0, 1, 2, 2, 3, 0, // face 0
+                    4, 5, 6, 6, 7, 4, // face 1
+                    8, 9, 10, 10, 11, 8, // face 2
+                    12, 13, 14, 14, 15, 12, // face 3
+                    16, 17, 18, 18, 19, 16, // face 4
+                    20, 21, 22, 22, 23, 20, // face 5
+                ]
+                .into_iter()
+                .rev(),
+            )
             .build(ctx)
             .unwrap()
     }

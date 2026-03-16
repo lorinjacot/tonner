@@ -134,7 +134,7 @@ impl State {
                 Ball::settings()
                     .iter()
                     .for_each(|(number, name, color, position, velocity)| {
-                        let (ball, mesh_instance) = Ball::new(
+                        let ball = Ball::new(
                             py,
                             *number,
                             ball.clone(),
@@ -146,7 +146,6 @@ impl State {
                             &ctx,
                         );
                         balls.push(ball.into());
-                        mesh_instances.push(mesh_instance);
                     });
 
                 let arrow = Py::new(py, Arrow::new(py, scene_graph.clone_ref(py), &ctx))?;
@@ -237,6 +236,12 @@ impl State {
                 &self.camera_node,
                 &self.balls,
             );
+            let balls: Vec<_> = self
+                .balls
+                .iter()
+                .map(|ball| ball.borrow(py))
+                .filter(|ball| !ball.out)
+                .collect();
 
             self.renderer
                 .render(
@@ -246,6 +251,7 @@ impl State {
                     &mut self.skin_manager,
                     self.mesh_instances
                         .iter()
+                        .chain(balls.iter().map(|ball| ball.mesh_instance()))
                         .chain(self.arrow.borrow(py).mesh_instances()),
                     &mut self.light_manager,
                     &self.environment,

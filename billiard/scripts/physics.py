@@ -22,12 +22,10 @@ def f(pos: np.ndarray, vel: np.ndarray, dt: float) -> np.ndarray:
     return g
 
 def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np.ndarray):
-    pos = np.stack([ball.node.local_translation for ball in balls])
-    vel = np.stack([ball.velocity for ball in balls])
-
-    vel[0] += white_ball_impulse
-
     if reset:
+        for ball in balls:
+            ball.out = False
+
         d = 0.05
 
         dz = np.sqrt(3) / 2 * d
@@ -87,6 +85,12 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
             [0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
         ])
+    else:
+        pos = np.stack([ball.node.local_translation if not ball.out else [0.0, 1e6, 0.0] for ball in balls])
+        vel = np.stack([ball.velocity for ball in balls])
+
+        vel[0] += white_ball_impulse
+
 
     dt = delta_time / N
     lambdas = np.zeros(len(C))
@@ -96,6 +100,20 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
         vel = vel + dt * f(pos, vel, dt)
         old_pos = pos
         pos = pos + dt * vel
+
+        radius: float
+        for i in range(1, len(balls)):
+            radius = balls[i].radius
+            if ((pos[i,0] + radius > 0.63
+                or pos[i,0] - radius < -0.63)
+                and pos[i,2] + radius < 0.25
+                and pos[i,2] - radius > -0.25):
+                balls[i].out = True
+            elif ((pos[i,0] - radius > 0.55
+                or pos[i,0] + radius < -0.55)
+                and (pos[i,2] - radius > 1.15
+                or pos[i,2] + radius < -1.15)):
+                balls[i].out = True
 
         for i, c in enumerate(C):
             loss = c(pos)

@@ -21,6 +21,9 @@ pub struct Ball {
     radius: f64,
     #[pyo3(get, set)]
     velocity: Py<PyArray1<f64>>,
+    #[pyo3(get, set)]
+    pub out: bool,
+    mesh_instance: MeshInstance,
 }
 
 impl Ball {
@@ -71,7 +74,7 @@ impl Ball {
         velocity: impl Into<Vec3>,
         scene_graph: Py<SceneGraph>,
         ctx: &Context,
-    ) -> (Bound<'py, Ball>, MeshInstance) {
+    ) -> Bound<'py, Ball> {
         let node_id = NodeBuilder::default()
             .name(name.clone())
             .local_translation(position)
@@ -98,8 +101,14 @@ impl Ball {
             node: Py::new(py, PyNode::new(node_id, scene_graph)).unwrap(),
             radius: BALL_RADIUS,
             velocity: velocity.into(),
+            out: false,
+            mesh_instance,
         };
 
-        (Bound::new(py, ball).unwrap(), mesh_instance)
+        Bound::new(py, ball).unwrap()
+    }
+
+    pub fn mesh_instance(&self) -> &MeshInstance {
+        &self.mesh_instance
     }
 }

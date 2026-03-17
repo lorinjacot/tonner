@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 import numpy as np
 
+BALL_RADIUS = 0.025
+HALF_LONG_SIDE = 1.23
+HALF_SHORT_SIDE = 0.63
+
 
 class Constraint(ABC):
     @abstractmethod
@@ -41,50 +45,48 @@ class DistanceConstraint(Constraint):
             grad[self.obj2] = -delta / l
 
         return grad
+    
+class TableSurfaceConstraint(Constraint):
+    MIN_Y = BALL_RADIUS
 
+    def __init__(self, ball: int):
+        self.ball = ball
 
-class TableConstraint(Constraint):
-    HALF_LONG_SIDE = 1.23
-    HALF_SHORT_SIDE = 0.63
-    BALL_RADIUS = 0.025
-
+    def __call__(self, pos: np.ndarray) -> np.floating:
+        return np.minimum(pos[self.ball,1] - self.MIN_Y, 0)
+    
+    def grad(self, pos: np.ndarray) -> np.ndarray:
+        grad = np.zeros(pos.shape)
+        grad[self.ball,1] = float(pos[self.ball,1] < self.MIN_Y)
+        return grad
+    
+class TableShortSideConstraint(Constraint):
     MAX_X = HALF_SHORT_SIDE - BALL_RADIUS
     MIN_X = - MAX_X
 
-    MIN_Y = BALL_RADIUS
+    def __init__(self, ball: int):
+        self.ball = ball
 
+    def __call__(self, pos: np.ndarray) -> np.floating:
+        return np.minimum(pos[self.ball,0] - self.MIN_X, 0) + np.minimum(self.MAX_X - pos[self.ball,0], 0)
+    
+    def grad(self, pos: np.ndarray) -> np.ndarray:
+        grad = np.zeros(pos.shape)
+        grad[self.ball,0] = float(pos[self.ball,0] < self.MIN_X) - float(pos[self.ball,0] > self.MAX_X)
+        return grad
+    
+class TableLongSideConstraint(Constraint):
     MAX_Z = HALF_LONG_SIDE - BALL_RADIUS
     MIN_Z = - MAX_Z
 
-    def __init__(self, obj: int):
-        self.obj = obj
+    def __init__(self, ball: int):
+        self.ball = ball
 
     def __call__(self, pos: np.ndarray) -> np.floating:
-        return np.float64(
-            np.minimum(self.MAX_X - pos[self.obj,0], 0)
-            + np.minimum(pos[self.obj,0] - self.MIN_X, 0)
-            + np.minimum(pos[self.obj,1] - self.MIN_Y, 0)
-            + np.minimum(self.MAX_Z - pos[self.obj,2], 0)
-            + np.minimum(pos[self.obj,2] - self.MIN_Z, 0)
-        )
-
+        return np.minimum(pos[self.ball,2] - self.MIN_Z, 0) + np.minimum(self.MAX_Z - pos[self.ball,2], 0)
+    
     def grad(self, pos: np.ndarray) -> np.ndarray:
-        xs = pos[self.obj,0]
-        ys = pos[self.obj,1]
-        zs = pos[self.obj,2]
-
         grad = np.zeros(pos.shape)
-        if xs > self.MAX_X:
-            grad[self.obj,0] = - 1.0
-        elif xs < self.MIN_X:
-            grad[self.obj,0] = 1.0
-            
-        if ys < self.MIN_Y:
-            grad[self.obj,1] = 1.0
-
-        if zs > self.MAX_Z:
-            grad[self.obj,2] = - 1.0
-        elif zs < self.MIN_Z:
-            grad[self.obj,2] = 1.0
-            
+        grad[self.ball,2] = float(pos[self.ball,2] < self.MIN_Z) - float(pos[self.ball,2] > self.MAX_Z)
         return grad
+    

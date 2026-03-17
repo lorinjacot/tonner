@@ -6,7 +6,11 @@ g = np.array([0.0, -1.0, 0.0])
 drag_coefficient = 0.1
 N = 10
 
-C: List[constraints.Constraint] = [constraints.TableConstraint(i) for i in range(16)]
+C: List[constraints.Constraint] = []
+for i in range(16):
+    C.append(constraints.TableSurfaceConstraint(i))
+    C.append(constraints.TableShortSideConstraint(i))
+    C.append(constraints.TableLongSideConstraint(i))
 for i in range(15):
     for j in range(i + 1, 16):
         C.append(constraints.DistanceConstraint(i, j))

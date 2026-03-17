@@ -110,8 +110,8 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
             radius = balls[i].radius
             if ((pos[i,0] + radius > 0.63
                 or pos[i,0] - radius < -0.63)
-                and pos[i,2] + radius < 0.25
-                and pos[i,2] - radius > -0.25):
+                and pos[i,2] + radius <  0.05
+                and pos[i,2] - radius > -0.05):
                 balls[i].out = True
             elif ((pos[i,0] - radius > 0.55
                 or pos[i,0] + radius < -0.55)

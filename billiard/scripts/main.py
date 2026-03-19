@@ -1,0 +1,218 @@
+from typing import Literal
+import importlib, sys
+
+import numpy as np
+import quaternion
+
+import debugpy
+debugpy.listen(5678, in_process_debug_adapter=True)
+
+if "physics" in sys.modules:
+    importlib.reload(sys.modules["physics"])
+if "constraints" in sys.modules:
+    importlib.reload(sys.modules["constraints"])
+if "ray" in sys.modules:
+    importlib.reload(sys.modules["ray"])
+if "interpolation" in sys.modules:
+    importlib.reload(sys.modules["interpolation"])
+
+from physics import simulate
+from ray import Ray
+from interpolation import cubic_hermite_spline, Point
+
+mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
+mouse_over_ball = False
+throwing_arrow: np.ndarray | None = None
+IMPULSE_FACTOR = 4
+white_ball_impulse: np.ndarray = np.zeros(3)
+
+camera_horizontal_angle: float = np.pi / 4.0
+camera_horizontal_speed = -1e-3
+camera_vertical_angle: float = np.pi / 8.0
+camera_vertical_speed = 1e-3
+camera_distance = 3
+camera_mouse_wheel_zoom_speed = 1e-3
+camera_mouse_motion_zoom_speed = 1e-3
+
+camera_state: Literal["Fixed", "Interpolating", "Playable"] = "Interpolating"
+camera_interpolation_start = np.zeros(3)
+camera_interpolation_end = np.zeros(3)
+camera_interpolation_fraction: float = 0.0
+camera_interpolation_duration = 1.0
+camera_interpolation_speed = 0.1
+
+reset = False
+
+
+def mouse_input(
+    button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"], arrow,
+):
+    global mouse_action, throwing_arrow, white_ball_impulse, reset, camera_state
+
+    if button == "Left":
+        if mouse_action == None and state == "Pressed":
+            mouse_action = "Throw" if mouse_over_ball and camera_state == "Playable" else "Rotate"
+        elif mouse_action == "Throw" and state == "Released" and throwing_arrow is not None:
+            camera_state = "Fixed"
+            white_ball_impulse += throwing_arrow * IMPULSE_FACTOR
+            throwing_arrow = None
+            mouse_action = None
+            arrow.show = False
+        elif mouse_action == "Rotate" and state == "Released":
+            mouse_action = None
+
+    elif button == "Middle":
+        if mouse_action == None and state == "Pressed":
+            mouse_action = "Zoom"
+        elif mouse_action == "Zoom" and state == "Released":
+            mouse_action = None
+
+    elif button == "Right" and state == "Released":
+        if mouse_action == "Throw":
+            camera_state = "Fixed"
+            throwing_arrow = None
+            mouse_action = None
+            arrow.show = False
+        else:
+            reset = True
+
+
+def mouse_moved(x: float, y: float, camera_node, projection_matrix: np.ndarray, balls: list, arrow):
+    def pointer_ray():
+        view_proj_inv = camera_node.global_transformation @ np.linalg.inv(projection_matrix)
+        
+        origin = view_proj_inv @ np.array([x, y, 0.0, 1.0])
+        origin = origin[:3] / origin[3]
+
+        point = view_proj_inv @ np.array([x, y, 0.1, 1.0])
+        point = point[:3] / point[3]
+        dir = point - origin
+        dir = dir / np.linalg.norm(dir)
+        
+        return Ray(origin, dir)
+
+    if mouse_action is None:
+        ray = pointer_ray()
+
+        white_ball = balls[0]
+        assert white_ball.number == 0
+
+        global mouse_over_ball
+        mouse_over_ball = ray.intersects_ball(white_ball)
+    
+    elif mouse_action == "Throw":
+        white_ball = balls[0]
+        assert white_ball.number == 0
+        ball_pos = (white_ball.node.global_transformation @ np.array([0, 0, 0, 1]))[:3]
+
+        ray = pointer_ray()
+        butt = ray.intersection_table()
+        global throwing_arrow
+        if butt is None:
+            arrow.show = False
+            throwing_arrow = None
+            return
+        butt[1] = ball_pos[1]
+        
+        dir = ball_pos - butt
+        norm = np.linalg.norm(dir)
+        if norm <= white_ball.radius:
+            arrow.show = False
+            throwing_arrow = None
+            return
+        dir = dir / norm
+        length = norm - white_ball.radius
+
+        throwing_arrow = dir * length
+
+        center = butt + dir * length / 2
+        arrow.node.local_translation = center
+        
+        x_axis = np.array([0, 1, 0])
+        y_axis = dir
+        z_axis = np.cross(x_axis, y_axis)
+        rot = np.stack([x_axis, y_axis, z_axis]).T
+        rot = quaternion.from_rotation_matrix(rot)
+        arrow.node.local_rotation = quaternion.as_float_array(rot)
+
+        arrow.node.local_scale = [1, length, 1]
+
+        arrow.show = True
+
+
+def mouse_motion(dx: float, dy: float):
+    if mouse_action == "Rotate":
+        global camera_horizontal_angle, camera_vertical_angle
+        camera_horizontal_angle += dx * camera_horizontal_speed
+        camera_vertical_angle += dy * camera_vertical_speed
+
+    elif mouse_action == "Zoom":
+        global camera_distance
+        camera_distance *= 1 + dy * camera_mouse_motion_zoom_speed
+
+
+def mouse_wheel(dx: float, dy: float):
+    global camera_distance
+    camera_distance *= 1 - dy * camera_mouse_wheel_zoom_speed
+
+
+def update(
+        delta_time: float,
+        scene_graph, camera_node,
+        balls: list
+    ):
+    global camera_state, reset, white_ball_impulse
+    global camera_interpolation_start, camera_interpolation_end, camera_interpolation_fraction
+    
+    simulate(delta_time, balls, reset, white_ball_impulse)
+    if reset:
+        camera_state = "Interpolating"
+        reset = False
+    white_ball_impulse = np.zeros(3)
+
+    if camera_state == "Fixed":
+        camera_center = camera_interpolation_start
+        max_motion = np.max([np.linalg.norm(ball.velocity) for ball in balls if not ball.out])
+        if max_motion < 1e-3:
+            camera_state = "Interpolating"
+    elif camera_state == "Interpolating":
+        camera_interpolation_end = balls[0].node.local_translation
+        if camera_interpolation_fraction < 1.0:
+            start = Point(0.0, camera_interpolation_speed)
+            end = Point(1.0, camera_interpolation_speed)
+            p = cubic_hermite_spline(camera_interpolation_fraction, start, end)
+            camera_center = (1.0 - p) * camera_interpolation_start + p * camera_interpolation_end
+            camera_interpolation_fraction += delta_time / camera_interpolation_duration
+        else:
+            camera_state = "Playable"
+            camera_interpolation_fraction = 0.0
+            camera_interpolation_start = camera_interpolation_end
+            camera_center = camera_interpolation_start
+    elif camera_state == "Playable":
+        camera_center = camera_interpolation_start
+
+    r = camera_distance
+    theta = camera_horizontal_angle
+    phi = camera_vertical_angle
+    pos = np.array(
+        [
+            r * np.cos(phi) * np.sin(theta),
+            r * np.sin(phi),
+            r * np.cos(phi) * np.cos(theta),
+        ]
+    ) + camera_center
+    camera_node.local_translation = pos
+
+    dir = camera_center - pos
+    dir = dir / np.linalg.norm(dir)
+
+    up = np.array([0, 1, 0])
+    right = np.cross(dir, up)
+    right = right / np.linalg.norm(right)
+
+    up = np.cross(right, dir)
+    rot = np.stack([
+        right, up, -dir
+    ]).T
+    rot = quaternion.from_rotation_matrix(rot)
+    camera_node.local_rotation = quaternion.as_float_array(rot)

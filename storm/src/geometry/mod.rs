@@ -12,8 +12,14 @@ use wgpu::util::DeviceExt;
 
 use crate::Context;
 
+pub use r#box::BoxBuilder;
+pub use cone::ConeBuilder;
+pub use cylinder::CylinderBuilder;
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
 
+mod r#box;
+mod cone;
+mod cylinder;
 pub mod skin;
 mod sphere;
 
@@ -349,7 +355,6 @@ impl GeometryBuilder {
             };
 
             if generate_normals {
-                dbg!(generate_normals);
                 for target in 0..=self.morph_target_count {
                     let start = target * self.vertex_count;
                     let end = start + self.vertex_count;

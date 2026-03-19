@@ -147,15 +147,15 @@ impl Renderer {
 
         let target_texture = target.texture();
         let opaque_texture = self.opaque_attachment.texture();
-        if target_texture.width() != opaque_texture.width()
+        if target_texture.format() != self.format
             || target_texture.height() != opaque_texture.height()
-            || target_texture.format() != opaque_texture.format()
+            || target_texture.width() != opaque_texture.width()
         {
-            warn!("Renderer is incompatible with the target. Recreating the renderer");
+            warn!("Renderer is incompatible with the target. Recreating the renderer.");
             *self = Self::new(
                 target_texture.width(),
                 target_texture.height(),
-                self.format,
+                target_texture.format(),
                 ctx,
             )
         }

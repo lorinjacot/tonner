@@ -9,12 +9,18 @@ use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 use uuid::{NonNilUuid, Uuid};
 
+#[cfg(feature = "pyo3")]
+use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1};
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 use crate::Context;
 
 /// A Scene Graph works as a tree-like structure establishing parent-child relationships between scene elements,
 /// creating logical groupings where transformations (position, rotation, scale) applied to parent nodes automatically
 /// affect all their children - simplifying complex object manipulation and animation.
 #[derive(Debug)]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct SceneGraph {
     nodes: HashMap<NodeId, Node>,
     root_nodes: Vec<NodeId>,
@@ -26,11 +32,6 @@ impl SceneGraph {
             nodes: HashMap::new(),
             root_nodes: Vec::new(),
         }
-    }
-
-    /// Returns `true` if the scene graph contains the specified node.
-    pub fn contains(&self, node: NodeId) -> bool {
-        self.nodes.contains_key(&node)
     }
 
     /// Returns a reference to the node corresponding to the id.
@@ -97,6 +98,26 @@ impl SceneGraph {
             }
         };
         self.recursively_update_global_transformation(node, parent_transformation)
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl SceneGraph {
+    fn nodes(slf: &Bound<'_, Self>) -> Vec<PyNode> {
+        slf.borrow()
+            .nodes
+            .iter()
+            .map(|(&id, _)| PyNode {
+                id,
+                scene_graph: slf.clone().into(),
+            })
+            .collect()
+    }
+
+    /// Returns `true` if the scene graph contains the specified node.
+    pub fn contains(&self, node: NodeId) -> bool {
+        self.nodes.contains_key(&node)
     }
 }
 
@@ -226,17 +247,12 @@ impl<'a> ExactSizeIterator for NodeMutIter<'a> {
 
 impl<'a> FusedIterator for NodeMutIter<'a> {}
 
-// impl<'a> IntoIterator for &'a SceneGraph {
-//     type Item = (NodeId, &'a Node);
-
-//     fn into_iter(self) -> Self::IntoIter {}
-// }
-
 /// A unique id for a Scene Graph node. Each node has one and only one id. The id for a given node will never change.
 ///
 /// Node that `Option<NodeId>` takes up the same space as `NodeId`.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, str, from_py_object))]
 pub struct NodeId {
     uuid: NonNilUuid,
 }
@@ -304,6 +320,185 @@ impl Node {
     /// When the node has no parent, the global transformation is identical to the local transformation.
     pub fn global_transformation(&self) -> Mat4 {
         self.global_transformation
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pyclass(frozen)]
+pub struct PyNode {
+    id: NodeId,
+    scene_graph: Py<SceneGraph>,
+}
+
+#[cfg(feature = "pyo3")]
+impl PyNode {
+    pub fn new(id: NodeId, scene_graph: Py<SceneGraph>) -> Self {
+        Self { id, scene_graph }
+    }
+
+    fn deleted_error(id: NodeId) -> PyErr {
+        pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "Node {id} has been deleted from the scene graph"
+        ))
+    }
+
+    fn get<'a>(&self, scene_graph: &'a SceneGraph) -> PyResult<&'a Node> {
+        scene_graph
+            .get(self.id)
+            .ok_or_else(|| Self::deleted_error(self.id))
+    }
+
+    fn get_mut<'a>(&self, scene_graph: &'a mut SceneGraph) -> PyResult<&'a mut Node> {
+        scene_graph
+            .get_mut(self.id)
+            .ok_or_else(|| Self::deleted_error(self.id))
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl PyNode {
+    #[getter]
+    fn id(&self) -> NodeId {
+        self.id
+    }
+
+    #[getter]
+    fn name(&self, py: Python) -> PyResult<String> {
+        Ok(self.get(&self.scene_graph.borrow(py))?.name.clone())
+    }
+
+    #[setter]
+    fn set_name(&self, py: Python, name: String) -> PyResult<()> {
+        self.get_mut(&mut self.scene_graph.borrow_mut(py))?.name = name;
+        Ok(())
+    }
+
+    fn parent(&self, py: Python) -> PyResult<Option<PyNode>> {
+        Ok(self
+            .get(&self.scene_graph.borrow(py))?
+            .parent
+            .map(|id| PyNode {
+                id,
+                scene_graph: self.scene_graph.clone_ref(py),
+            }))
+    }
+
+    #[getter]
+    fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
+        Ok(PyArray1::from_slice(py, &translation.to_array()))
+    }
+
+    #[setter]
+    fn set_local_translation<'py>(
+        &self,
+        py: Python<'py>,
+        translation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::vec3;
+
+        let translation = translation.as_array();
+        if translation.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "translation.shape must be (3,)",
+            ));
+        }
+        self.scene_graph
+            .borrow_mut(py)
+            .set_local_transformation(
+                self.id,
+                vec3(translation[0], translation[1], translation[2]),
+                None,
+                None,
+            )
+            .map_err(|_| Self::deleted_error(self.id))
+    }
+
+    #[getter]
+    fn local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let rotation = self.get(&self.scene_graph.borrow(py))?.local_rotation;
+        Ok(PyArray1::from_slice(
+            py,
+            &[rotation.w, rotation.x, rotation.y, rotation.z],
+        ))
+    }
+
+    #[setter]
+    fn set_local_rotation<'py>(
+        &self,
+        py: Python<'py>,
+        rotation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::quat;
+
+        let rotation = rotation.as_array();
+        if rotation.dim() != 4 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "rotation.shape must be (4,)",
+            ));
+        }
+        self.scene_graph
+            .borrow_mut(py)
+            .set_local_transformation(
+                self.id,
+                None,
+                quat(rotation[1], rotation[2], rotation[3], rotation[0]),
+                None,
+            )
+            .map_err(|_| Self::deleted_error(self.id))
+    }
+
+    #[getter]
+    fn local_scale<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let scale = self.get(&self.scene_graph.borrow(py))?.local_scale;
+        Ok(PyArray1::from_slice(py, &scale.to_array()))
+    }
+
+    #[setter]
+    fn set_local_scale<'py>(
+        &self,
+        py: Python<'py>,
+        scale: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::vec3;
+
+        let scale = scale.as_array();
+        if scale.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "scale.shape must be (3,)",
+            ));
+        }
+        self.scene_graph
+            .borrow_mut(py)
+            .set_local_transformation(self.id, None, None, vec3(scale[0], scale[1], scale[2]))
+            .map_err(|_| Self::deleted_error(self.id))
+    }
+
+    #[getter]
+    fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        use numpy::ndarray::aview2;
+
+        let transformation = self
+            .get(&self.scene_graph.borrow(py))?
+            .local_transformation()
+            .transpose()
+            .to_cols_array_2d();
+        let array = aview2(&transformation);
+        Ok(PyArray2::from_array(py, &array))
+    }
+
+    #[getter]
+    fn global_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        use numpy::ndarray::aview2;
+
+        let transformation = self
+            .get(&self.scene_graph.borrow(py))?
+            .global_transformation()
+            .transpose()
+            .to_cols_array_2d();
+        let array = aview2(&transformation);
+        Ok(PyArray2::from_array(py, &array))
     }
 }
 
@@ -432,4 +627,5 @@ pub enum NodeBuilderError {
 
 #[derive(Debug, Error)]
 #[error("no node found for {0}")]
+#[cfg_attr(feature = "pyo3", pyclass)]
 pub struct NodeNotFoundError(pub NodeId);

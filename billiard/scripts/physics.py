@@ -1,0 +1,134 @@
+from typing import List
+import numpy as np
+import constraints
+
+g = np.array([0.0, -1.0, 0.0])
+drag_coefficient = 0.1
+N = 10
+
+C: List[constraints.Constraint] = []
+for i in range(16):
+    C.append(constraints.TableSurfaceConstraint(i))
+    C.append(constraints.TableShortSideConstraint(i))
+    C.append(constraints.TableLongSideConstraint(i))
+for i in range(15):
+    for j in range(i + 1, 16):
+        C.append(constraints.DistanceConstraint(i, j))
+
+BASE_POS = np.array([0.0, 0.025, 0.65])
+
+def f(pos: np.ndarray, vel: np.ndarray, dt: float) -> np.ndarray:
+    norms = np.linalg.norm(vel, axis=-1)
+    non_zero = norms > 1e-3
+    safe_vel = vel[non_zero,:]
+    norms = np.linalg.norm(safe_vel, axis=-1)
+    vel[non_zero,:] -= drag_coefficient * dt * safe_vel / norms[:,np.newaxis]
+    return g
+
+def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np.ndarray):
+    if reset:
+        for ball in balls:
+            ball.out = False
+
+        d = 0.05
+
+        dz = np.sqrt(3) / 2 * d
+        dx = d
+
+        # white
+        b0 = np.array([0.0, 0.025, -0.8])
+
+        # Row 0 (1 ball)
+        b1  = np.array([0, 0, 0]) + BASE_POS
+
+        # Row 1 (2 balls)
+        b2  = np.array([-dx/2, 0, dz]) + BASE_POS
+        b3  = np.array([ dx/2, 0, dz]) + BASE_POS
+
+        # Row 2 (3 balls)
+        b4  = np.array([-dx, 0, 2*dz]) + BASE_POS
+        b5  = np.array([  0, 0, 2*dz]) + BASE_POS
+        b6  = np.array([ dx, 0, 2*dz]) + BASE_POS
+
+        # Row 3 (4 balls)
+        b7  = np.array([-3*dx/2, 0, 3*dz]) + BASE_POS
+        b8  = np.array([-dx/2,   0, 3*dz]) + BASE_POS
+        b9  = np.array([ dx/2,   0, 3*dz]) + BASE_POS
+        b10 = np.array([ 3*dx/2, 0, 3*dz]) + BASE_POS
+
+        # Row 4 (5 balls)
+        b11 = np.array([-2*dx, 0, 4*dz]) + BASE_POS
+        b12 = np.array([-dx,   0, 4*dz]) + BASE_POS
+        b13 = np.array([  0,   0, 4*dz]) + BASE_POS
+        b14 = np.array([ dx,   0, 4*dz]) + BASE_POS
+        b15 = np.array([ 2*dx, 0, 4*dz]) + BASE_POS
+
+        pos = np.array([
+            b0,
+            b1, b2, b3,
+            b4, b5, b6,
+            b7, b8, b9, b10,
+            b11, b12, b13, b14, b15,
+        ])
+
+        vel = np.array([
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ])
+    else:
+        pos = np.stack([ball.node.local_translation if not ball.out else [0.0, 1e6, 0.0] for ball in balls])
+        vel = np.stack([ball.velocity for ball in balls])
+
+        vel[0] += white_ball_impulse
+
+
+    dt = delta_time / N
+    lambdas = np.zeros(len(C))
+    alphas = np.array([c.alpha() / dt**2 for c in C])
+
+    for _ in range(N):
+        vel = vel + dt * f(pos, vel, dt)
+        old_pos = pos
+        pos = pos + dt * vel
+
+        radius: float
+        for i in range(1, len(balls)):
+            radius = balls[i].radius
+            if ((pos[i,0] + radius > 0.63
+                or pos[i,0] - radius < -0.63)
+                and pos[i,2] + radius <  0.05
+                and pos[i,2] - radius > -0.05):
+                balls[i].out = True
+            elif ((pos[i,0] - radius > 0.55
+                or pos[i,0] + radius < -0.55)
+                and (pos[i,2] - radius > 1.15
+                or pos[i,2] + radius < -1.15)):
+                balls[i].out = True
+
+        for i, c in enumerate(C):
+            loss = c(pos)
+            if np.abs(loss) > 1e-6:
+                grad = c.grad(pos)
+                delta_lambda = (- loss - alphas[i] * lambdas[i]) / (np.sum(np.square(grad)) + alphas[i])
+                lambdas[i] = lambdas[i] + delta_lambda
+                pos = pos + delta_lambda * grad
+
+        vel = (pos - old_pos) / dt
+
+    for i in range(len(balls)):
+        balls[i].node.local_translation = pos[i]
+        balls[i].velocity = vel[i]

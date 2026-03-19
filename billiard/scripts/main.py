@@ -13,9 +13,12 @@ if "constraints" in sys.modules:
     importlib.reload(sys.modules["constraints"])
 if "ray" in sys.modules:
     importlib.reload(sys.modules["ray"])
+if "interpolation" in sys.modules:
+    importlib.reload(sys.modules["interpolation"])
 
 from physics import simulate
 from ray import Ray
+from interpolation import cubic_hermite_spline, Point
 
 mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
 mouse_over_ball = False
@@ -31,18 +34,26 @@ camera_distance = 3
 camera_mouse_wheel_zoom_speed = 1e-3
 camera_mouse_motion_zoom_speed = 1e-3
 
+camera_state: Literal["Fixed", "Interpolating", "Playable"] = "Interpolating"
+camera_interpolation_start = np.zeros(3)
+camera_interpolation_end = np.zeros(3)
+camera_interpolation_fraction: float = 0.0
+camera_interpolation_duration = 1.0
+camera_interpolation_speed = 0.1
+
 reset = False
 
 
 def mouse_input(
     button: Literal["Left", "Right", "Middle"], state: Literal["Pressed", "Released"], arrow,
 ):
-    global mouse_action, throwing_arrow, white_ball_impulse, reset
+    global mouse_action, throwing_arrow, white_ball_impulse, reset, camera_state
 
     if button == "Left":
         if mouse_action == None and state == "Pressed":
-            mouse_action = "Throw" if mouse_over_ball else "Rotate"
+            mouse_action = "Throw" if mouse_over_ball and camera_state == "Playable" else "Rotate"
         elif mouse_action == "Throw" and state == "Released" and throwing_arrow is not None:
+            camera_state = "Fixed"
             white_ball_impulse += throwing_arrow * IMPULSE_FACTOR
             throwing_arrow = None
             mouse_action = None
@@ -58,6 +69,7 @@ def mouse_input(
 
     elif button == "Right" and state == "Released":
         if mouse_action == "Throw":
+            camera_state = "Fixed"
             throwing_arrow = None
             mouse_action = None
             arrow.show = False
@@ -149,6 +161,36 @@ def update(
         scene_graph, camera_node,
         balls: list
     ):
+    global camera_state, reset, white_ball_impulse
+    global camera_interpolation_start, camera_interpolation_end, camera_interpolation_fraction
+    
+    simulate(delta_time, balls, reset, white_ball_impulse)
+    if reset:
+        camera_state = "Interpolating"
+        reset = False
+    white_ball_impulse = np.zeros(3)
+
+    if camera_state == "Fixed":
+        camera_center = camera_interpolation_start
+        max_motion = np.max([np.linalg.norm(ball.velocity) for ball in balls])
+        if max_motion < 1e-3:
+            camera_state = "Interpolating"
+    elif camera_state == "Interpolating":
+        camera_interpolation_end = balls[0].node.local_translation
+        if camera_interpolation_fraction < 1.0:
+            start = Point(0.0, camera_interpolation_speed)
+            end = Point(1.0, camera_interpolation_speed)
+            p = cubic_hermite_spline(camera_interpolation_fraction, start, end)
+            camera_center = (1.0 - p) * camera_interpolation_start + p * camera_interpolation_end
+            camera_interpolation_fraction += delta_time / camera_interpolation_duration
+        else:
+            camera_state = "Playable"
+            camera_interpolation_fraction = 0.0
+            camera_interpolation_start = camera_interpolation_end
+            camera_center = camera_interpolation_start
+    elif camera_state == "Playable":
+        camera_center = camera_interpolation_start
+
     r = camera_distance
     theta = camera_horizontal_angle
     phi = camera_vertical_angle
@@ -158,10 +200,10 @@ def update(
             r * np.sin(phi),
             r * np.cos(phi) * np.cos(theta),
         ]
-    )
+    ) + camera_center
     camera_node.local_translation = pos
 
-    dir = -pos
+    dir = camera_center - pos
     dir = dir / np.linalg.norm(dir)
 
     up = np.array([0, 1, 0])
@@ -174,8 +216,3 @@ def update(
     ]).T
     rot = quaternion.from_rotation_matrix(rot)
     camera_node.local_rotation = quaternion.as_float_array(rot)
-
-    global reset, white_ball_impulse
-    simulate(delta_time, balls, reset, white_ball_impulse)
-    reset = False
-    white_ball_impulse = np.zeros(3)

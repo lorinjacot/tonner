@@ -2,10 +2,7 @@ use glam::{Vec3, vec3};
 use storm::{
     Context,
     geometry::BoxBuilder,
-    mesh::{
-        MeshBuilder, MeshInstance,
-        material::{AlphaMode, MaterialBuilder},
-    },
+    mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
     scene_graph::{NodeBuilder, SceneGraph},
 };
 

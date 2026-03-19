@@ -20,7 +20,7 @@ pub struct Ball {
     #[pyo3(get)]
     radius: f64,
     #[pyo3(get, set)]
-    velocity: Py<PyArray1<f64>>,
+    pub velocity: Py<PyArray1<f64>>,
     #[pyo3(get, set)]
     pub out: bool,
     mesh_instance: MeshInstance,

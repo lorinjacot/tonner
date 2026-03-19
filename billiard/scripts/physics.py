@@ -96,38 +96,38 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
         vel[0] += white_ball_impulse
 
 
-    dt = delta_time / N
-    lambdas = np.zeros(len(C))
-    alphas = np.array([c.alpha() / dt**2 for c in C])
+    # dt = delta_time / N
+    # lambdas = np.zeros(len(C))
+    # alphas = np.array([c.alpha() / dt**2 for c in C])
 
-    for _ in range(N):
-        vel = vel + dt * f(pos, vel, dt)
-        old_pos = pos
-        pos = pos + dt * vel
+    # for _ in range(N):
+    #     vel = vel + dt * f(pos, vel, dt)
+    #     old_pos = pos
+    #     pos = pos + dt * vel
 
-        radius: float
-        for i in range(1, len(balls)):
-            radius = balls[i].radius
-            if ((pos[i,0] + radius > 0.63
-                or pos[i,0] - radius < -0.63)
-                and pos[i,2] + radius <  0.05
-                and pos[i,2] - radius > -0.05):
-                balls[i].out = True
-            elif ((pos[i,0] - radius > 0.55
-                or pos[i,0] + radius < -0.55)
-                and (pos[i,2] - radius > 1.15
-                or pos[i,2] + radius < -1.15)):
-                balls[i].out = True
+    #     radius: float
+    #     for i in range(1, len(balls)):
+    #         radius = balls[i].radius
+    #         if ((pos[i,0] + radius > 0.63
+    #             or pos[i,0] - radius < -0.63)
+    #             and pos[i,2] + radius <  0.05
+    #             and pos[i,2] - radius > -0.05):
+    #             balls[i].out = True
+    #         elif ((pos[i,0] - radius > 0.55
+    #             or pos[i,0] + radius < -0.55)
+    #             and (pos[i,2] - radius > 1.15
+    #             or pos[i,2] + radius < -1.15)):
+    #             balls[i].out = True
 
-        for i, c in enumerate(C):
-            loss = c(pos)
-            if np.abs(loss) > 1e-6:
-                grad = c.grad(pos)
-                delta_lambda = (- loss - alphas[i] * lambdas[i]) / (np.sum(np.square(grad)) + alphas[i])
-                lambdas[i] = lambdas[i] + delta_lambda
-                pos = pos + delta_lambda * grad
+    #     for i, c in enumerate(C):
+    #         loss = c(pos)
+    #         if np.abs(loss) > 1e-6:
+    #             grad = c.grad(pos)
+    #             delta_lambda = (- loss - alphas[i] * lambdas[i]) / (np.sum(np.square(grad)) + alphas[i])
+    #             lambdas[i] = lambdas[i] + delta_lambda
+    #             pos = pos + delta_lambda * grad
 
-        vel = (pos - old_pos) / dt
+    #     vel = (pos - old_pos) / dt
 
     for i in range(len(balls)):
         balls[i].node.local_translation = pos[i]

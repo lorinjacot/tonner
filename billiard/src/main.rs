@@ -242,10 +242,10 @@ impl State {
                 &self.balls,
                 &self.constraints_manager,
             );
-            let balls: Vec<_> = self
+            let mut balls: Vec<_> = self
                 .balls
                 .iter()
-                .map(|ball| ball.borrow(py))
+                .map(|ball| ball.borrow_mut(py))
                 .filter(|ball| !ball.out)
                 .collect();
 
@@ -253,7 +253,7 @@ impl State {
                 py,
                 delta_time,
                 &mut self.scene_graph.borrow_mut(py),
-                &balls,
+                &mut balls,
                 self.constraints_manager.borrow(py).constraints(),
             );
 

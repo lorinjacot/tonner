@@ -100,13 +100,13 @@ def register_distance_constraint(ball1, ball2, constraint_manager):
         else:
             return np.float64(0.0)
     
-    def grad(self, pos: np.ndarray) -> np.ndarray:
-        delta: np.ndarray = pos[0] - pos[1]
+    def grad(pos: np.ndarray) -> np.ndarray:
+        delta = pos[0] - pos[1]
         l = np.linalg.norm(delta)
 
         grad = np.zeros(pos.shape)
 
-        if l < self.L0:
+        if l < L0:
             grad[0] = delta / l
             grad[1] = -delta / l
 
@@ -116,5 +116,5 @@ def register_distance_constraint(ball1, ball2, constraint_manager):
         f"distance({ball1.number}, {ball2.number})",
         [ball1.node.id, ball2.node.id],
         value,
-        grad
+        grad,
     )

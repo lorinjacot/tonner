@@ -8,7 +8,7 @@ use std::{
 use glam::{Mat4, vec3};
 use log::{error, info};
 use notify::Watcher;
-use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike2, ndarray::aview2};
+use numpy::{AllowTypeChange, PyArray2, PyArrayLike2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
 use storm::scene_graph::{NodeId, PyNode, SceneGraph};
 
@@ -72,6 +72,13 @@ struct PyConstraint {
     gradient: Py<PyAny>,
 }
 
+impl PyConstraint {
+    fn to_pyarray<'py>(py: Python<'py>, positions: &[glam::Vec3]) -> Bound<'py, PyArray2<f32>> {
+        let positions: Vec<_> = positions.iter().map(|v| v.to_array()).collect();
+        PyArray2::from_array(py, &aview2(&positions))
+    }
+}
+
 impl Constraint for PyConstraint {
     fn entities(&self) -> &[NodeId] {
         &self.entities
@@ -79,10 +86,7 @@ impl Constraint for PyConstraint {
 
     fn value(&self, positions: &[glam::Vec3]) -> f32 {
         match Python::attach(|py| {
-            let positions: Vec<_> = positions
-                .iter()
-                .map(|p| PyArray1::from_slice(py, &p.to_array()))
-                .collect();
+            let positions = Self::to_pyarray(py, positions);
             self.value.call1(py, (positions,))?.extract(py)
         }) {
             Ok(v) => v,
@@ -96,14 +100,12 @@ impl Constraint for PyConstraint {
     fn gradient(&self, positions: &[glam::Vec3]) -> Vec<glam::Vec3> {
         let dim = (positions.len(), 3);
         match Python::attach(|py| {
-            let positions: Vec<_> = positions
-                .iter()
-                .map(|p| PyArray1::from_slice(py, &p.to_array()))
-                .collect();
-            let array: PyArrayLike2<'_, f32, AllowTypeChange> =
+            let positions = Self::to_pyarray(py, positions);
+
+            let grad: PyArrayLike2<'_, f32, AllowTypeChange> =
                 self.gradient.call1(py, (positions,))?.extract(py)?;
-            let array = array.as_array();
-            if array.dim() != dim {
+            let grad = grad.as_array();
+            if grad.dim() != dim {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "expected a gradient with shape ({},3)",
                     dim.0
@@ -111,7 +113,7 @@ impl Constraint for PyConstraint {
             }
             let mut gradient = Vec::with_capacity(dim.0);
             for i in 0..dim.0 {
-                gradient.push(vec3(array[(i, 0)], array[(i, 1)], array[(i, 2)]));
+                gradient.push(vec3(grad[(i, 0)], grad[(i, 1)], grad[(i, 2)]));
             }
             Ok(gradient)
         }) {
@@ -238,7 +240,16 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node, balls, constraint_manager)) {
+            if let Err(e) = func.call1(
+                py,
+                (
+                    delta_time,
+                    scene_graph,
+                    camera_node,
+                    balls,
+                    constraint_manager,
+                ),
+            ) {
                 error!("Failed to run update(): {e}.");
             }
         }

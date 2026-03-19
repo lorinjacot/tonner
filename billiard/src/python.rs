@@ -45,6 +45,26 @@ impl ConstraintManager {
     }
 }
 
+#[pymethods]
+impl ConstraintManager {
+    fn clear(&mut self) {
+        self.constraints.clear();
+    }
+
+    fn push(&mut self, name: String, entities: Vec<NodeId>, value: Py<PyAny>, gradient: Py<PyAny>) {
+        self.constraints.push(Box::new(PyConstraint {
+            name,
+            entities,
+            value,
+            gradient,
+        }));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.constraints.is_empty()
+    }
+}
+
 struct PyConstraint {
     name: String,
     entities: Vec<NodeId>,
@@ -101,22 +121,6 @@ impl Constraint for PyConstraint {
                 vec![glam::Vec3::ZERO; positions.len()]
             }
         }
-    }
-}
-
-#[pymethods]
-impl ConstraintManager {
-    fn clear(&mut self) {
-        self.constraints.clear();
-    }
-
-    fn push(&mut self, name: String, entities: Vec<NodeId>, value: Py<PyAny>, gradient: Py<PyAny>) {
-        self.constraints.push(Box::new(PyConstraint {
-            name,
-            entities,
-            value,
-            gradient,
-        }));
     }
 }
 

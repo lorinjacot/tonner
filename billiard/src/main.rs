@@ -252,12 +252,9 @@ impl State {
             physics::update(
                 py,
                 delta_time,
-                balls.iter().map(|b| &**b),
-                self.constraints_manager
-                    .borrow(py)
-                    .constraints()
-                    .iter()
-                    .map(|c| c.as_ref()),
+                &mut self.scene_graph.borrow_mut(py),
+                &balls,
+                self.constraints_manager.borrow(py).constraints(),
             );
 
             self.renderer

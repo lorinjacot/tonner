@@ -108,6 +108,10 @@ impl Ball {
         Bound::new(py, ball).unwrap()
     }
 
+    pub fn node(&self) -> &Py<PyNode> {
+        &self.node
+    }
+
     pub fn mesh_instance(&self) -> &MeshInstance {
         &self.mesh_instance
     }

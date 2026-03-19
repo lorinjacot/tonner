@@ -90,3 +90,31 @@ class TableLongSideConstraint(Constraint):
         grad[self.ball,2] = float(pos[self.ball,2] < self.MIN_Z) - float(pos[self.ball,2] > self.MAX_Z)
         return grad
     
+def register_distance_constraint(ball1, ball2, constraint_manager):
+    L0 = ball1.radius + ball2.radius
+
+    def value(pos: np.ndarray):
+        l = np.linalg.norm(pos[1] - pos[0])
+        if l < L0:
+            return l - L0
+        else:
+            return np.float64(0.0)
+    
+    def grad(self, pos: np.ndarray) -> np.ndarray:
+        delta: np.ndarray = pos[0] - pos[1]
+        l = np.linalg.norm(delta)
+
+        grad = np.zeros(pos.shape)
+
+        if l < self.L0:
+            grad[0] = delta / l
+            grad[1] = -delta / l
+
+        return grad
+    
+    constraint_manager.push(
+        f"distance({ball1.number}, {ball2.number})",
+        [ball1.node.id, ball2.node.id],
+        value,
+        grad
+    )

@@ -359,7 +359,7 @@ impl PyNode {
 #[pymethods]
 impl PyNode {
     #[getter]
-    fn id(&self) -> NodeId {
+    pub fn id(&self) -> NodeId {
         self.id
     }
 

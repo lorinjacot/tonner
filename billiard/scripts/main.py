@@ -19,6 +19,7 @@ if "interpolation" in sys.modules:
 from physics import simulate
 from ray import Ray
 from interpolation import cubic_hermite_spline, Point
+import constraints
 
 mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
 mouse_over_ball = False
@@ -168,7 +169,12 @@ def update(
     simulate(delta_time, balls, reset, white_ball_impulse)
     if reset:
         camera_state = "Interpolating"
+        constraint_manager.clear()
         reset = False
+    if constraint_manager.is_empty():
+        for i in range(15):
+            for j in range(i + 1, 16):
+                constraints.register_distance_constraint(balls[i], balls[j], constraint_manager)
     white_ball_impulse = np.zeros(3)
 
     if camera_state == "Fixed":

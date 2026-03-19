@@ -172,7 +172,7 @@ def update(
 
     if camera_state == "Fixed":
         camera_center = camera_interpolation_start
-        max_motion = np.max([np.linalg.norm(ball.velocity) for ball in balls])
+        max_motion = np.max([np.linalg.norm(ball.velocity) for ball in balls if not ball.out])
         if max_motion < 1e-3:
             camera_state = "Interpolating"
     elif camera_state == "Interpolating":

@@ -173,6 +173,10 @@ def update(
         reset = False
     if register_constraints:
         constraint_manager.clear()
+        for i in range(16):
+            constraints.register_table_surface_constraint(balls[i], constraint_manager)
+            constraints.register_table_short_side_constraint(balls[i], constraint_manager)
+            constraints.register_table_long_side_constraint(balls[i], constraint_manager)
         for i in range(15):
             for j in range(i + 1, 16):
                 constraints.register_distance_constraint(balls[i], balls[j], constraint_manager)

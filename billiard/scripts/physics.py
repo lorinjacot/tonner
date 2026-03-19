@@ -1,19 +1,8 @@
-from typing import List
 import numpy as np
-import constraints
 
 g = np.array([0.0, -1.0, 0.0])
 drag_coefficient = 0.1
 N = 10
-
-C: List[constraints.Constraint] = []
-for i in range(16):
-    C.append(constraints.TableSurfaceConstraint(i))
-    C.append(constraints.TableShortSideConstraint(i))
-    C.append(constraints.TableLongSideConstraint(i))
-for i in range(15):
-    for j in range(i + 1, 16):
-        C.append(constraints.DistanceConstraint(i, j))
 
 BASE_POS = np.array([0.0, 0.025, 0.65])
 
@@ -94,40 +83,6 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
         vel = np.stack([ball.velocity for ball in balls])
 
         vel[0] += white_ball_impulse
-
-
-    # dt = delta_time / N
-    # lambdas = np.zeros(len(C))
-    # alphas = np.array([c.alpha() / dt**2 for c in C])
-
-    # for _ in range(N):
-    #     vel = vel + dt * f(pos, vel, dt)
-    #     old_pos = pos
-    #     pos = pos + dt * vel
-
-    #     radius: float
-    #     for i in range(1, len(balls)):
-    #         radius = balls[i].radius
-    #         if ((pos[i,0] + radius > 0.63
-    #             or pos[i,0] - radius < -0.63)
-    #             and pos[i,2] + radius <  0.05
-    #             and pos[i,2] - radius > -0.05):
-    #             balls[i].out = True
-    #         elif ((pos[i,0] - radius > 0.55
-    #             or pos[i,0] + radius < -0.55)
-    #             and (pos[i,2] - radius > 1.15
-    #             or pos[i,2] + radius < -1.15)):
-    #             balls[i].out = True
-
-    #     for i, c in enumerate(C):
-    #         loss = c(pos)
-    #         if np.abs(loss) > 1e-6:
-    #             grad = c.grad(pos)
-    #             delta_lambda = (- loss - alphas[i] * lambdas[i]) / (np.sum(np.square(grad)) + alphas[i])
-    #             lambdas[i] = lambdas[i] + delta_lambda
-    #             pos = pos + delta_lambda * grad
-
-    #     vel = (pos - old_pos) / dt
 
     for i in range(len(balls)):
         balls[i].node.local_translation = pos[i]

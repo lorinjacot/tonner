@@ -1,6 +1,6 @@
 use std::io::Cursor;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use glam::Vec3;
 use pollster::block_on;
@@ -26,15 +26,14 @@ use winit::{
 
 use crate::arrow::Arrow;
 use crate::ball::Ball;
+use crate::python::ConstraintManager;
 use crate::table::table;
 
 mod arrow;
 mod ball;
+mod physics;
 mod python;
 mod table;
-
-const MAX_DELTA_TIME: f32 = 1.0 / 30.0;
-const MIN_DELTA_TIME: f32 = 0.001;
 
 struct State {
     ctx: Context,
@@ -51,6 +50,7 @@ struct State {
     scripts: python::PyScripts,
     camera_node: Py<PyNode>,
     balls: Vec<Py<Ball>>,
+    constraints_manager: Py<ConstraintManager>,
     arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
     last_render: Instant,
@@ -126,8 +126,8 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let (scene_graph, camera_node, arrow) =
-            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyNode>, Py<Arrow>)> {
+        let (scene_graph, camera_node, constraints_manager, arrow) = Python::attach(
+            |py| -> PyResult<(Py<SceneGraph>, Py<PyNode>, Py<ConstraintManager>, Py<Arrow>)> {
                 let scene_graph = Py::new(py, scene_graph)?;
                 let camera_node = Py::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?;
 
@@ -148,11 +148,14 @@ impl State {
                         balls.push(ball.into());
                     });
 
+                let constraints_manager = Py::new(py, ConstraintManager::new())?;
+
                 let arrow = Py::new(py, Arrow::new(py, scene_graph.clone_ref(py), &ctx))?;
 
-                Ok((scene_graph, camera_node, arrow))
-            })
-            .unwrap();
+                Ok((scene_graph, camera_node, constraints_manager, arrow))
+            },
+        )
+        .unwrap();
 
         let scripts = python::PyScripts::new();
 
@@ -173,6 +176,7 @@ impl State {
             scripts,
             camera_node,
             balls,
+            constraints_manager,
             arrow,
             mesh_instances,
             last_render: Instant::now(),
@@ -203,10 +207,11 @@ impl State {
     }
 
     fn render(&mut self) {
+        let min_delta_time = Duration::from_secs_f32(1.0 / 60.0);
+        let max_delta_time = Duration::from_secs_f32(1.0 / 60.0);
+
         let now = Instant::now();
-        let delta_time = (now - self.last_render)
-            .as_secs_f32()
-            .clamp(MIN_DELTA_TIME, MAX_DELTA_TIME);
+        let delta_time = (now - self.last_render).clamp(min_delta_time, max_delta_time);
         self.last_render = now;
 
         let surface_texture = self
@@ -231,10 +236,11 @@ impl State {
         Python::attach(|py| -> PyResult<()> {
             self.scripts.update(
                 py,
-                delta_time,
+                delta_time.as_secs_f32(),
                 &self.scene_graph,
                 &self.camera_node,
                 &self.balls,
+                &self.constraints_manager,
             );
             let balls: Vec<_> = self
                 .balls
@@ -242,6 +248,17 @@ impl State {
                 .map(|ball| ball.borrow(py))
                 .filter(|ball| !ball.out)
                 .collect();
+
+            physics::update(
+                py,
+                delta_time,
+                balls.iter().map(|b| &**b),
+                self.constraints_manager
+                    .borrow(py)
+                    .constraints()
+                    .iter()
+                    .map(|c| c.as_ref()),
+            );
 
             self.renderer
                 .render(

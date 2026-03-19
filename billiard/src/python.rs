@@ -5,14 +5,14 @@ use std::{
     sync::mpsc::{Receiver, channel},
 };
 
-use glam::Mat4;
+use glam::{Mat4, vec3};
 use log::{error, info};
 use notify::Watcher;
-use numpy::{PyArray2, ndarray::aview2};
+use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
-use storm::scene_graph::{PyNode, SceneGraph};
+use storm::scene_graph::{NodeId, PyNode, SceneGraph};
 
-use crate::{arrow::Arrow, ball::Ball};
+use crate::{arrow::Arrow, ball::Ball, physics::Constraint};
 
 const SCRIPTS_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
 
@@ -26,6 +26,98 @@ pub struct PyScripts {
     mouse_moved: Option<Py<PyAny>>,
     mouse_motion: Option<Py<PyAny>>,
     mouse_wheel: Option<Py<PyAny>>,
+}
+
+#[pyclass]
+pub struct ConstraintManager {
+    constraints: Vec<Box<dyn Constraint>>,
+}
+
+impl ConstraintManager {
+    pub fn new() -> ConstraintManager {
+        ConstraintManager {
+            constraints: Vec::new(),
+        }
+    }
+
+    pub fn constraints(&self) -> &[Box<dyn Constraint>] {
+        &self.constraints
+    }
+}
+
+struct PyConstraint {
+    name: String,
+    entities: Vec<NodeId>,
+    value: Py<PyAny>,
+    gradient: Py<PyAny>,
+}
+
+impl Constraint for PyConstraint {
+    fn entities(&self) -> &[NodeId] {
+        &self.entities
+    }
+
+    fn value(&self, positions: &[glam::Vec3]) -> f32 {
+        match Python::attach(|py| {
+            let positions: Vec<_> = positions
+                .iter()
+                .map(|p| PyArray1::from_slice(py, &p.to_array()))
+                .collect();
+            self.value.call1(py, (positions,))?.extract(py)
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Failed evaluate constraint {}: {e}.", self.name);
+                0.0
+            }
+        }
+    }
+
+    fn gradient(&self, positions: &[glam::Vec3]) -> Vec<glam::Vec3> {
+        let dim = (positions.len(), 3);
+        match Python::attach(|py| {
+            let positions: Vec<_> = positions
+                .iter()
+                .map(|p| PyArray1::from_slice(py, &p.to_array()))
+                .collect();
+            let array: PyArrayLike2<'_, f32, AllowTypeChange> =
+                self.gradient.call1(py, (positions,))?.extract(py)?;
+            let array = array.as_array();
+            if array.dim() != dim {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "expected a gradient with shape ({},3)",
+                    dim.0
+                )));
+            }
+            let mut gradient = Vec::with_capacity(dim.0);
+            for i in 0..dim.0 {
+                gradient.push(vec3(array[(i, 0)], array[(i, 1)], array[(i, 2)]));
+            }
+            Ok(gradient)
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Failed evaluate constraint {}: {e}.", self.name);
+                vec![glam::Vec3::ZERO; positions.len()]
+            }
+        }
+    }
+}
+
+#[pymethods]
+impl ConstraintManager {
+    fn clear(&mut self) {
+        self.constraints.clear();
+    }
+
+    fn push(&mut self, name: String, entities: Vec<NodeId>, value: Py<PyAny>, gradient: Py<PyAny>) {
+        self.constraints.push(Box::new(PyConstraint {
+            name,
+            entities,
+            value,
+            gradient,
+        }));
+    }
 }
 
 impl PyScripts {
@@ -119,6 +211,7 @@ impl PyScripts {
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
         balls: &[Py<Ball>],
+        constraint_manager: &Py<ConstraintManager>,
     ) {
         if let Some(rx) = &self.watcher_receiver {
             use notify::EventKind::*;
@@ -141,7 +234,7 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node, balls)) {
+            if let Err(e) = func.call1(py, (delta_time, scene_graph, camera_node, balls, constraint_manager)) {
                 error!("Failed to run update(): {e}.");
             }
         }

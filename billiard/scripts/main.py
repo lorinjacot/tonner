@@ -159,7 +159,8 @@ def mouse_wheel(dx: float, dy: float):
 def update(
         delta_time: float,
         scene_graph, camera_node,
-        balls: list
+        balls: list,
+        constraint_manager,
     ):
     global camera_state, reset, white_ball_impulse
     global camera_interpolation_start, camera_interpolation_end, camera_interpolation_fraction

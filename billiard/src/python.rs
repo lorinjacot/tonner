@@ -12,7 +12,11 @@ use numpy::{AllowTypeChange, PyArray2, PyArrayLike2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
 use storm::scene_graph::{NodeId, PyNode, SceneGraph};
 
-use crate::{arrow::Arrow, ball::Ball, physics::Constraint};
+use crate::{
+    arrow::Arrow,
+    ball::Ball,
+    physics::{Constraint, Force},
+};
 
 const SCRIPTS_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
 
@@ -26,6 +30,86 @@ pub struct PyScripts {
     mouse_moved: Option<Py<PyAny>>,
     mouse_motion: Option<Py<PyAny>>,
     mouse_wheel: Option<Py<PyAny>>,
+}
+
+fn to_pyarray<'py>(py: Python<'py>, rust: &[glam::Vec3]) -> Bound<'py, PyArray2<f32>> {
+    let array: Vec<_> = rust.iter().map(|v| v.to_array()).collect();
+    PyArray2::from_array(py, &aview2(&array))
+}
+
+#[pyclass]
+pub struct ForceManager {
+    forces: Vec<Box<dyn Force>>,
+}
+
+impl ForceManager {
+    pub fn new() -> ForceManager {
+        ForceManager { forces: Vec::new() }
+    }
+
+    pub fn forces(&self) -> &[Box<dyn Force>] {
+        &self.forces
+    }
+}
+
+#[pymethods]
+impl ForceManager {
+    fn clear(&mut self) {
+        self.forces.clear();
+    }
+
+    fn push(&mut self, name: String, entities: Vec<NodeId>, value: Py<PyAny>) {
+        self.forces.push(Box::new(PyForce {
+            name,
+            entities,
+            value,
+        }));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.forces.is_empty()
+    }
+}
+
+struct PyForce {
+    name: String,
+    entities: Vec<NodeId>,
+    value: Py<PyAny>,
+}
+
+impl Force for PyForce {
+    fn entities(&self) -> &[NodeId] {
+        &self.entities
+    }
+
+    fn value(&self, positions: &[glam::Vec3], velocities: &[glam::Vec3]) -> Vec<glam::Vec3> {
+        let dim = (positions.len(), 3);
+        match Python::attach(|py| {
+            let positions = to_pyarray(py, positions);
+            let velocities = to_pyarray(py, velocities);
+
+            let force: PyArrayLike2<'_, f32, AllowTypeChange> =
+                self.value.call1(py, (positions, velocities))?.extract(py)?;
+            let force = force.as_array();
+            if force.dim() != dim {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "expected a force vector with shape ({},3)",
+                    dim.0
+                )));
+            }
+            let mut result = Vec::with_capacity(dim.0);
+            for i in 0..dim.0 {
+                result.push(vec3(force[(i, 0)], force[(i, 1)], force[(i, 2)]));
+            }
+            Ok(result)
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Failed evaluate constraint {}: {e}.", self.name);
+                vec![glam::Vec3::ZERO; positions.len()]
+            }
+        }
+    }
 }
 
 #[pyclass]
@@ -51,12 +135,20 @@ impl ConstraintManager {
         self.constraints.clear();
     }
 
-    fn push(&mut self, name: String, entities: Vec<NodeId>, value: Py<PyAny>, gradient: Py<PyAny>) {
+    fn push(
+        &mut self,
+        name: String,
+        entities: Vec<NodeId>,
+        value: Py<PyAny>,
+        gradient: Py<PyAny>,
+        alpha: f32,
+    ) {
         self.constraints.push(Box::new(PyConstraint {
             name,
             entities,
             value,
             gradient,
+            alpha,
         }));
     }
 
@@ -70,13 +162,7 @@ struct PyConstraint {
     entities: Vec<NodeId>,
     value: Py<PyAny>,
     gradient: Py<PyAny>,
-}
-
-impl PyConstraint {
-    fn to_pyarray<'py>(py: Python<'py>, positions: &[glam::Vec3]) -> Bound<'py, PyArray2<f32>> {
-        let positions: Vec<_> = positions.iter().map(|v| v.to_array()).collect();
-        PyArray2::from_array(py, &aview2(&positions))
-    }
+    alpha: f32,
 }
 
 impl Constraint for PyConstraint {
@@ -86,7 +172,7 @@ impl Constraint for PyConstraint {
 
     fn value(&self, positions: &[glam::Vec3]) -> f32 {
         match Python::attach(|py| {
-            let positions = Self::to_pyarray(py, positions);
+            let positions = to_pyarray(py, positions);
             self.value.call1(py, (positions,))?.extract(py)
         }) {
             Ok(v) => v,
@@ -100,7 +186,7 @@ impl Constraint for PyConstraint {
     fn gradient(&self, positions: &[glam::Vec3]) -> Vec<glam::Vec3> {
         let dim = (positions.len(), 3);
         match Python::attach(|py| {
-            let positions = Self::to_pyarray(py, positions);
+            let positions = to_pyarray(py, positions);
 
             let grad: PyArrayLike2<'_, f32, AllowTypeChange> =
                 self.gradient.call1(py, (positions,))?.extract(py)?;
@@ -123,6 +209,10 @@ impl Constraint for PyConstraint {
                 vec![glam::Vec3::ZERO; positions.len()]
             }
         }
+    }
+
+    fn alpha(&self) -> f32 {
+        self.alpha
     }
 }
 
@@ -217,6 +307,7 @@ impl PyScripts {
         scene_graph: &Py<SceneGraph>,
         camera_node: &Py<PyNode>,
         balls: &[Py<Ball>],
+        force_manager: &Py<ForceManager>,
         constraint_manager: &Py<ConstraintManager>,
     ) {
         if let Some(rx) = &self.watcher_receiver {
@@ -247,6 +338,7 @@ impl PyScripts {
                     scene_graph,
                     camera_node,
                     balls,
+                    force_manager,
                     constraint_manager,
                 ),
             ) {

@@ -1,7 +1,4 @@
-use std::{
-    ops::{Deref, DerefMut},
-    time::Duration,
-};
+use std::{collections::HashMap, ops::Deref, time::Duration};
 
 use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
@@ -11,7 +8,16 @@ use storm::scene_graph::{NodeId, SceneGraph};
 use crate::ball::Ball;
 
 const SUBSTEP_COUNT: usize = 10;
-const G: Vec3 = vec3(0.0, 0.0, 0.0);
+
+pub trait Force: Send + Sync {
+    /// All entities impacted or impacting the force.
+    fn entities(&self) -> &[NodeId];
+
+    /// Force (in N) to apply on the entities. for the given positions.
+    /// The order and length the returned `Vec` and of `positions` must match
+    /// [`Force::entities()`].
+    fn value(&self, positions: &[Vec3], velocities: &[Vec3]) -> Vec<Vec3>;
+}
 
 pub trait Constraint: Send + Sync {
     /// All entities impacted or impacting the contraint.
@@ -32,7 +38,6 @@ pub trait Constraint: Send + Sync {
 
 struct Particle<'a> {
     ball: &'a mut Ball,
-    node: NodeId,
     mass: f32,
     inverse_mass: f32,
     position: Vec3,
@@ -40,43 +45,58 @@ struct Particle<'a> {
     velocity: Vec3,
 }
 
-pub fn update<'py, 'a, B: DerefMut<Target = Ball>, C: Deref<Target = dyn Constraint>>(
+pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Constraint>>(
     py: Python<'py>,
     delta_time: Duration,
     scene_graph: &mut SceneGraph,
-    balls: &mut [B],
+    balls: impl IntoIterator<Item = &'a mut Ball>,
+    forces: &[F],
     constraints: &[C],
 ) {
-    let mut particles: Vec<_> = balls
-        .iter_mut()
-        .map(|b| {
-            let v = b.velocity.bind(py).readonly();
-            let v = v.as_array();
-            let velocity = vec3(v[0] as f32, v[1] as f32, v[2] as f32);
-            let ball = b.deref_mut();
+    let mut particles: HashMap<_, _> = balls
+        .into_iter()
+        .map(|ball| {
             let node = ball.node().borrow(py).id();
             let mass = 1.0;
             let position = scene_graph[node]
                 .global_transformation()
                 .transform_point3(Vec3::ZERO);
+            let v = ball.velocity.bind(py).readonly();
+            let v = v.as_array();
+            let velocity = vec3(v[0] as f32, v[1] as f32, v[2] as f32);
             let previous_position = position;
-            Particle {
+            let particle = Particle {
                 ball,
-                node,
                 mass,
                 inverse_mass: 1.0 / mass,
                 position,
                 previous_position,
                 velocity,
-            }
+            };
+            (node, particle)
         })
         .collect();
 
     let h = delta_time.as_secs_f32() / SUBSTEP_COUNT as f32;
     for _ in 0..SUBSTEP_COUNT {
-        particles.iter_mut().for_each(|p| {
+        forces.iter().for_each(|f| {
+            let entities = f.entities();
+            let positions: Vec<_> = entities
+                .iter()
+                .map(|node| particles[node].position)
+                .collect();
+            let velocities: Vec<_> = entities
+                .iter()
+                .map(|node| particles[node].velocity)
+                .collect();
+            let force = f.value(&positions, &velocities);
+            entities.iter().zip(force).for_each(|(node, force)| {
+                particles.get_mut(node).unwrap().velocity *= h * force;
+            })
+        });
+
+        particles.values_mut().for_each(|p| {
             p.previous_position = p.position;
-            p.velocity += h * G;
             p.position += h * p.velocity;
         });
 
@@ -84,7 +104,8 @@ pub fn update<'py, 'a, B: DerefMut<Target = Ball>, C: Deref<Target = dyn Constra
             let nodes = c.entities();
             let mut particles: Vec<_> = particles
                 .iter_mut()
-                .filter(|p| nodes.contains(&p.node))
+                .filter(|(node, _)| nodes.contains(*node))
+                .map(|(_, p)| p)
                 .collect();
 
             let positions: Vec<_> = particles.iter().map(|p| p.position).collect();
@@ -102,14 +123,14 @@ pub fn update<'py, 'a, B: DerefMut<Target = Ball>, C: Deref<Target = dyn Constra
             }
         }
 
-        particles.iter_mut().for_each(|p| {
+        particles.values_mut().for_each(|p| {
             p.velocity = (p.position - p.previous_position) / h;
         });
     }
 
-    particles.iter_mut().for_each(|p| {
+    particles.iter_mut().for_each(|(node, p)| {
         scene_graph
-            .set_local_transformation(p.node, p.position, None, None)
+            .set_local_transformation(*node, p.position, None, None)
             .unwrap();
         p.ball.velocity =
             PyArray1::from_iter(py, p.velocity.to_array().iter().map(|c| *c as f64)).unbind();

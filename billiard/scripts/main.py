@@ -42,8 +42,8 @@ camera_interpolation_fraction: float = 0.0
 camera_interpolation_duration = 1.0
 camera_interpolation_speed = 0.1
 
-reset = False
-register_constraints = True
+reset: bool = False
+register_constraints: bool = True
 
 
 def mouse_input(
@@ -162,6 +162,7 @@ def update(
         delta_time: float,
         scene_graph, camera_node,
         balls: list,
+        force_manager,
         constraint_manager,
     ):
     global camera_state, reset, register_constraints, white_ball_impulse

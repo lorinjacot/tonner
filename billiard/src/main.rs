@@ -26,7 +26,7 @@ use winit::{
 
 use crate::arrow::Arrow;
 use crate::ball::Ball;
-use crate::python::ConstraintManager;
+use crate::python::{ConstraintManager, ForceManager};
 use crate::table::table;
 
 mod arrow;
@@ -50,7 +50,8 @@ struct State {
     scripts: python::PyScripts,
     camera_node: Py<PyNode>,
     balls: Vec<Py<Ball>>,
-    constraints_manager: Py<ConstraintManager>,
+    force_manager: Py<ForceManager>,
+    constraint_manager: Py<ConstraintManager>,
     arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
     last_render: Instant,
@@ -126,8 +127,14 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let (scene_graph, camera_node, constraints_manager, arrow) = Python::attach(
-            |py| -> PyResult<(Py<SceneGraph>, Py<PyNode>, Py<ConstraintManager>, Py<Arrow>)> {
+        let (scene_graph, camera_node, force_manager, constraint_manager, arrow) = Python::attach(
+            |py| -> PyResult<(
+                Py<SceneGraph>,
+                Py<PyNode>,
+                Py<ForceManager>,
+                Py<ConstraintManager>,
+                Py<Arrow>,
+            )> {
                 let scene_graph = Py::new(py, scene_graph)?;
                 let camera_node = Py::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?;
 
@@ -148,11 +155,19 @@ impl State {
                         balls.push(ball.into());
                     });
 
-                let constraints_manager = Py::new(py, ConstraintManager::new())?;
+                let force_manager = Py::new(py, ForceManager::new())?;
+
+                let constraint_manager = Py::new(py, ConstraintManager::new())?;
 
                 let arrow = Py::new(py, Arrow::new(py, scene_graph.clone_ref(py), &ctx))?;
 
-                Ok((scene_graph, camera_node, constraints_manager, arrow))
+                Ok((
+                    scene_graph,
+                    camera_node,
+                    force_manager,
+                    constraint_manager,
+                    arrow,
+                ))
             },
         )
         .unwrap();
@@ -176,7 +191,8 @@ impl State {
             scripts,
             camera_node,
             balls,
-            constraints_manager,
+            force_manager,
+            constraint_manager,
             arrow,
             mesh_instances,
             last_render: Instant::now(),
@@ -240,7 +256,8 @@ impl State {
                 &self.scene_graph,
                 &self.camera_node,
                 &self.balls,
-                &self.constraints_manager,
+                &self.force_manager,
+                &self.constraint_manager,
             );
             let mut balls: Vec<_> = self
                 .balls
@@ -253,8 +270,9 @@ impl State {
                 py,
                 delta_time,
                 &mut self.scene_graph.borrow_mut(py),
-                &mut balls,
-                self.constraints_manager.borrow(py).constraints(),
+                balls.iter_mut().map(|ball| &mut **ball),
+                self.force_manager.borrow(py).forces(),
+                self.constraint_manager.borrow(py).constraints(),
             );
 
             self.renderer

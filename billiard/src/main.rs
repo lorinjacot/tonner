@@ -35,6 +35,7 @@ mod physics;
 mod python;
 mod table;
 mod shape;
+mod gjk;
 
 struct State {
     ctx: Context,

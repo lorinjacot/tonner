@@ -1,6 +1,6 @@
 use glam::{Vec3, vec3};
 
-use crate::ball;
+use crate::gjk::gjk;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AxisAlignedBox {
@@ -60,69 +60,7 @@ pub trait ConvexShape: Shape {
     fn support_point(&self, direction: Vec3) -> Vec3;
 
     fn collides(&self, other: &impl ConvexShape) -> bool {
-        let mut direction = other.centroid() - self.centroid();
-
-        let a = self.support_point(direction) - other.support_point(-direction);
-
-        let mut simplex = Simplex::Point(a);
-        direction = -a;
-
-        loop {
-            let a = self.support_point(direction) - other.support_point(-direction);
-            if a.dot(direction) < 0.0 {
-                return false;
-            }
-
-            simplex.push(a);
-
-            match simplex {
-                Simplex::Line(b, a) => {
-                    let ab = b - a;
-                    let ao = -a;
-                    let normal = ab.cross(ao).cross(ab);
-                    direction = ab.cross(ao).cross(ab)
-                }
-                Simplex::Triangle(c, b, a) => {
-                    let ab = b - a;
-                    let ac = c - a;
-                    let ao = -a;
-                    let ab_normal = ac.cross(ab).cross(ab);
-                    let ac_normal = ab.cross(ac).cross(ac);
-                    if ab_normal.dot(ao) > 0.0 {
-                        simplex = Simplex::Line(b, a);
-                        direction = ab_normal;
-                    } else if ac_normal.dot(ao) > 0.0 {
-                        simplex = Simplex::Line(c, a);
-                        direction = ac_normal;
-                    } else {
-                        return true;
-                    }
-                }
-                Simplex::Tetrahedron(d, c, b, a) => {
-                    
-                    let ao = -a;
-                }
-                Simplex::Point(_) => unreachable!()
-            }
-        }
-    }
-}
-
-enum Simplex {
-    Point(Vec3),
-    Line(Vec3, Vec3),
-    Triangle(Vec3, Vec3, Vec3),
-    Tetrahedron(Vec3, Vec3, Vec3, Vec3),
-}
-
-impl Simplex {
-    fn push(&mut self, point: Vec3) {
-        *self = match *self {
-            Simplex::Point(a) => Simplex::Line(a, point),
-            Simplex::Line(a, b) => Simplex::Triangle(a, b, point),
-            Simplex::Triangle(a, b, c) => Simplex::Tetrahedron(a, b, c, point),
-            Simplex::Tetrahedron(_, _, _, _) => unimplemented!(),
-        }
+        gjk(self, other)
     }
 }
 

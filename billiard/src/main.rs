@@ -34,6 +34,7 @@ mod ball;
 mod physics;
 mod python;
 mod table;
+mod shape;
 
 struct State {
     ctx: Context,

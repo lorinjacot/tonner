@@ -91,7 +91,7 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
                 .collect();
             let force = f.value(&positions, &velocities);
             entities.iter().zip(force).for_each(|(node, force)| {
-                particles.get_mut(node).unwrap().velocity *= h * force;
+                particles.get_mut(node).unwrap().velocity += h * force;
             })
         });
 

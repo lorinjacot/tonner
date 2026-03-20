@@ -14,6 +14,20 @@ def f(pos: np.ndarray, vel: np.ndarray, dt: float) -> np.ndarray:
     vel[non_zero,:] -= drag_coefficient * dt * safe_vel / norms[:,np.newaxis]
     return g
 
+def gravity(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
+    force = np.zeros(pos.shape) + g
+    return force
+
+def drag(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(vel, axis=-1)
+    non_zero = norms > 1e-3
+    safe_vel = vel[non_zero,:]
+    norms = np.linalg.norm(safe_vel, axis=-1)
+
+    force = np.zeros(pos.shape)
+    force[non_zero,:] = - drag_coefficient * safe_vel / norms[:,np.newaxis]
+    return force
+
 def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np.ndarray):
     if reset:
         for ball in balls:

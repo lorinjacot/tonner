@@ -37,7 +37,7 @@ def register_distance_constraint(ball1, ball2, constraint_manager):
 
 def register_table_surface_constraint(ball, constraint_manager):
     MIN_Y = BALL_RADIUS
-    ALPHA = 0.0
+    ALPHA = 1e-6
 
     def value(pos: np.ndarray) -> np.floating:
         return np.minimum(pos[0,1] - MIN_Y, 0)
@@ -58,7 +58,7 @@ def register_table_surface_constraint(ball, constraint_manager):
 def register_table_short_side_constraint(ball, constraint_manager):
     MAX_X = HALF_SHORT_SIDE - BALL_RADIUS
     MIN_X = - MAX_X
-    ALPHA = 0.0
+    ALPHA = 1e-6
 
     def value(pos: np.ndarray) -> np.floating:
         return np.minimum(pos[0,0] - MIN_X, 0) + np.minimum(MAX_X - pos[0,0], 0)
@@ -79,7 +79,7 @@ def register_table_short_side_constraint(ball, constraint_manager):
 def register_table_long_side_constraint(ball, constraint_manager):
     MAX_Z = HALF_LONG_SIDE - BALL_RADIUS
     MIN_Z = - MAX_Z
-    ALPHA = 0.0
+    ALPHA = 1e-6
 
     def value(pos: np.ndarray) -> np.floating:
         return np.minimum(pos[0,2] - MIN_Z, 0) + np.minimum(MAX_Z - pos[0,2], 0)

@@ -16,7 +16,7 @@ if "ray" in sys.modules:
 if "interpolation" in sys.modules:
     importlib.reload(sys.modules["interpolation"])
 
-from physics import simulate
+import physics
 from ray import Ray
 from interpolation import cubic_hermite_spline, Point
 import constraints
@@ -167,12 +167,20 @@ def update(
     ):
     global camera_state, reset, register_constraints, white_ball_impulse
     global camera_interpolation_start, camera_interpolation_end, camera_interpolation_fraction
-    
-    simulate(delta_time, balls, reset, white_ball_impulse)
-    if reset:
-        camera_state = "Interpolating"
-        reset = False
+
     if register_constraints:
+        force_manager.clear()
+        force_manager.push(
+            "gravity",
+            [ball.node.id for ball in balls],
+            physics.gravity,
+        )
+        force_manager.push(
+            "drag",
+            [ball.node.id for ball in balls],
+            physics.drag,
+        )
+
         constraint_manager.clear()
         for i in range(16):
             constraints.register_table_surface_constraint(balls[i], constraint_manager)
@@ -182,6 +190,11 @@ def update(
             for j in range(i + 1, 16):
                 constraints.register_distance_constraint(balls[i], balls[j], constraint_manager)
         register_constraints = False
+    
+    physics.simulate(delta_time, balls, reset, white_ball_impulse)
+    if reset:
+        camera_state = "Interpolating"
+        reset = False
     white_ball_impulse = np.zeros(3)
 
     if camera_state == "Fixed":

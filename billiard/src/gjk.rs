@@ -2,7 +2,10 @@ use glam::Vec3;
 
 use crate::shape::ConvexShape;
 
-pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(shape1: &S1, shape2: &S2) -> bool {
+pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+    shape1: &S1,
+    shape2: &S2,
+) -> bool {
     let direction = shape2.centroid() - shape1.centroid();
     let a = support(shape1, shape2, direction);
 
@@ -64,12 +67,12 @@ fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
 
     let ab_normal = ab.cross(abc);
     if ab_normal.dot(ao) > 0.0 {
-        return (Simplex::Line([b, a]), ab_normal, false);
+        return nearest_line([b, a]);
     }
 
     let ac_normal = abc.cross(ac);
     if ac_normal.dot(ao) > 0.0 {
-        return (Simplex::Line([c, a]), ac_normal, false);
+        return nearest_line([c, a]);
     }
 
     if abc.dot(ac) > 0.0 {
@@ -90,7 +93,7 @@ fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
         abc = -abc;
     }
     if abc.dot(ao) > 0.0 {
-        return (Simplex::Triangle([c, b, a]), abc, false);
+        return nearest_triangle([c, b, a]);
     }
 
     let mut abd = ab.cross(ad);
@@ -98,7 +101,7 @@ fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
         abd = -abd;
     }
     if abd.dot(ao) > 0.0 {
-        return (Simplex::Triangle([d, b, a]), abd, false);
+        return nearest_triangle([d, b, a]);
     }
 
     let mut acd = ac.cross(ad);
@@ -106,12 +109,13 @@ fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
         acd = -acd;
     }
     if acd.dot(ao) > 0.0 {
-        return (Simplex::Triangle([d, c, a]), acd, false);
+        return nearest_triangle([d, c, a]);
     }
 
     (Simplex::Tetrahedron([d, c, b, a]), ao, true)
 }
 
+#[derive(Debug)]
 enum Simplex {
     Point([Vec3; 1]),
     Line([Vec3; 2]),
@@ -127,5 +131,54 @@ impl Simplex {
             Simplex::Triangle([c, b, a]) => Simplex::Tetrahedron([c, b, a, point]),
             Simplex::Tetrahedron(_) => unimplemented!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use glam::vec3;
+
+    use crate::shape::Ball;
+
+    use super::*;
+
+    #[test]
+    fn test_two_balls() {
+        let origin = Ball {
+            center: Vec3::ZERO,
+            radius: 1.0,
+        };
+
+        assert!(gjk(&origin, &origin));
+
+        let x = Ball {
+            center: Vec3::X,
+            radius: 1.0,
+        };
+        assert!(gjk(&x, &x));
+        assert!(gjk(&origin, &x));
+
+        let three_x = Ball {
+            center: 3.0 * Vec3::X,
+            radius: 1.0,
+        };
+        assert!(!gjk(&origin, &three_x));
+        assert!(gjk(&x, &three_x));
+
+        let random_center = Ball {
+            center: vec3(-1.0312, 0.13312, 1.2),
+            radius: 1.0,
+        };
+        assert!(gjk(&origin, &random_center));
+        assert!(!gjk(&x, &random_center));
+
+        let radius = 2.343;
+        let random_radius = Ball {
+            center: Vec3::Y * radius,
+            radius,
+        };
+        assert!(gjk(&origin, &random_radius));
+        assert!(gjk(&x, &random_radius));
+        assert!(!gjk(&three_x, &random_radius));
     }
 }

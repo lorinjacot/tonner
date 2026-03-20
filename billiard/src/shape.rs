@@ -66,8 +66,8 @@ pub trait ConvexShape: Shape {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Ball {
-    center: Vec3,
-    radius: f32,
+    pub center: Vec3,
+    pub radius: f32,
 }
 
 impl Shape for Ball {

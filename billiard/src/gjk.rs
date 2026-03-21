@@ -77,22 +77,22 @@ fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
     let ac = c - a;
     let ao = -a;
 
-    let abc = ab.cross(ac);
+    let abc_normal = ab.cross(ac);
 
-    let ab_normal = ab.cross(abc);
+    let ab_normal = ab.cross(abc_normal);
     if ab_normal.dot(ao) > 0.0 {
-        return nearest_line([b, a]);
+        return (Simplex::Line([b, a]), ab_normal, false);
     }
 
-    let ac_normal = abc.cross(ac);
+    let ac_normal = abc_normal.cross(ac);
     if ac_normal.dot(ao) > 0.0 {
-        return nearest_line([c, a]);
+        return (Simplex::Line([c, a]), ac_normal, false);
     }
 
-    if abc.dot(ao) > 0.0 {
-        (Simplex::Triangle([c, b, a]), abc, false)
+    if abc_normal.dot(ao) > 0.0 {
+        (Simplex::Triangle([c, b, a]), abc_normal, false)
     } else {
-        (Simplex::Triangle([b, c, a]), -abc, false)
+        (Simplex::Triangle([b, c, a]), -abc_normal, false)
     }
 }
 
@@ -102,19 +102,19 @@ fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
     let ad = d - a;
     let ao = -a;
 
-    let abc = ab.cross(ac);
-    if abc.dot(ao) > 0.0 {
-        return nearest_triangle([c, b, a]);
+    let abc_normal = ab.cross(ac);
+    if abc_normal.dot(ao) > 0.0 {
+        return (Simplex::Triangle([c, b, a]), abc_normal, false);
     }
 
-    let acd = ac.cross(ad);
-    if acd.dot(ao) > 0.0 {
-        return nearest_triangle([d, c, a]);
+    let acd_normal = ac.cross(ad);
+    if acd_normal.dot(ao) > 0.0 {
+        return (Simplex::Triangle([d, c, a]), acd_normal, false);
     }
 
-    let adb = ad.cross(ab);
-    if adb.dot(ao) > 0.0 {
-        return nearest_triangle([b, d, a]);
+    let adb_normal = ad.cross(ab);
+    if adb_normal.dot(ao) > 0.0 {
+        return (Simplex::Triangle([b, d, a]), adb_normal, false);
     }
 
     (Simplex::Tetrahedron([d, c, b, a]), ao, true)

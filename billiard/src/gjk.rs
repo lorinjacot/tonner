@@ -6,17 +6,19 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape1: &S1,
     shape2: &S2,
 ) -> bool {
-    let direction = shape2.centroid() - shape1.centroid();
+    let mut direction = shape2.centroid() - shape1.centroid();
+    if direction.abs_diff_eq(Vec3::ZERO, f32::EPSILON) {
+        return true;
+    }
     let a = support(shape1, shape2, direction);
 
     let mut simplex = Simplex::Point([a]);
-    let mut direction = -a;
+    direction = -a;
 
     loop {
         let a = support(shape1, shape2, direction);
 
         if a.dot(direction) < 0.0 {
-            // new point did not pass origin => no collision
             return false;
         }
 
@@ -54,8 +56,18 @@ fn nearest_simplex(simplex: Simplex) -> (Simplex, Vec3, bool) {
 fn nearest_line([b, a]: [Vec3; 2]) -> (Simplex, Vec3, bool) {
     let ab = b - a;
     let ao = -a;
-    let direction = ab.cross(ao).cross(ab);
-    (Simplex::Line([b, a]), direction, false)
+
+    if ab.dot(ao) > 0.0 {
+        let direction = ab.cross(ao).cross(ab);
+        if direction.abs_diff_eq(Vec3::ZERO, 10.0 * f32::EPSILON) {
+            // origin is on the line
+            (Simplex::Line([b, a]), ao, true)
+        } else {
+            (Simplex::Line([b, a]), direction, false)
+        }
+    } else {
+        (Simplex::Point([a]), ao, false)
+    }
 }
 
 fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
@@ -65,20 +77,30 @@ fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
 
     let abc = ab.cross(ac);
 
+    let ac_normal = abc.cross(ac);
+    if ac_normal.dot(ao) > 0.0 {
+        return if ac.dot(ao) > 0.0 {
+            let direction = ac.cross(ao).cross(ac);
+            if direction.abs_diff_eq(Vec3::ZERO, 10.0 * f32::EPSILON) {
+                // origin is on the line
+                (Simplex::Line([c, a]), ac, true)
+            } else {
+                (Simplex::Line([c, a]), direction, false)
+            }
+        } else {
+            nearest_line([b, a])
+        };
+    }
+
     let ab_normal = ab.cross(abc);
     if ab_normal.dot(ao) > 0.0 {
         return nearest_line([b, a]);
     }
 
-    let ac_normal = abc.cross(ac);
-    if ac_normal.dot(ao) > 0.0 {
-        return nearest_line([c, a]);
-    }
-
     if abc.dot(ao) > 0.0 {
         (Simplex::Triangle([c, b, a]), abc, false)
     } else {
-        (Simplex::Triangle([c, b, a]), -abc, false)
+        (Simplex::Triangle([b, c, a]), -abc, false)
     }
 }
 
@@ -88,28 +110,19 @@ fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
     let ad = d - a;
     let ao = -a;
 
-    let mut abc = ab.cross(ac);
-    if abc.dot(ad) > 0.0 {
-        abc = -abc;
-    }
+    let abc = ab.cross(ac);
     if abc.dot(ao) > 0.0 {
         return nearest_triangle([c, b, a]);
     }
 
-    let mut abd = ab.cross(ad);
-    if abd.dot(ac) > 0.0 {
-        abd = -abd;
-    }
-    if abd.dot(ao) > 0.0 {
-        return nearest_triangle([d, b, a]);
-    }
-
-    let mut acd = ac.cross(ad);
-    if acd.dot(ab) > 0.0 {
-        acd = -acd;
-    }
+    let acd = ac.cross(ad);
     if acd.dot(ao) > 0.0 {
         return nearest_triangle([d, c, a]);
+    }
+
+    let adb = ad.cross(ab);
+    if adb.dot(ao) > 0.0 {
+        return nearest_triangle([b, d, a]);
     }
 
     (Simplex::Tetrahedron([d, c, b, a]), ao, true)
@@ -200,13 +213,40 @@ mod tests {
         for x in range {
             for y in range {
                 for z in range {
-                    let other =
-                        AxisAlignedBox::from_center_dimension(Vec3 { x, y, z }, 1.0, 1.0, 1.0);
+                    let other = AxisAlignedBox::from_center_dimension(vec3(x, y, z), 1.0, 1.0, 1.0);
 
                     let collision_expected = x.abs() <= 1.0 && y.abs() <= 1.0 && z.abs() <= 1.0;
                     assert_eq!(collision_expected, gjk(&origin, &other));
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_ball_axis_aligned_boxes() {
+        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+        let mut ball = Ball {
+            center: Vec3::ZERO,
+            radius: 1.0,
+        };
+        assert!(gjk(&aab, &ball));
+
+        ball.center = vec3(1.99, 0.0, 0.0);
+        assert!(gjk(&aab, &ball));
+        ball.center = vec3(2.0, 0.0, 0.0);
+        assert!(gjk(&aab, &ball));
+        ball.center = vec3(2.01, 0.0, 0.0);
+        assert!(!gjk(&aab, &ball));
+
+        ball.center = vec3(1.70, 1.70, 0.0);
+        assert!(gjk(&aab, &ball));
+        ball.center = vec3(1.71, 1.71, 0.0);
+        assert!(!gjk(&aab, &ball));
+
+        ball.center = vec3(1.57, 1.57, 1.57);
+        assert!(gjk(&aab, &ball));
+        ball.center = vec3(1.58, 1.58, 1.58);
+        assert!(!gjk(&aab, &ball));
     }
 }

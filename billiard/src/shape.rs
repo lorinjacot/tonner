@@ -37,7 +37,7 @@ impl Shape for AxisAlignedBox {
     }
 
     fn centroid(&self) -> Vec3 {
-        self.max.midpoint(self.max)
+        self.min.midpoint(self.max)
     }
 }
 

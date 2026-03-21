@@ -7,16 +7,23 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape2: &S2,
 ) -> bool {
     let mut direction = shape2.centroid() - shape1.centroid();
-    if direction.abs_diff_eq(Vec3::ZERO, f32::EPSILON) {
+    if is_zero(direction) {
         return true;
     }
+
     let a = support(shape1, shape2, direction);
+    if is_zero(a) {
+        return true;
+    }
 
     let mut simplex = Simplex::Point([a]);
     direction = -a;
 
     loop {
         let a = support(shape1, shape2, direction);
+        if is_zero(a) {
+            return true;
+        }
 
         if a.dot(direction) < 0.0 {
             return false;
@@ -30,6 +37,10 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
             return true;
         }
     }
+}
+
+fn is_zero(a: Vec3) -> bool {
+    a.abs_diff_eq(Vec3::ZERO, f32::EPSILON)
 }
 
 fn support<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
@@ -57,17 +68,8 @@ fn nearest_line([b, a]: [Vec3; 2]) -> (Simplex, Vec3, bool) {
     let ab = b - a;
     let ao = -a;
 
-    if ab.dot(ao) > 0.0 {
-        let direction = ab.cross(ao).cross(ab);
-        if direction.abs_diff_eq(Vec3::ZERO, 10.0 * f32::EPSILON) {
-            // origin is on the line
-            (Simplex::Line([b, a]), ao, true)
-        } else {
-            (Simplex::Line([b, a]), direction, false)
-        }
-    } else {
-        (Simplex::Point([a]), ao, false)
-    }
+    let ab_normal = ab.cross(ao).cross(ab);
+    (Simplex::Line([b, a]), ab_normal, false)
 }
 
 fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
@@ -77,24 +79,14 @@ fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
 
     let abc = ab.cross(ac);
 
-    let ac_normal = abc.cross(ac);
-    if ac_normal.dot(ao) > 0.0 {
-        return if ac.dot(ao) > 0.0 {
-            let direction = ac.cross(ao).cross(ac);
-            if direction.abs_diff_eq(Vec3::ZERO, 10.0 * f32::EPSILON) {
-                // origin is on the line
-                (Simplex::Line([c, a]), ac, true)
-            } else {
-                (Simplex::Line([c, a]), direction, false)
-            }
-        } else {
-            nearest_line([b, a])
-        };
-    }
-
     let ab_normal = ab.cross(abc);
     if ab_normal.dot(ao) > 0.0 {
         return nearest_line([b, a]);
+    }
+
+    let ac_normal = abc.cross(ac);
+    if ac_normal.dot(ao) > 0.0 {
+        return nearest_line([c, a]);
     }
 
     if abc.dot(ao) > 0.0 {
@@ -248,5 +240,19 @@ mod tests {
         assert!(gjk(&aab, &ball));
         ball.center = vec3(1.58, 1.58, 1.58);
         assert!(!gjk(&aab, &ball));
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        // Minkowski point `a` exactly on origin
+        let a = Ball {
+            center: Vec3::X,
+            radius: 1.0,
+        };
+        let b = Ball {
+            center: 3.0 * Vec3::X,
+            radius: 1.0,
+        };
+        assert!(gjk(&a, &b));
     }
 }

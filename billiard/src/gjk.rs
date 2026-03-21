@@ -75,7 +75,7 @@ fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
         return nearest_line([c, a]);
     }
 
-    if abc.dot(ac) > 0.0 {
+    if abc.dot(ao) > 0.0 {
         (Simplex::Triangle([c, b, a]), abc, false)
     } else {
         (Simplex::Triangle([c, b, a]), -abc, false)
@@ -138,7 +138,7 @@ impl Simplex {
 mod tests {
     use glam::vec3;
 
-    use crate::shape::Ball;
+    use crate::shape::{AxisAlignedBox, Ball};
 
     use super::*;
 
@@ -180,5 +180,33 @@ mod tests {
         assert!(gjk(&origin, &random_radius));
         assert!(gjk(&x, &random_radius));
         assert!(!gjk(&three_x, &random_radius));
+    }
+
+    #[test]
+    fn test_two_axis_aligned_boxes() {
+        let origin = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 1.0, 1.0, 1.0);
+        assert!(gjk(&origin, &origin));
+
+        let top = AxisAlignedBox::from_center_dimension(0.5 * Vec3::Y, 1.0, 1.0, 1.0);
+        assert!(gjk(&top, &origin));
+
+        let top = AxisAlignedBox::from_center_dimension(Vec3::Y, 1.0, 1.0, 1.0);
+        assert!(gjk(&top, &origin));
+
+        let top = AxisAlignedBox::from_center_dimension(1.5 * Vec3::Y, 1.0, 1.0, 1.0);
+        assert!(!gjk(&top, &origin));
+
+        let range = [-1.5, -1.234, -1.0, -0.789, 0.0, 0.543, 1.0, 1.432, 1.5];
+        for x in range {
+            for y in range {
+                for z in range {
+                    let other =
+                        AxisAlignedBox::from_center_dimension(Vec3 { x, y, z }, 1.0, 1.0, 1.0);
+
+                    let collision_expected = x.abs() <= 1.0 && y.abs() <= 1.0 && z.abs() <= 1.0;
+                    assert_eq!(collision_expected, gjk(&origin, &other));
+                }
+            }
+        }
     }
 }

@@ -8,6 +8,29 @@ pub struct AxisAlignedBox {
     max: Vec3,
 }
 
+impl AxisAlignedBox {
+    pub fn from_min_max(min: Vec3, max: Vec3) -> AxisAlignedBox {
+        AxisAlignedBox { min, max }
+    }
+
+    /// Creates an `AxisAlignedBox` from its center, its width, height and depth.
+    ///
+    /// `width`, `height` and `depth` must be larger or equal to `0.0`. They represent the length of the side parallel
+    /// to the x, y and respectively z-axis.
+    pub fn from_center_dimension(
+        center: Vec3,
+        width: f32,
+        height: f32,
+        depth: f32,
+    ) -> AxisAlignedBox {
+        let half = vec3(width, height, depth) / 2.0;
+        AxisAlignedBox {
+            min: center - half,
+            max: center + half,
+        }
+    }
+}
+
 impl Shape for AxisAlignedBox {
     fn bounding_box(&self) -> AxisAlignedBox {
         *self

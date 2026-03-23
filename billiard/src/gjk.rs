@@ -7,23 +7,13 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape2: &S2,
 ) -> bool {
     let mut direction = shape2.centroid() - shape1.centroid();
-    if is_zero(direction) {
-        return true;
-    }
-
     let a = support(shape1, shape2, direction);
-    if is_zero(a) {
-        return true;
-    }
 
     let mut simplex = Simplex::Point([a]);
     direction = -a;
 
     loop {
         let a = support(shape1, shape2, direction);
-        if is_zero(a) {
-            return true;
-        }
 
         if a.dot(direction) < 0.0 {
             return false;
@@ -37,10 +27,6 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
             return true;
         }
     }
-}
-
-fn is_zero(a: Vec3) -> bool {
-    a.abs_diff_eq(Vec3::ZERO, f32::EPSILON)
 }
 
 fn support<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(

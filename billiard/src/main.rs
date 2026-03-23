@@ -31,11 +31,12 @@ use crate::table::table;
 
 mod arrow;
 mod ball;
+mod epa;
+mod gjk;
 mod physics;
 mod python;
-mod table;
 mod shape;
-mod gjk;
+mod table;
 
 struct State {
     ctx: Context,

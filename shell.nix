@@ -5,6 +5,11 @@ let
     libxkbcommon
     vulkan-loader
   ];
+  myPython = pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
+    debugpy
+    numpy
+    quaternion
+  ]);
 in
 pkgs.mkShell {
   strictDeps = true;
@@ -18,15 +23,14 @@ pkgs.mkShell {
   LD_LIBRARY_PATH = libPath;
   RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
 
-  packages = with pkgs; [
-    (python3.withPackages (python-pkgs: with python-pkgs; [
-      debugpy
-      numpy
-      quaternion
-    ]))
+  packages = [
+    myPython
   ];
+
+  PYO3_PYTHON="${myPython}/bin/python3";
 
   shellHook = ''
     export TMPDIR=/tmp
+    export PYO3_PYTHON=${myPython}/bin/python3
   '';
 }

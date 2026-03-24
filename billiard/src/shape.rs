@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use glam::{Vec3, vec3};
 
 use crate::gjk::gjk;

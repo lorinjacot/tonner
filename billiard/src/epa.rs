@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{cmp::Reverse, collections::BinaryHeap};
 
 use glam::{Vec3, Vec4};
@@ -25,7 +27,7 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         let distance_support = support.difference.dot(closest_face.normal);
 
         if (distance_support - closest_face.distance).abs() < 1e-4 {
-            return closest_face.normal.extend(closest_face.distance);
+            break;
         }
 
         // In order to keep the polyhedron convex, we need to remove all faces visible from `support`.
@@ -60,8 +62,8 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         );
     }
 
-    // min_normal.extend(min_distance)
-    panic!()
+    let closest_face = &faces.peek().unwrap().0;
+    closest_face.normal.extend(closest_face.distance)
 }
 
 #[derive(Debug)]
@@ -196,10 +198,10 @@ mod tests {
         let separating_vector = epa(&aab, &ball, tetrahedron);
         assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
 
-        // ball.center = vec3(1.57, 1.57, 1.57);
-        // let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        // let separating_vector = epa(&aab, &ball, tetrahedron);
-        // assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
+        ball.center = vec3(1.57, 1.57, 1.57);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let separating_vector = epa(&aab, &ball, tetrahedron);
+        assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
     }
 
     fn assert_seperating_vector(expected_direction: Vec3, expected_length: f32, actual: Vec4) {

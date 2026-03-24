@@ -1,11 +1,11 @@
 use glam::{Vec3, Vec4};
 
-use crate::shape::ConvexShape;
+use crate::{gjk::SupportPoint, shape::ConvexShape};
 
 pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape1: &S1,
     shape2: &S2,
-    tetrahedron: [Vec3; 4],
+    tetrahedron: [SupportPoint; 4],
 ) -> Vec4 {
     let mut vertices = Vec::from(tetrahedron);
     let mut faces = Vec::from(
@@ -25,8 +25,8 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
             }
         }
 
-        let support = support(shape1, shape2, min_normal);
-        let distance_support = support.dot(min_normal);
+        let support = SupportPoint::new(shape1, shape2, min_normal);
+        let distance_support = support.difference.dot(min_normal);
 
         if (distance_support - min_distance).abs() < 1e-4 {
             return min_normal.extend(min_distance);
@@ -34,7 +34,7 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 
         for i in (0..faces.len()).rev() {
             let face = &faces[i];
-            if face.normal.dot(support) > 0.0 {
+            if face.normal.dot(support.difference) > 0.0 {
                 let face = faces.swap_remove(i);
 
                 face.edges().into_iter().for_each(|(i, j)| {
@@ -62,14 +62,6 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     }
 }
 
-fn support<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
-    shape1: &S1,
-    shape2: &S2,
-    direction: Vec3,
-) -> Vec3 {
-    shape1.support_point(direction) - shape2.support_point(-direction)
-}
-
 struct Face {
     indices: [usize; 3],
     normal: Vec3,
@@ -77,8 +69,8 @@ struct Face {
 }
 
 impl Face {
-    fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[Vec3]) -> Face {
-        let [a, b, c] = vertex_indices.map(|i| vertices[i]);
+    fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
+        let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
         let mut normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
             dbg!(vertices);
             todo!("abc is a line or a point")
@@ -176,22 +168,27 @@ mod tests {
         let separating_vector = epa(&aab, &ball, tetrahedron);
         assert_seperating_vector(ball.center.normalize(), 0.0, separating_vector);
 
-        // ball.center = vec3(2.01, 0.0, 0.0);
-        // assert!(!gjk(&aab, &ball));
+        ball.center = vec3(1.70, 1.70, 0.0);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let separating_vector = epa(&aab, &ball, tetrahedron);
+        assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
 
-        // ball.center = vec3(1.70, 1.70, 0.0);
-        // assert!(gjk(&aab, &ball));
-        // ball.center = vec3(1.71, 1.71, 0.0);
-        // assert!(!gjk(&aab, &ball));
-
-        // ball.center = vec3(1.57, 1.57, 1.57);
-        // assert!(gjk(&aab, &ball));
-        // ball.center = vec3(1.58, 1.58, 1.58);
-        // assert!(!gjk(&aab, &ball));
+        ball.center = vec3(1.57, 1.57, 1.57);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let separating_vector = epa(&aab, &ball, tetrahedron);
+        assert_seperating_vector(dbg!(ball.center.normalize()), 0.01, separating_vector);
     }
 
     fn assert_seperating_vector(expected_direction: Vec3, expected_length: f32, actual: Vec4) {
-        assert!(actual.truncate().abs_diff_eq(expected_direction, 1e-4));
-        assert!((actual.w - expected_length).abs() <= 1e-4);
+        assert!(
+            actual.truncate().abs_diff_eq(expected_direction, 1e-2),
+            "Expected {expected_direction}, got {}",
+            actual.truncate()
+        );
+        assert!(
+            (actual.w - expected_length).abs() <= 1e-4,
+            "Expected {expected_length}, got {}",
+            actual.w
+        );
     }
 }

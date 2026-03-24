@@ -12,21 +12,21 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 pub(crate) fn gjk_tetrahedron<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape1: &S1,
     shape2: &S2,
-) -> Option<[Vec3; 4]> {
+) -> Option<[SupportPoint; 4]> {
     let mut direction = shape2.centroid() - shape1.centroid();
-    let a = support(shape1, shape2, direction);
+    let a = SupportPoint::new(shape1, shape2, direction);
 
+    direction = -a.difference;
     let mut simplex = Simplex::Point([a]);
-    direction = -a;
 
     loop {
-        let a = support(shape1, shape2, direction);
+        let a = SupportPoint::new(shape1, shape2, direction);
 
-        if a.dot(direction) < 0.0 {
+        if a.difference.dot(direction) < 0.0 {
             return None;
         }
 
-        simplex.push(a);
+        simplex = simplex.with(a);
 
         let contains_origin;
         (simplex, direction, contains_origin) = nearest_simplex(simplex);
@@ -38,14 +38,6 @@ pub(crate) fn gjk_tetrahedron<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized
             }
         }
     }
-}
-
-fn support<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
-    shape1: &S1,
-    shape2: &S2,
-    direction: Vec3,
-) -> Vec3 {
-    shape1.support_point(direction) - shape2.support_point(-direction)
 }
 
 /// Returns:
@@ -61,18 +53,18 @@ fn nearest_simplex(simplex: Simplex) -> (Simplex, Vec3, bool) {
     }
 }
 
-fn nearest_line([b, a]: [Vec3; 2]) -> (Simplex, Vec3, bool) {
-    let ab = b - a;
-    let ao = -a;
+fn nearest_line([b, a]: [SupportPoint; 2]) -> (Simplex, Vec3, bool) {
+    let ab = b.difference - a.difference;
+    let ao = -a.difference;
 
     let ab_normal = ab.cross(ao).cross(ab);
     (Simplex::Line([b, a]), ab_normal, false)
 }
 
-fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
-    let ab = b - a;
-    let ac = c - a;
-    let ao = -a;
+fn nearest_triangle([c, b, a]: [SupportPoint; 3]) -> (Simplex, Vec3, bool) {
+    let ab = b.difference - a.difference;
+    let ac = c.difference - a.difference;
+    let ao = -a.difference;
 
     let abc_normal = ab.cross(ac);
 
@@ -93,11 +85,11 @@ fn nearest_triangle([c, b, a]: [Vec3; 3]) -> (Simplex, Vec3, bool) {
     }
 }
 
-fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
-    let ab = b - a;
-    let ac = c - a;
-    let ad = d - a;
-    let ao = -a;
+fn nearest_tetrahedron([d, c, b, a]: [SupportPoint; 4]) -> (Simplex, Vec3, bool) {
+    let ab = b.difference - a.difference;
+    let ac = c.difference - a.difference;
+    let ad = d.difference - a.difference;
+    let ao = -a.difference;
 
     let abc_normal = ab.cross(ac);
     if abc_normal.dot(ao) > 0.0 {
@@ -119,19 +111,44 @@ fn nearest_tetrahedron([d, c, b, a]: [Vec3; 4]) -> (Simplex, Vec3, bool) {
 
 #[derive(Debug)]
 enum Simplex {
-    Point([Vec3; 1]),
-    Line([Vec3; 2]),
-    Triangle([Vec3; 3]),
-    Tetrahedron([Vec3; 4]),
+    Point([SupportPoint; 1]),
+    Line([SupportPoint; 2]),
+    Triangle([SupportPoint; 3]),
+    Tetrahedron([SupportPoint; 4]),
 }
 
 impl Simplex {
-    fn push(&mut self, point: Vec3) {
-        *self = match *self {
-            Simplex::Point([a]) => Simplex::Line([a, point]),
-            Simplex::Line([b, a]) => Simplex::Triangle([b, a, point]),
-            Simplex::Triangle([c, b, a]) => Simplex::Tetrahedron([c, b, a, point]),
+    fn with(self, a: SupportPoint) -> Simplex {
+        match self {
+            Simplex::Point([b]) => Simplex::Line([b, a]),
+            Simplex::Line([c, b]) => Simplex::Triangle([c, b, a]),
+            Simplex::Triangle([d, c, b]) => Simplex::Tetrahedron([d, c, b, a]),
             Simplex::Tetrahedron(_) => unimplemented!(),
+        }
+    }
+}
+
+/// 3d point living on the border of the Minkowsi difference.
+#[derive(Debug, Clone)]
+pub(crate) struct SupportPoint {
+    pub(crate) point1: Vec3,
+    pub(crate) point2: Vec3,
+    pub(crate) difference: Vec3,
+}
+
+impl SupportPoint {
+    pub fn new<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+        shape1: &S1,
+        shape2: &S2,
+        direction: Vec3,
+    ) -> SupportPoint {
+        let point1 = shape1.support_point(direction);
+        let point2 = shape2.support_point(-direction);
+        let difference = point1 - point2;
+        SupportPoint {
+            point1,
+            point2,
+            difference,
         }
     }
 }

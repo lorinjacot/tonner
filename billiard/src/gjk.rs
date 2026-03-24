@@ -6,6 +6,13 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape1: &S1,
     shape2: &S2,
 ) -> bool {
+    gjk_tetrahedron(shape1, shape2).is_some()
+}
+
+pub(crate) fn gjk_tetrahedron<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+    shape1: &S1,
+    shape2: &S2,
+) -> Option<[Vec3; 4]> {
     let mut direction = shape2.centroid() - shape1.centroid();
     let a = support(shape1, shape2, direction);
 
@@ -16,7 +23,7 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         let a = support(shape1, shape2, direction);
 
         if a.dot(direction) < 0.0 {
-            return false;
+            return None;
         }
 
         simplex.push(a);
@@ -24,7 +31,11 @@ pub(crate) fn gjk<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         let contains_origin;
         (simplex, direction, contains_origin) = nearest_simplex(simplex);
         if contains_origin {
-            return true;
+            if let Simplex::Tetrahedron(vertices) = simplex {
+                return Some(vertices);
+            } else {
+                unreachable!();
+            }
         }
     }
 }

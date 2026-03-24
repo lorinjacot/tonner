@@ -169,16 +169,13 @@ mod tests {
         ball.center = vec3(1.99, 0.0, 0.0);
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
         let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert!(
-            separating_vector
-                .truncate()
-                .abs_diff_eq(ball.center.normalize(), 1e-4)
-        );
-        assert!((separating_vector.w - 0.01).abs() <= 1e-4);
+        assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
 
-        // assert!(gjk(&aab, &ball));
-        // ball.center = vec3(2.0, 0.0, 0.0);
-        // assert!(gjk(&aab, &ball));
+        ball.center = vec3(2.0, 0.0, 0.0);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let separating_vector = epa(&aab, &ball, tetrahedron);
+        assert_seperating_vector(ball.center.normalize(), 0.0, separating_vector);
+
         // ball.center = vec3(2.01, 0.0, 0.0);
         // assert!(!gjk(&aab, &ball));
 
@@ -191,5 +188,10 @@ mod tests {
         // assert!(gjk(&aab, &ball));
         // ball.center = vec3(1.58, 1.58, 1.58);
         // assert!(!gjk(&aab, &ball));
+    }
+
+    fn assert_seperating_vector(expected_direction: Vec3, expected_length: f32, actual: Vec4) {
+        assert!(actual.truncate().abs_diff_eq(expected_direction, 1e-4));
+        assert!((actual.w - expected_length).abs() <= 1e-4);
     }
 }

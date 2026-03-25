@@ -9,12 +9,27 @@ repository = "https://github.com/lorinjacot/tonner"
 readme = "README.md"
 
 [lib]
-crate-type = ["lib", "cdylib", "rlib"]
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
+bitflags.workspace = true
+bytemuck.workspace = true
+dashmap.workspace = true
+glam = { workspace = true, features = ["bytemuck"] }
+image.workspace = true
+log.workspace = true
+mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
+numpy = { workspace = true, optional = true }
 pyo3 = { workspace = true, optional = true }
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 wasm-bindgen = { workspace = true, optional = true }
+wgpu.workspace = true
 
 [features]
 python = ["dep:pyo3"]
 java-script = ["dep:wasm-bindgen"]
+
+[dev-dependencies]
+pollster.workspace = true
+winit.workspace = true

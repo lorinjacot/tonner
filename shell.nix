@@ -1,6 +1,5 @@
 { pkgs ? import <nixpkgs> { config = {}; overlays = []; } }:
 let 
-  overrides = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml));
   libPath = with pkgs; lib.makeLibraryPath [
     wayland
     libxkbcommon
@@ -27,7 +26,6 @@ pkgs.callPackage (
       rustPlatform.bindgenHook
       nodejs_24
     ];
-    RUSTC_VERSION = overrides.toolchain.channel;
     LD_LIBRARY_PATH = libPath;
 
     packages = [
@@ -38,7 +36,6 @@ pkgs.callPackage (
 
     shellHook = ''
       export PATH="''${CARGO_HOME:-~/.cargo}/bin":"$PATH"
-      export PATH="''${RUSTUP_HOME:-~/.rustup}/toolchains/$RUSTC_VERSION-${stdenv.hostPlatform.rust.rustcTarget}/bin":"$PATH"
 
       export TMPDIR=/tmp
 

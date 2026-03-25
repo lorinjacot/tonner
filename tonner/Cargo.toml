@@ -9,3 +9,7 @@ repository = "https://github.com/lorinjacot/tonner"
 readme = "README.md"
 
 [dependencies]
+pyo3 = { workspace = true, optional = true }
+
+[features]
+python = ["dep:pyo3"]

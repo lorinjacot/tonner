@@ -9,6 +9,7 @@ let
     debugpy
     numpy
     quaternion
+    uv
   ]);
 in
 pkgs.mkShell {
@@ -32,5 +33,6 @@ pkgs.mkShell {
   shellHook = ''
     export TMPDIR=/tmp
     export PYO3_PYTHON=${myPython}/bin/python3
+    export PATH="$HOME/.local/bin:$PATH"
   '';
 }

@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use anyhow::{Context, Result, anyhow};
 use glam::{Mat4, Quat};
 use serde::{Deserialize, Serialize};
-use storm::{
+use tonner::{
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
     scene_graph::{NodeBuilder, SceneGraph},
@@ -26,7 +26,7 @@ use crate::{Mesh, skin::Skin};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    pub(super) id: Option<storm::scene_graph::NodeId>,
+    pub(super) id: Option<tonner::scene_graph::NodeId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -90,9 +90,9 @@ impl Node {
     pub(super) fn load(
         index: usize,
         nodes: &mut [Node],
-        parent: Option<storm::scene_graph::NodeId>,
+        parent: Option<tonner::scene_graph::NodeId>,
         scene_graph: &mut SceneGraph,
-    ) -> Result<storm::scene_graph::NodeId> {
+    ) -> Result<tonner::scene_graph::NodeId> {
         let node = nodes
             .get_mut(index)
             .with_context(|| format!("node {index} is out of range."))?;
@@ -143,7 +143,7 @@ impl Node {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<storm::mesh::material::Material>,
+        default_material: &mut Option<tonner::mesh::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
@@ -151,7 +151,7 @@ impl Node {
         buffers: &[super::Buffer],
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<()> {
         let node = &nodes[index];

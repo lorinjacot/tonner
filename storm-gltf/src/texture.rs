@@ -49,7 +49,7 @@ impl Image {
         base_path: &Path,
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<wgpu::TextureView> {
         if let Some(image) = &self.wgpu {
@@ -104,7 +104,7 @@ impl Image {
             ImageReader::with_format(reader, format).decode()?
         };
 
-        let texture = storm::texture::TextureBuilder::default()
+        let texture = tonner::texture::TextureBuilder::default()
             .name(name)
             .from_dynamic_image(&image, srgb)
             // .generate_mips()
@@ -181,7 +181,7 @@ pub(super) struct Sampler {
 }
 
 impl Sampler {
-    fn load(&mut self, ctx: &storm::Context) -> anyhow::Result<wgpu::Sampler> {
+    fn load(&mut self, ctx: &tonner::Context) -> anyhow::Result<wgpu::Sampler> {
         if let Some(sampler) = &self.wgpu {
             return Ok(sampler.clone());
         }
@@ -317,7 +317,7 @@ impl Texture {
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> anyhow::Result<(wgpu::TextureView, wgpu::Sampler)> {
         let sampler = self.sampler;

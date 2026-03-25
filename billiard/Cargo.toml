@@ -13,6 +13,6 @@ numpy.workspace = true
 pollster.workspace = true
 pyo3 = { workspace = true, features = ["auto-initialize"] }
 pyo3-ffi.workspace = true
-storm = { workspace = true, features = ["pyo3"] }
+tonner = { workspace = true, features = ["python"] }
 wgpu.workspace = true
 winit.workspace = true

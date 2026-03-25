@@ -27,7 +27,7 @@ wasm-bindgen = { workspace = true, optional = true }
 wgpu.workspace = true
 
 [features]
-python = ["dep:pyo3"]
+python = ["dep:pyo3", "dep:numpy"]
 java-script = ["dep:wasm-bindgen"]
 
 [dev-dependencies]

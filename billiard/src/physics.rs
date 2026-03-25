@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Deref, time::Duration};
 use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
-use storm::scene_graph::{NodeId, SceneGraph};
+use tonner::scene_graph::{NodeId, SceneGraph};
 
 use crate::ball::Ball;
 

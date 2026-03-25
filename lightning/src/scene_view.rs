@@ -5,7 +5,7 @@ use std::{
 };
 
 use eframe::egui_wgpu;
-use storm::{Context, renderer::camera::Camera};
+use tonner::{Context, renderer::camera::Camera};
 use storm_animation::Animatable;
 use storm_controls::{EguiControls, orbit::OrbitControls};
 
@@ -17,7 +17,7 @@ pub struct SceneView {
     texture_view: TextureView,
     sized_texture: egui::load::SizedTexture,
     egui_renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
-    storm_renderer: storm::renderer::Renderer,
+    storm_renderer: tonner::renderer::Renderer,
 }
 
 impl SceneView {
@@ -39,7 +39,7 @@ impl SceneView {
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
         let storm_renderer =
-            storm::renderer::Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx);
+            tonner::renderer::Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx);
 
         let controls = OrbitControls::new(camera);
 

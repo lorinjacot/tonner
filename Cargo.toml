@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "tonner",
-    "storm",
     "storm-animation",
     "storm-controls",
     "storm-gltf",
@@ -55,7 +54,7 @@ web-sys = "0.3.81"
 winit = "0.30.12"
 wgpu = "27.0.1"
 
-storm = { path = "storm" }
+tonner = { path = "tonner" }
 storm-animation = { path = "storm-animation" }
 storm-controls = { path = "storm-controls" }
 glam-js = { path = "glam-js" }

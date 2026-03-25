@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use storm::{
+use tonner::{
     Context,
     geometry::CylinderBuilder,
     mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},

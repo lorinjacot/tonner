@@ -12,7 +12,7 @@ image.workspace = true
 log.workspace = true
 rfd.workspace = true
 serde.workspace = true
-storm.workspace = true
+tonner.workspace = true
 storm-animation.workspace = true
 storm-controls = { workspace = true, features = ["egui"] }
 storm-gltf = { version = "0.1.0", path = "../storm-gltf" }

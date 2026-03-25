@@ -7,7 +7,7 @@ use std::{
 use egui::containers::menu::SubMenuButton;
 use image::{DynamicImage, codecs::hdr::HdrDecoder};
 pub use scene_view::SceneView;
-use storm::{
+use tonner::{
     Context,
     environment::{Environment, EnvironmentBuilder},
     geometry::skin::SkinManager,

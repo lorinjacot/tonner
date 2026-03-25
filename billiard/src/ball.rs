@@ -1,7 +1,7 @@
 use glam::{U8Vec4, Vec3, vec3};
 use numpy::{PyArray1, ToPyArray, ndarray::arr1};
 use pyo3::prelude::*;
-use storm::{
+use tonner::{
     Context,
     geometry::Geometry,
     mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},

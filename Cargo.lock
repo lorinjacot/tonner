@@ -630,7 +630,7 @@ dependencies = [
  "pollster",
  "pyo3",
  "pyo3-ffi",
- "storm",
+ "tonner",
  "wgpu",
  "winit",
 ]
@@ -2281,10 +2281,10 @@ dependencies = [
  "pollster",
  "rfd",
  "serde",
- "storm",
  "storm-animation",
  "storm-controls",
  "storm-gltf",
+ "tonner",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
@@ -3891,34 +3891,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "storm"
-version = "0.1.0"
-dependencies = [
- "approx",
- "bitflags 2.11.0",
- "bytemuck",
- "dashmap",
- "glam 0.30.10",
- "image",
- "log",
- "mikktspace",
- "numpy",
- "pollster",
- "pyo3",
- "thiserror 2.0.18",
- "uuid",
- "wgpu",
- "winit",
-]
-
-[[package]]
 name = "storm-animation"
 version = "0.1.0"
 dependencies = [
  "approx",
  "glam 0.30.10",
- "storm",
  "thiserror 2.0.18",
+ "tonner",
  "uuid",
 ]
 
@@ -3930,7 +3909,7 @@ dependencies = [
  "egui",
  "glam 0.30.10",
  "log",
- "storm",
+ "tonner",
 ]
 
 [[package]]
@@ -3945,9 +3924,9 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
- "storm",
  "storm-animation",
  "thiserror 2.0.18",
+ "tonner",
  "wgpu",
 ]
 

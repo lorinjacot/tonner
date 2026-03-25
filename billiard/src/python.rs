@@ -10,7 +10,7 @@ use log::{error, info};
 use notify::Watcher;
 use numpy::{AllowTypeChange, PyArray2, PyArrayLike2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
-use storm::scene_graph::{NodeId, PyNode, SceneGraph};
+use tonner::scene_graph::{NodeId, PyNode, SceneGraph};
 
 use crate::{
     arrow::Arrow,

@@ -41,7 +41,7 @@ impl Context {
     /// Create the context using the provided [wgpu::Device] and [wgpu::Queue].
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
-            label: Some("storm::Context::from_device command encoder"),
+            label: Some("tonner::Context::from_device command encoder"),
         });
 
         let texture_ctx = TextureContex::new(&device);

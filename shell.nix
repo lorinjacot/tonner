@@ -1,5 +1,6 @@
 { pkgs ? import <nixpkgs> { config = {}; overlays = []; } }:
 let 
+  overrides = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml));
   libPath = with pkgs; lib.makeLibraryPath [
     wayland
     libxkbcommon
@@ -12,27 +13,38 @@ let
     uv
   ]);
 in
-pkgs.mkShell {
-  strictDeps = true;
-  nativeBuildInputs = with pkgs; [
-    cargo
-    rustc
-    rustfmt
-    rust-analyzer
-    pkg-config
-  ];
-  LD_LIBRARY_PATH = libPath;
-  RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+pkgs.callPackage (
+  {
+    stdenv,
+    mkShell,
+    rustup,
+    rustPlatform,
+  }:
+  mkShell {
+    strictDeps = true;
+    nativeBuildInputs = with pkgs; [
+      rustup
+      rustPlatform.bindgenHook
+      nodejs_24
+    ];
+    RUSTC_VERSION = overrides.toolchain.channel;
+    LD_LIBRARY_PATH = libPath;
 
-  packages = [
-    myPython
-  ];
+    packages = [
+      myPython
+    ];
 
-  PYO3_PYTHON="${myPython}/bin/python3";
+    PYO3_PYTHON="${myPython}/bin/python3";
 
-  shellHook = ''
-    export TMPDIR=/tmp
-    export PYO3_PYTHON=${myPython}/bin/python3
-    export PATH="$HOME/.local/bin:$PATH"
-  '';
-}
+    shellHook = ''
+      export PATH="''${CARGO_HOME:-~/.cargo}/bin":"$PATH"
+      export PATH="''${RUSTUP_HOME:-~/.rustup}/toolchains/$RUSTC_VERSION-${stdenv.hostPlatform.rust.rustcTarget}/bin":"$PATH"
+
+      export TMPDIR=/tmp
+
+      export PYO3_PYTHON=${myPython}/bin/python3
+
+      export PATH="$HOME/.local/bin:$PATH"
+    '';
+  }
+) { }

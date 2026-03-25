@@ -8,8 +8,13 @@ homepage = "https://tonner.jacot.cloud"
 repository = "https://github.com/lorinjacot/tonner"
 readme = "README.md"
 
+[lib]
+crate-type = ["lib", "cdylib", "rlib"]
+
 [dependencies]
 pyo3 = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
 
 [features]
 python = ["dep:pyo3"]
+java-script = ["dep:wasm-bindgen"]

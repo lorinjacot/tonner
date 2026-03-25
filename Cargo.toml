@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "tonner",
     "storm",
     "storm-animation",
     "storm-controls",

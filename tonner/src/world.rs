@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     iter::{FusedIterator, repeat_n},
+    ops::{Index, IndexMut},
 };
 
 /// A world is a collection of entities. Each entity is composed of a unique [EntityId]
@@ -15,6 +16,15 @@ pub struct World {
 }
 
 impl World {
+    pub fn new() -> World {
+        World {
+            dense: Vec::new(),
+            sparse: Vec::new(),
+            available: 0,
+            next: 0,
+        }
+    }
+
     /// Generates a unique entity id.
     pub fn new_entity(&mut self) -> EntityId {
         if self.available == 0 {
@@ -30,14 +40,14 @@ impl World {
             entity
         } else {
             let entry = &mut self.sparse[self.next as usize];
-            self.available -= 1;
-            self.next = entry.dense;
-            entry.dense = self.dense.len() as u16;
-            entry.version += entry.version;
+            entry.version += 1;
             let entity = EntityId {
                 sparse: self.next,
                 version: entry.version,
             };
+            self.next = entry.dense;
+            self.available -= 1;
+            entry.dense = self.dense.len() as u16;
             self.dense.push(entity);
             entity
         }
@@ -593,4 +603,165 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
             inner: self.dense.iter_mut(),
         }
     }
+}
+
+impl<T> Index<EntityId> for SparseArray<T> {
+    type Output = T;
+
+    fn index(&self, index: EntityId) -> &Self::Output {
+        self.get(index).expect("no component for the entity")
+    }
+}
+
+impl<T> IndexMut<EntityId> for SparseArray<T> {
+    fn index_mut(&mut self, index: EntityId) -> &mut Self::Output {
+        self.get_mut(index).expect("no component for the entity")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct TestData(&'static str);
+
+    #[derive(Debug)]
+    struct TestData2(&'static str);
+
+    #[test]
+    fn test_world() {
+        let mut world = World::new();
+        assert_eq!(0, world.available);
+
+        let entity_0_v0 = world.new_entity();
+        assert_eq!(1, world.dense.len());
+        assert!(world.dense.contains(&entity_0_v0));
+        assert_eq!(0, entity_0_v0.sparse);
+        assert_eq!(0, entity_0_v0.version);
+        assert!(world.contains(entity_0_v0));
+
+        let entity_1_v0 = world.new_entity();
+        assert_eq!(2, world.dense.len());
+        assert!(world.dense.contains(&entity_1_v0));
+        assert_eq!(1, entity_1_v0.sparse);
+        assert_eq!(0, entity_1_v0.version);
+        assert!(world.contains(entity_0_v0));
+        assert!(world.contains(entity_1_v0));
+
+        assert_eq!(0, world.available);
+        world.delete_entity(entity_1_v0);
+        assert_eq!(1, world.dense.len());
+        assert!(world.dense.contains(&entity_0_v0));
+        assert!(!world.dense.contains(&entity_1_v0));
+        assert_eq!(1, world.available);
+        assert_eq!(1, world.next);
+        assert!(world.contains(entity_0_v0));
+        assert!(!world.contains(entity_1_v0));
+
+        let entity_1_v1 = world.new_entity();
+        assert_eq!(2, world.dense.len());
+        assert!(world.dense.contains(&entity_0_v0));
+        assert!(!world.dense.contains(&entity_1_v0));
+        assert!(world.dense.contains(&entity_1_v1));
+        assert_eq!(1, entity_1_v1.sparse);
+        assert_eq!(1, entity_1_v1.version);
+        assert_eq!(0, world.available);
+        assert!(world.contains(entity_0_v0));
+        assert!(!world.contains(entity_1_v0));
+        assert!(world.contains(entity_1_v1));
+
+        let entity_2_v0 = world.new_entity();
+        assert_eq!(2, entity_2_v0.sparse);
+        assert_eq!(0, entity_2_v0.version);
+        assert_eq!(3, world.dense.len());
+        assert!(world.contains(entity_0_v0));
+        assert!(!world.contains(entity_1_v0));
+        assert!(world.contains(entity_1_v1));
+        assert!(world.contains(entity_2_v0));
+
+        world.delete_entity(entity_0_v0);
+        assert_eq!(2, world.dense.len());
+        assert_eq!(1, world.available);
+        assert_eq!(0, world.next);
+        assert!(!world.contains(entity_0_v0));
+        assert!(world.contains(entity_1_v1));
+        assert!(world.contains(entity_2_v0));
+
+        world.delete_entity(entity_2_v0);
+        assert_eq!(1, world.dense.len());
+        assert_eq!(2, world.available);
+        assert_eq!(2, world.next);
+        assert!(world.contains(entity_1_v1));
+        assert!(!world.contains(entity_2_v0));
+
+        let entity_2_v1 = world.new_entity();
+        assert_eq!(2, entity_2_v1.sparse);
+        assert_eq!(1, entity_2_v1.version);
+        assert_eq!(1, world.available);
+        assert_eq!(0, world.next);
+        assert!(world.contains(entity_1_v1));
+        assert!(!world.contains(entity_2_v0));
+        assert!(world.contains(entity_2_v1));
+    }
+
+    // #[test]
+    // fn test_map() {
+    //     let mut set: SparseSet<TestData> = SparseSet::new();
+    //     let mut map: SparseMap<TestData2> = SparseMap::new();
+
+    //     let id_1_v1 = set.next_id();
+    //     set.insert(TestData(id_1_v1, String::from("data 1 v1")));
+    //     let id_2_v1 = set.next_id();
+    //     set.insert(TestData(id_2_v1, String::from("data 2 v1")));
+    //     let id_3_v1 = set.next_id();
+    //     set.insert(TestData(id_3_v1, String::from("data 3 v1")));
+
+    //     map.insert(TestData2(id_2_v1, String::from("data2 2 v1")));
+    //     assert!(map.get(id_1_v1).is_none());
+    //     assert_eq!(map[id_2_v1].1, "data2 2 v1");
+    //     assert!(map.get(id_3_v1).is_none());
+
+    //     map.insert(TestData2(id_1_v1, String::from("data2 1 v1")));
+    //     assert_eq!(map[id_1_v1].1, "data2 1 v1");
+    //     assert_eq!(map[id_2_v1].1, "data2 2 v1");
+    //     assert!(map.get(id_3_v1).is_none());
+
+    //     map.remove(id_2_v1);
+    //     assert_eq!(map[id_1_v1].1, "data2 1 v1");
+    //     assert!(map.get(id_2_v1).is_none());
+    //     assert!(map.get(id_3_v1).is_none());
+
+    //     set.remove(id_2_v1);
+    //     set.remove(id_3_v1);
+
+    //     let id_2_v2 = set.next_id();
+    //     set.insert(TestData(id_2_v2, String::from("data 2 v2")));
+    //     let id_3_v2 = set.next_id();
+    //     set.insert(TestData(id_3_v2, String::from("data 3 v2")));
+
+    //     assert!(map.get(id_2_v2).is_none());
+    //     assert!(map.get(id_3_v2).is_none());
+
+    //     map.insert(TestData2(id_3_v2, String::from("data2 3 v2")));
+    //     assert_eq!(map[id_1_v1].1, "data2 1 v1");
+    //     assert!(map.get(id_2_v2).is_none());
+    //     assert_eq!(map[id_3_v2].1, "data2 3 v2");
+
+    //     set.remove(id_1_v1);
+    //     let id_1_v2 = set.next_id();
+    //     set.insert(TestData(id_1_v2, String::from("data 1 v2")));
+    //     assert!(map.get(id_1_v2).is_none());
+
+    //     map.insert(TestData2(id_1_v2, String::from("data2 1 v2")));
+    //     assert!(map.get(id_1_v1).is_none());
+    //     assert_eq!(map[id_1_v2].1, "data2 1 v2");
+    //     assert!(map.get(id_2_v2).is_none());
+    //     assert_eq!(map[id_3_v2].1, "data2 3 v2");
+
+    //     map.insert(TestData2(id_2_v2, String::from("data2 2 v2")));
+    //     assert_eq!(map[id_1_v2].1, "data2 1 v2");
+    //     assert_eq!(map[id_2_v2].1, "data2 2 v2");
+    //     assert_eq!(map[id_3_v2].1, "data2 3 v2");
+    // }
 }

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, iter::repeat_n};
+use std::{
+    collections::HashMap,
+    iter::{FusedIterator, repeat_n},
+};
 
 /// A world is a collection of entities. Each entity is composed of a unique [EntityId]
 /// and data components. Components can by dynamically added, accessed, modified and removed.
@@ -40,6 +43,16 @@ pub struct EntityId {
 }
 
 pub trait ComponentStorage<T> {
+    type Iter<'a>: Iterator<Item = (EntityId, &'a T)>
+    where
+        Self: 'a,
+        T: 'a;
+
+    type IterMut<'a>: Iterator<Item = (EntityId, &'a mut T)>
+    where
+        Self: 'a,
+        T: 'a;
+
     /// Adds the component to the entity.
     ///
     /// If the entity did not have this component, `None` is returned.
@@ -61,9 +74,122 @@ pub trait ComponentStorage<T> {
 
     /// Returns a mutable reference to the component belonging to the entity.
     fn get_mut(&mut self, entity: EntityId) -> Option<&mut T>;
+
+    /// An iterator visiting all components `T` in arbitrary order. The iterator element type is `(EntityId, &'a T)`.
+    fn iter<'a>(&'a self) -> Self::Iter<'a>;
+
+    /// An iterator visiting all components `T` in arbitrary order, with mutable references to the values.
+    /// The iterator element type is `(EntityId, &'a T)`.
+    fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>;
 }
 
+pub struct HashMapIter<'a, T> {
+    inner: std::collections::hash_map::Iter<'a, EntityId, T>,
+}
+
+impl<'a, T> Iterator for HashMapIter<'a, T> {
+    type Item = (EntityId, &'a T);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(&entity, component)| (entity, component))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, (&entity, component)| f(b, (entity, component)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for HashMapIter<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for HashMapIter<'a, T> {}
+
+pub struct HashMapIterMut<'a, T> {
+    inner: std::collections::hash_map::IterMut<'a, EntityId, T>,
+}
+
+impl<'a, T> Iterator for HashMapIterMut<'a, T> {
+    type Item = (EntityId, &'a mut T);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(&entity, component)| (entity, component))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, (&entity, component)| f(b, (entity, component)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for HashMapIterMut<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for HashMapIterMut<'a, T> {}
+
 impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
+    type Iter<'a>
+        = HashMapIter<'a, T>
+    where
+        Self: 'a,
+        T: 'a;
+
+    type IterMut<'a>
+        = HashMapIterMut<'a, T>
+    where
+        Self: 'a,
+        T: 'a;
+
     fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
         self.insert(entity, component)
     }
@@ -86,6 +212,16 @@ impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
 
     fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
         self.get_mut(&entity)
+    }
+
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        HashMapIter { inner: self.iter() }
+    }
+
+    fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {
+        HashMapIterMut {
+            inner: self.iter_mut(),
+        }
     }
 }
 
@@ -117,7 +253,113 @@ impl<T> SparseSet<T> {
     }
 }
 
+pub struct SliceIter<'a, T> {
+    inner: std::slice::Iter<'a, (EntityId, T)>,
+}
+
+impl<'a, T> Iterator for SliceIter<'a, T> {
+    type Item = (EntityId, &'a T);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(entity, component)| (*entity, component))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, (entity, component)| f(b, (*entity, component)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for SliceIter<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for SliceIter<'a, T> {}
+
+pub struct SliceIterMut<'a, T> {
+    inner: std::slice::IterMut<'a, (EntityId, T)>,
+}
+
+impl<'a, T> Iterator for SliceIterMut<'a, T> {
+    type Item = (EntityId, &'a mut T);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|(entity, component)| (*entity, component))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, (entity, component)| f(b, (*entity, component)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for SliceIterMut<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for SliceIterMut<'a, T> {}
+
 impl<T> ComponentStorage<T> for SparseSet<T> {
+    type Iter<'a>
+        = SliceIter<'a, T>
+    where
+        Self: 'a,
+        T: 'a;
+
+    type IterMut<'a>
+        = SliceIterMut<'a, T>
+    where
+        Self: 'a,
+        T: 'a;
+
     fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
         let sparse_idx = entity.sparse as usize;
         match self.sparse.get_mut(sparse_idx) {
@@ -205,6 +447,18 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
                 }
             }
             _ => None,
+        }
+    }
+
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        SliceIter {
+            inner: self.dense.iter(),
+        }
+    }
+
+    fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {
+        SliceIterMut {
+            inner: self.dense.iter_mut(),
         }
     }
 }

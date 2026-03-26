@@ -8,37 +8,140 @@ use std::{
 /// This pattern is known as an Entity component system (ECS).
 #[derive(Debug, Default)]
 pub struct World {
-    deleted_entities: Vec<EntityId>,
-    next_sparse: u16,
+    dense: Vec<EntityId>,
+    sparse: Vec<SparseEntry>,
+    available: usize,
+    next: u16,
 }
 
 impl World {
     /// Generates a unique entity id.
     pub fn new_entity(&mut self) -> EntityId {
-        self.deleted_entities.pop().map_or_else(
-            || {
-                let sparse = self.next_sparse;
-                self.next_sparse += 1;
-                EntityId { version: 0, sparse }
-            },
-            |EntityId { version, sparse }| EntityId {
-                version: version + 1,
-                sparse,
-            },
-        )
+        if self.available == 0 {
+            let entity = EntityId {
+                sparse: self.sparse.len() as u16,
+                version: 0,
+            };
+            self.sparse.push(SparseEntry {
+                version: 0,
+                dense: self.dense.len() as u16,
+            });
+            self.dense.push(entity);
+            entity
+        } else {
+            let entry = &mut self.sparse[self.next as usize];
+            self.available -= 1;
+            self.next = entry.dense;
+            entry.dense = self.dense.len() as u16;
+            entry.version += entry.version;
+            let entity = EntityId {
+                sparse: self.next,
+                version: entry.version,
+            };
+            self.dense.push(entity);
+            entity
+        }
     }
 
-    pub fn delete_entity(&mut self, entity: EntityId) {
-        todo!()
+    /// Deletes the given entity. Returns `true` if the world previously had the entity.
+    /// Returns `false` on subsequent deletions or if the world never had the entity.
+    ///
+    /// This operation does not automatically delete all its componenets.
+    /// However, this enable future entities to reuse the same storage offset, deacreasing the overall
+    /// memomy usage of the different component storages.
+    pub fn delete_entity(&mut self, entity: EntityId) -> bool {
+        let sparse_idx = entity.sparse as usize;
+        match self.sparse.get_mut(sparse_idx) {
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                let dense_idx = sparse_entry.dense as usize;
+                match self.dense.get(dense_idx) {
+                    Some(dense_entry) if dense_entry.sparse == entity.sparse => {
+                        self.sparse[self.dense.last().unwrap().sparse as usize].dense =
+                            sparse_entry.dense;
+                        self.dense.swap_remove(dense_idx);
+                        self.sparse[sparse_idx].dense = self.next;
+                        self.next = entity.sparse;
+                        self.available += 1;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns `true` if the world contains the entity.
+    /// Returns `false` it the entity has been deleted or was never created.
+    pub fn contains(&self, entity: EntityId) -> bool {
+        match self.sparse.get(entity.sparse as usize) {
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                match self.dense.get(sparse_entry.dense as usize) {
+                    Some(dense_entry) if dense_entry.sparse == entity.sparse => true,
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// An iterator visiting all entities in arbitrary order.
+    pub fn iter<'a>(&'a self) -> EntityIter<'a> {
+        EntityIter {
+            inner: self.dense.iter(),
+        }
     }
 }
+
+pub struct EntityIter<'a> {
+    inner: std::slice::Iter<'a, EntityId>,
+}
+
+impl<'a> Iterator for EntityIter<'a> {
+    type Item = EntityId;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().copied()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner.fold(init, |b, &entity| f(b, entity))
+    }
+}
+
+impl<'a> ExactSizeIterator for EntityIter<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a> FusedIterator for EntityIter<'a> {}
 
 /// Unique id for a [`World`] entity. This is used to associate
 /// entities with their components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntityId {
     version: u16,
-    /// Always strictly smaller than `u16::MAX`.
     sparse: u16,
 }
 
@@ -231,40 +334,56 @@ struct SparseEntry {
     dense: u16,
 }
 
-#[derive(Debug, Default)]
-pub struct SparseSet<T> {
-    sparse: Vec<SparseEntry>,
-    dense: Vec<(EntityId, T)>,
+#[derive(Debug)]
+struct DenseEntry<T> {
+    entity: EntityId,
+    component: T,
 }
 
-impl<T> SparseSet<T> {
-    pub fn new() -> SparseSet<T> {
-        SparseSet {
+#[derive(Debug, Default)]
+pub struct SparseArray<T> {
+    sparse: Vec<SparseEntry>,
+    dense: Vec<DenseEntry<T>>,
+}
+
+impl<T> SparseArray<T> {
+    /// Constructs a new, empty SparseArray<T>.
+    ///
+    /// The sparse array will not allocate until components are added.
+    pub fn new() -> SparseArray<T> {
+        SparseArray {
             sparse: Vec::new(),
             dense: Vec::new(),
         }
     }
 
-    pub fn with_capacity(capacity: usize) -> SparseSet<T> {
-        SparseSet {
+    /// Constructs a new, empty SparseArray<T> with at least the specified capacity.
+    ///
+    /// The sparse array will be able to hold at least capacity elements without reallocating.
+    /// This method is allowed to allocate for more elements than capacity. If capacity is zero, the sparse array will not allocate.
+    ///
+    /// ## Panics
+    /// Panics if the new capacity exceeds isize::MAX bytes.
+    pub fn with_capacity(capacity: usize) -> SparseArray<T> {
+        SparseArray {
             sparse: Vec::with_capacity(capacity),
             dense: Vec::with_capacity(capacity),
         }
     }
 }
 
-pub struct SliceIter<'a, T> {
-    inner: std::slice::Iter<'a, (EntityId, T)>,
+pub struct SparseArrayIter<'a, T> {
+    inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
 
-impl<'a, T> Iterator for SliceIter<'a, T> {
+impl<'a, T> Iterator for SparseArrayIter<'a, T> {
     type Item = (EntityId, &'a T);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .next()
-            .map(|(entity, component)| (*entity, component))
+            .map(|dense_entry| (dense_entry.entity, &dense_entry.component))
     }
 
     #[inline]
@@ -286,32 +405,33 @@ impl<'a, T> Iterator for SliceIter<'a, T> {
         Self: Sized,
         F: FnMut(B, Self::Item) -> B,
     {
-        self.inner
-            .fold(init, |b, (entity, component)| f(b, (*entity, component)))
+        self.inner.fold(init, |b, dense_entry| {
+            f(b, (dense_entry.entity, &dense_entry.component))
+        })
     }
 }
 
-impl<'a, T> ExactSizeIterator for SliceIter<'a, T> {
+impl<'a, T> ExactSizeIterator for SparseArrayIter<'a, T> {
     #[inline]
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl<'a, T> FusedIterator for SliceIter<'a, T> {}
+impl<'a, T> FusedIterator for SparseArrayIter<'a, T> {}
 
-pub struct SliceIterMut<'a, T> {
-    inner: std::slice::IterMut<'a, (EntityId, T)>,
+pub struct SparseArrayIterMut<'a, T> {
+    inner: std::slice::IterMut<'a, DenseEntry<T>>,
 }
 
-impl<'a, T> Iterator for SliceIterMut<'a, T> {
+impl<'a, T> Iterator for SparseArrayIterMut<'a, T> {
     type Item = (EntityId, &'a mut T);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
             .next()
-            .map(|(entity, component)| (*entity, component))
+            .map(|dense_entry| (dense_entry.entity, &mut dense_entry.component))
     }
 
     #[inline]
@@ -333,29 +453,30 @@ impl<'a, T> Iterator for SliceIterMut<'a, T> {
         Self: Sized,
         F: FnMut(B, Self::Item) -> B,
     {
-        self.inner
-            .fold(init, |b, (entity, component)| f(b, (*entity, component)))
+        self.inner.fold(init, |b, dense_entry| {
+            f(b, (dense_entry.entity, &mut dense_entry.component))
+        })
     }
 }
 
-impl<'a, T> ExactSizeIterator for SliceIterMut<'a, T> {
+impl<'a, T> ExactSizeIterator for SparseArrayIterMut<'a, T> {
     #[inline]
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl<'a, T> FusedIterator for SliceIterMut<'a, T> {}
+impl<'a, T> FusedIterator for SparseArrayIterMut<'a, T> {}
 
-impl<T> ComponentStorage<T> for SparseSet<T> {
+impl<T> ComponentStorage<T> for SparseArray<T> {
     type Iter<'a>
-        = SliceIter<'a, T>
+        = SparseArrayIter<'a, T>
     where
         Self: 'a,
         T: 'a;
 
     type IterMut<'a>
-        = SliceIterMut<'a, T>
+        = SparseArrayIterMut<'a, T>
     where
         Self: 'a,
         T: 'a;
@@ -363,21 +484,23 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
     fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
         let sparse_idx = entity.sparse as usize;
         match self.sparse.get_mut(sparse_idx) {
-            Some(entry) => match self.dense.get_mut(entry.dense as usize) {
-                Some((old_entity, value)) if entity.version == old_entity.version => {
-                    old_entity.version = entity.version;
-                    Some(std::mem::replace(value, component))
+            Some(sparse_entry) => match self.dense.get_mut(sparse_entry.dense as usize) {
+                Some(dense_entry) if dense_entry.entity.version == entity.version => {
+                    // the entity already had the component
+                    Some(std::mem::replace(&mut dense_entry.component, component))
                 }
-                Some((old_entity, value)) => {
-                    entry.version = entity.version;
-                    old_entity.version = entity.version;
-                    *value = component;
+                Some(dense_entry) => {
+                    // a deleted entity with the same `sparse` had the component
+                    sparse_entry.version = entity.version;
+                    dense_entry.entity.version = entity.version;
+                    dense_entry.component = component;
                     None
                 }
                 None => {
-                    entry.dense = self.dense.len() as u16;
-                    entry.version = entity.version;
-                    self.dense.push((entity, component));
+                    // no dense entry for the `sparse` index
+                    sparse_entry.dense = self.dense.len() as u16;
+                    sparse_entry.version = entity.version;
+                    self.dense.push(DenseEntry { entity, component });
                     None
                 }
             },
@@ -395,7 +518,7 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
                         dense: self.dense.len() as u16,
                     })),
                 );
-                self.dense.push((entity, component));
+                self.dense.push(DenseEntry { entity, component });
                 None
             }
         }
@@ -404,11 +527,17 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
     fn remove(&mut self, entity: EntityId) -> Option<T> {
         let sparse_idx = entity.sparse as usize;
         match self.sparse.get(sparse_idx) {
-            Some(entry) if entity.version == entity.version => {
-                let dense_idx = entry.dense as usize;
-                self.sparse[self.dense.last().unwrap().0.sparse as usize].dense = entry.dense;
-                self.sparse[sparse_idx].dense = u16::MAX;
-                Some(self.dense.swap_remove(dense_idx).1)
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                let dense_idx = sparse_entry.dense as usize;
+                match self.dense.get(dense_idx) {
+                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                        self.sparse[self.dense.last().unwrap().entity.sparse as usize].dense =
+                            sparse_entry.dense;
+                        self.sparse[sparse_idx].version = u16::MAX;
+                        Some(self.dense.swap_remove(dense_idx).component)
+                    }
+                    _ => None,
+                }
             }
             _ => None,
         }
@@ -416,7 +545,6 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
 
     fn clear(&mut self) {
         self.dense.clear();
-        self.sparse.clear();
     }
 
     fn contains(&self, entity: EntityId) -> bool {
@@ -428,10 +556,12 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
 
     fn get(&self, entity: EntityId) -> Option<&T> {
         match self.sparse.get(entity.sparse as usize) {
-            Some(entry) if entry.version == entity.version => {
-                match self.dense.get(entry.dense as usize) {
-                    Some((_, component)) => Some(component),
-                    None => None,
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                match self.dense.get(sparse_entry.dense as usize) {
+                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                        Some(&dense_entry.component)
+                    }
+                    _ => None,
                 }
             }
             _ => None,
@@ -440,10 +570,12 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
 
     fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
         match self.sparse.get(entity.sparse as usize) {
-            Some(entry) if entry.version == entity.version => {
-                match self.dense.get_mut(entry.dense as usize) {
-                    Some((_, component)) => Some(component),
-                    None => None,
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                match self.dense.get_mut(sparse_entry.dense as usize) {
+                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                        Some(&mut dense_entry.component)
+                    }
+                    _ => None,
                 }
             }
             _ => None,
@@ -451,13 +583,13 @@ impl<T> ComponentStorage<T> for SparseSet<T> {
     }
 
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        SliceIter {
+        SparseArrayIter {
             inner: self.dense.iter(),
         }
     }
 
     fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {
-        SliceIterMut {
+        SparseArrayIterMut {
             inner: self.dense.iter_mut(),
         }
     }

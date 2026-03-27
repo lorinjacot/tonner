@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
-    fmt::Display,
+    fmt::{Debug, Display},
     iter::{FusedIterator, repeat_n},
+    num::{NonZeroU16, NonZeroU32},
     ops::{Index, IndexMut},
 };
 
@@ -18,6 +19,8 @@ pub struct EntityManager {
     next: u16,
 }
 
+const FIRST_VERSION: NonZeroU16 = NonZeroU16::new(1).unwrap();
+
 impl EntityManager {
     pub fn new() -> EntityManager {
         EntityManager {
@@ -32,23 +35,17 @@ impl EntityManager {
     #[must_use]
     pub fn new_entity(&mut self) -> EntityId {
         if self.available == 0 {
-            let entity = EntityId {
-                sparse: self.sparse.len() as u16,
-                version: 0,
-            };
+            let entity = EntityId::new(self.sparse.len() as u16, FIRST_VERSION);
             self.sparse.push(SparseEntry {
-                version: 0,
                 dense: self.dense.len() as u16,
+                version: FIRST_VERSION,
             });
             self.dense.push(entity);
             entity
         } else {
             let entry = &mut self.sparse[self.next as usize];
-            entry.version += 1;
-            let entity = EntityId {
-                sparse: self.next,
-                version: entry.version,
-            };
+            entry.version = entry.version.checked_add(1).unwrap();
+            let entity = EntityId::new(self.next, entry.version);
             self.next = entry.dense;
             self.available -= 1;
             entry.dense = self.dense.len() as u16;
@@ -64,17 +61,17 @@ impl EntityManager {
     /// However, this enable future entities to reuse the same storage offset, deacreasing the overall
     /// memomy usage of the different component storages.
     pub fn delete_entity(&mut self, entity: EntityId) -> bool {
-        let sparse_idx = entity.sparse as usize;
+        let sparse_idx = entity.sparse() as usize;
         match self.sparse.get_mut(sparse_idx) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
+            Some(sparse_entry) if sparse_entry.version == entity.version() => {
                 let dense_idx = sparse_entry.dense as usize;
                 match self.dense.get(dense_idx) {
-                    Some(dense_entry) if dense_entry.sparse == entity.sparse => {
-                        self.sparse[self.dense.last().unwrap().sparse as usize].dense =
+                    Some(dense_entry) if dense_entry.sparse() == entity.sparse() => {
+                        self.sparse[self.dense.last().unwrap().sparse() as usize].dense =
                             sparse_entry.dense;
                         self.dense.swap_remove(dense_idx);
                         self.sparse[sparse_idx].dense = self.next;
-                        self.next = entity.sparse;
+                        self.next = entity.sparse();
                         self.available += 1;
                         true
                     }
@@ -88,10 +85,10 @@ impl EntityManager {
     /// Returns `true` if the manager contains the entity.
     /// Returns `false` it the entity has been deleted or was never created.
     pub fn contains(&self, entity: EntityId) -> bool {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
+        match self.sparse.get(entity.sparse() as usize) {
+            Some(sparse_entry) if sparse_entry.version == entity.version() => {
                 match self.dense.get(sparse_entry.dense as usize) {
-                    Some(dense_entry) if dense_entry.sparse == entity.sparse => true,
+                    Some(dense_entry) if dense_entry.sparse() == entity.sparse() => true,
                     _ => false,
                 }
             }
@@ -153,16 +150,46 @@ impl<'a> FusedIterator for EntityIter<'a> {}
 
 /// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "python", pyclass(frozen, str, from_py_object))]
-pub struct EntityId {
-    sparse: u16,
-    version: u16,
+#[repr(transparent)]
+pub struct EntityId(NonZeroU32);
+
+const SPARSE_BITES: u32 = 0b1111_1111_1111_1111_0000_0000_0000_0000;
+const VERSION_BITES: u32 = 0b0000_0000_0000_0000_1111_1111_1111_1111;
+
+impl EntityId {
+    #[inline]
+    fn new(sparse: u16, version: NonZeroU16) -> EntityId {
+        let sparse = (sparse as u32) << 16;
+        let version = (version.get() as u32) & VERSION_BITES;
+        // SAFETY: cannot be zero because `version` is non zero
+        EntityId(unsafe { NonZeroU32::new_unchecked(sparse | version) })
+    }
+
+    #[inline]
+    fn sparse(&self) -> u16 {
+        let sparse = (self.0.get() & SPARSE_BITES) >> 16;
+        sparse as u16
+    }
+
+    #[inline]
+    fn version(&self) -> NonZeroU16 {
+        let version = (self.0.get() & VERSION_BITES) as u16;
+        // SAFETY: cannot be zero because the VERSION BITES cannot all be zero
+        unsafe { NonZeroU16::new_unchecked(version) }
+    }
+}
+
+impl Debug for EntityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.sparse(), self.version())
+    }
 }
 
 impl Display for EntityId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}-{}", self.sparse, self.version)
+        write!(f, "{}-{}", self.sparse(), self.version())
     }
 }
 
@@ -355,8 +382,8 @@ impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
 
 #[derive(Debug, Clone)]
 struct SparseEntry {
-    version: u16,
     dense: u16,
+    version: NonZeroU16,
 }
 
 #[derive(Debug)]
@@ -507,17 +534,17 @@ impl<T> ComponentsView<T> for SparseArray<T> {
         T: 'a;
 
     fn has(&self, entity: EntityId) -> bool {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(entry) if entry.version == entity.version => true,
+        match self.sparse.get(entity.sparse() as usize) {
+            Some(entry) if entry.version == entity.version() => true,
             _ => false,
         }
     }
 
     fn get(&self, entity: EntityId) -> Option<&T> {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
+        match self.sparse.get(entity.sparse() as usize) {
+            Some(sparse_entry) if sparse_entry.version == entity.version() => {
                 match self.dense.get(sparse_entry.dense as usize) {
-                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                    Some(dense_entry) if dense_entry.entity.sparse() == entity.sparse() => {
                         Some(&dense_entry.component)
                     }
                     _ => None,
@@ -528,10 +555,10 @@ impl<T> ComponentsView<T> for SparseArray<T> {
     }
 
     fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
+        match self.sparse.get(entity.sparse() as usize) {
+            Some(sparse_entry) if sparse_entry.version == entity.version() => {
                 match self.dense.get_mut(sparse_entry.dense as usize) {
-                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                    Some(dense_entry) if dense_entry.entity.sparse() == entity.sparse() => {
                         Some(&mut dense_entry.component)
                     }
                     _ => None,
@@ -556,17 +583,17 @@ impl<T> ComponentsView<T> for SparseArray<T> {
 
 impl<T> ComponentStorage<T> for SparseArray<T> {
     fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
-        let sparse_idx = entity.sparse as usize;
+        let sparse_idx = entity.sparse() as usize;
         match self.sparse.get_mut(sparse_idx) {
             Some(sparse_entry) => match self.dense.get_mut(sparse_entry.dense as usize) {
-                Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
-                    if dense_entry.entity.version == entity.version {
+                Some(dense_entry) if dense_entry.entity.sparse() == entity.sparse() => {
+                    if dense_entry.entity.version() == entity.version() {
                         // the entity already had the component
                         Some(std::mem::replace(&mut dense_entry.component, component))
                     } else {
                         // a deleted entity with the same `sparse` had the component
-                        sparse_entry.version = entity.version;
-                        dense_entry.entity.version = entity.version;
+                        sparse_entry.version = entity.version();
+                        dense_entry.entity = entity;
                         dense_entry.component = component;
                         None
                     }
@@ -574,7 +601,7 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
                 _ => {
                     // no dense entry for the `sparse` index
                     sparse_entry.dense = self.dense.len() as u16;
-                    sparse_entry.version = entity.version;
+                    sparse_entry.version = entity.version();
                     self.dense.push(DenseEntry { entity, component });
                     None
                 }
@@ -583,14 +610,14 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
                 self.sparse.extend(
                     repeat_n(
                         SparseEntry {
-                            version: u16::MAX,
                             dense: u16::MAX,
+                            version: NonZeroU16::new(u16::MAX).unwrap(),
                         },
                         sparse_idx - self.sparse.len(),
                     )
                     .chain(Some(SparseEntry {
-                        version: entity.version,
                         dense: self.dense.len() as u16,
+                        version: entity.version(),
                     })),
                 );
                 self.dense.push(DenseEntry { entity, component });
@@ -600,15 +627,15 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
     }
 
     fn remove(&mut self, entity: EntityId) -> Option<T> {
-        let sparse_idx = entity.sparse as usize;
+        let sparse_idx = entity.sparse() as usize;
         match self.sparse.get(sparse_idx) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
+            Some(sparse_entry) if sparse_entry.version == entity.version() => {
                 let dense_idx = sparse_entry.dense as usize;
                 match self.dense.get(dense_idx) {
-                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
-                        self.sparse[self.dense.last().unwrap().entity.sparse as usize].dense =
+                    Some(dense_entry) if dense_entry.entity.sparse() == entity.sparse ()=> {
+                        self.sparse[self.dense.last().unwrap().entity.sparse() as usize].dense =
                             sparse_entry.dense;
-                        self.sparse[sparse_idx].version = u16::MAX;
+                        self.sparse[sparse_idx].version = NonZeroU16::new(u16::MAX).unwrap();
                         Some(self.dense.swap_remove(dense_idx).component)
                     }
                     _ => None,
@@ -649,75 +676,75 @@ mod tests {
         let mut manager = EntityManager::new();
         assert_eq!(0, manager.available);
 
-        let entity_0_v0 = manager.new_entity();
+        let entity_0_v1 = manager.new_entity();
         assert_eq!(1, manager.dense.len());
-        assert!(manager.dense.contains(&entity_0_v0));
-        assert_eq!(0, entity_0_v0.sparse);
-        assert_eq!(0, entity_0_v0.version);
-        assert!(manager.contains(entity_0_v0));
-
-        let entity_1_v0 = manager.new_entity();
-        assert_eq!(2, manager.dense.len());
-        assert!(manager.dense.contains(&entity_1_v0));
-        assert_eq!(1, entity_1_v0.sparse);
-        assert_eq!(0, entity_1_v0.version);
-        assert!(manager.contains(entity_0_v0));
-        assert!(manager.contains(entity_1_v0));
-
-        assert_eq!(0, manager.available);
-        manager.delete_entity(entity_1_v0);
-        assert_eq!(1, manager.dense.len());
-        assert!(manager.dense.contains(&entity_0_v0));
-        assert!(!manager.dense.contains(&entity_1_v0));
-        assert_eq!(1, manager.available);
-        assert_eq!(1, manager.next);
-        assert!(manager.contains(entity_0_v0));
-        assert!(!manager.contains(entity_1_v0));
+        assert!(manager.dense.contains(&entity_0_v1));
+        assert_eq!(0, entity_0_v1.sparse());
+        assert_eq!(1, entity_0_v1.version().get());
+        assert!(manager.contains(entity_0_v1));
 
         let entity_1_v1 = manager.new_entity();
         assert_eq!(2, manager.dense.len());
-        assert!(manager.dense.contains(&entity_0_v0));
-        assert!(!manager.dense.contains(&entity_1_v0));
         assert!(manager.dense.contains(&entity_1_v1));
-        assert_eq!(1, entity_1_v1.sparse);
-        assert_eq!(1, entity_1_v1.version);
+        assert_eq!(1, entity_1_v1.sparse());
+        assert_eq!(1, entity_1_v1.version().get());
+        assert!(manager.contains(entity_0_v1));
+        assert!(manager.contains(entity_1_v1));
+
         assert_eq!(0, manager.available);
-        assert!(manager.contains(entity_0_v0));
-        assert!(!manager.contains(entity_1_v0));
-        assert!(manager.contains(entity_1_v1));
+        manager.delete_entity(entity_1_v1);
+        assert_eq!(1, manager.dense.len());
+        assert!(manager.dense.contains(&entity_0_v1));
+        assert!(!manager.dense.contains(&entity_1_v1));
+        assert_eq!(1, manager.available);
+        assert_eq!(1, manager.next);
+        assert!(manager.contains(entity_0_v1));
+        assert!(!manager.contains(entity_1_v1));
 
-        let entity_2_v0 = manager.new_entity();
-        assert_eq!(2, entity_2_v0.sparse);
-        assert_eq!(0, entity_2_v0.version);
+        let entity_1_v2 = manager.new_entity();
+        assert_eq!(2, manager.dense.len());
+        assert!(manager.dense.contains(&entity_0_v1));
+        assert!(!manager.dense.contains(&entity_1_v1));
+        assert!(manager.dense.contains(&entity_1_v2));
+        assert_eq!(1, entity_1_v2.sparse());
+        assert_eq!(2, entity_1_v2.version().get());
+        assert_eq!(0, manager.available);
+        assert!(manager.contains(entity_0_v1));
+        assert!(!manager.contains(entity_1_v1));
+        assert!(manager.contains(entity_1_v2));
+
+        let entity_2_v1 = manager.new_entity();
+        assert_eq!(2, entity_2_v1.sparse());
+        assert_eq!(1, entity_2_v1.version().get());
         assert_eq!(3, manager.dense.len());
-        assert!(manager.contains(entity_0_v0));
-        assert!(!manager.contains(entity_1_v0));
-        assert!(manager.contains(entity_1_v1));
-        assert!(manager.contains(entity_2_v0));
+        assert!(manager.contains(entity_0_v1));
+        assert!(!manager.contains(entity_1_v1));
+        assert!(manager.contains(entity_1_v2));
+        assert!(manager.contains(entity_2_v1));
 
-        manager.delete_entity(entity_0_v0);
+        manager.delete_entity(entity_0_v1);
         assert_eq!(2, manager.dense.len());
         assert_eq!(1, manager.available);
         assert_eq!(0, manager.next);
-        assert!(!manager.contains(entity_0_v0));
-        assert!(manager.contains(entity_1_v1));
-        assert!(manager.contains(entity_2_v0));
+        assert!(!manager.contains(entity_0_v1));
+        assert!(manager.contains(entity_1_v2));
+        assert!(manager.contains(entity_2_v1));
 
-        manager.delete_entity(entity_2_v0);
+        manager.delete_entity(entity_2_v1);
         assert_eq!(1, manager.dense.len());
         assert_eq!(2, manager.available);
         assert_eq!(2, manager.next);
-        assert!(manager.contains(entity_1_v1));
-        assert!(!manager.contains(entity_2_v0));
+        assert!(manager.contains(entity_1_v2));
+        assert!(!manager.contains(entity_2_v1));
 
-        let entity_2_v1 = manager.new_entity();
-        assert_eq!(2, entity_2_v1.sparse);
-        assert_eq!(1, entity_2_v1.version);
+        let entity_2_v2 = manager.new_entity();
+        assert_eq!(2, entity_2_v2.sparse());
+        assert_eq!(2, entity_2_v2.version().get());
         assert_eq!(1, manager.available);
         assert_eq!(0, manager.next);
-        assert!(manager.contains(entity_1_v1));
-        assert!(!manager.contains(entity_2_v0));
-        assert!(manager.contains(entity_2_v1));
+        assert!(manager.contains(entity_1_v2));
+        assert!(!manager.contains(entity_2_v1));
+        assert!(manager.contains(entity_2_v2));
     }
 
     #[test]
@@ -725,108 +752,108 @@ mod tests {
         let mut manager = EntityManager::new();
         let mut storage = SparseArray::new();
 
-        let entity_0_v0 = manager.new_entity();
-        let entity_1_v0 = manager.new_entity();
-
-        let data = storage.add(entity_0_v0, TestData("0 v0"));
-        assert!(data.is_none());
-        assert_eq!(1, storage.dense.len());
-        assert!(storage.has(entity_0_v0));
-        assert!(!storage.has(entity_1_v0));
-        assert_eq!("0 v0", storage[entity_0_v0].0);
-        assert!(storage.get(entity_1_v0).is_none());
-
-        let data = storage.add(entity_1_v0, TestData("1 v0"));
-        assert!(data.is_none());
-        assert_eq!(2, storage.dense.len());
-        assert!(storage.has(entity_0_v0));
-        assert!(storage.has(entity_1_v0));
-        assert_eq!("0 v0", storage[entity_0_v0].0);
-        assert_eq!("1 v0", storage[entity_1_v0].0);
-
-        manager.delete_entity(entity_0_v0);
         let entity_0_v1 = manager.new_entity();
-
-        let data = storage.remove(entity_0_v0).unwrap();
-        assert_eq!("0 v0", data.0);
-        assert_eq!(1, storage.dense.len());
-        assert!(!storage.has(entity_0_v0));
-        assert!(!storage.has(entity_0_v1));
-        assert!(storage.has(entity_1_v0));
-        assert!(storage.get(entity_0_v0).is_none());
-        assert_eq!("1 v0", storage[entity_1_v0].0);
+        let entity_1_v1 = manager.new_entity();
 
         let data = storage.add(entity_0_v1, TestData("0 v1"));
         assert!(data.is_none());
-        assert_eq!(2, storage.dense.len());
-        assert!(!storage.has(entity_0_v0));
+        assert_eq!(1, storage.dense.len());
         assert!(storage.has(entity_0_v1));
-        assert!(storage.has(entity_1_v0));
-        assert!(storage.has(entity_1_v0));
-        assert!(storage.get(entity_0_v0).is_none());
-        assert_eq!("0 v1", storage[entity_0_v1].0);
-        assert_eq!("1 v0", storage[entity_1_v0].0);
-
-        manager.delete_entity(entity_1_v0);
-        let entity_1_v1 = manager.new_entity();
-
-        let data = storage.add(entity_1_v0, TestData("1 v0 prime")).unwrap();
-        assert_eq!("1 v0", data.0);
-        assert_eq!(2, storage.dense.len());
-        assert!(!storage.has(entity_0_v0));
-        assert!(storage.has(entity_0_v1));
-        assert!(storage.has(entity_1_v0));
         assert!(!storage.has(entity_1_v1));
-        assert!(storage.get(entity_0_v0).is_none());
         assert_eq!("0 v1", storage[entity_0_v1].0);
-        assert_eq!("1 v0 prime", storage[entity_1_v0].0);
         assert!(storage.get(entity_1_v1).is_none());
 
         let data = storage.add(entity_1_v1, TestData("1 v1"));
         assert!(data.is_none());
         assert_eq!(2, storage.dense.len());
-        assert!(!storage.has(entity_0_v0));
         assert!(storage.has(entity_0_v1));
-        assert!(!storage.has(entity_1_v0));
         assert!(storage.has(entity_1_v1));
-        assert!(storage.get(entity_0_v0).is_none());
         assert_eq!("0 v1", storage[entity_0_v1].0);
-        assert!(storage.get(entity_1_v0).is_none());
         assert_eq!("1 v1", storage[entity_1_v1].0);
 
-        let entity_2_v0 = manager.new_entity();
-        let entity_3_v0 = manager.new_entity();
+        manager.delete_entity(entity_0_v1);
+        let entity_0_v2 = manager.new_entity();
 
-        let data = storage.add(entity_3_v0, TestData("3 v0"));
+        let data = storage.remove(entity_0_v1).unwrap();
+        assert_eq!("0 v1", data.0);
+        assert_eq!(1, storage.dense.len());
+        assert!(!storage.has(entity_0_v1));
+        assert!(!storage.has(entity_0_v2));
+        assert!(storage.has(entity_1_v1));
+        assert!(storage.get(entity_0_v1).is_none());
+        assert_eq!("1 v1", storage[entity_1_v1].0);
+
+        let data = storage.add(entity_0_v2, TestData("0 v2"));
+        assert!(data.is_none());
+        assert_eq!(2, storage.dense.len());
+        assert!(!storage.has(entity_0_v1));
+        assert!(storage.has(entity_0_v2));
+        assert!(storage.has(entity_1_v1));
+        assert!(storage.has(entity_1_v1));
+        assert!(storage.get(entity_0_v1).is_none());
+        assert_eq!("0 v2", storage[entity_0_v2].0);
+        assert_eq!("1 v1", storage[entity_1_v1].0);
+
+        manager.delete_entity(entity_1_v1);
+        let entity_1_v2 = manager.new_entity();
+
+        let data = storage.add(entity_1_v1, TestData("1 v1 prime")).unwrap();
+        assert_eq!("1 v1", data.0);
+        assert_eq!(2, storage.dense.len());
+        assert!(!storage.has(entity_0_v1));
+        assert!(storage.has(entity_0_v2));
+        assert!(storage.has(entity_1_v1));
+        assert!(!storage.has(entity_1_v2));
+        assert!(storage.get(entity_0_v1).is_none());
+        assert_eq!("0 v2", storage[entity_0_v2].0);
+        assert_eq!("1 v1 prime", storage[entity_1_v1].0);
+        assert!(storage.get(entity_1_v2).is_none());
+
+        let data = storage.add(entity_1_v2, TestData("1 v2"));
+        assert!(data.is_none());
+        assert_eq!(2, storage.dense.len());
+        assert!(!storage.has(entity_0_v1));
+        assert!(storage.has(entity_0_v2));
+        assert!(!storage.has(entity_1_v1));
+        assert!(storage.has(entity_1_v2));
+        assert!(storage.get(entity_0_v1).is_none());
+        assert_eq!("0 v2", storage[entity_0_v2].0);
+        assert!(storage.get(entity_1_v1).is_none());
+        assert_eq!("1 v2", storage[entity_1_v2].0);
+
+        let entity_2_v1 = manager.new_entity();
+        let entity_3_v1 = manager.new_entity();
+
+        let data = storage.add(entity_3_v1, TestData("3 v1"));
         assert!(data.is_none());
         assert_eq!(3, storage.dense.len());
-        assert!(!storage.has(entity_0_v0));
-        assert!(storage.has(entity_0_v1));
-        assert!(!storage.has(entity_1_v0));
-        assert!(storage.has(entity_1_v1));
-        assert!(!storage.has(entity_2_v0));
-        assert!(storage.has(entity_3_v0));
-        assert!(storage.get(entity_0_v0).is_none());
-        assert_eq!("0 v1", storage[entity_0_v1].0);
-        assert!(storage.get(entity_1_v0).is_none());
-        assert_eq!("1 v1", storage[entity_1_v1].0);
-        assert!(storage.get(entity_2_v0).is_none());
-        assert_eq!("3 v0", storage[entity_3_v0].0);
+        assert!(!storage.has(entity_0_v1));
+        assert!(storage.has(entity_0_v2));
+        assert!(!storage.has(entity_1_v1));
+        assert!(storage.has(entity_1_v2));
+        assert!(!storage.has(entity_2_v1));
+        assert!(storage.has(entity_3_v1));
+        assert!(storage.get(entity_0_v1).is_none());
+        assert_eq!("0 v2", storage[entity_0_v2].0);
+        assert!(storage.get(entity_1_v1).is_none());
+        assert_eq!("1 v2", storage[entity_1_v2].0);
+        assert!(storage.get(entity_2_v1).is_none());
+        assert_eq!("3 v1", storage[entity_3_v1].0);
 
-        let data = storage.add(entity_2_v0, TestData("2 v0"));
+        let data = storage.add(entity_2_v1, TestData("2 v1"));
         assert!(data.is_none());
         assert_eq!(4, storage.dense.len());
-        assert!(!storage.has(entity_0_v0));
-        assert!(storage.has(entity_0_v1));
-        assert!(!storage.has(entity_1_v0));
-        assert!(storage.has(entity_1_v1));
-        assert!(storage.has(entity_2_v0));
-        assert!(storage.has(entity_3_v0));
-        assert!(storage.get(entity_0_v0).is_none());
-        assert_eq!("0 v1", storage[entity_0_v1].0);
-        assert!(storage.get(entity_1_v0).is_none());
-        assert_eq!("1 v1", storage[entity_1_v1].0);
-        assert_eq!("2 v0", storage[entity_2_v0].0);
-        assert_eq!("3 v0", storage[entity_3_v0].0);
+        assert!(!storage.has(entity_0_v1));
+        assert!(storage.has(entity_0_v2));
+        assert!(!storage.has(entity_1_v1));
+        assert!(storage.has(entity_1_v2));
+        assert!(storage.has(entity_2_v1));
+        assert!(storage.has(entity_3_v1));
+        assert!(storage.get(entity_0_v1).is_none());
+        assert_eq!("0 v2", storage[entity_0_v2].0);
+        assert!(storage.get(entity_1_v1).is_none());
+        assert_eq!("1 v2", storage[entity_1_v2].0);
+        assert_eq!("2 v1", storage[entity_2_v1].0);
+        assert_eq!("3 v1", storage[entity_3_v1].0);
     }
 }

@@ -1,23 +1,26 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     iter::{FusedIterator, repeat_n},
     ops::{Index, IndexMut},
 };
 
-/// A world is a collection of entities. Each entity is composed of a unique [EntityId]
-/// and data components. Components can by dynamically added, accessed, modified and removed.
-/// This pattern is known as an Entity component system (ECS).
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+
+/// An entity manager is responsible of generating unique [EntityId]. It can also
+/// recycle deleted ones.
 #[derive(Debug, Default)]
-pub struct World {
+pub struct EntityManager {
     dense: Vec<EntityId>,
     sparse: Vec<SparseEntry>,
     available: usize,
     next: u16,
 }
 
-impl World {
-    pub fn new() -> World {
-        World {
+impl EntityManager {
+    pub fn new() -> EntityManager {
+        EntityManager {
             dense: Vec::new(),
             sparse: Vec::new(),
             available: 0,
@@ -54,8 +57,8 @@ impl World {
         }
     }
 
-    /// Deletes the given entity. Returns `true` if the world previously had the entity.
-    /// Returns `false` on subsequent deletions or if the world never had the entity.
+    /// Deletes the given entity. Returns `true` if the manager previously had the entity.
+    /// Returns `false` on subsequent deletions or if the manager never had the entity.
     ///
     /// This operation does not automatically delete all its componenets.
     /// However, this enable future entities to reuse the same storage offset, deacreasing the overall
@@ -82,7 +85,7 @@ impl World {
         }
     }
 
-    /// Returns `true` if the world contains the entity.
+    /// Returns `true` if the manager contains the entity.
     /// Returns `false` it the entity has been deleted or was never created.
     pub fn contains(&self, entity: EntityId) -> bool {
         match self.sparse.get(entity.sparse as usize) {
@@ -148,15 +151,22 @@ impl<'a> ExactSizeIterator for EntityIter<'a> {
 
 impl<'a> FusedIterator for EntityIter<'a> {}
 
-/// Unique id for a [`World`] entity. This is used to associate
+/// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "python", pyclass(frozen, str, from_py_object))]
 pub struct EntityId {
-    version: u16,
     sparse: u16,
+    version: u16,
 }
 
-pub trait ComponentStorage<T> {
+impl Display for EntityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.sparse, self.version)
+    }
+}
+
+pub trait ComponentsView<T> {
     type Iter<'a>: Iterator<Item = (EntityId, &'a T)>
     where
         Self: 'a,
@@ -166,19 +176,6 @@ pub trait ComponentStorage<T> {
     where
         Self: 'a,
         T: 'a;
-
-    /// Adds the component to the entity.
-    ///
-    /// If the entity did not have this component, `None` is returned.
-    ///
-    /// If the entity did have this component, the component is updated and the old value is returned.
-    fn add(&mut self, entity: EntityId, component: T) -> Option<T>;
-
-    /// Removes the component from the entity, returning the component value if the entity previously had it.
-    fn remove(&mut self, entity: EntityId) -> Option<T>;
-
-    /// Removes all component `T` from all entities. Keeps the allocated memory for reuse.
-    fn clear(&mut self);
 
     /// Returns true if the entity has the component.
     fn has(&self, entity: EntityId) -> bool;
@@ -195,6 +192,21 @@ pub trait ComponentStorage<T> {
     /// An iterator visiting all components `T` in arbitrary order, with mutable references to the values.
     /// The iterator element type is `(EntityId, &'a T)`.
     fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>;
+}
+
+pub trait ComponentStorage<T>: ComponentsView<T> {
+    /// Adds the component to the entity.
+    ///
+    /// If the entity did not have this component, `None` is returned.
+    ///
+    /// If the entity did have this component, the component is updated and the old value is returned.
+    fn add(&mut self, entity: EntityId, component: T) -> Option<T>;
+
+    /// Removes the component from the entity, returning the component value if the entity previously had it.
+    fn remove(&mut self, entity: EntityId) -> Option<T>;
+
+    /// Removes all component `T` from all entities. Keeps the allocated memory for reuse.
+    fn clear(&mut self);
 }
 
 pub struct HashMapIter<'a, T> {
@@ -291,7 +303,7 @@ impl<'a, T> ExactSizeIterator for HashMapIterMut<'a, T> {
 
 impl<'a, T> FusedIterator for HashMapIterMut<'a, T> {}
 
-impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
+impl<T> ComponentsView<T> for HashMap<EntityId, T> {
     type Iter<'a>
         = HashMapIter<'a, T>
     where
@@ -303,18 +315,6 @@ impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
     where
         Self: 'a,
         T: 'a;
-
-    fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
-        self.insert(entity, component)
-    }
-
-    fn remove(&mut self, entity: EntityId) -> Option<T> {
-        self.remove(&entity)
-    }
-
-    fn clear(&mut self) {
-        self.clear();
-    }
 
     fn has(&self, entity: EntityId) -> bool {
         self.contains_key(&entity)
@@ -336,6 +336,20 @@ impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
         HashMapIterMut {
             inner: self.iter_mut(),
         }
+    }
+}
+
+impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
+    fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
+        self.insert(entity, component)
+    }
+
+    fn remove(&mut self, entity: EntityId) -> Option<T> {
+        self.remove(&entity)
+    }
+
+    fn clear(&mut self) {
+        self.clear();
     }
 }
 
@@ -479,7 +493,7 @@ impl<'a, T> ExactSizeIterator for SparseArrayIterMut<'a, T> {
 
 impl<'a, T> FusedIterator for SparseArrayIterMut<'a, T> {}
 
-impl<T> ComponentStorage<T> for SparseArray<T> {
+impl<T> ComponentsView<T> for SparseArray<T> {
     type Iter<'a>
         = SparseArrayIter<'a, T>
     where
@@ -492,6 +506,55 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
         Self: 'a,
         T: 'a;
 
+    fn has(&self, entity: EntityId) -> bool {
+        match self.sparse.get(entity.sparse as usize) {
+            Some(entry) if entry.version == entity.version => true,
+            _ => false,
+        }
+    }
+
+    fn get(&self, entity: EntityId) -> Option<&T> {
+        match self.sparse.get(entity.sparse as usize) {
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                match self.dense.get(sparse_entry.dense as usize) {
+                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                        Some(&dense_entry.component)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
+        match self.sparse.get(entity.sparse as usize) {
+            Some(sparse_entry) if sparse_entry.version == entity.version => {
+                match self.dense.get_mut(sparse_entry.dense as usize) {
+                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                        Some(&mut dense_entry.component)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        SparseArrayIter {
+            inner: self.dense.iter(),
+        }
+    }
+
+    fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {
+        SparseArrayIterMut {
+            inner: self.dense.iter_mut(),
+        }
+    }
+}
+
+impl<T> ComponentStorage<T> for SparseArray<T> {
     fn add(&mut self, entity: EntityId, component: T) -> Option<T> {
         let sparse_idx = entity.sparse as usize;
         match self.sparse.get_mut(sparse_idx) {
@@ -558,53 +621,6 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
     fn clear(&mut self) {
         self.dense.clear();
     }
-
-    fn has(&self, entity: EntityId) -> bool {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(entry) if entry.version == entity.version => true,
-            _ => false,
-        }
-    }
-
-    fn get(&self, entity: EntityId) -> Option<&T> {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
-                match self.dense.get(sparse_entry.dense as usize) {
-                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
-                        Some(&dense_entry.component)
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
-        match self.sparse.get(entity.sparse as usize) {
-            Some(sparse_entry) if sparse_entry.version == entity.version => {
-                match self.dense.get_mut(sparse_entry.dense as usize) {
-                    Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
-                        Some(&mut dense_entry.component)
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        SparseArrayIter {
-            inner: self.dense.iter(),
-        }
-    }
-
-    fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {
-        SparseArrayIterMut {
-            inner: self.dense.iter_mut(),
-        }
-    }
 }
 
 impl<T> Index<EntityId> for SparseArray<T> {
@@ -629,88 +645,88 @@ mod tests {
     struct TestData(&'static str);
 
     #[test]
-    fn test_world() {
-        let mut world = World::new();
-        assert_eq!(0, world.available);
+    fn test_entity_manager() {
+        let mut manager = EntityManager::new();
+        assert_eq!(0, manager.available);
 
-        let entity_0_v0 = world.new_entity();
-        assert_eq!(1, world.dense.len());
-        assert!(world.dense.contains(&entity_0_v0));
+        let entity_0_v0 = manager.new_entity();
+        assert_eq!(1, manager.dense.len());
+        assert!(manager.dense.contains(&entity_0_v0));
         assert_eq!(0, entity_0_v0.sparse);
         assert_eq!(0, entity_0_v0.version);
-        assert!(world.contains(entity_0_v0));
+        assert!(manager.contains(entity_0_v0));
 
-        let entity_1_v0 = world.new_entity();
-        assert_eq!(2, world.dense.len());
-        assert!(world.dense.contains(&entity_1_v0));
+        let entity_1_v0 = manager.new_entity();
+        assert_eq!(2, manager.dense.len());
+        assert!(manager.dense.contains(&entity_1_v0));
         assert_eq!(1, entity_1_v0.sparse);
         assert_eq!(0, entity_1_v0.version);
-        assert!(world.contains(entity_0_v0));
-        assert!(world.contains(entity_1_v0));
+        assert!(manager.contains(entity_0_v0));
+        assert!(manager.contains(entity_1_v0));
 
-        assert_eq!(0, world.available);
-        world.delete_entity(entity_1_v0);
-        assert_eq!(1, world.dense.len());
-        assert!(world.dense.contains(&entity_0_v0));
-        assert!(!world.dense.contains(&entity_1_v0));
-        assert_eq!(1, world.available);
-        assert_eq!(1, world.next);
-        assert!(world.contains(entity_0_v0));
-        assert!(!world.contains(entity_1_v0));
+        assert_eq!(0, manager.available);
+        manager.delete_entity(entity_1_v0);
+        assert_eq!(1, manager.dense.len());
+        assert!(manager.dense.contains(&entity_0_v0));
+        assert!(!manager.dense.contains(&entity_1_v0));
+        assert_eq!(1, manager.available);
+        assert_eq!(1, manager.next);
+        assert!(manager.contains(entity_0_v0));
+        assert!(!manager.contains(entity_1_v0));
 
-        let entity_1_v1 = world.new_entity();
-        assert_eq!(2, world.dense.len());
-        assert!(world.dense.contains(&entity_0_v0));
-        assert!(!world.dense.contains(&entity_1_v0));
-        assert!(world.dense.contains(&entity_1_v1));
+        let entity_1_v1 = manager.new_entity();
+        assert_eq!(2, manager.dense.len());
+        assert!(manager.dense.contains(&entity_0_v0));
+        assert!(!manager.dense.contains(&entity_1_v0));
+        assert!(manager.dense.contains(&entity_1_v1));
         assert_eq!(1, entity_1_v1.sparse);
         assert_eq!(1, entity_1_v1.version);
-        assert_eq!(0, world.available);
-        assert!(world.contains(entity_0_v0));
-        assert!(!world.contains(entity_1_v0));
-        assert!(world.contains(entity_1_v1));
+        assert_eq!(0, manager.available);
+        assert!(manager.contains(entity_0_v0));
+        assert!(!manager.contains(entity_1_v0));
+        assert!(manager.contains(entity_1_v1));
 
-        let entity_2_v0 = world.new_entity();
+        let entity_2_v0 = manager.new_entity();
         assert_eq!(2, entity_2_v0.sparse);
         assert_eq!(0, entity_2_v0.version);
-        assert_eq!(3, world.dense.len());
-        assert!(world.contains(entity_0_v0));
-        assert!(!world.contains(entity_1_v0));
-        assert!(world.contains(entity_1_v1));
-        assert!(world.contains(entity_2_v0));
+        assert_eq!(3, manager.dense.len());
+        assert!(manager.contains(entity_0_v0));
+        assert!(!manager.contains(entity_1_v0));
+        assert!(manager.contains(entity_1_v1));
+        assert!(manager.contains(entity_2_v0));
 
-        world.delete_entity(entity_0_v0);
-        assert_eq!(2, world.dense.len());
-        assert_eq!(1, world.available);
-        assert_eq!(0, world.next);
-        assert!(!world.contains(entity_0_v0));
-        assert!(world.contains(entity_1_v1));
-        assert!(world.contains(entity_2_v0));
+        manager.delete_entity(entity_0_v0);
+        assert_eq!(2, manager.dense.len());
+        assert_eq!(1, manager.available);
+        assert_eq!(0, manager.next);
+        assert!(!manager.contains(entity_0_v0));
+        assert!(manager.contains(entity_1_v1));
+        assert!(manager.contains(entity_2_v0));
 
-        world.delete_entity(entity_2_v0);
-        assert_eq!(1, world.dense.len());
-        assert_eq!(2, world.available);
-        assert_eq!(2, world.next);
-        assert!(world.contains(entity_1_v1));
-        assert!(!world.contains(entity_2_v0));
+        manager.delete_entity(entity_2_v0);
+        assert_eq!(1, manager.dense.len());
+        assert_eq!(2, manager.available);
+        assert_eq!(2, manager.next);
+        assert!(manager.contains(entity_1_v1));
+        assert!(!manager.contains(entity_2_v0));
 
-        let entity_2_v1 = world.new_entity();
+        let entity_2_v1 = manager.new_entity();
         assert_eq!(2, entity_2_v1.sparse);
         assert_eq!(1, entity_2_v1.version);
-        assert_eq!(1, world.available);
-        assert_eq!(0, world.next);
-        assert!(world.contains(entity_1_v1));
-        assert!(!world.contains(entity_2_v0));
-        assert!(world.contains(entity_2_v1));
+        assert_eq!(1, manager.available);
+        assert_eq!(0, manager.next);
+        assert!(manager.contains(entity_1_v1));
+        assert!(!manager.contains(entity_2_v0));
+        assert!(manager.contains(entity_2_v1));
     }
 
     #[test]
     fn test_sparse_array() {
-        let mut world = World::new();
+        let mut manager = EntityManager::new();
         let mut storage = SparseArray::new();
 
-        let entity_0_v0 = world.new_entity();
-        let entity_1_v0 = world.new_entity();
+        let entity_0_v0 = manager.new_entity();
+        let entity_1_v0 = manager.new_entity();
 
         let data = storage.add(entity_0_v0, TestData("0 v0"));
         assert!(data.is_none());
@@ -728,8 +744,8 @@ mod tests {
         assert_eq!("0 v0", storage[entity_0_v0].0);
         assert_eq!("1 v0", storage[entity_1_v0].0);
 
-        world.delete_entity(entity_0_v0);
-        let entity_0_v1 = world.new_entity();
+        manager.delete_entity(entity_0_v0);
+        let entity_0_v1 = manager.new_entity();
 
         let data = storage.remove(entity_0_v0).unwrap();
         assert_eq!("0 v0", data.0);
@@ -751,8 +767,8 @@ mod tests {
         assert_eq!("0 v1", storage[entity_0_v1].0);
         assert_eq!("1 v0", storage[entity_1_v0].0);
 
-        world.delete_entity(entity_1_v0);
-        let entity_1_v1 = world.new_entity();
+        manager.delete_entity(entity_1_v0);
+        let entity_1_v1 = manager.new_entity();
 
         let data = storage.add(entity_1_v0, TestData("1 v0 prime")).unwrap();
         assert_eq!("1 v0", data.0);
@@ -778,8 +794,8 @@ mod tests {
         assert!(storage.get(entity_1_v0).is_none());
         assert_eq!("1 v1", storage[entity_1_v1].0);
 
-        let entity_2_v0 = world.new_entity();
-        let entity_3_v0 = world.new_entity();
+        let entity_2_v0 = manager.new_entity();
+        let entity_3_v0 = manager.new_entity();
 
         let data = storage.add(entity_3_v0, TestData("3 v0"));
         assert!(data.is_none());

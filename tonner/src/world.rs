@@ -26,6 +26,7 @@ impl World {
     }
 
     /// Generates a unique entity id.
+    #[must_use]
     pub fn new_entity(&mut self) -> EntityId {
         if self.available == 0 {
             let entity = EntityId {
@@ -180,7 +181,7 @@ pub trait ComponentStorage<T> {
     fn clear(&mut self);
 
     /// Returns true if the entity has the component.
-    fn contains(&self, entity: EntityId) -> bool;
+    fn has(&self, entity: EntityId) -> bool;
 
     /// Returns a reference to the component belonging to the entity.
     fn get(&self, entity: EntityId) -> Option<&T>;
@@ -315,7 +316,7 @@ impl<T> ComponentStorage<T> for HashMap<EntityId, T> {
         self.clear();
     }
 
-    fn contains(&self, entity: EntityId) -> bool {
+    fn has(&self, entity: EntityId) -> bool {
         self.contains_key(&entity)
     }
 
@@ -495,18 +496,19 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
         let sparse_idx = entity.sparse as usize;
         match self.sparse.get_mut(sparse_idx) {
             Some(sparse_entry) => match self.dense.get_mut(sparse_entry.dense as usize) {
-                Some(dense_entry) if dense_entry.entity.version == entity.version => {
-                    // the entity already had the component
-                    Some(std::mem::replace(&mut dense_entry.component, component))
+                Some(dense_entry) if dense_entry.entity.sparse == entity.sparse => {
+                    if dense_entry.entity.version == entity.version {
+                        // the entity already had the component
+                        Some(std::mem::replace(&mut dense_entry.component, component))
+                    } else {
+                        // a deleted entity with the same `sparse` had the component
+                        sparse_entry.version = entity.version;
+                        dense_entry.entity.version = entity.version;
+                        dense_entry.component = component;
+                        None
+                    }
                 }
-                Some(dense_entry) => {
-                    // a deleted entity with the same `sparse` had the component
-                    sparse_entry.version = entity.version;
-                    dense_entry.entity.version = entity.version;
-                    dense_entry.component = component;
-                    None
-                }
-                None => {
+                _ => {
                     // no dense entry for the `sparse` index
                     sparse_entry.dense = self.dense.len() as u16;
                     sparse_entry.version = entity.version;
@@ -557,7 +559,7 @@ impl<T> ComponentStorage<T> for SparseArray<T> {
         self.dense.clear();
     }
 
-    fn contains(&self, entity: EntityId) -> bool {
+    fn has(&self, entity: EntityId) -> bool {
         match self.sparse.get(entity.sparse as usize) {
             Some(entry) if entry.version == entity.version => true,
             _ => false,
@@ -625,9 +627,6 @@ mod tests {
 
     #[derive(Debug)]
     struct TestData(&'static str);
-
-    #[derive(Debug)]
-    struct TestData2(&'static str);
 
     #[test]
     fn test_world() {
@@ -705,63 +704,113 @@ mod tests {
         assert!(world.contains(entity_2_v1));
     }
 
-    // #[test]
-    // fn test_map() {
-    //     let mut set: SparseSet<TestData> = SparseSet::new();
-    //     let mut map: SparseMap<TestData2> = SparseMap::new();
+    #[test]
+    fn test_sparse_array() {
+        let mut world = World::new();
+        let mut storage = SparseArray::new();
 
-    //     let id_1_v1 = set.next_id();
-    //     set.insert(TestData(id_1_v1, String::from("data 1 v1")));
-    //     let id_2_v1 = set.next_id();
-    //     set.insert(TestData(id_2_v1, String::from("data 2 v1")));
-    //     let id_3_v1 = set.next_id();
-    //     set.insert(TestData(id_3_v1, String::from("data 3 v1")));
+        let entity_0_v0 = world.new_entity();
+        let entity_1_v0 = world.new_entity();
 
-    //     map.insert(TestData2(id_2_v1, String::from("data2 2 v1")));
-    //     assert!(map.get(id_1_v1).is_none());
-    //     assert_eq!(map[id_2_v1].1, "data2 2 v1");
-    //     assert!(map.get(id_3_v1).is_none());
+        let data = storage.add(entity_0_v0, TestData("0 v0"));
+        assert!(data.is_none());
+        assert_eq!(1, storage.dense.len());
+        assert!(storage.has(entity_0_v0));
+        assert!(!storage.has(entity_1_v0));
+        assert_eq!("0 v0", storage[entity_0_v0].0);
+        assert!(storage.get(entity_1_v0).is_none());
 
-    //     map.insert(TestData2(id_1_v1, String::from("data2 1 v1")));
-    //     assert_eq!(map[id_1_v1].1, "data2 1 v1");
-    //     assert_eq!(map[id_2_v1].1, "data2 2 v1");
-    //     assert!(map.get(id_3_v1).is_none());
+        let data = storage.add(entity_1_v0, TestData("1 v0"));
+        assert!(data.is_none());
+        assert_eq!(2, storage.dense.len());
+        assert!(storage.has(entity_0_v0));
+        assert!(storage.has(entity_1_v0));
+        assert_eq!("0 v0", storage[entity_0_v0].0);
+        assert_eq!("1 v0", storage[entity_1_v0].0);
 
-    //     map.remove(id_2_v1);
-    //     assert_eq!(map[id_1_v1].1, "data2 1 v1");
-    //     assert!(map.get(id_2_v1).is_none());
-    //     assert!(map.get(id_3_v1).is_none());
+        world.delete_entity(entity_0_v0);
+        let entity_0_v1 = world.new_entity();
 
-    //     set.remove(id_2_v1);
-    //     set.remove(id_3_v1);
+        let data = storage.remove(entity_0_v0).unwrap();
+        assert_eq!("0 v0", data.0);
+        assert_eq!(1, storage.dense.len());
+        assert!(!storage.has(entity_0_v0));
+        assert!(!storage.has(entity_0_v1));
+        assert!(storage.has(entity_1_v0));
+        assert!(storage.get(entity_0_v0).is_none());
+        assert_eq!("1 v0", storage[entity_1_v0].0);
 
-    //     let id_2_v2 = set.next_id();
-    //     set.insert(TestData(id_2_v2, String::from("data 2 v2")));
-    //     let id_3_v2 = set.next_id();
-    //     set.insert(TestData(id_3_v2, String::from("data 3 v2")));
+        let data = storage.add(entity_0_v1, TestData("0 v1"));
+        assert!(data.is_none());
+        assert_eq!(2, storage.dense.len());
+        assert!(!storage.has(entity_0_v0));
+        assert!(storage.has(entity_0_v1));
+        assert!(storage.has(entity_1_v0));
+        assert!(storage.has(entity_1_v0));
+        assert!(storage.get(entity_0_v0).is_none());
+        assert_eq!("0 v1", storage[entity_0_v1].0);
+        assert_eq!("1 v0", storage[entity_1_v0].0);
 
-    //     assert!(map.get(id_2_v2).is_none());
-    //     assert!(map.get(id_3_v2).is_none());
+        world.delete_entity(entity_1_v0);
+        let entity_1_v1 = world.new_entity();
 
-    //     map.insert(TestData2(id_3_v2, String::from("data2 3 v2")));
-    //     assert_eq!(map[id_1_v1].1, "data2 1 v1");
-    //     assert!(map.get(id_2_v2).is_none());
-    //     assert_eq!(map[id_3_v2].1, "data2 3 v2");
+        let data = storage.add(entity_1_v0, TestData("1 v0 prime")).unwrap();
+        assert_eq!("1 v0", data.0);
+        assert_eq!(2, storage.dense.len());
+        assert!(!storage.has(entity_0_v0));
+        assert!(storage.has(entity_0_v1));
+        assert!(storage.has(entity_1_v0));
+        assert!(!storage.has(entity_1_v1));
+        assert!(storage.get(entity_0_v0).is_none());
+        assert_eq!("0 v1", storage[entity_0_v1].0);
+        assert_eq!("1 v0 prime", storage[entity_1_v0].0);
+        assert!(storage.get(entity_1_v1).is_none());
 
-    //     set.remove(id_1_v1);
-    //     let id_1_v2 = set.next_id();
-    //     set.insert(TestData(id_1_v2, String::from("data 1 v2")));
-    //     assert!(map.get(id_1_v2).is_none());
+        let data = storage.add(entity_1_v1, TestData("1 v1"));
+        assert!(data.is_none());
+        assert_eq!(2, storage.dense.len());
+        assert!(!storage.has(entity_0_v0));
+        assert!(storage.has(entity_0_v1));
+        assert!(!storage.has(entity_1_v0));
+        assert!(storage.has(entity_1_v1));
+        assert!(storage.get(entity_0_v0).is_none());
+        assert_eq!("0 v1", storage[entity_0_v1].0);
+        assert!(storage.get(entity_1_v0).is_none());
+        assert_eq!("1 v1", storage[entity_1_v1].0);
 
-    //     map.insert(TestData2(id_1_v2, String::from("data2 1 v2")));
-    //     assert!(map.get(id_1_v1).is_none());
-    //     assert_eq!(map[id_1_v2].1, "data2 1 v2");
-    //     assert!(map.get(id_2_v2).is_none());
-    //     assert_eq!(map[id_3_v2].1, "data2 3 v2");
+        let entity_2_v0 = world.new_entity();
+        let entity_3_v0 = world.new_entity();
 
-    //     map.insert(TestData2(id_2_v2, String::from("data2 2 v2")));
-    //     assert_eq!(map[id_1_v2].1, "data2 1 v2");
-    //     assert_eq!(map[id_2_v2].1, "data2 2 v2");
-    //     assert_eq!(map[id_3_v2].1, "data2 3 v2");
-    // }
+        let data = storage.add(entity_3_v0, TestData("3 v0"));
+        assert!(data.is_none());
+        assert_eq!(3, storage.dense.len());
+        assert!(!storage.has(entity_0_v0));
+        assert!(storage.has(entity_0_v1));
+        assert!(!storage.has(entity_1_v0));
+        assert!(storage.has(entity_1_v1));
+        assert!(!storage.has(entity_2_v0));
+        assert!(storage.has(entity_3_v0));
+        assert!(storage.get(entity_0_v0).is_none());
+        assert_eq!("0 v1", storage[entity_0_v1].0);
+        assert!(storage.get(entity_1_v0).is_none());
+        assert_eq!("1 v1", storage[entity_1_v1].0);
+        assert!(storage.get(entity_2_v0).is_none());
+        assert_eq!("3 v0", storage[entity_3_v0].0);
+
+        let data = storage.add(entity_2_v0, TestData("2 v0"));
+        assert!(data.is_none());
+        assert_eq!(4, storage.dense.len());
+        assert!(!storage.has(entity_0_v0));
+        assert!(storage.has(entity_0_v1));
+        assert!(!storage.has(entity_1_v0));
+        assert!(storage.has(entity_1_v1));
+        assert!(storage.has(entity_2_v0));
+        assert!(storage.has(entity_3_v0));
+        assert!(storage.get(entity_0_v0).is_none());
+        assert_eq!("0 v1", storage[entity_0_v1].0);
+        assert!(storage.get(entity_1_v0).is_none());
+        assert_eq!("1 v1", storage[entity_1_v1].0);
+        assert_eq!("2 v0", storage[entity_2_v0].0);
+        assert_eq!("3 v0", storage[entity_3_v0].0);
+    }
 }

@@ -5,7 +5,7 @@ use std::{
 
 use crate::entity_component::{
     EntityId,
-    component::{ComponentStorage, ComponentsView},
+    component::{ComponentStorage, ComponentsView, ComponentsViewMut},
 };
 
 #[derive(Debug, Clone)]
@@ -52,11 +52,11 @@ impl<T> SparseArray<T> {
     }
 }
 
-pub struct SparseArrayIter<'a, T> {
+pub struct Iter<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
 
-impl<'a, T> Iterator for SparseArrayIter<'a, T> {
+impl<'a, T> Iterator for Iter<'a, T> {
     type Item = (EntityId, &'a T);
 
     #[inline]
@@ -91,20 +91,20 @@ impl<'a, T> Iterator for SparseArrayIter<'a, T> {
     }
 }
 
-impl<'a, T> ExactSizeIterator for SparseArrayIter<'a, T> {
+impl<'a, T> ExactSizeIterator for Iter<'a, T> {
     #[inline]
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl<'a, T> FusedIterator for SparseArrayIter<'a, T> {}
+impl<'a, T> FusedIterator for Iter<'a, T> {}
 
-pub struct SparseArrayIterMut<'a, T> {
+pub struct IterMut<'a, T> {
     inner: std::slice::IterMut<'a, DenseEntry<T>>,
 }
 
-impl<'a, T> Iterator for SparseArrayIterMut<'a, T> {
+impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = (EntityId, &'a mut T);
 
     #[inline]
@@ -139,24 +139,18 @@ impl<'a, T> Iterator for SparseArrayIterMut<'a, T> {
     }
 }
 
-impl<'a, T> ExactSizeIterator for SparseArrayIterMut<'a, T> {
+impl<'a, T> ExactSizeIterator for IterMut<'a, T> {
     #[inline]
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl<'a, T> FusedIterator for SparseArrayIterMut<'a, T> {}
+impl<'a, T> FusedIterator for IterMut<'a, T> {}
 
 impl<T> ComponentsView<T> for SparseArray<T> {
     type Iter<'a>
-        = SparseArrayIter<'a, T>
-    where
-        Self: 'a,
-        T: 'a;
-
-    type IterMut<'a>
-        = SparseArrayIterMut<'a, T>
+        = Iter<'a, T>
     where
         Self: 'a,
         T: 'a;
@@ -177,6 +171,20 @@ impl<T> ComponentsView<T> for SparseArray<T> {
         }
     }
 
+    fn iter<'a>(&'a self) -> Self::Iter<'a> {
+        Iter {
+            inner: self.dense.iter(),
+        }
+    }
+}
+
+impl<T> ComponentsViewMut<T> for SparseArray<T> {
+    type IterMut<'a>
+        = IterMut<'a, T>
+    where
+        Self: 'a,
+        T: 'a;
+
     fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
         match self.sparse.get(entity.sparse() as usize) {
             Some(sparse_entry) if sparse_entry.version == entity.version().get() => {
@@ -186,14 +194,8 @@ impl<T> ComponentsView<T> for SparseArray<T> {
         }
     }
 
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        SparseArrayIter {
-            inner: self.dense.iter(),
-        }
-    }
-
     fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {
-        SparseArrayIterMut {
+        IterMut {
             inner: self.dense.iter_mut(),
         }
     }

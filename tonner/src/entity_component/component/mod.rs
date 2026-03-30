@@ -9,22 +9,24 @@ pub trait ComponentsView<T> {
         Self: 'a,
         T: 'a;
 
-    type IterMut<'a>: Iterator<Item = (EntityId, &'a mut T)>
-    where
-        Self: 'a,
-        T: 'a;
-
     /// Returns true if the entity has the component.
     fn has(&self, entity: EntityId) -> bool;
 
     /// Returns a reference to the component belonging to the entity.
     fn get(&self, entity: EntityId) -> Option<&T>;
 
-    /// Returns a mutable reference to the component belonging to the entity.
-    fn get_mut(&mut self, entity: EntityId) -> Option<&mut T>;
-
     /// An iterator visiting all components `T` in arbitrary order. The iterator element type is `(EntityId, &'a T)`.
     fn iter<'a>(&'a self) -> Self::Iter<'a>;
+}
+
+pub trait ComponentsViewMut<T>: ComponentsView<T> {
+    type IterMut<'a>: Iterator<Item = (EntityId, &'a mut T)>
+    where
+        Self: 'a,
+        T: 'a;
+
+    /// Returns a mutable reference to the component belonging to the entity.
+    fn get_mut(&mut self, entity: EntityId) -> Option<&mut T>;
 
     /// An iterator visiting all components `T` in arbitrary order, with mutable references to the values.
     /// The iterator element type is `(EntityId, &'a T)`.

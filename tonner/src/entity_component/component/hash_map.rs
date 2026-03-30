@@ -1,6 +1,9 @@
 use std::{collections::HashMap, iter::FusedIterator};
 
-use crate::entity_component::{EntityId, component::{ComponentStorage, ComponentsView}};
+use crate::entity_component::{
+    EntityId,
+    component::{ComponentStorage, ComponentsView, ComponentsViewMut},
+};
 
 pub struct Iter<'a, T> {
     inner: std::collections::hash_map::Iter<'a, EntityId, T>,
@@ -103,12 +106,6 @@ impl<T> ComponentsView<T> for HashMap<EntityId, T> {
         Self: 'a,
         T: 'a;
 
-    type IterMut<'a>
-        = IterMut<'a, T>
-    where
-        Self: 'a,
-        T: 'a;
-
     fn has(&self, entity: EntityId) -> bool {
         self.contains_key(&entity)
     }
@@ -117,12 +114,20 @@ impl<T> ComponentsView<T> for HashMap<EntityId, T> {
         self.get(&entity)
     }
 
-    fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
-        self.get_mut(&entity)
-    }
-
     fn iter<'a>(&'a self) -> Self::Iter<'a> {
         Iter { inner: self.iter() }
+    }
+}
+
+impl<T> ComponentsViewMut<T> for HashMap<EntityId, T> {
+    type IterMut<'a>
+        = IterMut<'a, T>
+    where
+        Self: 'a,
+        T: 'a;
+
+    fn get_mut(&mut self, entity: EntityId) -> Option<&mut T> {
+        self.get_mut(&entity)
     }
 
     fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a> {

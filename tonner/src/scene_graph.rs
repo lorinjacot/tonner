@@ -73,46 +73,73 @@ impl SceneGraph {
         }
     }
 
-    // fn recursively_update_global_transformation(
-    //     &mut self,
-    //     node: EntityId,
-    //     parent_global_transformation: Mat4,
-    // ) {
-    //     let node = self.nodes[node];
-    //     let global_transformation = parent_global_transformation * node.local_transformation();
-    //     node.global_transformation = global_transformation;
-    //     for child in node.children.clone() {
-    //         self.recursively_update_global_transformation(child, global_transformation);
-    //     }
-    // }
+    pub fn all_children(&self, node: EntityId) -> AllChildrenIter {
+        let parent = &self[node];
+        let next = parent.first_child.unwrap_or(node);
+        let states = vec![DepthIterState {
+            next,
+            remaining: parent.children_count,
+        }];
+        AllChildrenIter {
+            scene_graph: self,
+            states,
+        }
+    }
 
-    // /// Sets the node's local translation (if not `None`), rotation (if not `None`) and scale (if not `None`).
-    // /// See [Node::local_transformation] for more informations.
-    // /// This function will fail the node contains an invalid parent or if any of the children
-    // /// (direct and indirect) is invalid.
-    // ///
-    // /// ## Panics
-    // ///
-    // /// Panics if the entity `node` is not part of the scene graph.
-    // pub fn set_local_transformation(
-    //     &mut self,
-    //     node: EntityId,
-    //     translation: impl Into<Option<Vec3>>,
-    //     rotation: impl Into<Option<Quat>>,
-    //     scale: impl Into<Option<Vec3>>,
-    // ) {
-    //     let parent_transformation = {
-    //         let node = &mut self.nodes[node];
-    //         node.local_translation = translation.into().unwrap_or(node.local_translation);
-    //         node.local_rotation = rotation.into().unwrap_or(node.local_rotation);
-    //         node.local_scale = scale.into().unwrap_or(node.local_scale);
-    //         match node.parent {
-    //             Some(parent) => self[parent].global_transformation,
-    //             None => Mat4::IDENTITY,
-    //         }
-    //     };
-    //     self.recursively_update_global_transformation(node, parent_transformation)
-    // }
+    /// Sets the node's local translation (if not `None`), rotation (if not `None`) and scale (if not `None`).
+    /// See [Node::local_transformation] for more informations.
+    /// This function will fail the node contains an invalid parent or if any of the children
+    /// (direct and indirect) is invalid.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the entity `node` is not part of the scene graph.
+    pub fn set_local_transformation(
+        &mut self,
+        node: EntityId,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
+    ) {
+        let parent_transform = match self[node].parent {
+            Some(parent) => self[parent].global_transformation,
+            None => Mat4::IDENTITY,
+        };
+
+        let node = &mut self.nodes[node];
+        node.local_translation = translation.into().unwrap_or(node.local_translation);
+        node.local_rotation = rotation.into().unwrap_or(node.local_rotation);
+        node.local_scale = scale.into().unwrap_or(node.local_scale);
+        node.global_transformation = parent_transform * node.local_transformation();
+
+        // update children global_transformation
+        if let Some(next) = node.first_child {
+            let mut states = vec![UpdateTransformIterState {
+                next,
+                remaining: node.children_count,
+                parent_transform,
+            }];
+
+            while let Some(state) = states.last_mut() {
+                if state.remaining > 0 {
+                    state.remaining -= 1;
+                    let node = &mut self.nodes[state.next];
+                    node.global_transformation =
+                        state.parent_transform * node.local_transformation();
+                    state.next = node.next_sibling;
+                    if let Some(next) = node.first_child {
+                        states.push(UpdateTransformIterState {
+                            next,
+                            remaining: node.children_count,
+                            parent_transform: node.global_transformation,
+                        });
+                    }
+                } else {
+                    states.pop();
+                }
+            }
+        }
+    }
 
     // #[cfg(not(feature = "python"))]
     // /// Returns `true` if the scene graph contains the specified node.
@@ -300,8 +327,7 @@ impl<'a> Iterator for DirectChildrenIter<'a> {
 /// An iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
 pub struct AllChildrenIter<'a> {
     scene_graph: &'a SceneGraph,
-    root: EntityId,
-    state: Vec<DepthIterState>,
+    states: Vec<DepthIterState>,
 }
 
 struct DepthIterState {
@@ -313,25 +339,31 @@ impl<'a> Iterator for AllChildrenIter<'a> {
     type Item = (EntityId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(state) = self.state.last_mut() {
+        while let Some(state) = self.states.last_mut() {
             if state.remaining > 0 {
                 state.remaining -= 1;
                 let node = &self.scene_graph[state.next];
                 let item = (state.next, node);
                 state.next = node.next_sibling;
                 if let Some(next) = node.first_child {
-                    self.state.push(DepthIterState {
+                    self.states.push(DepthIterState {
                         next,
                         remaining: node.children_count,
                     });
                 }
                 return Some(item);
             } else {
-                self.state.pop();
+                self.states.pop();
             }
         }
         None
     }
+}
+
+struct UpdateTransformIterState {
+    next: EntityId,
+    remaining: usize,
+    parent_transform: Mat4,
 }
 
 // #[cfg(feature = "python")]

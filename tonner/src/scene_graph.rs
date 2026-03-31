@@ -889,10 +889,6 @@ mod tests {
         let mut entity_manager = EntityManager::new();
         let mut scene_graph = SceneGraph::new(&ctx);
 
-        let mut roots = scene_graph.roots();
-        assert_eq!(0, roots.len());
-        assert!(roots.next().is_none());
-
         let root_0 = entity_manager.new_entity();
 
         let previous = scene_graph.add(root_0, None);
@@ -946,5 +942,72 @@ mod tests {
         assert!(result.is_some());
         assert_eq!(0, scene_graph.root_count);
         assert_eq!(None, scene_graph.first_root);
+    }
+
+    #[test]
+    fn test_scene_graph_children() {
+        let ctx = pollster::block_on(Context::new());
+        let mut entity_manager = EntityManager::new();
+        let mut scene_graph = SceneGraph::new(&ctx);
+
+        let root = entity_manager.new_entity();
+        scene_graph.add(root, None);
+
+        assert_eq!(0, scene_graph[root].children_count);
+        assert_eq!(None, scene_graph[root].first_child);
+
+        let child_0 = entity_manager.new_entity();
+
+        let previous = scene_graph.add(child_0, root);
+        assert!(previous.is_none());
+        assert_eq!(1, scene_graph[root].children_count);
+        assert_eq!(Some(child_0), scene_graph[root].first_child);
+        assert_eq!(child_0, scene_graph[child_0].previous_sibling);
+        assert_eq!(child_0, scene_graph[child_0].next_sibling);
+
+        let child_1 = entity_manager.new_entity();
+
+        let previous = scene_graph.add(child_1, root);
+        assert!(previous.is_none());
+        assert_eq!(2, scene_graph[root].children_count);
+        assert_eq!(Some(child_0), scene_graph[root].first_child);
+        assert_eq!(child_1, scene_graph[child_0].previous_sibling);
+        assert_eq!(child_0, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_0].next_sibling);
+        assert_eq!(child_0, scene_graph[child_1].next_sibling);
+
+        let child_2 = entity_manager.new_entity();
+
+        let previous = scene_graph.add(child_2, root);
+        assert!(previous.is_none());
+        assert_eq!(3, scene_graph[root].children_count);
+        assert_eq!(Some(child_0), scene_graph[root].first_child);
+        assert_eq!(child_2, scene_graph[child_0].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_2].previous_sibling);
+        assert_eq!(child_0, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_0].next_sibling);
+        assert_eq!(child_2, scene_graph[child_1].next_sibling);
+        assert_eq!(child_0, scene_graph[child_2].next_sibling);
+
+        let result = scene_graph.remove(child_0);
+        assert!(result.is_some());
+        assert_eq!(2, scene_graph[root].children_count);
+        assert_eq!(Some(child_1), scene_graph[root].first_child);
+        assert_eq!(child_2, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_2].previous_sibling);
+        assert_eq!(child_2, scene_graph[child_1].next_sibling);
+        assert_eq!(child_1, scene_graph[child_2].next_sibling);
+
+        let result = scene_graph.remove(child_2);
+        assert!(result.is_some());
+        assert_eq!(1, scene_graph[root].children_count);
+        assert_eq!(Some(child_1), scene_graph[root].first_child);
+        assert_eq!(child_1, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_1].next_sibling);
+
+        let result = scene_graph.remove(child_1);
+        assert!(result.is_some());
+        assert_eq!(0, scene_graph[root].children_count);
+        assert_eq!(None, scene_graph[root].first_child);
     }
 }

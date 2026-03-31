@@ -49,11 +49,7 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if `parent` references an entity with no assicated node.
-    pub fn add(
-        &mut self,
-        entity: EntityId,
-        parent: impl Into<Option<EntityId>>,
-    ) -> Option<Node> {
+    pub fn add(&mut self, entity: EntityId, parent: impl Into<Option<EntityId>>) -> Option<Node> {
         self.add_with_transform(entity, parent, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE)
     }
 
@@ -76,9 +72,9 @@ impl SceneGraph {
         local_rotation: Quat,
         local_scale: Vec3,
     ) -> Option<Node> {
+        let parent = parent.into();
         let previous = self.remove(entity);
 
-        let parent = parent.into();
         let (parent_tranform, next_sibling) = match parent {
             Some(id) => {
                 let parent = &mut self.nodes[id];
@@ -147,30 +143,34 @@ impl SceneGraph {
                 self.nodes[node.next_sibling].previous_sibling = node.previous_sibling;
             }
 
-            if let Some(next) = node.first_child {
-                let mut states = vec![DeleteIterState {
-                    next,
-                    remaining: node.children_count,
-                }];
+            self.remove_children(node);
+        }
+        node
+    }
 
-                while let Some(state) = states.last_mut() {
-                    if state.remaining > 0 {
-                        state.remaining -= 1;
-                        let node = self.nodes.remove(state.next).unwrap();
-                        state.next = node.next_sibling;
-                        if let Some(next) = node.first_child {
-                            states.push(DeleteIterState {
-                                next,
-                                remaining: node.children_count,
-                            });
-                        }
-                    } else {
-                        states.pop();
+    fn remove_children(&mut self, node: &Node) {
+        if let Some(next) = node.first_child {
+            let mut states = vec![DeleteIterState {
+                next,
+                remaining: node.children_count,
+            }];
+
+            while let Some(state) = states.last_mut() {
+                if state.remaining > 0 {
+                    state.remaining -= 1;
+                    let node = self.nodes.remove(state.next).unwrap();
+                    state.next = node.next_sibling;
+                    if let Some(next) = node.first_child {
+                        states.push(DeleteIterState {
+                            next,
+                            remaining: node.children_count,
+                        });
                     }
+                } else {
+                    states.pop();
                 }
             }
         }
-        node
     }
 
     /// Returns n iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.

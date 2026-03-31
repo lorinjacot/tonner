@@ -4,6 +4,7 @@ use std::time::Instant;
 use glam::{vec3, vec4};
 use pollster::block_on;
 use tonner::Context;
+use tonner::entity_component::EntityManager;
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::GeometryBuilder;
 use tonner::geometry::skin::SkinManager;
@@ -12,7 +13,7 @@ use tonner::mesh::{MeshBuilder, MeshInstance};
 use tonner::renderer::Renderer;
 use tonner::renderer::camera::Camera;
 use tonner::renderer::light::LightManager;
-use tonner::scene_graph::{NodeBuilder, SceneGraph};
+use tonner::scene_graph::SceneGraph;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -59,6 +60,7 @@ impl ApplicationHandler for App {
         );
 
         let context = Context::from_device(device, queue);
+        let mut entity_manager = EntityManager::new();
 
         let mut encoder =
             context
@@ -97,17 +99,13 @@ impl ApplicationHandler for App {
             .build(&context)
             .unwrap();
 
-        let triangle_node = NodeBuilder::default()
-            .name("Triangle node")
-            .build(&mut scene_graph)
-            .unwrap();
-        let instance = red_triangle.new_instance(triangle_node);
+        let triangle = entity_manager.new_entity();
+        scene_graph.add(triangle, None);
+        let instance = red_triangle.new_instance(triangle);
 
-        let camera_node = NodeBuilder::default()
-            .name("Camera node")
-            .build(&mut scene_graph)
-            .unwrap();
-        let camera = Camera::new(camera_node);
+        let camera = entity_manager.new_entity();
+        scene_graph.add(camera, None);
+        let camera = Camera::new(camera);
 
         let skin_manager = SkinManager::new(&context);
         let light_manager = LightManager::new(&context);

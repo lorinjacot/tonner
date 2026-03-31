@@ -178,7 +178,7 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if the entity `node` is not part of the scene graph.
-    pub fn parents(&self, node: EntityId) -> ParentsIter {
+    pub fn parents(&self, node: EntityId) -> ParentsIter<'_> {
         ParentsIter {
             scene_graph: &self,
             next: self[node].parent,
@@ -190,7 +190,7 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if the entity `node` is not part of the scene graph.
-    pub fn siblings(&self, node: EntityId) -> SiblingsIter {
+    pub fn siblings(&self, node: EntityId) -> SiblingsIter<'_> {
         SiblingsIter {
             scene_graph: self,
             first: node,
@@ -203,7 +203,7 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if the entity `node` is not part of the scene graph.
-    pub fn direct_children(&self, node: EntityId) -> DirectChildrenIter {
+    pub fn direct_children(&self, node: EntityId) -> DirectChildrenIter<'_> {
         let parent = &self[node];
         let next = parent.first_child.unwrap_or(node);
         DirectChildrenIter {
@@ -213,7 +213,7 @@ impl SceneGraph {
         }
     }
 
-    pub fn all_children(&self, node: EntityId) -> AllChildrenIter {
+    pub fn all_children(&self, node: EntityId) -> AllChildrenIter<'_> {
         let parent = &self[node];
         let next = parent.first_child.unwrap_or(node);
         let states = vec![DepthIterState {

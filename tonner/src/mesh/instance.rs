@@ -6,15 +6,18 @@ use uuid::{NonNilUuid, Uuid};
 
 use crate::{
     Context,
-    geometry::skin::{PreparedSkins, SkinId},
-    geometry::{GeometryIndices, MAX_MORPH_TARGET_COUNT},
+    entity_component::{ComponentsView, EntityId},
+    geometry::{
+        GeometryIndices, MAX_MORPH_TARGET_COUNT,
+        skin::{PreparedSkins, SkinId},
+    },
     mesh::{
         Mesh,
         asset::{MeshPrimitive, MeshPrimitiveId},
         material::AlphaMode,
     },
     renderer::RenderError,
-    scene_graph::{NodeId, SceneGraph},
+    scene_graph::SceneGraph,
 };
 
 /// A unique id for a [mesh instance][MeshInstance]. A mesh instance will always have the same id.
@@ -40,7 +43,7 @@ pub struct MeshInstance {
     id: MeshInstanceId,
     pub name: String,
     mesh: Mesh,
-    pub node: NodeId,
+    pub entity: EntityId,
     weights: [f32; MAX_MORPH_TARGET_COUNT],
     skin: Option<SkinId>,
 }
@@ -83,28 +86,28 @@ impl Mesh {
     /// Create a mesh instance with no skin/skeleton.
     /// By default, the name is an empty string and
     /// all [morph target weight][MeshInstance::weights()] are `0.0`.
-    pub fn new_instance(&self, node: NodeId) -> MeshInstance {
+    pub fn new_instance(&self, entity: EntityId) -> MeshInstance {
         MeshInstance {
             id: MeshInstanceId {
                 uuid: NonNilUuid::new(Uuid::new_v4()).unwrap(),
             },
             name: String::new(),
             mesh: self.clone(),
-            node,
+            entity,
             weights: [0.0; _],
             skin: None,
         }
     }
 
     /// Same as [Self::new_instance()] but with a skin/skeleton.
-    pub fn new_instance_with_skin(&self, node: NodeId, skin: SkinId) -> MeshInstance {
+    pub fn new_instance_with_skin(&self, entity: EntityId, skin: SkinId) -> MeshInstance {
         MeshInstance {
             id: MeshInstanceId {
                 uuid: NonNilUuid::new(Uuid::new_v4()).unwrap(),
             },
             name: String::new(),
             mesh: self.clone(),
-            node,
+            entity,
             weights: [0.0; _],
             skin: Some(skin),
         }
@@ -135,10 +138,10 @@ impl PrimitiveRenderer {
         let mut primitive_count = 0;
         for mesh_instance in mesh_instances.into_iter() {
             let model_matrix = scene_graph
-                .get(mesh_instance.node)
+                .get(mesh_instance.entity)
                 .ok_or(RenderError::InvalidMeshInstanceNode(
                     mesh_instance.id,
-                    mesh_instance.node,
+                    mesh_instance.entity,
                 ))?
                 .global_transformation();
             let pipeline_index = model_matrix.determinant().is_sign_negative() as usize;

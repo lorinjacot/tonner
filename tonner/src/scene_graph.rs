@@ -386,13 +386,13 @@ impl Node {
         )
     }
 
-    // /// Returns the global transformation of the node. The returns matrix can be used transform points
-    // /// from local space to the global space. The global transformation of a node is the product of the
-    // /// global transformation matrix of its parent and its own [local transformation matrix][Self::local_transformation].
-    // /// When the node has no parent, the global transformation is identical to the local transformation.
-    // pub fn global_transformation(&self) -> Mat4 {
-    //     self.global_transformation
-    // }
+    /// Returns the global transformation of the node. The returns matrix can be used transform points
+    /// from local space to the global space. The global transformation of a node is the product of the
+    /// global transformation matrix of its parent and its own [local transformation matrix][Self::local_transformation].
+    /// When the node has no parent, the global transformation is identical to the local transformation.
+    pub fn global_transformation(&self) -> Mat4 {
+        self.global_transformation
+    }
 }
 
 /// An iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.

@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::{
     Context,
-    scene_graph::{NodeBuilder, NodeId, SceneGraph},
+    entity_component::{ComponentsView, EntityId},
+    scene_graph::SceneGraph,
 };
 
 /// A unique id for a point light. A point light has one and only one id.
@@ -22,27 +23,29 @@ impl Display for PointLightId {
 
 /// A builder for point light.
 #[must_use]
-#[derive(Default)]
 pub struct PointLightBuilder {
+    entity: EntityId,
     name: Option<String>,
-    node: Option<NodeId>,
     color: Option<Vec3>,
 }
 
 impl PointLightBuilder {
+    /// Create a new point light builder for the given entity.
+    ///
+    /// If `entity` does not have a node component, it will be created. The
+    /// node global transform will determine the position of the light.
+    pub fn new(entity: EntityId) -> Self {
+        PointLightBuilder {
+            entity,
+            name: None,
+            color: None,
+        }
+    }
+
     /// Gives a name to the light. Usefull for GUI and debugging.
     pub fn name(self, name: impl Into<String>) -> Self {
         Self {
             name: Some(name.into()),
-            ..self
-        }
-    }
-
-    /// Attaches the light to an existing node. If not set, a new node will be created. The
-    /// node global transform will determine the position of the light.
-    pub fn node(self, node: impl Into<NodeId>) -> Self {
-        Self {
-            node: Some(node.into()),
             ..self
         }
     }
@@ -62,25 +65,17 @@ impl PointLightBuilder {
         light_manager: &mut LightManager,
     ) -> Result<PointLightId, PointLightBuilderError> {
         let name = self.name.unwrap_or_default();
-        let node = match self.node {
-            Some(node) => {
-                if !scene_graph.contains(node) {
-                    return Err(PointLightBuilderError::InvalidNode(node));
-                }
-                node
-            }
-            None => NodeBuilder::default()
-                .name(name.clone())
-                .build(scene_graph)
-                .unwrap(),
-        };
+        if !scene_graph.has(self.entity) {
+            scene_graph.add(self.entity, None);
+        }
+
         let color = self.color.unwrap_or(Vec3::ONE);
         let id = PointLightId(Uuid::new_v4());
         let data = PointLightData {
             id,
             index: None,
             _name: name,
-            node,
+            entity: self.entity,
             color,
         };
         light_manager.point_lights.insert(id, data);
@@ -92,7 +87,7 @@ impl PointLightBuilder {
 #[derive(Debug, Error)]
 pub enum PointLightBuilderError {
     #[error("invalid node {0}")]
-    InvalidNode(NodeId),
+    InvalidNode(EntityId),
 }
 
 /// Manages all point lights
@@ -168,8 +163,8 @@ impl LightManager {
             data.index = Some(i as u32);
             uniforms.push(PointLightUniform {
                 position: scene_graph
-                    .get(data.node)
-                    .ok_or(LightError::InvalidNode(data.id, data.node))?
+                    .get(data.entity)
+                    .ok_or(LightError::InvalidNode(data.id, data.entity))?
                     .global_transformation()
                     .transform_point3(Vec3::ZERO)
                     .to_array(),
@@ -203,7 +198,7 @@ impl LightManager {
 #[derive(Debug, Error)]
 pub enum LightError {
     #[error("invalid node {0}")]
-    InvalidNode(PointLightId, NodeId),
+    InvalidNode(PointLightId, EntityId),
 }
 
 #[derive(Debug)]
@@ -211,7 +206,7 @@ struct PointLightData {
     id: PointLightId,
     index: Option<u32>,
     _name: String,
-    node: NodeId,
+    entity: EntityId,
     color: Vec3,
 }
 

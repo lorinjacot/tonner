@@ -11,7 +11,8 @@ use uuid::{NonNilUuid, Uuid};
 
 use crate::{
     Context,
-    scene_graph::{NodeId, SceneGraph},
+    entity_component::{ComponentsView, EntityId},
+    scene_graph::SceneGraph,
 };
 
 /// A unique id for a skin. A skin can only have one id.
@@ -65,7 +66,7 @@ impl Hash for Skin {
 #[derive(Debug)]
 pub struct SkinJoint {
     /// Node defining the position of the bone.
-    pub node: NodeId,
+    pub entity: EntityId,
     /// Transform the geometry into the space of the joint. This is the inverse of the
     /// global transform of the joint in its initial configuration.
     pub inverse_bind_matrix: Mat4,
@@ -77,7 +78,7 @@ pub struct SkinJoint {
 pub struct SkinBuilder {
     name: String,
     joints: Vec<SkinJoint>,
-    nodes: Vec<NodeId>,
+    nodes: Vec<EntityId>,
     inverse_bind_matrices: Vec<Mat4>,
 }
 
@@ -97,7 +98,7 @@ impl SkinBuilder {
 
     /// Add new nodes to the skin. If called multiple time,
     /// nodes from all calls will be used.
-    pub fn nodes(mut self, nodes: impl IntoIterator<Item = NodeId>) -> Self {
+    pub fn nodes(mut self, nodes: impl IntoIterator<Item = EntityId>) -> Self {
         self.nodes.extend(nodes);
         self
     }
@@ -130,8 +131,8 @@ impl SkinBuilder {
 
         self.joints
             .extend(self.nodes.into_iter().zip(inverse_bind_matrices).map(
-                |(node, inverse_bind_matrix)| SkinJoint {
-                    node,
+                |(entity, inverse_bind_matrix)| SkinJoint {
+                    entity,
                     inverse_bind_matrix,
                 },
             ));
@@ -150,7 +151,7 @@ impl SkinBuilder {
 #[derive(Debug, Error)]
 pub enum SkinBuilderError {
     #[error("invalid node: {0}")]
-    InvalidNode(NodeId),
+    InvalidNode(EntityId),
     #[error("invalid inverse bind matrix count: expected {expected}, got {actual}")]
     InvalidInverseBindMatrixCount { expected: usize, actual: usize },
 }
@@ -208,14 +209,14 @@ impl SkinManager {
             self.offsets.insert(skin.id, offset);
             offset += skin.joints.len() as u32;
             for &SkinJoint {
-                node,
+                entity,
                 inverse_bind_matrix,
             } in &skin.joints
             {
                 self.joint_matrices.push(
                     scene_graph
-                        .get(node)
-                        .ok_or(SkinError::InvalidNode(skin.id, node))?
+                        .get(entity)
+                        .ok_or(SkinError::InvalidNode(skin.id, entity))?
                         .global_transformation()
                         * inverse_bind_matrix,
                 );
@@ -252,7 +253,7 @@ impl SkinManager {
 #[derive(Debug, Error)]
 pub enum SkinError {
     #[error("invalid node: {0}")]
-    InvalidNode(SkinId, NodeId),
+    InvalidNode(SkinId, EntityId),
 }
 
 pub(crate) struct PreparedSkins<'a> {

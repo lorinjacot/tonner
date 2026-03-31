@@ -2,6 +2,7 @@ use std::iter::repeat_with;
 
 use crate::{
     Context,
+    entity_component::{ComponentsView, EntityId},
     environment::Environment,
     geometry::skin::{SkinError, SkinId, SkinManager},
     mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
@@ -9,7 +10,7 @@ use crate::{
         camera::Camera,
         light::{LightError, LightManager},
     },
-    scene_graph::{NodeId, SceneGraph},
+    scene_graph::SceneGraph,
     texture::TextureBuilder,
 };
 use bytemuck::{Pod, Zeroable, bytes_of};
@@ -164,8 +165,8 @@ impl Renderer {
         let projection_matrix = camera.projection_matrix(aspect_ratio);
 
         let camera_matrix = scene_graph
-            .get(camera.node)
-            .ok_or(RenderError::InvalidCameraNode(camera.node))?
+            .get(camera.entity)
+            .ok_or(RenderError::InvalidCameraNode(camera.entity))?
             .global_transformation();
         let camera_position = camera_matrix.transform_point3(Vec3::ZERO);
 
@@ -419,7 +420,7 @@ pub enum RenderError {
     InvalidLight(#[from] LightError),
 
     #[error("mesh instance ({0}) node ({1}) is not part of the scene graph")]
-    InvalidMeshInstanceNode(MeshInstanceId, NodeId),
+    InvalidMeshInstanceNode(MeshInstanceId, EntityId),
 
     #[error("invalid skin: {0}")]
     InvalidSkin(#[from] SkinError),
@@ -428,7 +429,7 @@ pub enum RenderError {
     InvalidMeshInstanceSkin(MeshInstanceId, SkinId),
 
     #[error("camera node ({0}) is not part of the scene graph")]
-    InvalidCameraNode(NodeId),
+    InvalidCameraNode(EntityId),
 }
 
 #[derive(Debug, Clone)]

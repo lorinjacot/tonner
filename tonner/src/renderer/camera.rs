@@ -1,34 +1,37 @@
 use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 
-use crate::scene_graph::{NodeBuilder, NodeId, NodeNotFoundError, SceneGraph};
+use crate::{
+    entity_component::{ComponentsView, EntityId},
+    scene_graph::SceneGraph,
+};
 
 /// A builder for camera.
 #[must_use]
-#[derive(Default)]
 pub struct CameraBuilder {
     name: String,
-    node: Option<NodeId>,
+    entity: EntityId,
     projection: Option<Projection>,
 }
 
 impl CameraBuilder {
+    /// Creates a new camera build for the given entity.
+    ///
+    /// Attaches the camera to the entity node. The node global transform
+    /// will be used as the view matrix. A node will be created if the entity
+    /// does not have any node.
+    pub fn new(entity: EntityId) -> Self {
+        CameraBuilder {
+            name: String::new(),
+            entity,
+            projection: None,
+        }
+    }
+
     /// Gives a name to the camera. The name is only used for UI and debugging.
     pub fn name(self, name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            ..self
-        }
-    }
-
-    /// Attaches the camera to the node. The node global transform
-    /// will be used as the view matrix.
-    ///
-    /// If this function is never called, the camera will be attached to
-    /// a new root node with identity transform.
-    pub fn node(self, node: impl Into<NodeId>) -> Self {
-        Self {
-            node: Some(node.into()),
             ..self
         }
     }
@@ -51,12 +54,9 @@ impl CameraBuilder {
 
     /// Build the camera.
     pub fn build(self, scene_graph: &mut SceneGraph) -> Camera {
-        let node = self.node.unwrap_or_else(|| {
-            NodeBuilder::default()
-                .name(&self.name)
-                .build(scene_graph)
-                .unwrap()
-        });
+        if !scene_graph.has(self.entity) {
+            scene_graph.add(self.entity, None);
+        }
 
         let projection = self
             .projection
@@ -64,7 +64,7 @@ impl CameraBuilder {
 
         Camera {
             name: self.name,
-            node,
+            entity: self.entity,
             projection,
         }
     }
@@ -73,7 +73,7 @@ impl CameraBuilder {
 #[derive(Debug, Error)]
 pub enum NewCameraError {
     #[error("invalid node: {0}")]
-    InvalidNode(NodeId),
+    InvalidNode(EntityId),
 }
 
 /// In this projection mode, an object's size in the rendered image stays constant regardless of its distance from
@@ -144,19 +144,19 @@ pub struct Camera {
     /// Name of the camera. Does not need to be unique. Used for GUI and debugging.
     pub name: String,
     /// The location of the camera. The camera will also move with this node.
-    pub node: NodeId,
+    pub entity: EntityId,
     projection: Projection,
 }
 
 impl Camera {
     /// Create a new Camera. By default, the name is an empty string and uses
     /// the default [PerspectiveProjection].
-    pub fn new(node: NodeId) -> Self {
+    pub fn new(entity: EntityId) -> Self {
         let projection = Projection::Perspective(PerspectiveProjection::default());
 
         Camera {
             name: String::new(),
-            node,
+            entity,
             projection,
         }
     }
@@ -188,13 +188,17 @@ impl Camera {
     }
 
     /// Transform a position from the camera's normalized device coordinate space into world space.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the entity does not have a scene graph node.
     pub fn unproject(
         &self,
         position: Vec3,
         viewport_aspect_ratio: f32,
         scene_graph: &mut SceneGraph,
     ) -> Vec3 {
-        let view = scene_graph.get(self.node).unwrap().global_transformation();
+        let view = scene_graph[self.entity].global_transformation();
         let projection = self.projection.matrix(viewport_aspect_ratio);
         (projection.inverse() * view).transform_point3(position)
     }
@@ -203,27 +207,24 @@ impl Camera {
         self.projection.matrix(viewport_aspect_ratio)
     }
 
-    pub fn look_at(
-        &self,
-        target: Vec3,
-        scene_graph: &mut SceneGraph,
-    ) -> Result<(), NodeNotFoundError> {
-        let node = scene_graph
-            .get(self.node)
-            .ok_or(NodeNotFoundError(self.node))?;
+    /// Modifies the local transformation of the camera entity such that its local z-axis is
+    /// pointing toward `target`.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the entity does not have a scene graph node.
+    pub fn look_at(&self, target: Vec3, scene_graph: &mut SceneGraph) {
+        let node = &scene_graph[self.entity];
         let eye = node.global_transformation().transform_point3(Vec3::ZERO);
         let mut rotation = Quat::look_at_rh(eye, target, Vec3::Y).inverse();
         if let Some(parent) = node.parent() {
-            let parent_rotation = scene_graph
-                .get(parent)
-                .ok_or(NodeNotFoundError(parent))?
+            let parent_rotation = scene_graph[parent]
                 .global_transformation()
                 .to_scale_rotation_translation()
                 .1;
             rotation = parent_rotation.inverse() * rotation;
         }
-        scene_graph.set_local_transformation(self.node, None, rotation, None)?;
-        Ok(())
+        scene_graph.set_local_transformation(self.entity, None, rotation, None);
     }
 }
 

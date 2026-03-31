@@ -808,3 +808,15 @@ struct UpdateTransformIterState {
 // #[error("no node found for {0}")]
 // #[cfg_attr(feature = "python", pyclass)]
 // pub struct NodeNotFoundError(pub EntityId);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scene_graph() {
+        let ctx = pollster::block_on(Context::new());
+
+        let _scene_graph = SceneGraph::new(&ctx);
+    }
+}

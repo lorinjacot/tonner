@@ -4,6 +4,7 @@ use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
 
+pub mod entity_component;
 pub mod environment;
 pub mod geometry;
 pub mod math;
@@ -11,7 +12,6 @@ pub mod mesh;
 pub mod renderer;
 pub mod scene_graph;
 pub mod texture;
-pub mod entity_component;
 
 /// Contains everything long-lived and shared by the engine.
 /// This is the first thing you need when using storm.
@@ -39,6 +39,38 @@ pub struct Context {
 }
 
 impl Context {
+    pub async fn new() -> Self {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            flags: wgpu::InstanceFlags::from_env_or_default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            backend_options: wgpu::BackendOptions::from_env_or_default(),
+        });
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptionsBase {
+                power_preference: wgpu::PowerPreference::LowPower,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            })
+            .await
+            .expect("Failed to get GPU adapter");
+
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::defaults(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .expect("Failed to get GPU handle");
+
+        Self::from_device(device, queue)
+    }
+
     /// Create the context using the provided [wgpu::Device] and [wgpu::Queue].
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
@@ -75,9 +107,6 @@ impl Context {
     }
 }
 
-
 #[cfg(feature = "python")]
 #[pyo3::pymodule(name = "tonner")]
-mod tonner_py {
-    
-}
+mod tonner_py {}

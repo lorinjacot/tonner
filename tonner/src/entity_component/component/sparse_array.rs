@@ -27,7 +27,7 @@ pub struct SparseArray<T> {
 }
 
 impl<T> SparseArray<T> {
-    /// Constructs a new, empty SparseArray<T>.
+    /// Constructs a new, empty `SparseArray<T>`.
     ///
     /// The sparse array will not allocate until components are added.
     pub fn new() -> SparseArray<T> {

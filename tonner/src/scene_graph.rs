@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use crate::{
     Context,
     entity_component::{
-        ComponentsView, EntityId,
+        ComponentStorage, ComponentsView, EntityId,
         component::sparse_array::{Iter, SparseArray},
     },
 };
@@ -22,15 +22,155 @@ use crate::{
 #[cfg_attr(feature = "python", pyclass)]
 pub struct SceneGraph {
     nodes: SparseArray<Node>,
-    root_nodes: Vec<EntityId>,
+    first_root: Option<EntityId>,
+    root_count: usize,
 }
 
 impl SceneGraph {
+    /// Constructs a new, empty scene graph.
+    ///
+    /// The scene graph will not allocate until nodes are added.
     pub fn new(_ctx: &Context) -> Self {
         Self {
             nodes: SparseArray::new(),
-            root_nodes: Vec::new(),
+            first_root: None,
+            root_count: 0,
         }
+    }
+
+    /// Create a node in the scene graph for the given entity.
+    /// If `parent` is `None`, the new node will be a root node.
+    /// Otherwise, the new node will be a child of `parent`.
+    ///
+    /// It entity did not have a scene graph node, `None` is returned. If the entity had
+    /// one, the node is updated and the old value is returned. All children of the old
+    /// node will be removed.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `parent` references an entity with no assicated node.
+    pub fn add(
+        &mut self,
+        entity: EntityId,
+        parent: impl Into<Option<EntityId>>,
+    ) -> Option<Node> {
+        self.add_with_transform(entity, parent, Vec3::ZERO, Quat::IDENTITY, Vec3::ONE)
+    }
+
+    /// Create a node in the scene graph for the given entity.
+    /// If `parent` is `None`, the new node will be a root node.
+    /// Otherwise, the new node will be a child of `parent`.
+    ///
+    /// It entity did not have a scene graph node, `None` is returned. If the entity had
+    /// one, the node is updated and the old value is returned. All children of the old
+    /// node will be removed.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `parent` references an entity with no assicated node.
+    pub fn add_with_transform(
+        &mut self,
+        entity: EntityId,
+        parent: impl Into<Option<EntityId>>,
+        local_translation: Vec3,
+        local_rotation: Quat,
+        local_scale: Vec3,
+    ) -> Option<Node> {
+        let previous = self.remove(entity);
+
+        let parent = parent.into();
+        let (parent_tranform, next_sibling) = match parent {
+            Some(id) => {
+                let parent = &mut self.nodes[id];
+                parent.children_count += 1;
+                (parent.global_transformation, &mut parent.first_child)
+            }
+            None => {
+                self.root_count += 1;
+                (Mat4::IDENTITY, &mut self.first_root)
+            }
+        };
+
+        let (previous_sibling, next_sibling) = match *next_sibling {
+            Some(next_sibling) => {
+                // parent already has another child -> patch double linked list
+                let next = &mut self.nodes[next_sibling];
+                let previous_sibling = next.previous_sibling;
+                next.previous_sibling = entity;
+                self.nodes[previous_sibling].next_sibling = entity;
+                (previous_sibling, next_sibling)
+            }
+            None => {
+                *next_sibling = Some(entity);
+                (entity, entity)
+            }
+        };
+
+        let global_transformation = parent_tranform
+            * Mat4::from_scale_rotation_translation(local_scale, local_rotation, local_translation);
+
+        let node = Node {
+            parent,
+            children_count: 0,
+            first_child: None,
+            previous_sibling,
+            next_sibling,
+            local_translation,
+            local_rotation,
+            local_scale,
+            global_transformation,
+        };
+        self.nodes.add(entity, node);
+
+        previous
+    }
+
+    /// Removes the node assicated with `entity` from the scene graph and returns it.
+    /// Returns `None` if `entity` does not have any node.
+    pub fn remove(&mut self, entity: EntityId) -> Option<Node> {
+        let node = self.nodes.remove(entity);
+        if let Some(node) = &node {
+            let parent = node.parent.map(|id| &mut self.nodes[id]);
+
+            if node.next_sibling == entity {
+                if let Some(parent) = parent {
+                    parent.children_count = 0;
+                    parent.first_child = None;
+                }
+            } else {
+                if let Some(parent) = parent {
+                    parent.children_count -= 1;
+                    parent.first_child = Some(node.next_sibling);
+                }
+
+                self.nodes[node.previous_sibling].next_sibling = node.next_sibling;
+                self.nodes[node.next_sibling].previous_sibling = node.previous_sibling;
+            }
+
+            if let Some(next) = node.first_child {
+                let mut states = vec![DeleteIterState {
+                    next,
+                    remaining: node.children_count,
+                }];
+
+                while let Some(state) = states.last_mut() {
+                    if state.remaining > 0 {
+                        state.remaining -= 1;
+                        let node = self.nodes.remove(state.next).unwrap();
+                        state.next = node.next_sibling;
+                        if let Some(next) = node.first_child {
+                            states.push(DeleteIterState {
+                                next,
+                                remaining: node.children_count,
+                            });
+                        }
+                    } else {
+                        states.pop();
+                    }
+                }
+            }
+        }
+        node
     }
 
     /// Returns n iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.
@@ -140,12 +280,6 @@ impl SceneGraph {
             }
         }
     }
-
-    // #[cfg(not(feature = "python"))]
-    // /// Returns `true` if the scene graph contains the specified node.
-    // pub fn contains(&self, node: EntityId) -> bool {
-    //     self.nodes.contains_key(&node)
-    // }
 }
 
 impl ComponentsView<Node> for SceneGraph {
@@ -191,8 +325,8 @@ impl Index<EntityId> for SceneGraph {
 //     }
 
 //     /// Returns `true` if the scene graph contains the specified node.
-//     pub fn contains(&self, node: EntityId) -> bool {
-//         self.nodes.contains_key(&node)
+//     pub fn has(&self, node: EntityId) -> bool {
+//         self.has(node)
 //     }
 // }
 
@@ -358,6 +492,11 @@ impl<'a> Iterator for AllChildrenIter<'a> {
         }
         None
     }
+}
+
+struct DeleteIterState {
+    next: EntityId,
+    remaining: usize,
 }
 
 struct UpdateTransformIterState {
@@ -549,114 +688,111 @@ struct UpdateTransformIterState {
 // #[must_use]
 // #[derive(Debug, Clone)]
 // pub struct NodeBuilder {
-//     uuid: Option<NonNilUuid>,
-//     name: String,
+//     entity: EntityId,
 //     parent: Option<EntityId>,
-//     local_translation: Option<Vec3>,
-//     local_rotation: Option<Quat>,
-//     local_scale: Option<Vec3>,
-// }
-
-// impl Default for NodeBuilder {
-//     fn default() -> Self {
-//         Self {
-//             uuid: None,
-//             name: String::new(),
-//             parent: None,
-//             local_translation: None,
-//             local_rotation: None,
-//             local_scale: None,
-//         }
-//     }
+//     local_translation: Vec3,
+//     local_rotation: Quat,
+//     local_scale: Vec3,
 // }
 
 // impl NodeBuilder {
-//     /// Sets the node Universally Unique Identifier (UUID). One is automatically generated if not provided.
-//     pub fn uuid(mut self, uuid: impl Into<NonNilUuid>) -> Self {
-//         self.uuid = Some(uuid.into());
-//         self
-//     }
-
-//     /// Sets the node name. Defaults to an empty string.
-//     pub fn name(mut self, name: impl Into<String>) -> Self {
-//         self.name = name.into();
-//         self
-//     }
-
-//     /// Sets the node parent. A node without any parent will be added as a root node.
-//     pub fn parent(mut self, parent: impl Into<EntityId>) -> Self {
-//         self.parent = Some(parent.into());
-//         self
-//     }
-
-//     /// Sets the translation component of the node local transform. Defaults to [`Vec3::ZERO`].
-//     /// See [`local_transformation`][Node::local_transformation] for more informations.
-//     pub fn local_translation(mut self, translation: impl Into<Vec3>) -> Self {
-//         self.local_translation = Some(translation.into());
-//         self
-//     }
-
-//     /// Sets the rotation component of the node local transform. Defaults to [`Quat::IDENTITY`].
-//     /// See [`local_transformation`][Node::local_transformation] for more informations.
-//     pub fn local_rotation(mut self, rotation: impl Into<Quat>) -> Self {
-//         self.local_rotation = Some(rotation.into());
-//         self
-//     }
-
-//     /// Sets the scale component of the node local transform. Defaults to [`Vec3::ONE`].
-//     /// See [`local_transformation`][Node::local_transformation] for more informations.
-//     pub fn local_scale(mut self, scale: impl Into<Vec3>) -> Self {
-//         self.local_scale = Some(scale.into());
-//         self
-//     }
-
-//     /// Builds the node and adds it to the scene graph.
-//     pub fn build(self, scene_graph: &mut SceneGraph) -> Result<EntityId, NodeBuilderError> {
-//         let uuid = self
-//             .uuid
-//             .unwrap_or_else(|| NonNilUuid::new(Uuid::new_v4()).unwrap());
-//         let id = EntityId { uuid };
-
-//         let local_scale = self.local_scale.unwrap_or(Vec3::ONE);
-//         let local_rotation = self.local_rotation.unwrap_or(Quat::IDENTITY);
-//         let local_translation = self.local_translation.unwrap_or(Vec3::ZERO);
-
-//         let local_transformation =
-//             Mat4::from_scale_rotation_translation(local_scale, local_rotation, local_translation);
-
-//         let global_transformation = match self.parent {
-//             Some(parent) => {
-//                 let parent_data = scene_graph
-//                     .nodes
-//                     .get_mut(&parent)
-//                     .ok_or(NodeBuilderError::ParentNodeNotFound(parent))?;
-//                 parent_data.children.push(id);
-//                 parent_data.global_transformation * local_transformation
-//             }
-//             None => {
-//                 scene_graph.root_nodes.push(id);
-//                 local_transformation
-//             }
-//         };
-
-//         let node = Node {
-//             name: self.name,
-//             parent: self.parent,
-//             children: Vec::new(),
-//             local_translation,
-//             local_rotation,
-//             local_scale,
-//             global_transformation,
-//         };
-
-//         match scene_graph.nodes.insert(id, node) {
-//             None => Ok(id),
-//             Some(node) => {
-//                 scene_graph.nodes.insert(id, node);
-//                 Err(NodeBuilderError::UuidNotUnique(id.uuid))
-//             }
+//     /// Creates a node for the given entity.
+//     pub fn new(entity: EntityId) -> NodeBuilder {
+//         NodeBuilder {
+//             entity,
+//             parent: None,
+//             local_translation: Vec3::ZERO,
+//             local_rotation: Quat::IDENTITY,
+//             local_scale: Vec3::ONE,
 //         }
 //     }
+
+//     // /// Sets the node Universally Unique Identifier (UUID). One is automatically generated if not provided.
+//     // pub fn uuid(mut self, uuid: impl Into<NonNilUuid>) -> Self {
+//     //     self.uuid = Some(uuid.into());
+//     //     self
+//     // }
+
+//     // /// Sets the node name. Defaults to an empty string.
+//     // pub fn name(mut self, name: impl Into<String>) -> Self {
+//     //     self.name = name.into();
+//     //     self
+//     // }
+
+//     // /// Sets the node parent. A node without any parent will be added as a root node.
+//     // pub fn parent(mut self, parent: impl Into<EntityId>) -> Self {
+//     //     self.parent = Some(parent.into());
+//     //     self
+//     // }
+
+//     // /// Sets the translation component of the node local transform. Defaults to [`Vec3::ZERO`].
+//     // /// See [`local_transformation`][Node::local_transformation] for more informations.
+//     // pub fn local_translation(mut self, translation: impl Into<Vec3>) -> Self {
+//     //     self.local_translation = Some(translation.into());
+//     //     self
+//     // }
+
+//     // /// Sets the rotation component of the node local transform. Defaults to [`Quat::IDENTITY`].
+//     // /// See [`local_transformation`][Node::local_transformation] for more informations.
+//     // pub fn local_rotation(mut self, rotation: impl Into<Quat>) -> Self {
+//     //     self.local_rotation = Some(rotation.into());
+//     //     self
+//     // }
+
+//     // /// Sets the scale component of the node local transform. Defaults to [`Vec3::ONE`].
+//     // /// See [`local_transformation`][Node::local_transformation] for more informations.
+//     // pub fn local_scale(mut self, scale: impl Into<Vec3>) -> Self {
+//     //     self.local_scale = Some(scale.into());
+//     //     self
+//     // }
+
+//     // /// Builds the node and adds it to the scene graph.
+//     // pub fn build(self, scene_graph: &mut SceneGraph) -> Result<EntityId, NodeBuilderError> {
+//     //     let uuid = self
+//     //         .uuid
+//     //         .unwrap_or_else(|| NonNilUuid::new(Uuid::new_v4()).unwrap());
+//     //     let id = EntityId { uuid };
+
+//     //     let local_scale = self.local_scale.unwrap_or(Vec3::ONE);
+//     //     let local_rotation = self.local_rotation.unwrap_or(Quat::IDENTITY);
+//     //     let local_translation = self.local_translation.unwrap_or(Vec3::ZERO);
+
+//     //     let local_transformation =
+//     //         Mat4::from_scale_rotation_translation(local_scale, local_rotation, local_translation);
+
+//     //     let global_transformation = match self.parent {
+//     //         Some(parent) => {
+//     //             let parent_data = scene_graph
+//     //                 .nodes
+//     //                 .get_mut(&parent)
+//     //                 .ok_or(NodeBuilderError::ParentNodeNotFound(parent))?;
+//     //             parent_data.children.push(id);
+//     //             parent_data.global_transformation * local_transformation
+//     //         }
+//     //         None => {
+//     //             scene_graph.root_nodes.push(id);
+//     //             local_transformation
+//     //         }
+//     //     };
+
+//     //     let node = Node {
+//     //         name: self.name,
+//     //         parent: self.parent,
+//     //         children: Vec::new(),
+//     //         local_translation,
+//     //         local_rotation,
+//     //         local_scale,
+//     //         global_transformation,
+//     //     };
+
+//     //     match scene_graph.nodes.insert(id, node) {
+//     //         None => Ok(id),
+//     //         Some(node) => {
+//     //             scene_graph.nodes.insert(id, node);
+//     //             Err(NodeBuilderError::UuidNotUnique(id.uuid))
+//     //         }
+//     //     }
+//     // }
 // }
 
 // /// Error when [`NodeBuilder::build()`] fails.

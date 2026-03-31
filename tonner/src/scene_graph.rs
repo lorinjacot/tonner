@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::{iter::FusedIterator, ops::Index};
 
 use glam::{Mat4, Quat, Vec3};
 
@@ -132,11 +132,17 @@ impl SceneGraph {
                 if let Some(parent) = parent {
                     parent.children_count = 0;
                     parent.first_child = None;
+                } else {
+                    self.root_count = 0;
+                    self.first_root = None;
                 }
             } else {
                 if let Some(parent) = parent {
                     parent.children_count -= 1;
                     parent.first_child = Some(node.next_sibling);
+                } else {
+                    self.root_count -= 1;
+                    self.first_root = Some(node.next_sibling);
                 }
 
                 self.nodes[node.previous_sibling].next_sibling = node.next_sibling;
@@ -173,15 +179,24 @@ impl SceneGraph {
         }
     }
 
+    /// Returns an iterator visiting all root nodes once. A root node is a node with no parent.
+    pub fn roots(&self) -> RootsIter<'_> {
+        RootsIter {
+            scene_graph: self,
+            next: self.first_root,
+            remaining: self.root_count,
+        }
+    }
+
     /// Returns n iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.
     ///
     /// ## Panics
     ///
-    /// Panics if the entity `node` is not part of the scene graph.
-    pub fn parents(&self, node: EntityId) -> ParentsIter<'_> {
+    /// Panics if `entity` is not a node.
+    pub fn parents(&self, entity: EntityId) -> ParentsIter<'_> {
         ParentsIter {
             scene_graph: &self,
-            next: self[node].parent,
+            next: self[entity].parent,
         }
     }
 
@@ -189,12 +204,12 @@ impl SceneGraph {
     ///
     /// ## Panics
     ///
-    /// Panics if the entity `node` is not part of the scene graph.
-    pub fn siblings(&self, node: EntityId) -> SiblingsIter<'_> {
+    /// Panics if `entity` is not a node.
+    pub fn siblings(&self, entity: EntityId) -> SiblingsIter<'_> {
         SiblingsIter {
             scene_graph: self,
-            first: node,
-            next: self.nodes[node].next_sibling,
+            first: entity,
+            next: self.nodes[entity].next_sibling,
         }
     }
 
@@ -202,10 +217,10 @@ impl SceneGraph {
     ///
     /// ## Panics
     ///
-    /// Panics if the entity `node` is not part of the scene graph.
-    pub fn direct_children(&self, node: EntityId) -> DirectChildrenIter<'_> {
-        let parent = &self[node];
-        let next = parent.first_child.unwrap_or(node);
+    /// Panics if `entity` is not a node.
+    pub fn direct_children(&self, entity: EntityId) -> DirectChildrenIter<'_> {
+        let parent = &self[entity];
+        let next = parent.first_child.unwrap_or(entity);
         DirectChildrenIter {
             scene_graph: self,
             next,
@@ -213,9 +228,14 @@ impl SceneGraph {
         }
     }
 
-    pub fn all_children(&self, node: EntityId) -> AllChildrenIter<'_> {
-        let parent = &self[node];
-        let next = parent.first_child.unwrap_or(node);
+    /// Returns an iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `entity` is not a node.
+    pub fn all_children(&self, entity: EntityId) -> AllChildrenIter<'_> {
+        let parent = &self[entity];
+        let next = parent.first_child.unwrap_or(entity);
         let states = vec![DepthIterState {
             next,
             remaining: parent.children_count,
@@ -233,20 +253,20 @@ impl SceneGraph {
     ///
     /// ## Panics
     ///
-    /// Panics if the entity `node` is not part of the scene graph.
+    /// Panics if `entity` is not a node.
     pub fn set_local_transformation(
         &mut self,
-        node: EntityId,
+        entity: EntityId,
         translation: impl Into<Option<Vec3>>,
         rotation: impl Into<Option<Quat>>,
         scale: impl Into<Option<Vec3>>,
     ) {
-        let parent_transform = match self[node].parent {
+        let parent_transform = match self[entity].parent {
             Some(parent) => self[parent].global_transformation,
             None => Mat4::IDENTITY,
         };
 
-        let node = &mut self.nodes[node];
+        let node = &mut self.nodes[entity];
         node.local_translation = translation.into().unwrap_or(node.local_translation);
         node.local_rotation = rotation.into().unwrap_or(node.local_rotation);
         node.local_scale = scale.into().unwrap_or(node.local_scale);
@@ -413,6 +433,42 @@ impl<'a> Iterator for ParentsIter<'a> {
     }
 }
 
+/// An iterator visiting all root nodes once. A root node is a node with no parent.
+pub struct RootsIter<'a> {
+    scene_graph: &'a SceneGraph,
+    next: Option<EntityId>,
+    remaining: usize,
+}
+
+impl<'a> Iterator for RootsIter<'a> {
+    type Item = (EntityId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            let id = self.next.unwrap();
+            let node = &self.scene_graph[id];
+            let item = (id, node);
+            self.next = Some(node.next_sibling);
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for RootsIter<'a> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
+
+impl<'a> FusedIterator for RootsIter<'a> {}
+
 /// An iterator visiting all sibling nodes once. A sibling is a node with the same parent.
 pub struct SiblingsIter<'a> {
     scene_graph: &'a SceneGraph,
@@ -434,6 +490,8 @@ impl<'a> Iterator for SiblingsIter<'a> {
         }
     }
 }
+
+impl<'a> FusedIterator for SiblingsIter<'a> {}
 
 /// An iterator visiting all direct children nodes once.
 pub struct DirectChildrenIter<'a> {
@@ -457,6 +515,14 @@ impl<'a> Iterator for DirectChildrenIter<'a> {
         }
     }
 }
+
+impl<'a> ExactSizeIterator for DirectChildrenIter<'a> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
+
+impl<'a> FusedIterator for DirectChildrenIter<'a> {}
 
 /// An iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
 pub struct AllChildrenIter<'a> {
@@ -493,6 +559,8 @@ impl<'a> Iterator for AllChildrenIter<'a> {
         None
     }
 }
+
+impl<'a> FusedIterator for AllChildrenIter<'a> {}
 
 struct DeleteIterState {
     next: EntityId,
@@ -811,12 +879,72 @@ struct UpdateTransformIterState {
 
 #[cfg(test)]
 mod tests {
+    use crate::entity_component::EntityManager;
+
     use super::*;
 
     #[test]
-    fn test_scene_graph() {
+    fn test_scene_graph_roots() {
         let ctx = pollster::block_on(Context::new());
+        let mut entity_manager = EntityManager::new();
+        let mut scene_graph = SceneGraph::new(&ctx);
 
-        let _scene_graph = SceneGraph::new(&ctx);
+        let mut roots = scene_graph.roots();
+        assert_eq!(0, roots.len());
+        assert!(roots.next().is_none());
+
+        let root_0 = entity_manager.new_entity();
+
+        let previous = scene_graph.add(root_0, None);
+        assert!(previous.is_none());
+        assert_eq!(1, scene_graph.root_count);
+        assert_eq!(Some(root_0), scene_graph.first_root);
+        assert_eq!(root_0, scene_graph[root_0].previous_sibling);
+        assert_eq!(root_0, scene_graph[root_0].next_sibling);
+
+        let root_1 = entity_manager.new_entity();
+
+        let previous = scene_graph.add(root_1, None);
+        assert!(previous.is_none());
+        assert_eq!(2, scene_graph.root_count);
+        assert_eq!(Some(root_0), scene_graph.first_root);
+        assert_eq!(root_1, scene_graph[root_0].previous_sibling);
+        assert_eq!(root_0, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_0].next_sibling);
+        assert_eq!(root_0, scene_graph[root_1].next_sibling);
+
+        let root_2 = entity_manager.new_entity();
+
+        let previous = scene_graph.add(root_2, None);
+        assert!(previous.is_none());
+        assert_eq!(3, scene_graph.root_count);
+        assert_eq!(Some(root_0), scene_graph.first_root);
+        assert_eq!(root_2, scene_graph[root_0].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_2].previous_sibling);
+        assert_eq!(root_0, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_0].next_sibling);
+        assert_eq!(root_2, scene_graph[root_1].next_sibling);
+        assert_eq!(root_0, scene_graph[root_2].next_sibling);
+
+        let result = scene_graph.remove(root_0);
+        assert!(result.is_some());
+        assert_eq!(2, scene_graph.root_count);
+        assert_eq!(Some(root_1), scene_graph.first_root);
+        assert_eq!(root_2, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_2].previous_sibling);
+        assert_eq!(root_2, scene_graph[root_1].next_sibling);
+        assert_eq!(root_1, scene_graph[root_2].next_sibling);
+
+        let result = scene_graph.remove(root_2);
+        assert!(result.is_some());
+        assert_eq!(1, scene_graph.root_count);
+        assert_eq!(Some(root_1), scene_graph.first_root);
+        assert_eq!(root_1, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_1].next_sibling);
+
+        let result = scene_graph.remove(root_1);
+        assert!(result.is_some());
+        assert_eq!(0, scene_graph.root_count);
+        assert_eq!(None, scene_graph.first_root);
     }
 }

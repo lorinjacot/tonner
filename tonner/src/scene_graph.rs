@@ -277,7 +277,7 @@ impl SceneGraph {
             let mut states = vec![UpdateTransformIterState {
                 next,
                 remaining: node.children_count,
-                parent_transform,
+                parent_transform: node.global_transformation,
             }];
 
             while let Some(state) = states.last_mut() {
@@ -1150,5 +1150,44 @@ mod tests {
         assert!(!s.scene_graph.has(s.child_0_0));
         assert!(!s.scene_graph.has(s.child_0_0_0));
         assert_eq!(0, s.scene_graph.iter().len());
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_scene_graph_set_local_transformation() {
+        let mut s = Setup::new();
+
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_0_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_0_0_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_1].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_1].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_1].global_transformation);
+
+        let trans_1 = Mat4::from_scale_rotation_translation(Vec3::ONE, Quat::IDENTITY, Vec3::X);
+        s.scene_graph.set_local_transformation(s.root_0, Vec3::X, None, None);
+
+        assert_eq!(trans_1, s.scene_graph[s.root_0].global_transformation);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0].global_transformation);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_1].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_1].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_1].global_transformation);
+
+        let trans_2 = Mat4::from_scale_rotation_translation(Vec3::ONE, Quat::IDENTITY, Vec3::Y);
+        s.scene_graph.set_local_transformation(s.child_1_0, Vec3::Y, None, None);
+
+        assert_eq!(trans_1, s.scene_graph[s.root_0].global_transformation);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0].global_transformation);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0_0].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_1].global_transformation);
+        assert_eq!(trans_2, s.scene_graph[s.child_1_0].global_transformation);
+        assert_eq!(trans_2, s.scene_graph[s.child_1_0_0].global_transformation);
+        assert_eq!(trans_2, s.scene_graph[s.child_1_0_1].global_transformation);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_1].global_transformation);
     }
 }

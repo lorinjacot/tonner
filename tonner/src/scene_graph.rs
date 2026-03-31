@@ -883,6 +883,58 @@ mod tests {
 
     use super::*;
 
+    struct Setup {
+        scene_graph: SceneGraph,
+        root_0: EntityId,
+        child_0_0: EntityId,
+        child_0_0_0: EntityId,
+        root_1: EntityId,
+        child_1_0: EntityId,
+        child_1_0_0: EntityId,
+        child_1_0_1: EntityId,
+        child_1_1: EntityId,
+    }
+
+    impl Setup {
+        fn new() -> Setup {
+            let ctx = pollster::block_on(Context::new());
+            let mut entity_manager = EntityManager::new();
+            let mut scene_graph = SceneGraph::new(&ctx);
+
+            let root_0 = entity_manager.new_entity();
+            let child_0_0 = entity_manager.new_entity();
+            let child_0_0_0 = entity_manager.new_entity();
+
+            let root_1 = entity_manager.new_entity();
+            let child_1_0 = entity_manager.new_entity();
+            let child_1_0_0 = entity_manager.new_entity();
+            let child_1_0_1 = entity_manager.new_entity();
+            let child_1_1 = entity_manager.new_entity();
+
+            scene_graph.add(root_0, None);
+            scene_graph.add(child_0_0, root_0);
+            scene_graph.add(child_0_0_0, child_0_0);
+
+            scene_graph.add(root_1, None);
+            scene_graph.add(child_1_0, root_1);
+            scene_graph.add(child_1_0_0, child_1_0);
+            scene_graph.add(child_1_0_1, child_1_0);
+            scene_graph.add(child_1_1, root_1);
+
+            Setup {
+                scene_graph,
+                root_0,
+                child_0_0,
+                child_0_0_0,
+                root_1,
+                child_1_0,
+                child_1_0_0,
+                child_1_0_1,
+                child_1_1,
+            }
+        }
+    }
+
     #[test]
     fn test_scene_graph_roots() {
         let ctx = pollster::block_on(Context::new());
@@ -1013,90 +1065,90 @@ mod tests {
 
     #[test]
     fn test_scene_graph_iters() {
-        let ctx = pollster::block_on(Context::new());
-        let mut entity_manager = EntityManager::new();
-        let mut scene_graph = SceneGraph::new(&ctx);
+        let s = Setup::new();
 
-        let root_0 = entity_manager.new_entity();
-        let child_0_0 = entity_manager.new_entity();
-        let child_0_0_0 = entity_manager.new_entity();
-
-        let root_1 = entity_manager.new_entity();
-        let child_1_0 = entity_manager.new_entity();
-        let child_1_0_0 = entity_manager.new_entity();
-        let child_1_0_1 = entity_manager.new_entity();
-        let child_1_1 = entity_manager.new_entity();
-
-        scene_graph.add(root_0, None);
-        scene_graph.add(child_0_0, root_0);
-        scene_graph.add(child_0_0_0, child_0_0);
-
-        scene_graph.add(root_1, None);
-        scene_graph.add(child_1_0, root_1);
-        scene_graph.add(child_1_0_0, child_1_0);
-        scene_graph.add(child_1_0_1, child_1_0);
-        scene_graph.add(child_1_1, root_1);
-
-        let mut iter = scene_graph.iter();
-        assert_eq!(root_0, iter.next().unwrap().0);
-        assert_eq!(child_0_0, iter.next().unwrap().0);
-        assert_eq!(child_0_0_0, iter.next().unwrap().0);
-        assert_eq!(root_1, iter.next().unwrap().0);
-        assert_eq!(child_1_0, iter.next().unwrap().0);
-        assert_eq!(child_1_0_0, iter.next().unwrap().0);
-        assert_eq!(child_1_0_1, iter.next().unwrap().0);
-        assert_eq!(child_1_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.iter();
+        assert_eq!(s.root_0, iter.next().unwrap().0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_0_0_0, iter.next().unwrap().0);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        assert_eq!(s.child_1_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.roots();
-        assert_eq!(root_0, iter.next().unwrap().0);
-        assert_eq!(root_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.roots();
+        assert_eq!(s.root_0, iter.next().unwrap().0);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.parents(child_0_0_0);
-        assert_eq!(child_0_0, iter.next().unwrap().0);
-        assert_eq!(root_0, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.parents(s.child_0_0_0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert_eq!(s.root_0, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.parents(child_1_1);
-        assert_eq!(root_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.parents(s.child_1_1);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.siblings(root_0);
-        assert_eq!(root_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.siblings(s.root_0);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.siblings(child_0_0);
+        let mut iter = s.scene_graph.siblings(s.child_0_0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.siblings(child_1_0);
-        assert_eq!(child_1_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.siblings(s.child_1_0);
+        assert_eq!(s.child_1_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.direct_children(root_0);
-        assert_eq!(child_0_0, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.direct_children(s.root_0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.direct_children(child_1_0);
-        assert_eq!(child_1_0_0, iter.next().unwrap().0);
-        assert_eq!(child_1_0_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.direct_children(s.child_1_0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.all_children(root_0);
-        assert_eq!(child_0_0, iter.next().unwrap().0);
-        assert_eq!(child_0_0_0, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.all_children(s.root_0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_0_0_0, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.all_children(root_1);
-        assert_eq!(child_1_0, iter.next().unwrap().0);
-        assert_eq!(child_1_0_0, iter.next().unwrap().0);
-        assert_eq!(child_1_0_1, iter.next().unwrap().0);
-        assert_eq!(child_1_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.all_children(s.root_1);
+        assert_eq!(s.child_1_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        assert_eq!(s.child_1_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
 
-        let mut iter = scene_graph.all_children(child_1_0);
-        assert_eq!(child_1_0_0, iter.next().unwrap().0);
-        assert_eq!(child_1_0_1, iter.next().unwrap().0);
+        let mut iter = s.scene_graph.all_children(s.child_1_0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_scene_graph_remove_children() {
+        let mut s = Setup::new();
+
+        s.scene_graph.remove(s.child_1_0);
+        assert!(!s.scene_graph.has(s.child_1_0));
+        assert!(!s.scene_graph.has(s.child_1_0_0));
+        assert!(!s.scene_graph.has(s.child_1_0_1));
+        assert_eq!(5, s.scene_graph.iter().len());
+
+        s.scene_graph.remove(s.root_1);
+        assert!(!s.scene_graph.has(s.root_1));
+        assert!(!s.scene_graph.has(s.child_1_1));
+        assert_eq!(3, s.scene_graph.iter().len());
+
+        s.scene_graph.remove(s.root_0);
+        assert!(!s.scene_graph.has(s.root_0));
+        assert!(!s.scene_graph.has(s.child_0_0));
+        assert!(!s.scene_graph.has(s.child_0_0_0));
+        assert_eq!(0, s.scene_graph.iter().len());
     }
 }

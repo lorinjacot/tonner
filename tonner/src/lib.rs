@@ -12,6 +12,7 @@ pub mod mesh;
 pub mod renderer;
 pub mod scene_graph;
 pub mod texture;
+pub mod world;
 
 /// Contains everything long-lived and shared by the engine.
 /// This is the first thing you need when using storm.

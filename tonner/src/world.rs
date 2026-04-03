@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
 use uuid::Uuid;
 
 /// The type used to uniquely identified each [World] field.
@@ -132,6 +134,17 @@ pub trait StaticField: 'static {
     /// This value should stay unchanged between compilations and across different plaforms/OS. This is especially important for (des)serialization.
     /// (Des)serialization is required to save, load and sync [World]s.
     const ID: FieldId;
+
+    /// Turns the field into a python object. Returns `None` if the field is not available in python.
+    ///
+    /// If the `StaticField` already implements [`pyo3::PyClass`], this method may just wrap it into a `Bound` before
+    /// calling [`Bound::as_any`]. If the `StaticField` does not implement [`pyo3::PyClass`] but should still be accessible
+    /// from python, this method may return a wrapper created using `#[pyclass]`. The default implementation returns `None`.
+    #[cfg(feature = "python")]
+    #[allow(unused_variables)]
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        None
+    }
 }
 
 /// A [World] field whose [FieldId] is known at runtime. This means the world can have multiple field
@@ -143,10 +156,25 @@ pub trait DynamicField: Any {
     /// Field unique id. This value should stay unchanged throughout the lifetime of the app, between compilations and across different plaforms/OS.
     /// It is a logic error to change a field id. This is especially important for correct field access and (des)serialization.
     fn id(&self) -> FieldId;
+
+    /// Turns the field into a python object. Returns `None` if the field is not available in python.
+    ///
+    /// If the `DynamicField` already implements [`pyo3::PyClass`], this method may just wrap it into a `Bound` before
+    /// calling [`Bound::as_any`]. If the `DynamicField` does not implement [`pyo3::PyClass`] but should still be accessible
+    /// from python, this method may return a wrapper created using `#[pyclass]`. The default implementation returns `None`.
+    #[cfg(feature = "python")]
+    #[allow(unused_variables)]
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        None
+    }
 }
 
 impl<T: StaticField> DynamicField for T {
     fn id(&self) -> FieldId {
         Self::ID
+    }
+
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        StaticField::as_py(self, py)
     }
 }

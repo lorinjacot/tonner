@@ -1,6 +1,8 @@
 use std::{
-    any::Any,
+    any::{Any, type_name},
     collections::HashMap,
+    fmt::Debug,
+    ops::Deref,
     sync::{Arc, Mutex},
 };
 
@@ -14,12 +16,22 @@ use uuid::Uuid;
 /// (Des)serialization is required to save, load and sync [World]s.
 pub type FieldId = Uuid;
 
+type Fields = HashMap<FieldId, Arc<dyn DynamicField>>;
+
 /// A world is a collection of key-value pairs.
+#[derive(Debug)]
 pub struct World {
-    fields: Mutex<HashMap<FieldId, Arc<dyn DynamicField>>>,
+    fields: Mutex<Fields>,
 }
 
 impl World {
+    /// Creates an empty `World`.
+    pub fn new() -> World {
+        World {
+            fields: Mutex::new(HashMap::new()),
+        }
+    }
+
     /// Adds a new field to the world.
     ///
     /// If the world did not have this field present, `None` is returned. If the world did have this field present, the value is updated,
@@ -43,6 +55,7 @@ impl World {
     pub fn add_dynamic<Field: DynamicField>(&self, field: Arc<Field>) -> Option<Arc<Field>> {
         self.add_any(field).map(|old| {
             let any = old as Arc<dyn Any>;
+            dbg!(any.deref().type_id());
             Arc::clone(
                 any.downcast_ref()
                     .expect("the type of a world field should never change"),
@@ -126,9 +139,27 @@ impl World {
     }
 }
 
+#[cfg(feature = "python")]
+#[pyclass(name = "World", frozen)]
+pub struct PyWorld(pub Arc<World>);
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyWorld {
+    #[new]
+    pub fn new() -> PyWorld {
+        PyWorld(Arc::new(World::new()))
+    }
+
+    // fn new_entity(&self) -> Entity {
+    //     let id = self.0.entity_manager.lock().unwrap().new_entity();
+    //     Entity::new(id, self.0.clone())
+    // }
+}
+
 /// A [World] field whose [FieldId] is known at compile time. This means the world can have
 /// one field per `StaticField` type.
-pub trait StaticField: 'static {
+pub trait StaticField: Debug + Send + Sync + 'static {
     /// Field unique id.
     ///
     /// This value should stay unchanged between compilations and across different plaforms/OS. This is especially important for (des)serialization.
@@ -152,7 +183,7 @@ pub trait StaticField: 'static {
 /// python.
 ///
 /// All [`StaticField`] are also `DynamicField`.
-pub trait DynamicField: Any {
+pub trait DynamicField: Debug + Any + Send + Sync {
     /// Field unique id. This value should stay unchanged throughout the lifetime of the app, between compilations and across different plaforms/OS.
     /// It is a logic error to change a field id. This is especially important for correct field access and (des)serialization.
     fn id(&self) -> FieldId;

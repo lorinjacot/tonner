@@ -110,4 +110,10 @@ impl Context {
 
 #[cfg(feature = "python")]
 #[pyo3::pymodule(name = "tonner")]
-mod tonner_py {}
+mod tonner_py {
+    #[pymodule_export]
+    use super::world::PyWorld;
+
+    #[pymodule_export]
+    use super::entity_component::entity::Entity;
+}

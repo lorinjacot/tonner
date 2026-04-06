@@ -1,3 +1,16 @@
+[project]
+name = "tonner"
+dynamic = [
+    "version",
+    "description",
+    "readme",
+    "urls",
+    "authors",
+    "license",
+    "keywords",
+]
+dependencies = ["numpy >= 2.4.4"]
+
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"

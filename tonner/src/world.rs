@@ -9,6 +9,9 @@ use std::{
 use pyo3::prelude::*;
 use uuid::Uuid;
 
+#[cfg(feature = "python")]
+use crate::Context;
+
 /// The type used to uniquely identified each [World] field.
 ///
 /// This field should stay unchanged between compilations and across different plaforms/OS. This is especially important for (des)serialization.
@@ -118,6 +121,7 @@ impl World {
     }
 }
 
+/// A world is a collection of key-value pairs.
 #[cfg(feature = "python")]
 #[pyclass(name = "World", frozen)]
 pub struct PyWorld(pub Arc<World>);
@@ -126,7 +130,9 @@ pub struct PyWorld(pub Arc<World>);
 #[pymethods]
 impl PyWorld {
     #[new]
-    pub fn new() -> PyWorld {
+    pub fn new(ctx: &Context) -> PyWorld {
+        let world = World::new();
+        world.add(Arc::new(ctx.clone()));
         PyWorld(Arc::new(World::new()))
     }
 

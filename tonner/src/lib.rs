@@ -1,8 +1,13 @@
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+use uuid::uuid;
+
 use crate::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
+use crate::world::StaticField;
 
 pub mod entity_component;
 pub mod environment;
@@ -17,7 +22,7 @@ pub mod world;
 /// Contains everything long-lived and shared by the engine.
 /// This is the first thing you need when using storm.
 ///
-/// [Context] is cheap to clone, and any clone refers to the same data.
+/// [Context] can be cloned, and any clone refers to the same data.
 /// In general, two objects created with different contexts cannot be used together.
 ///
 /// Contains:
@@ -27,7 +32,9 @@ pub mod world;
 /// - pipelines
 /// - default buffers, textures, samplers
 /// - ...
+#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object))]
 #[derive(Debug, Clone)]
+
 pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -40,6 +47,15 @@ pub struct Context {
 }
 
 impl Context {
+    /// Creates a new context using one of the following GPU api:
+    /// - VULKAN
+    /// - METAL
+    /// - DX12
+    /// - BROWSER_WEBGPU
+    ///
+    /// ## Panics
+    ///
+    /// This method will panic if it fails to get a GPU adapter or handle.
     pub async fn new() -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -108,12 +124,35 @@ impl Context {
     }
 }
 
+impl StaticField for Context {
+    const ID: world::FieldId = uuid!("386ed978-e1c9-4870-83ac-cdb4e6fbf8bc");
+
+    #[cfg(feature = "python")]
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        Some(Bound::new(py, self.clone()).unwrap().into_any())
+    }
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl Context {
+    #[new]
+    fn py_new() -> Context {
+        pollster::block_on(Context::new())
+    }
+}
+
 #[cfg(feature = "python")]
 #[pyo3::pymodule(name = "tonner")]
 mod tonner_py {
-    #[pymodule_export]
-    use super::world::PyWorld;
+    use super::*;
 
     #[pymodule_export]
-    use super::entity_component::entity::Entity;
+    use Context;
+
+    #[pymodule_export]
+    use world::PyWorld;
+
+    #[pymodule_export]
+    use entity_component::entity::Entity;
 }

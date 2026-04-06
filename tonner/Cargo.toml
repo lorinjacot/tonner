@@ -20,6 +20,7 @@ image.workspace = true
 log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
 numpy = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
 pyo3 = { workspace = true, optional = true }
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4"] }
@@ -27,7 +28,7 @@ wasm-bindgen = { workspace = true, optional = true }
 wgpu.workspace = true
 
 [features]
-python = ["dep:pyo3", "dep:numpy"]
+python = ["dep:pyo3", "dep:numpy", "dep:pollster"]
 java-script = ["dep:wasm-bindgen"]
 
 [dev-dependencies]

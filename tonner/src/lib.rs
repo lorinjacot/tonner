@@ -156,8 +156,8 @@ impl Context {
 }
 
 #[cfg(feature = "python")]
-#[pyo3::pymodule(name = "tonner")]
-mod tonner_py {
+#[pyo3::pymodule]
+mod _tonner {
     use super::*;
 
     #[pymodule_export]

@@ -9,7 +9,11 @@ dynamic = [
     "license",
     "keywords",
 ]
-dependencies = ["numpy >= 2.4.4"]
+dependencies = [
+    "numpy >= 2.4.4",
+    "ipykernel >= 7.2.0",
+    "jupyter_client >= 4.1.0",
+]
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -18,3 +22,5 @@ build-backend = "maturin"
 [tool.maturin]
 features = ["python"]
 no-default-features = true
+python-source = "python"
+module-name = "tonner._tonner"

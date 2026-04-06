@@ -11,6 +11,10 @@ readme = "README.md"
 [lib]
 crate-type = ["lib", "cdylib"]
 
+[[bin]]
+name = "jupyter-server"
+required-features = ["python", "window"]
+
 [dependencies]
 bitflags.workspace = true
 bytemuck.workspace = true
@@ -26,10 +30,12 @@ thiserror.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 wasm-bindgen = { workspace = true, optional = true }
 wgpu.workspace = true
+winit = { workspace = true, optional = true }
 
 [features]
 python = ["dep:pyo3", "dep:numpy", "dep:pollster"]
 java-script = ["dep:wasm-bindgen"]
+window = ["dep:winit"]
 
 [dev-dependencies]
 pollster.workspace = true

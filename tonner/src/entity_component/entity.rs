@@ -1,5 +1,5 @@
 #[cfg(feature = "python")]
-use std::{any::{Any, type_name_of_val}, sync::Mutex};
+use std::sync::Mutex;
 use std::{
     fmt::{Debug, Display},
     iter::FusedIterator,

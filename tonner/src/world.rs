@@ -1,8 +1,7 @@
 use std::{
-    any::{Any, type_name},
+    any::Any,
     collections::HashMap,
     fmt::Debug,
-    ops::Deref,
     sync::{Arc, Mutex},
 };
 
@@ -53,25 +52,15 @@ impl World {
     ///
     /// This function will panic if the world already contains a field with the same id but of a different type.
     pub fn add_dynamic<Field: DynamicField>(&self, field: Arc<Field>) -> Option<Arc<Field>> {
-        self.add_any(field).map(|old| {
-            let any = old as Arc<dyn Any>;
-            dbg!(any.deref().type_id());
-            Arc::clone(
-                any.downcast_ref()
-                    .expect("the type of a world field should never change"),
-            )
-        })
-    }
-
-    /// Adds a new field to the world. If possible, it is preferable to use [`World::insert`]. If possible, it is preferable to use [`World::add_dynamic`].
-    ///
-    /// If the world did not have this field present, `None` is returned. If the world did have this field present, the value is updated,
-    /// and the old value is returned.
-    ///
-    /// This method should be used with great care: each field (and therefore [FieldId]) should always have the same underlying concrete type.
-    /// This is especially important when mixing [World::add], [World::add_dynamic] and [World::add_any].
-    fn add_any(&self, field: Arc<dyn DynamicField>) -> Option<Arc<dyn DynamicField>> {
-        self.fields.lock().unwrap().insert(field.id(), field)
+        self.fields
+            .lock()
+            .unwrap()
+            .insert(field.id(), field)
+            .map(|old| {
+                let any = old as Arc<dyn Any + Send + Sync>;
+                any.downcast()
+                    .expect("the type of a world field should never change")
+            })
     }
 
     /// Returns `true` if and only the world contains the `StaticField`.
@@ -99,43 +88,33 @@ impl World {
     ///
     /// This function will panic if the world contains a field with the same id but of a different type.
     pub fn get_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
-        let any = self.get_any(id)? as Arc<dyn Any>;
-        Some(Arc::clone(
-            any.downcast_ref()
+        let any = self.fields.lock().unwrap().get(&id)?.clone() as Arc<dyn Any + Send + Sync>;
+        Some(
+            any.downcast()
                 .expect("the type of a world field should never change"),
-        ))
-    }
-
-    /// Returns a shared pointer to the world field or `None` if the world does not contain the field. If possible, it is preferable to use [`World::get_dynamic`].
-    ///
-    /// This method should be used with great care: each field (and therefore [FieldId]) should always have the same underlying concrete type.
-    /// This is especially important when mixing [World::get], [World::get_dynamic] and [World::get_any].
-    fn get_any(&self, id: FieldId) -> Option<Arc<dyn DynamicField>> {
-        self.fields.lock().unwrap().get(&id).cloned()
+        )
     }
 
     /// Removes a field from the world, returning the value of the field if the field was previously in the world.
+    ///
+    /// ## Panics
+    ///
+    /// This function will panic if the world contains a field with the same id but of a different type.
     pub fn remove<Field: StaticField>(&self) -> Option<Arc<Field>> {
         self.remove_dynamic(Field::ID)
     }
 
     /// Removes a field from the world, returning the value of the field if the field was previously in the world.
-    pub fn remove_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
-        self.remove_any(id).map(|old| {
-            let any = old as Arc<dyn Any>;
-            Arc::clone(
-                any.downcast_ref()
-                    .expect("the type of a world field should never change"),
-            )
-        })
-    }
-
-    /// Removes a field from the world, returning the value of the field if the field was previously in the world. If possible, it is preferable to use [`World::remove_dynamic`].
     ///
-    /// This method should be used with great care: each field (and therefore [FieldId]) should always have the same underlying concrete type.
-    /// This is especially important when mixing [World::get], [World::remove_dynamic] and [World::remove_any].
-    fn remove_any(&self, id: FieldId) -> Option<Arc<dyn DynamicField>> {
-        self.fields.lock().unwrap().remove(&id)
+    /// ## Panics
+    ///
+    /// This function will panic if the world contains a field with the same id but of a different type.
+    pub fn remove_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
+        self.fields.lock().unwrap().remove(&id).map(|old| {
+            let any = old as Arc<dyn Any + Send + Sync>;
+            any.downcast()
+                .expect("the type of a world field should never change")
+        })
     }
 }
 

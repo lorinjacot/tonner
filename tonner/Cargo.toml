@@ -21,7 +21,7 @@ log.workspace = true
 mikktspace = { version = "0.3.0", features = ["glam"], default-features = false }
 numpy = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
-pyo3 = { workspace = true, optional = true }
+pyo3 = { workspace = true, optional = true, features = ["uuid"] }
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 wasm-bindgen = { workspace = true, optional = true }

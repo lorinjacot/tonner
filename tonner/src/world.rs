@@ -6,7 +6,7 @@ use std::{
 };
 
 #[cfg(feature = "python")]
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyType};
 use uuid::Uuid;
 
 #[cfg(feature = "python")]
@@ -91,11 +91,19 @@ impl World {
     ///
     /// This function will panic if the world contains a field with the same id but of a different type.
     pub fn get_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
-        let any = self.fields.lock().unwrap().get(&id)?.clone() as Arc<dyn Any + Send + Sync>;
-        Some(
+        self.get_any(id).map(|field| {
+            let any = field as Arc<dyn Any + Send + Sync>;
             any.downcast()
-                .expect("the type of a world field should never change"),
-        )
+                .expect("the type of a world field should never change")
+        })
+    }
+
+    /// Returns a shared pointer to the world field or `None` if the world does not contain the field. If possible, it is preferable to use [`World::get_dynamic`].
+    ///
+    /// This method should be used with great care: each field (and therefore [FieldId]) should always have the same underlying concrete type.
+    /// This is especially important when mixing [World::get], [World::get_dynamic] and [World::get_any].
+    fn get_any(&self, id: FieldId) -> Option<Arc<dyn DynamicField>> {
+        self.fields.lock().unwrap().get(&id).cloned()
     }
 
     /// Removes a field from the world, returning the value of the field if the field was previously in the world.
@@ -129,17 +137,24 @@ pub struct PyWorld(pub Arc<World>);
 #[cfg(feature = "python")]
 #[pymethods]
 impl PyWorld {
+    /// Creates a new world.
     #[new]
     pub fn new(ctx: &Context) -> PyWorld {
         let world = World::new();
         world.add(Arc::new(ctx.clone()));
-        PyWorld(Arc::new(World::new()))
+        PyWorld(Arc::new(world))
     }
 
-    // fn new_entity(&self) -> Entity {
-    //     let id = self.0.entity_manager.lock().unwrap().new_entity();
-    //     Entity::new(id, self.0.clone())
-    // }
+    /// Returns the world field or `None` if the world does not have the field.
+    pub fn get<'py>(
+        &self,
+        py: Python<'py>,
+        field: Bound<'py, PyType>,
+    ) -> PyResult<Option<Bound<'py, WorldField>>> {
+        let id = field.call_method0("id")?;
+        let id = id.extract()?;
+        Ok(self.0.get_any(id).map(|field| field.as_py(py)).flatten())
+    }
 }
 
 /// A [World] field whose [FieldId] is known at compile time. This means the world can have
@@ -158,7 +173,7 @@ pub trait StaticField: Debug + Send + Sync + 'static {
     /// from python, this method may return a wrapper created using `#[pyclass]`. The default implementation returns `None`.
     #[cfg(feature = "python")]
     #[allow(unused_variables)]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, WorldField>> {
         None
     }
 }
@@ -180,7 +195,7 @@ pub trait DynamicField: Debug + Any + Send + Sync {
     /// from python, this method may return a wrapper created using `#[pyclass]`. The default implementation returns `None`.
     #[cfg(feature = "python")]
     #[allow(unused_variables)]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, WorldField>> {
         None
     }
 }
@@ -190,7 +205,13 @@ impl<T: StaticField> DynamicField for T {
         Self::ID
     }
 
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+    #[cfg(feature = "python")]
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, WorldField>> {
         StaticField::as_py(self, py)
     }
 }
+
+/// Base class of all [World] fields.
+#[cfg(feature = "python")]
+#[pyclass(frozen, subclass)]
+pub struct WorldField;

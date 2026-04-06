@@ -1,5 +1,9 @@
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
+use pyo3::types::PyType;
+#[cfg(feature = "python")]
+use uuid::Uuid;
 use uuid::uuid;
 
 use crate::environment::EnvironmentContext;
@@ -32,7 +36,7 @@ pub mod world;
 /// - pipelines
 /// - default buffers, textures, samplers
 /// - ...
-#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object))]
+#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object, extends=world::WorldField))]
 #[derive(Debug, Clone)]
 
 pub struct Context {
@@ -128,8 +132,12 @@ impl StaticField for Context {
     const ID: world::FieldId = uuid!("386ed978-e1c9-4870-83ac-cdb4e6fbf8bc");
 
     #[cfg(feature = "python")]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
-        Some(Bound::new(py, self.clone()).unwrap().into_any())
+    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, world::WorldField>> {
+        Some(
+            Bound::new(py, (self.clone(), world::WorldField))
+                .unwrap()
+                .into_super(),
+        )
     }
 }
 
@@ -137,8 +145,13 @@ impl StaticField for Context {
 #[pymethods]
 impl Context {
     #[new]
-    fn py_new() -> Context {
-        pollster::block_on(Context::new())
+    fn py_new() -> (Context, world::WorldField) {
+        (pollster::block_on(Context::new()), world::WorldField)
+    }
+
+    #[classmethod]
+    fn id(_cls: &Bound<'_, PyType>) -> PyResult<Uuid> {
+        Ok(Self::ID)
     }
 }
 
@@ -151,7 +164,7 @@ mod tonner_py {
     use Context;
 
     #[pymodule_export]
-    use world::PyWorld;
+    use world::{PyWorld, WorldField};
 
     #[pymodule_export]
     use entity_component::entity::Entity;

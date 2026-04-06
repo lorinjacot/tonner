@@ -1,19 +1,11 @@
-#[cfg(feature = "python")]
-use std::sync::Mutex;
 use std::{
     fmt::{Debug, Display},
     iter::FusedIterator,
     num::{NonZeroU16, NonZeroU32},
-    sync::Arc,
 };
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
-use uuid::uuid;
-
-#[cfg(feature = "python")]
-use crate::world::PyWorld;
-use crate::world::{StaticField, World};
 
 /// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
@@ -161,10 +153,6 @@ impl EntityManager {
     }
 }
 
-impl StaticField for Mutex<EntityManager> {
-    const ID: crate::world::FieldId = uuid!("5d30c780-9045-49fa-93db-bd5f31091de2");
-}
-
 /// An iterator visiting all entities in arbitrary order. Created by [`EntityManager::iter()`].
 pub struct Iter<'a> {
     inner: std::slice::Iter<'a, EntityId>,
@@ -209,41 +197,6 @@ impl<'a> ExactSizeIterator for Iter<'a> {
 }
 
 impl<'a> FusedIterator for Iter<'a> {}
-
-/// An entity handle. Even though this class can be used in rust,
-/// it is only needed when using the python api.
-#[cfg_attr(feature = "python", pyclass(frozen, str))]
-#[derive(Debug)]
-pub struct Entity {
-    id: EntityId,
-    world: Arc<World>,
-}
-
-#[cfg(feature = "python")]
-#[pymethods]
-impl Entity {
-    #[new]
-    pub fn new(world: &PyWorld) -> Entity {
-        let world = world.0.clone();
-        let id = match world.get::<Mutex<EntityManager>>() {
-            Some(manager) => manager.lock().unwrap().new_entity(),
-            None => {
-                let mut manager = EntityManager::new();
-                let id = manager.new_entity();
-                let field = Mutex::new(manager);
-                world.add(Arc::new(field));
-                id
-            }
-        };
-        Entity { id, world }
-    }
-}
-
-impl Display for Entity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Entity({})", self.id)
-    }
-}
 
 #[cfg(test)]
 mod tests {

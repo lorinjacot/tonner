@@ -1,17 +1,11 @@
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
-#[cfg(feature = "python")]
-use pyo3::types::PyType;
-#[cfg(feature = "python")]
-use uuid::Uuid;
-use uuid::uuid;
 
 use crate::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
-use crate::world::StaticField;
 
 pub mod entity_component;
 pub mod environment;
@@ -21,7 +15,6 @@ pub mod mesh;
 pub mod renderer;
 pub mod scene_graph;
 pub mod texture;
-pub mod world;
 
 /// Contains everything long-lived and shared by the engine.
 /// This is the first thing you need when using storm.
@@ -36,7 +29,7 @@ pub mod world;
 /// - pipelines
 /// - default buffers, textures, samplers
 /// - ...
-#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object, extends=world::WorldField))]
+#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object))]
 #[derive(Debug, Clone)]
 
 pub struct Context {
@@ -128,30 +121,12 @@ impl Context {
     }
 }
 
-impl StaticField for Context {
-    const ID: world::FieldId = uuid!("386ed978-e1c9-4870-83ac-cdb4e6fbf8bc");
-
-    #[cfg(feature = "python")]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, world::WorldField>> {
-        Some(
-            Bound::new(py, (self.clone(), world::WorldField))
-                .unwrap()
-                .into_super(),
-        )
-    }
-}
-
 #[cfg(feature = "python")]
 #[pymethods]
 impl Context {
     #[new]
-    fn py_new() -> (Context, world::WorldField) {
-        (pollster::block_on(Context::new()), world::WorldField)
-    }
-
-    #[classmethod]
-    fn id(_cls: &Bound<'_, PyType>) -> PyResult<Uuid> {
-        Ok(Self::ID)
+    fn py_new() -> Context {
+        pollster::block_on(Context::new())
     }
 }
 
@@ -162,10 +137,4 @@ mod tonner_py {
 
     #[pymodule_export]
     use Context;
-
-    #[pymodule_export]
-    use world::{PyWorld, WorldField};
-
-    #[pymodule_export]
-    use entity_component::entity::Entity;
 }

@@ -4131,6 +4131,9 @@ dependencies = [
 name = "tonner-kernel"
 version = "0.1.0"
 dependencies = [
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
  "pollster",
  "pyo3",
  "tonner",

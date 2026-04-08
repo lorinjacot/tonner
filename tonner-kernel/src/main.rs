@@ -7,8 +7,7 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyList},
 };
-use tonner::Context;
-use winit::{application::ApplicationHandler, event_loop::EventLoop, window::Window};
+use winit::{application::ApplicationHandler, event_loop::EventLoop};
 
 use crate::state::State;
 
@@ -65,34 +64,7 @@ struct App {
 
 impl ApplicationHandler<Event> for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let window = event_loop
-            .create_window(Window::default_attributes().with_title("Tonner Kernel"))
-            .expect("Failed to create a window");
-
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            flags: wgpu::InstanceFlags::from_env_or_default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-        });
-
-        let surface = instance
-            .create_surface(window)
-            .expect("Failed to create the window surface");
-
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-        }))
-        .expect("Failed to get GPU adapter");
-
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .expect("Failed to get GPU handle");
-
-        let ctx = Context::from_device(device, queue);
-        let state = State::new(ctx, surface);
+        let state = State::new(event_loop);
 
         *self.state.lock().unwrap() = Some(state);
     }
@@ -106,8 +78,27 @@ impl ApplicationHandler<Event> for App {
     fn window_event(
         &mut self,
         _event_loop: &winit::event_loop::ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        _event: winit::event::WindowEvent,
+        window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
     ) {
+        if let Some(state) = self.state.lock().unwrap().as_mut() {
+            state.on_window_event(window_id, event);
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        match event {
+            winit::event::DeviceEvent::MouseMotion { delta } => {
+                if let Some(state) = self.state.lock().unwrap().as_mut() {
+                    state.on_mouse_motion(delta);
+                }
+            }
+            _ => (),
+        }
     }
 }

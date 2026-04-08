@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use tonner::Context;
 
 pub struct State {
+    wgpu_instance: wgpu::Instance,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
     storm_ctx: Context,
@@ -18,24 +19,17 @@ struct Window {
 }
 
 impl Window {
-    fn configure(
-        &mut self,
-        size: winit::dpi::PhysicalSize<u32>,
-        device: &wgpu::Device,
-        surface_format: wgpu::TextureFormat,
-    ) {
+    fn configure(&self, device: &wgpu::Device, surface_format: wgpu::TextureFormat) {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            // Request compatibility with the sRGB-format texture view we‘re going to create later.
             view_formats: vec![surface_format.add_srgb_suffix()],
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            width: size.width,
-            height: size.height,
+            width: self.size.width,
+            height: self.size.height,
             desired_maximum_frame_latency: 2,
             present_mode: wgpu::PresentMode::AutoVsync,
         };
-        self.size = size;
         self.surface.configure(device, &surface_config);
     }
 }
@@ -47,23 +41,22 @@ impl State {
             .expect("Failed to create a window");
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            flags: wgpu::InstanceFlags::from_env_or_default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-        });
+        let wgpu_instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+                Box::new(event_loop.owned_display_handle()),
+            ));
 
-        let surface = instance
+        let surface = wgpu_instance
             .create_surface(window.clone())
             .expect("Failed to create the window surface");
 
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::None,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-        }))
-        .expect("Failed to get GPU adapter");
+        let adapter =
+            pollster::block_on(wgpu_instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::None,
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+            }))
+            .expect("Failed to get GPU adapter");
 
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
@@ -81,12 +74,12 @@ impl State {
 
         let surface_format = surface.get_capabilities(&adapter).formats[0];
         let size = window.inner_size();
-        let mut window = Window {
+        let window = Window {
             size,
             window,
             surface,
         };
-        window.configure(size, &device, surface_format);
+        window.configure(&device, surface_format);
 
         let egui_renderer = egui_wgpu::Renderer::new(
             &device,
@@ -100,6 +93,7 @@ impl State {
         windows.insert(window.window.id(), window);
 
         State {
+            wgpu_instance,
             egui_state,
             egui_renderer,
             storm_ctx,
@@ -120,7 +114,8 @@ impl State {
         let window = self.windows.get_mut(&window_id).unwrap();
 
         if let winit::event::WindowEvent::Resized(size) = event {
-            window.configure(size, self.storm_ctx.device(), self.surface_format);
+            window.size = size;
+            window.configure(self.storm_ctx.device(), self.surface_format);
         }
 
         let response = self.egui_state.on_window_event(&window.window, &event);
@@ -128,8 +123,8 @@ impl State {
         if response.repaint {
             let raw_input = self.egui_state.take_egui_input(&window.window);
 
-            let full_output = self.egui_state.egui_ctx().run(raw_input, |ctx| {
-                egui::CentralPanel::default().show(&ctx, |ui| {
+            let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
                     ui.label("Hello world!");
                     if ui.button("Click me").clicked() {
                         // take some action here
@@ -182,17 +177,44 @@ impl State {
                     );
                 });
 
-            let texture = window.surface.get_current_texture().unwrap();
-            let view = texture.texture.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("Tonner window surface texture view"),
-                ..Default::default()
-            });
+            let surface_texture = match window.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+                wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => {
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
+                    drop(texture);
+                    window.configure(self.storm_ctx.device(), self.surface_format);
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Outdated => {
+                    window.configure(self.storm_ctx.device(), self.surface_format);
+                    return;
+                }
+                wgpu::CurrentSurfaceTexture::Validation => {
+                    unreachable!("No error scope registered, so validation errors will panic")
+                }
+                wgpu::CurrentSurfaceTexture::Lost => {
+                    window.surface = self
+                        .wgpu_instance
+                        .create_surface(window.window.clone())
+                        .unwrap();
+                    window.configure(self.storm_ctx.device(), self.surface_format);
+                    return;
+                }
+            };
+            let texture_view = surface_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(self.surface_format.add_srgb_suffix()),
+                    ..Default::default()
+                });
 
             let mut render_pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Tonner Kernel render() render pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
+                        view: &texture_view,
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
@@ -203,6 +225,7 @@ impl State {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 })
                 .forget_lifetime();
 
@@ -215,7 +238,7 @@ impl State {
 
             self.storm_ctx.queue().submit(command_buffers);
             window.window.pre_present_notify();
-            texture.present();
+            surface_texture.present();
         }
     }
 }

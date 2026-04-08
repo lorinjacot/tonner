@@ -237,9 +237,14 @@ impl SkinManager {
                 true,
                 ctx.device(),
             );
-            let mut buffer_view = self.buffer.slice(..).get_mapped_range_mut();
-            buffer_view[offset..size].copy_from_slice(joint_matrices);
-            drop(buffer_view);
+            let offset = offset as wgpu::BufferAddress;
+            let size = size as wgpu::BufferAddress;
+            if offset < size {
+                self.buffer
+                    .slice(offset..size)
+                    .get_mapped_range_mut()
+                    .copy_from_slice(joint_matrices);
+            }
             self.buffer.unmap();
         }
 

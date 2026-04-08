@@ -41,8 +41,8 @@ impl TextureContex {
         let generate_mips_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Generate mips pipeline layout"),
-                bind_group_layouts: &[&generate_mips_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&generate_mips_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("texture.wgsl"));
@@ -229,7 +229,7 @@ impl<'a> TextureBuilder<'a> {
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 targets: &[Some(format.into())],
                             }),
-                            multiview: None,
+                            multiview_mask: None,
                             cache: None,
                         })
                 });
@@ -287,6 +287,7 @@ impl<'a> TextureBuilder<'a> {
                         depth_stencil_attachment: None,
                         timestamp_writes: None,
                         occlusion_query_set: None,
+                        multiview_mask: None,
                     });
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, &bind_group, &[]);

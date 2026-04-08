@@ -1,4 +1,3 @@
-#[cfg(feature = "python")]
 use std::sync::Mutex;
 use std::{
     fmt::{Debug, Display},

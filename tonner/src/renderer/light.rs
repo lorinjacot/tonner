@@ -136,10 +136,16 @@ impl LightManager {
             mapped_at_creation: true,
         });
 
-        let mut view = buffer.get_mapped_range_mut(..);
-        view[0..header_size].copy_from_slice(bytes_of(&header));
-        view[header_size..size].copy_from_slice(cast_slice(data));
-        drop(view);
+        let header_size = header_size as wgpu::BufferAddress;
+        let size = size as wgpu::BufferAddress;
+        buffer
+            .get_mapped_range_mut(0..header_size)
+            .copy_from_slice(bytes_of(&header));
+        if header_size < size {
+            buffer
+                .get_mapped_range_mut(header_size..size)
+                .copy_from_slice(bytes_of(&header));
+        }
         buffer.unmap();
 
         buffer

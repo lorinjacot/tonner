@@ -1,9 +1,5 @@
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
-#[cfg(feature = "python")]
-use pyo3::types::PyType;
-#[cfg(feature = "python")]
-use uuid::Uuid;
 use uuid::uuid;
 
 use crate::environment::EnvironmentContext;
@@ -57,16 +53,14 @@ impl Context {
     /// - DX12
     /// - BROWSER_WEBGPU
     ///
+    /// This function should only be used when no display/surfaces are needed.
+    ///
     /// ## Panics
     ///
     /// This method will panic if it fails to get a GPU adapter or handle.
     pub async fn new() -> Self {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            flags: wgpu::InstanceFlags::from_env_or_default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-        });
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptionsBase {
@@ -138,20 +132,6 @@ impl StaticField for Context {
                 .unwrap()
                 .into_super(),
         )
-    }
-}
-
-#[cfg(feature = "python")]
-#[pymethods]
-impl Context {
-    #[new]
-    fn py_new() -> (Context, world::WorldField) {
-        (pollster::block_on(Context::new()), world::WorldField)
-    }
-
-    #[classmethod]
-    fn id(_cls: &Bound<'_, PyType>) -> PyResult<Uuid> {
-        Ok(Self::ID)
     }
 }
 

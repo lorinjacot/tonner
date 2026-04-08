@@ -106,7 +106,7 @@ impl Renderer {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: &[Some(format.into())],
                     }),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 });
 
@@ -265,6 +265,7 @@ impl Renderer {
             }),
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         opaque_render_pass.set_bind_group(0, &render_bind_group, &[]);
 
@@ -313,6 +314,7 @@ impl Renderer {
             }),
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         transparent_render_pass.set_bind_group(0, &render_bind_group, &[]);
 
@@ -334,6 +336,7 @@ impl Renderer {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
 
         compose_render_pass.set_pipeline(&self.compose_pipeline);
@@ -356,6 +359,7 @@ impl Renderer {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
 
         brightness_render_pass.set_pipeline(&self.brightness_pipeline);
@@ -382,6 +386,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             render_pass.set_pipeline(&self.gaussian_blur_pipeline);
             render_pass.set_bind_group(0, source, &[]);
@@ -402,6 +407,7 @@ impl Renderer {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
 
         tone_mapping_render_pass.set_pipeline(&self.tone_mapping_pipeline);
@@ -548,8 +554,11 @@ impl RendererContext {
         let skybox_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Skybox pipeline layout"),
-                bind_group_layouts: &[&render_bind_group_layout, skybox_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[
+                    Some(&render_bind_group_layout),
+                    Some(skybox_bind_group_layout),
+                ],
+                immediate_size: 0,
             });
         let skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Skybox pipeline"),
@@ -571,8 +580,8 @@ impl RendererContext {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -587,7 +596,7 @@ impl RendererContext {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -615,8 +624,8 @@ impl RendererContext {
         let brightness_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Brightness pipeline layout"),
-                bind_group_layouts: &[&brightness_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&brightness_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let gaussian_blur_shader_module =
@@ -658,8 +667,8 @@ impl RendererContext {
         let gaussian_blur_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Gaussian blur pipeline layout"),
-                bind_group_layouts: &[&gaussian_blur_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&gaussian_blur_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let gaussian_blur_pipeline =
@@ -693,7 +702,7 @@ impl RendererContext {
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
                 }),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -732,8 +741,8 @@ impl RendererContext {
         let compose_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Compose pipeline layout"),
-                bind_group_layouts: &[&compose_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&compose_bind_group_layout)],
+                immediate_size: 0,
             });
 
         const COMPOSE_BLEND: wgpu::BlendComponent = wgpu::BlendComponent {
@@ -778,7 +787,7 @@ impl RendererContext {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -812,7 +821,7 @@ impl RendererContext {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -861,8 +870,8 @@ impl RendererContext {
         let tone_mapping_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Tone mapping pipeline layout"),
-                bind_group_layouts: &[&tone_mapping_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&tone_mapping_bind_group_layout)],
+                immediate_size: 0,
             });
 
         let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {

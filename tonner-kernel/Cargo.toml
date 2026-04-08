@@ -1,0 +1,9 @@
+[package]
+name = "tonner-kernel"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pyo3 = { workspace = true, features = ["auto-initialize"] }
+tonner = { workspace = true, features = ["python"] }
+winit.workspace = true

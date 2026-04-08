@@ -165,7 +165,4 @@ mod _tonner {
 
     #[pymodule_export]
     use world::{PyWorld, WorldField};
-
-    #[pymodule_export]
-    use entity_component::entity::Entity;
 }

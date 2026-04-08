@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "tonner",
+    "tonner-kernel",
     "storm-animation",
     "storm-controls",
     "storm-gltf",

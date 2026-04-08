@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+pollster.workspace = true
 pyo3 = { workspace = true, features = ["auto-initialize"] }
 tonner = { workspace = true, features = ["python"] }
+wgpu.workspace = true
 winit.workspace = true

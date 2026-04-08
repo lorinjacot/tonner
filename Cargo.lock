@@ -4131,8 +4131,10 @@ dependencies = [
 name = "tonner-kernel"
 version = "0.1.0"
 dependencies = [
+ "pollster",
  "pyo3",
  "tonner",
+ "wgpu",
  "winit",
 ]
 

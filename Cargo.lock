@@ -4263,6 +4263,7 @@ dependencies = [
  "pollster",
  "pyo3",
  "tonner",
+ "uuid",
  "wgpu",
  "winit",
 ]

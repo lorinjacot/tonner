@@ -1,5 +1,5 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, OnceLock},
     thread::spawn,
 };
 
@@ -7,6 +7,8 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyList},
 };
+use tonner::Context;
+use tonner_kernel::{Event, PyState};
 use winit::{application::ApplicationHandler, event_loop::EventLoop};
 
 use crate::state::State;
@@ -14,30 +16,35 @@ use crate::state::State;
 mod state;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("starting kernel");
-
     let event_loop = EventLoop::with_user_event().build().unwrap();
-    let state = Arc::new(Mutex::new(None));
+    let context = Arc::new(OnceLock::new());
+
+    let mut app = App {
+        state: None,
+        context: context.clone(),
+    };
 
     let args: Vec<String> = std::env::args().collect();
     let event_loop_proxy = event_loop.create_proxy();
     spawn(move || {
+        let context = context.wait().clone();
+        let py_state = PyState::new(context, event_loop_proxy.clone());
+
         let result = Python::attach(|py| -> PyResult<()> {
             let sys = py.import("sys")?;
             let py_args = PyList::new(py, &args)?;
             sys.setattr("argv", py_args)?;
 
-            let locals = PyDict::new(py);
-            py.run(
-                cr#"
-from ipykernel.ipkernel import IPythonKernel
-from ipykernel.kernelapp import IPKernelApp
+            let kernelapp = py.import("ipykernel.kernelapp")?;
+            let app_class = kernelapp.getattr("IPKernelApp")?;
+            let app = app_class.call_method0("instance")?;
 
-IPKernelApp.launch_instance(kernel_class=IPythonKernel)
-"#,
-                None,
-                Some(&locals),
-            )?;
+            let user_ns = PyDict::new(py);
+            user_ns.set_item("_tonner_kernel_state", py_state)?;
+            app.setattr("user_ns", user_ns)?;
+
+            app.call_method0("initialize")?;
+            app.call_method0("start")?;
 
             Ok(())
         });
@@ -49,26 +56,25 @@ IPKernelApp.launch_instance(kernel_class=IPythonKernel)
         event_loop_proxy.send_event(Event::ShutDown).unwrap();
     });
 
-    let mut app = App { state };
     event_loop.run_app(&mut app)?;
 
     Ok(())
 }
 
-#[derive(Debug)]
-enum Event {
-    ShutDown,
-}
-
 struct App {
-    state: Arc<Mutex<Option<State>>>,
+    state: Option<State>,
+    context: Arc<OnceLock<Context>>,
 }
 
 impl ApplicationHandler<Event> for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let state = State::new(event_loop);
 
-        *self.state.lock().unwrap() = Some(state);
+        if self.context.set(state.context().clone()).is_err() {
+            panic!("Tonner kernel context already set");
+        }
+
+        self.state = Some(state);
     }
 
     fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, event: Event) {
@@ -83,7 +89,7 @@ impl ApplicationHandler<Event> for App {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        if let Some(state) = self.state.lock().unwrap().as_mut() {
+        if let Some(state) = self.state.as_mut() {
             state.on_window_event(window_id, event);
         }
     }
@@ -96,7 +102,7 @@ impl ApplicationHandler<Event> for App {
     ) {
         match event {
             winit::event::DeviceEvent::MouseMotion { delta } => {
-                if let Some(state) = self.state.lock().unwrap().as_mut() {
+                if let Some(state) = &mut self.state {
                     state.on_mouse_motion(delta);
                 }
             }

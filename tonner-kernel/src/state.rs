@@ -102,6 +102,10 @@ impl State {
         }
     }
 
+    pub fn context(&self) -> &Context {
+        &self.storm_ctx
+    }
+
     pub fn on_mouse_motion(&mut self, delta: (f64, f64)) {
         self.egui_state.on_mouse_motion(delta);
     }

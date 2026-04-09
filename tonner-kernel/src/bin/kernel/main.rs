@@ -7,8 +7,8 @@ use pyo3::{
     prelude::*,
     types::{PyDict, PyList},
 };
-use tonner::Context;
-use tonner_kernel::{Event, PyState};
+use tonner::{Context, py_tonner};
+use tonner_kernel::{Event, PyState, py_tonner_kernel};
 use winit::{application::ApplicationHandler, event_loop::EventLoop};
 
 use crate::state::State;
@@ -29,6 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn(move || {
         let context = context.wait().clone();
         let py_state = PyState::new(context, event_loop_proxy.clone());
+
+        pyo3::append_to_inittab!(py_tonner);
+        pyo3::append_to_inittab!(py_tonner_kernel);
+        Python::initialize();
 
         let result = Python::attach(|py| -> PyResult<()> {
             let sys = py.import("sys")?;

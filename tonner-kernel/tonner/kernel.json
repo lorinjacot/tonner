@@ -1,6 +1,6 @@
 {
     "argv": [
-        "C:\\Users\\lorin\\Repos\\tonner\\target\\debug\\tonner-kernel.exe",
+        "C:\\Users\\lorin\\Repos\\tonner\\target\\debug\\kernel.exe",
         "-f",
         "{connection_file}"
     ],

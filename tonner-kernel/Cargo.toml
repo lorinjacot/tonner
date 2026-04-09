@@ -3,12 +3,15 @@ name = "tonner-kernel"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["lib", "cdylib"]
+
 [dependencies]
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
 pollster.workspace = true
-pyo3 = { workspace = true, features = ["auto-initialize"] }
+pyo3.workspace = true
 tonner = { workspace = true, features = ["python"] }
 wgpu.workspace = true
 winit.workspace = true

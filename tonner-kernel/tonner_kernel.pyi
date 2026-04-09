@@ -1,0 +1,3 @@
+from tonner import Context
+
+def context() -> Context: ...

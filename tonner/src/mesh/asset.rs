@@ -142,14 +142,14 @@ impl MeshBuilder {
                 double_sided: material.double_sided(),
             };
 
-            let render_pipelines = ctx
+            let render_pipelines = ctx.inner
                 .mesh_ctx
-                .get_or_create_render_pipeline(parameters, &ctx.device)
+                .get_or_create_render_pipeline(parameters, &ctx.inner.device)
                 .clone();
 
-            let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind_group = ctx.inner.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Mesh primitive bind group"),
-                layout: &ctx.mesh_ctx.primitive_bind_group_layout,
+                layout: &ctx.inner.mesh_ctx.primitive_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,

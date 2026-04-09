@@ -133,7 +133,7 @@ impl<'a> TextureBuilder<'a> {
 
         let (texture, format) = match self.source {
             Source::Empty { format, .. } => {
-                let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
+                let texture = ctx.inner.device.create_texture(&wgpu::TextureDescriptor {
                     label: self.name,
                     size,
                     mip_level_count: self.mip_level_count,
@@ -171,8 +171,8 @@ impl<'a> TextureBuilder<'a> {
                 if srgb {
                     format = format.add_srgb_suffix();
                 }
-                let texture = ctx.device.create_texture_with_data(
-                    &ctx.queue,
+                let texture = ctx.inner.device.create_texture_with_data(
+                    &ctx.inner.queue,
                     &wgpu::TextureDescriptor {
                         label: self.name,
                         size,
@@ -194,16 +194,18 @@ impl<'a> TextureBuilder<'a> {
 
         if self.generate_mips {
             let pipeline = ctx
+                .inner
                 .texture_ctx
                 .generate_mips_pipelines
                 .entry(format)
                 .or_insert_with(|| {
-                    ctx.device
+                    ctx.inner
+                        .device
                         .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                             label: Some("Generate mips pipeline"),
-                            layout: Some(&ctx.texture_ctx.generate_mips_pipeline_layout),
+                            layout: Some(&ctx.inner.texture_ctx.generate_mips_pipeline_layout),
                             vertex: wgpu::VertexState {
-                                module: &ctx.texture_ctx.shader_module,
+                                module: &ctx.inner.texture_ctx.shader_module,
                                 entry_point: Some("vs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 buffers: &[],
@@ -224,7 +226,7 @@ impl<'a> TextureBuilder<'a> {
                                 alpha_to_coverage_enabled: false,
                             },
                             fragment: Some(wgpu::FragmentState {
-                                module: &ctx.texture_ctx.shader_module,
+                                module: &ctx.inner.texture_ctx.shader_module,
                                 entry_point: Some("fs_main"),
                                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                                 targets: &[Some(format.into())],
@@ -246,22 +248,25 @@ impl<'a> TextureBuilder<'a> {
                         ..Default::default()
                     });
 
-                    let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Generate mips bind group"),
-                        layout: &ctx.texture_ctx.generate_mips_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&sample_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(
-                                    &ctx.texture_ctx.generate_mips_sampler,
-                                ),
-                            },
-                        ],
-                    });
+                    let bind_group =
+                        ctx.inner
+                            .device
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("Generate mips bind group"),
+                                layout: &ctx.inner.texture_ctx.generate_mips_bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(&sample_view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &ctx.inner.texture_ctx.generate_mips_sampler,
+                                        ),
+                                    },
+                                ],
+                            });
 
                     let render_view = texture.create_view(&wgpu::TextureViewDescriptor {
                         label: Some("Generate mips render view"),

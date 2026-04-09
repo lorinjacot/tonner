@@ -11,8 +11,6 @@ dynamic = [
 ]
 dependencies = [
     "numpy >= 2.4.4",
-    "ipykernel >= 7.2.0",
-    "jupyter_client >= 4.1.0",
 ]
 
 [build-system]

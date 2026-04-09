@@ -391,7 +391,7 @@ impl GeometryBuilder {
         let size = header_size
             + (1 + self.morph_target_count) * self.vertex_count * size_of::<Attribute>();
 
-        let vertex_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_buffer = ctx.inner.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Geometry vertex buffer"),
             size: wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT),
             usage: wgpu::BufferUsages::STORAGE,
@@ -427,6 +427,7 @@ impl GeometryBuilder {
             };
 
             let buffer = ctx
+                .inner
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Geometry index buffer"),

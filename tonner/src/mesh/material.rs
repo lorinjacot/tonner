@@ -366,6 +366,7 @@ impl MaterialBuilder {
 
     pub fn build(self, ctx: &Context) -> Material {
         let buffer = ctx
+            .inner
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Material buffer"),
@@ -373,8 +374,8 @@ impl MaterialBuilder {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        let default_texture = &ctx.material_ctx.dummy_texture;
-        let default_sampler = &ctx.material_ctx.default_sampler;
+        let default_texture = &ctx.inner.material_ctx.dummy_texture;
+        let default_sampler = &ctx.inner.material_ctx.default_sampler;
 
         let base_color_texture = Texture {
             view: self

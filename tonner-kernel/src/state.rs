@@ -123,14 +123,7 @@ impl State {
         if response.repaint {
             let raw_input = self.egui_state.take_egui_input(&window.window);
 
-            let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |ui| {
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    ui.label("Hello world!");
-                    if ui.button("Click me").clicked() {
-                        // take some action here
-                    }
-                });
-            });
+            let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |_ui| ());
 
             self.egui_state
                 .handle_platform_output(&window.window, full_output.platform_output);

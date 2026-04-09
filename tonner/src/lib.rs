@@ -1,13 +1,13 @@
+use std::sync::Arc;
+
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
-use uuid::uuid;
 
 use crate::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
-use crate::world::StaticField;
 
 pub mod entity_component;
 pub mod environment;
@@ -22,7 +22,7 @@ pub mod world;
 /// Contains everything long-lived and shared by the engine.
 /// This is the first thing you need when using storm.
 ///
-/// [Context] can be cloned, and any clone refers to the same data.
+/// [Context] is cheap to clone, and any clone refers to the same data.
 /// In general, two objects created with different contexts cannot be used together.
 ///
 /// Contains:
@@ -32,10 +32,15 @@ pub mod world;
 /// - pipelines
 /// - default buffers, textures, samplers
 /// - ...
-#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object, extends=world::WorldField))]
+#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object))]
 #[derive(Debug, Clone)]
 
 pub struct Context {
+    inner: Arc<InnerContext>,
+}
+
+#[derive(Debug)]
+struct InnerContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
 
@@ -100,7 +105,7 @@ impl Context {
 
         queue.submit([encoder.finish()]);
 
-        Self {
+        let inner = InnerContext {
             device,
             queue,
             texture_ctx,
@@ -108,30 +113,21 @@ impl Context {
             mesh_ctx,
             environment_ctx,
             renderer_ctx,
+        };
+
+        Context {
+            inner: Arc::new(inner),
         }
     }
 
     /// The GPU used by the engine.
     pub fn device(&self) -> &wgpu::Device {
-        &self.device
+        &self.inner.device
     }
 
     /// The GPU command queue used by the engine.
     pub fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-}
-
-impl StaticField for Context {
-    const ID: world::FieldId = uuid!("386ed978-e1c9-4870-83ac-cdb4e6fbf8bc");
-
-    #[cfg(feature = "python")]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, world::WorldField>> {
-        Some(
-            Bound::new(py, (self.clone(), world::WorldField))
-                .unwrap()
-                .into_super(),
-        )
+        &self.inner.queue
     }
 }
 
@@ -144,5 +140,5 @@ mod _tonner {
     use Context;
 
     #[pymodule_export]
-    use world::{PyWorld, WorldField};
+    use world::{TonnerWorldHandle, TonnerEntityHandle};
 }

@@ -46,18 +46,19 @@ impl Renderer {
     /// Create a new builder. If possible, a builder should be reused, as calling
     /// [`RenderTargetBuilder::new`] is recreating multiple [`wgpu::Texture`], [`wgpu::BindGroup`] and [`wgpu::RenderPipeline`].
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: &Context) -> Self {
-        let mut encoder = ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("RenderTarget::new() command encoder"),
-            });
+        let mut encoder =
+            ctx.inner
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("RenderTarget::new() command encoder"),
+                });
 
-        let render_bind_group_layout = ctx.renderer_ctx.render_bind_group_layout.clone();
+        let render_bind_group_layout = ctx.inner.renderer_ctx.render_bind_group_layout.clone();
         let primitive_renderer = PrimitiveRenderer::new(ctx);
-        let skybox_pipeline = ctx.renderer_ctx.skybox_pipeline.clone();
-        let compose_pipeline = ctx.renderer_ctx.compose_pipeline.clone();
-        let brightness_pipeline = ctx.renderer_ctx.brightness_pipeline.clone();
-        let gaussian_blur_pipeline = ctx.renderer_ctx.gaussian_blur_pipeline.clone();
+        let skybox_pipeline = ctx.inner.renderer_ctx.skybox_pipeline.clone();
+        let compose_pipeline = ctx.inner.renderer_ctx.compose_pipeline.clone();
+        let brightness_pipeline = ctx.inner.renderer_ctx.brightness_pipeline.clone();
+        let gaussian_blur_pipeline = ctx.inner.renderer_ctx.gaussian_blur_pipeline.clone();
 
         let (
             [
@@ -75,12 +76,13 @@ impl Renderer {
         ) = create_render_attachments(width, height, 10, ctx, &mut encoder);
 
         let tone_mapping_pipeline =
-            ctx.device
+            ctx.inner
+                .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Tone mapping pipeline"),
-                    layout: Some(&ctx.renderer_ctx.tone_mapping_pipeline_layout),
+                    layout: Some(&ctx.inner.renderer_ctx.tone_mapping_pipeline_layout),
                     vertex: wgpu::VertexState {
-                        module: &ctx.renderer_ctx.tone_mapping_shader_module,
+                        module: &ctx.inner.renderer_ctx.tone_mapping_shader_module,
                         entry_point: Some("vs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         buffers: &[],
@@ -101,7 +103,7 @@ impl Renderer {
                         alpha_to_coverage_enabled: false,
                     },
                     fragment: Some(wgpu::FragmentState {
-                        module: &ctx.renderer_ctx.tone_mapping_shader_module,
+                        module: &ctx.inner.renderer_ctx.tone_mapping_shader_module,
                         entry_point: Some("fs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: &[Some(format.into())],
@@ -967,24 +969,27 @@ fn create_render_attachments(
             ..Default::default()
         });
 
-    let compose_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Compose bind group"),
-        layout: &ctx.renderer_ctx.compose_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&accumulation_attachment),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&revealage_attachment),
-            },
-        ],
-    });
+    let compose_bind_group = ctx
+        .inner
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Compose bind group"),
+            layout: &ctx.inner.renderer_ctx.compose_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&accumulation_attachment),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&revealage_attachment),
+                },
+            ],
+        });
 
     let brightness_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Brightness bind group"),
-        layout: &ctx.renderer_ctx.brightness_bind_group_layout,
+        layout: &ctx.inner.renderer_ctx.brightness_bind_group_layout,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::TextureView(&opaque_attachment),
@@ -1012,7 +1017,7 @@ fn create_render_attachments(
         horizontal = !horizontal;
         let bloom_bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Bloom bind group"),
-            layout: &ctx.renderer_ctx.gaussian_blur_bind_group_layout,
+            layout: &ctx.inner.renderer_ctx.gaussian_blur_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -1020,7 +1025,7 @@ fn create_render_attachments(
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
+                    resource: wgpu::BindingResource::Sampler(&ctx.inner.renderer_ctx.bloom_sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -1065,7 +1070,7 @@ fn create_tone_mapping_bind_group(
 
     ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Tone mapping bind group"),
-        layout: &ctx.renderer_ctx.tone_mapping_bind_group_layout,
+        layout: &ctx.inner.renderer_ctx.tone_mapping_bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -1073,7 +1078,7 @@ fn create_tone_mapping_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
+                resource: wgpu::BindingResource::Sampler(&ctx.inner.renderer_ctx.bloom_sampler),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -1083,7 +1088,7 @@ fn create_tone_mapping_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.bloom_sampler),
+                resource: wgpu::BindingResource::Sampler(&ctx.inner.renderer_ctx.bloom_sampler),
             },
         ],
     })

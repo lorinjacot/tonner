@@ -1,217 +1,93 @@
-use std::{
-    any::Any,
-    collections::HashMap,
-    fmt::Debug,
-    sync::{Arc, Mutex},
+use std::sync::{Arc, Mutex};
+
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+
+use crate::{
+    Context,
+    entity_component::{EntityId, EntityManager},
+    scene_graph::SceneGraph,
 };
 
-#[cfg(feature = "python")]
-use pyo3::{prelude::*, types::PyType};
-use uuid::Uuid;
+pub trait World {}
 
-#[cfg(feature = "python")]
-use crate::Context;
-
-/// The type used to uniquely identified each [World] field.
-///
-/// This field should stay unchanged between compilations and across different plaforms/OS. This is especially important for (des)serialization.
-/// (Des)serialization is required to save, load and sync [World]s.
-pub type FieldId = Uuid;
-
-type Fields = HashMap<FieldId, Arc<dyn DynamicField>>;
-
-/// A world is a collection of key-value pairs.
 #[derive(Debug)]
-pub struct World {
-    fields: Mutex<Fields>,
+pub struct TonnerWorld {
+    context: Context,
+    pub entity_manager: EntityManager,
+    pub scene_graph: SceneGraph,
 }
 
-impl World {
-    /// Creates an empty `World`.
-    pub fn new() -> World {
-        World {
-            fields: Mutex::new(HashMap::new()),
+impl TonnerWorld {
+    pub fn new(context: Context) -> TonnerWorld {
+        let scene_graph = SceneGraph::new(&context);
+        TonnerWorld {
+            context,
+            entity_manager: EntityManager::new(),
+            scene_graph,
         }
     }
 
-    /// Adds a new field to the world.
-    ///
-    /// If the world did not have this field present, `None` is returned. If the world did have this field present, the value is updated,
-    /// and the old value is returned.
-    ///
-    /// ## Panics
-    ///
-    /// This function will panic if the world already contains a field with the same id but of a different type.
-    pub fn add<Field: StaticField>(&self, field: Arc<Field>) -> Option<Arc<Field>> {
-        self.add_dynamic(field)
-    }
-
-    /// Adds a new field to the world.
-    ///
-    /// If the world did not have this field present, `None` is returned. If the world did have this field present, the value is updated,
-    /// and the old value is returned.
-    ///
-    /// ## Panics
-    ///
-    /// This function will panic if the world already contains a field with the same id but of a different type.
-    pub fn add_dynamic<Field: DynamicField>(&self, field: Arc<Field>) -> Option<Arc<Field>> {
-        self.fields
-            .lock()
-            .unwrap()
-            .insert(field.id(), field)
-            .map(|old| {
-                let any = old as Arc<dyn Any + Send + Sync>;
-                any.downcast()
-                    .expect("the type of a world field should never change")
-            })
-    }
-
-    /// Returns `true` if and only the world contains the `StaticField`.
-    pub fn contains<Field: StaticField>(&self) -> bool {
-        self.contains_dynamic(Field::ID)
-    }
-
-    /// Returns `true` if and only the world contains a field for `id`.
-    pub fn contains_dynamic(&self, id: FieldId) -> bool {
-        self.fields.lock().unwrap().contains_key(&id)
-    }
-
-    /// Returns a shared pointer to the world field. Returns `None` if the world does not contain the field.
-    ///
-    /// ## Panics
-    ///
-    /// This function will panic if the world contains a field with the same id but of a different type.
-    pub fn get<Field: StaticField>(&self) -> Option<Arc<Field>> {
-        self.get_dynamic(Field::ID)
-    }
-
-    /// Returns a shared pointer to the world field. Returns `None` if the world does not contain the field.
-    ///
-    /// ## Panics
-    ///
-    /// This function will panic if the world contains a field with the same id but of a different type.
-    pub fn get_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
-        self.get_any(id).map(|field| {
-            let any = field as Arc<dyn Any + Send + Sync>;
-            any.downcast()
-                .expect("the type of a world field should never change")
-        })
-    }
-
-    /// Returns a shared pointer to the world field or `None` if the world does not contain the field. If possible, it is preferable to use [`World::get_dynamic`].
-    ///
-    /// This method should be used with great care: each field (and therefore [FieldId]) should always have the same underlying concrete type.
-    /// This is especially important when mixing [World::get], [World::get_dynamic] and [World::get_any].
-    fn get_any(&self, id: FieldId) -> Option<Arc<dyn DynamicField>> {
-        self.fields.lock().unwrap().get(&id).cloned()
-    }
-
-    /// Removes a field from the world, returning the value of the field if the field was previously in the world.
-    ///
-    /// ## Panics
-    ///
-    /// This function will panic if the world contains a field with the same id but of a different type.
-    pub fn remove<Field: StaticField>(&self) -> Option<Arc<Field>> {
-        self.remove_dynamic(Field::ID)
-    }
-
-    /// Removes a field from the world, returning the value of the field if the field was previously in the world.
-    ///
-    /// ## Panics
-    ///
-    /// This function will panic if the world contains a field with the same id but of a different type.
-    pub fn remove_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
-        self.fields.lock().unwrap().remove(&id).map(|old| {
-            let any = old as Arc<dyn Any + Send + Sync>;
-            any.downcast()
-                .expect("the type of a world field should never change")
-        })
+    pub fn context(&self) -> &Context {
+        &self.context
     }
 }
 
-/// A world is a collection of key-value pairs.
-#[cfg(feature = "python")]
-#[pyclass(name = "World", frozen)]
-pub struct PyWorld(pub Arc<World>);
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "python",
+    pyclass(name = "TonnerWorld", dict, skip_from_py_object, frozen)
+)]
+pub struct TonnerWorldHandle {
+    pub world: Arc<Mutex<TonnerWorld>>,
+}
 
 #[cfg(feature = "python")]
 #[pymethods]
-impl PyWorld {
-    /// Creates a new world.
+impl TonnerWorldHandle {
     #[new]
-    pub fn new(ctx: &Context) -> PyWorld {
-        let world = World::new();
-        world.add(Arc::new(ctx.clone()));
-        PyWorld(Arc::new(world))
+    fn py_new(ctx: &Context) -> TonnerWorldHandle {
+        let world = TonnerWorld::new(ctx.clone());
+
+        TonnerWorldHandle {
+            world: Arc::new(Mutex::new(world)),
+        }
     }
 
-    /// Returns the world field or `None` if the world does not have the field.
-    pub fn get<'py>(
-        &self,
-        py: Python<'py>,
-        field: Bound<'py, PyType>,
-    ) -> PyResult<Option<Bound<'py, WorldField>>> {
-        let id = field.call_method0("id")?;
-        let id = id.extract()?;
-        Ok(self.0.get_any(id).map(|field| field.as_py(py)).flatten())
-    }
-}
-
-/// A [World] field whose [FieldId] is known at compile time. This means the world can have
-/// one field per `StaticField` type.
-pub trait StaticField: Debug + Send + Sync + 'static {
-    /// Field unique id.
-    ///
-    /// This value should stay unchanged between compilations and across different plaforms/OS. This is especially important for (des)serialization.
-    /// (Des)serialization is required to save, load and sync [World]s.
-    const ID: FieldId;
-
-    /// Turns the field into a python object. Returns `None` if the field is not available in python.
-    ///
-    /// If the `StaticField` already implements [`pyo3::PyClass`], this method may just wrap it into a `Bound` before
-    /// calling [`Bound::as_any`]. If the `StaticField` does not implement [`pyo3::PyClass`] but should still be accessible
-    /// from python, this method may return a wrapper created using `#[pyclass]`. The default implementation returns `None`.
-    #[cfg(feature = "python")]
-    #[allow(unused_variables)]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, WorldField>> {
-        None
+    fn new_entity(&self) -> TonnerEntityHandle {
+        let entity = self.world.lock().unwrap().entity_manager.new_entity();
+        TonnerEntityHandle {
+            entity,
+            world: self.clone(),
+        }
     }
 }
 
-/// A [World] field whose [FieldId] is known at runtime. This means the world can have multiple field
-/// per `DynamicField` type. This can be useful for field comming from dynamically-typed languaged like
-/// python.
-///
-/// All [`StaticField`] are also `DynamicField`.
-pub trait DynamicField: Debug + Any + Send + Sync {
-    /// Field unique id. This value should stay unchanged throughout the lifetime of the app, between compilations and across different plaforms/OS.
-    /// It is a logic error to change a field id. This is especially important for correct field access and (des)serialization.
-    fn id(&self) -> FieldId;
+pub trait Entity {
+    fn id(&self) -> EntityId;
+}
 
-    /// Turns the field into a python object. Returns `None` if the field is not available in python.
-    ///
-    /// If the `DynamicField` already implements [`pyo3::PyClass`], this method may just wrap it into a `Bound` before
-    /// calling [`Bound::as_any`]. If the `DynamicField` does not implement [`pyo3::PyClass`] but should still be accessible
-    /// from python, this method may return a wrapper created using `#[pyclass]`. The default implementation returns `None`.
-    #[cfg(feature = "python")]
-    #[allow(unused_variables)]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, WorldField>> {
-        None
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "python",
+    pyclass(name = "TonnerEntity", dict, skip_from_py_object)
+)]
+pub struct TonnerEntityHandle {
+    pub entity: EntityId,
+    world: TonnerWorldHandle,
+}
+
+impl TonnerEntityHandle {
+    pub fn world(&self) -> &TonnerWorldHandle {
+        &self.world
     }
 }
 
-impl<T: StaticField> DynamicField for T {
-    fn id(&self) -> FieldId {
-        Self::ID
-    }
-
-    #[cfg(feature = "python")]
-    fn as_py<'py>(&self, py: Python<'py>) -> Option<Bound<'py, WorldField>> {
-        StaticField::as_py(self, py)
-    }
-}
-
-/// Base class of all [World] fields.
 #[cfg(feature = "python")]
-#[pyclass(frozen, subclass)]
-pub struct WorldField;
+#[pymethods]
+impl TonnerEntityHandle {
+    #[new]
+    fn py_new(world: &TonnerWorldHandle) -> TonnerEntityHandle {
+        world.new_entity()
+    }
+}

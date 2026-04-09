@@ -1,4 +1,3 @@
-use std::sync::Mutex;
 use std::{
     fmt::{Debug, Display},
     iter::FusedIterator,
@@ -7,9 +6,6 @@ use std::{
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
-use uuid::uuid;
-
-use crate::world::StaticField;
 
 /// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
@@ -155,10 +151,6 @@ impl EntityManager {
             inner: self.dense.iter(),
         }
     }
-}
-
-impl StaticField for Mutex<EntityManager> {
-    const ID: crate::world::FieldId = uuid!("5d30c780-9045-49fa-93db-bd5f31091de2");
 }
 
 /// An iterator visiting all entities in arbitrary order. Created by [`EntityManager::iter()`].

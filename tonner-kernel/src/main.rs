@@ -14,6 +14,8 @@ use crate::state::State;
 mod state;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("starting kernel");
+
     let event_loop = EventLoop::with_user_event().build().unwrap();
     let state = Arc::new(Mutex::new(None));
 

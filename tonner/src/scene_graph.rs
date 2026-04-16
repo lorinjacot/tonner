@@ -1,4 +1,8 @@
-use std::{iter::FusedIterator, ops::Index};
+use std::{
+    iter::FusedIterator,
+    ops::Index,
+    sync::{Arc, Mutex},
+};
 
 use glam::{Mat4, Quat, Vec3};
 
@@ -6,6 +10,7 @@ use glam::{Mat4, Quat, Vec3};
 // use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1};
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+use uuid::uuid;
 
 use crate::{
     Context,
@@ -13,6 +18,7 @@ use crate::{
         ComponentStorage, ComponentsView, EntityId,
         component::sparse_array::{Iter, SparseArray},
     },
+    world::{FieldId, StaticField},
 };
 
 /// A Scene Graph works as a tree-like structure establishing parent-child relationships between scene elements,
@@ -236,7 +242,7 @@ impl SceneGraph {
     pub fn all_children(&self, entity: EntityId) -> AllChildrenIter<'_> {
         let parent = &self[entity];
         let next = parent.first_child.unwrap_or(entity);
-        let states = vec![DepthIterState {
+        let states: Vec<DepthIterState> = vec![DepthIterState {
             next,
             remaining: parent.children_count,
         }];
@@ -328,6 +334,10 @@ impl Index<EntityId> for SceneGraph {
     fn index(&self, index: EntityId) -> &Self::Output {
         &self.nodes[index]
     }
+}
+
+impl StaticField for Mutex<SceneGraph> {
+    const ID: FieldId = uuid!("de9dee0b-caa1-48ec-a304-d863e9d3145b");
 }
 
 // #[cfg(feature = "python")]
@@ -573,184 +583,178 @@ struct UpdateTransformIterState {
     parent_transform: Mat4,
 }
 
-// #[cfg(feature = "python")]
-// #[pyclass(frozen)]
-// pub struct PyNode {
-//     id: EntityId,
-//     scene_graph: Py<SceneGraph>,
-// }
+#[cfg_attr(feature = "python", pyclass(frozen))]
+pub struct NodeHandle {
+    pub id: EntityId,
+    pub world: Arc<Mutex<SceneGraph>>,
+}
 
-// #[cfg(feature = "python")]
-// impl PyNode {
-//     pub fn new(id: EntityId, scene_graph: Py<SceneGraph>) -> Self {
-//         Self { id, scene_graph }
-//     }
+impl NodeHandle {
+    //     fn deleted_error(id: EntityId) -> PyErr {
+    //         pyo3::exceptions::PyRuntimeError::new_err(format!(
+    //             "Node {id} has been deleted from the scene graph"
+    //         ))
+    //     }
 
-//     fn deleted_error(id: EntityId) -> PyErr {
-//         pyo3::exceptions::PyRuntimeError::new_err(format!(
-//             "Node {id} has been deleted from the scene graph"
-//         ))
-//     }
+    //     fn get<'a>(&self, scene_graph: &'a SceneGraph) -> PyResult<&'a Node> {
+    //         scene_graph
+    //             .get(self.id)
+    //             .ok_or_else(|| Self::deleted_error(self.id))
+    //     }
 
-//     fn get<'a>(&self, scene_graph: &'a SceneGraph) -> PyResult<&'a Node> {
-//         scene_graph
-//             .get(self.id)
-//             .ok_or_else(|| Self::deleted_error(self.id))
-//     }
+    //     fn get_mut<'a>(&self, scene_graph: &'a mut SceneGraph) -> PyResult<&'a mut Node> {
+    //         scene_graph
+    //             .get_mut(self.id)
+    //             .ok_or_else(|| Self::deleted_error(self.id))
+    //     }
+}
 
-//     fn get_mut<'a>(&self, scene_graph: &'a mut SceneGraph) -> PyResult<&'a mut Node> {
-//         scene_graph
-//             .get_mut(self.id)
-//             .ok_or_else(|| Self::deleted_error(self.id))
-//     }
-// }
+#[cfg(feature = "python")]
+#[pymethods]
+impl NodeHandle {
+    // #[getter]
+    // pub fn id(&self) -> EntityId {
+    //     self.id
+    // }
 
-// #[cfg(feature = "python")]
-// #[pymethods]
-// impl PyNode {
-//     #[getter]
-//     pub fn id(&self) -> EntityId {
-//         self.id
-//     }
+    //     #[getter]
+    //     fn name(&self, py: Python) -> PyResult<String> {
+    //         Ok(self.get(&self.scene_graph.borrow(py))?.name.clone())
+    //     }
 
-//     #[getter]
-//     fn name(&self, py: Python) -> PyResult<String> {
-//         Ok(self.get(&self.scene_graph.borrow(py))?.name.clone())
-//     }
+    //     #[setter]
+    //     fn set_name(&self, py: Python, name: String) -> PyResult<()> {
+    //         self.get_mut(&mut self.scene_graph.borrow_mut(py))?.name = name;
+    //         Ok(())
+    //     }
 
-//     #[setter]
-//     fn set_name(&self, py: Python, name: String) -> PyResult<()> {
-//         self.get_mut(&mut self.scene_graph.borrow_mut(py))?.name = name;
-//         Ok(())
-//     }
+    //     fn parent(&self, py: Python) -> PyResult<Option<PyNode>> {
+    //         Ok(self
+    //             .get(&self.scene_graph.borrow(py))?
+    //             .parent
+    //             .map(|id| PyNode {
+    //                 id,
+    //                 scene_graph: self.scene_graph.clone_ref(py),
+    //             }))
+    //     }
 
-//     fn parent(&self, py: Python) -> PyResult<Option<PyNode>> {
-//         Ok(self
-//             .get(&self.scene_graph.borrow(py))?
-//             .parent
-//             .map(|id| PyNode {
-//                 id,
-//                 scene_graph: self.scene_graph.clone_ref(py),
-//             }))
-//     }
+    //     #[getter]
+    //     fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    //         let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
+    //         Ok(PyArray1::from_slice(py, &translation.to_array()))
+    //     }
 
-//     #[getter]
-//     fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-//         let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
-//         Ok(PyArray1::from_slice(py, &translation.to_array()))
-//     }
+    //     #[setter]
+    //     fn set_local_translation<'py>(
+    //         &self,
+    //         py: Python<'py>,
+    //         translation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    //     ) -> PyResult<()> {
+    //         use glam::vec3;
 
-//     #[setter]
-//     fn set_local_translation<'py>(
-//         &self,
-//         py: Python<'py>,
-//         translation: PyArrayLike1<'py, f32, AllowTypeChange>,
-//     ) -> PyResult<()> {
-//         use glam::vec3;
+    //         let translation = translation.as_array();
+    //         if translation.dim() != 3 {
+    //             return Err(pyo3::exceptions::PyValueError::new_err(
+    //                 "translation.shape must be (3,)",
+    //             ));
+    //         }
+    //         self.scene_graph
+    //             .borrow_mut(py)
+    //             .set_local_transformation(
+    //                 self.id,
+    //                 vec3(translation[0], translation[1], translation[2]),
+    //                 None,
+    //                 None,
+    //             )
+    //             .map_err(|_| Self::deleted_error(self.id))
+    //     }
 
-//         let translation = translation.as_array();
-//         if translation.dim() != 3 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "translation.shape must be (3,)",
-//             ));
-//         }
-//         self.scene_graph
-//             .borrow_mut(py)
-//             .set_local_transformation(
-//                 self.id,
-//                 vec3(translation[0], translation[1], translation[2]),
-//                 None,
-//                 None,
-//             )
-//             .map_err(|_| Self::deleted_error(self.id))
-//     }
+    //     #[getter]
+    //     fn local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    //         let rotation = self.get(&self.scene_graph.borrow(py))?.local_rotation;
+    //         Ok(PyArray1::from_slice(
+    //             py,
+    //             &[rotation.w, rotation.x, rotation.y, rotation.z],
+    //         ))
+    //     }
 
-//     #[getter]
-//     fn local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-//         let rotation = self.get(&self.scene_graph.borrow(py))?.local_rotation;
-//         Ok(PyArray1::from_slice(
-//             py,
-//             &[rotation.w, rotation.x, rotation.y, rotation.z],
-//         ))
-//     }
+    //     #[setter]
+    //     fn set_local_rotation<'py>(
+    //         &self,
+    //         py: Python<'py>,
+    //         rotation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    //     ) -> PyResult<()> {
+    //         use glam::quat;
 
-//     #[setter]
-//     fn set_local_rotation<'py>(
-//         &self,
-//         py: Python<'py>,
-//         rotation: PyArrayLike1<'py, f32, AllowTypeChange>,
-//     ) -> PyResult<()> {
-//         use glam::quat;
+    //         let rotation = rotation.as_array();
+    //         if rotation.dim() != 4 {
+    //             return Err(pyo3::exceptions::PyValueError::new_err(
+    //                 "rotation.shape must be (4,)",
+    //             ));
+    //         }
+    //         self.scene_graph
+    //             .borrow_mut(py)
+    //             .set_local_transformation(
+    //                 self.id,
+    //                 None,
+    //                 quat(rotation[1], rotation[2], rotation[3], rotation[0]),
+    //                 None,
+    //             )
+    //             .map_err(|_| Self::deleted_error(self.id))
+    //     }
 
-//         let rotation = rotation.as_array();
-//         if rotation.dim() != 4 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "rotation.shape must be (4,)",
-//             ));
-//         }
-//         self.scene_graph
-//             .borrow_mut(py)
-//             .set_local_transformation(
-//                 self.id,
-//                 None,
-//                 quat(rotation[1], rotation[2], rotation[3], rotation[0]),
-//                 None,
-//             )
-//             .map_err(|_| Self::deleted_error(self.id))
-//     }
+    //     #[getter]
+    //     fn local_scale<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    //         let scale = self.get(&self.scene_graph.borrow(py))?.local_scale;
+    //         Ok(PyArray1::from_slice(py, &scale.to_array()))
+    //     }
 
-//     #[getter]
-//     fn local_scale<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-//         let scale = self.get(&self.scene_graph.borrow(py))?.local_scale;
-//         Ok(PyArray1::from_slice(py, &scale.to_array()))
-//     }
+    //     #[setter]
+    //     fn set_local_scale<'py>(
+    //         &self,
+    //         py: Python<'py>,
+    //         scale: PyArrayLike1<'py, f32, AllowTypeChange>,
+    //     ) -> PyResult<()> {
+    //         use glam::vec3;
 
-//     #[setter]
-//     fn set_local_scale<'py>(
-//         &self,
-//         py: Python<'py>,
-//         scale: PyArrayLike1<'py, f32, AllowTypeChange>,
-//     ) -> PyResult<()> {
-//         use glam::vec3;
+    //         let scale = scale.as_array();
+    //         if scale.dim() != 3 {
+    //             return Err(pyo3::exceptions::PyValueError::new_err(
+    //                 "scale.shape must be (3,)",
+    //             ));
+    //         }
+    //         self.scene_graph
+    //             .borrow_mut(py)
+    //             .set_local_transformation(self.id, None, None, vec3(scale[0], scale[1], scale[2]))
+    //             .map_err(|_| Self::deleted_error(self.id))
+    //     }
 
-//         let scale = scale.as_array();
-//         if scale.dim() != 3 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "scale.shape must be (3,)",
-//             ));
-//         }
-//         self.scene_graph
-//             .borrow_mut(py)
-//             .set_local_transformation(self.id, None, None, vec3(scale[0], scale[1], scale[2]))
-//             .map_err(|_| Self::deleted_error(self.id))
-//     }
+    //     #[getter]
+    //     fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    //         use numpy::ndarray::aview2;
 
-//     #[getter]
-//     fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
-//         use numpy::ndarray::aview2;
+    //         let transformation = self
+    //             .get(&self.scene_graph.borrow(py))?
+    //             .local_transformation()
+    //             .transpose()
+    //             .to_cols_array_2d();
+    //         let array = aview2(&transformation);
+    //         Ok(PyArray2::from_array(py, &array))
+    //     }
 
-//         let transformation = self
-//             .get(&self.scene_graph.borrow(py))?
-//             .local_transformation()
-//             .transpose()
-//             .to_cols_array_2d();
-//         let array = aview2(&transformation);
-//         Ok(PyArray2::from_array(py, &array))
-//     }
+    //     #[getter]
+    //     fn global_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    //         use numpy::ndarray::aview2;
 
-//     #[getter]
-//     fn global_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
-//         use numpy::ndarray::aview2;
-
-//         let transformation = self
-//             .get(&self.scene_graph.borrow(py))?
-//             .global_transformation()
-//             .transpose()
-//             .to_cols_array_2d();
-//         let array = aview2(&transformation);
-//         Ok(PyArray2::from_array(py, &array))
-//     }
-// }
+    //         let transformation = self
+    //             .get(&self.scene_graph.borrow(py))?
+    //             .global_transformation()
+    //             .transpose()
+    //             .to_cols_array_2d();
+    //         let array = aview2(&transformation);
+    //         Ok(PyArray2::from_array(py, &array))
+    //     }
+}
 
 // /// A Scene Graph node builder. See [SceneGraph] for more informations.
 // #[must_use]

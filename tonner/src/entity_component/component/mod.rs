@@ -1,4 +1,9 @@
-use crate::entity_component::EntityId;
+use std::sync::{Arc, Mutex};
+
+use crate::{
+    entity_component::{EntityId, entity::EntityHandle},
+    world::{DynamicField, WorldHandle},
+};
 
 pub mod hash_map;
 pub mod sparse_array;
@@ -33,7 +38,7 @@ pub trait ComponentsViewMut<T>: ComponentsView<T> {
     fn iter_mut<'a>(&'a mut self) -> Self::IterMut<'a>;
 }
 
-pub trait ComponentStorage<T>: ComponentsView<T> {
+pub trait ComponentStorage<T>: ComponentsViewMut<T> {
     /// Adds the component to the entity.
     ///
     /// If the entity did not have this component, `None` is returned.
@@ -46,4 +51,27 @@ pub trait ComponentStorage<T>: ComponentsView<T> {
 
     /// Removes all component `T` from all entities. Keeps the allocated memory for reuse.
     fn clear(&mut self);
+}
+
+pub trait ComponentBuilder {
+    type Component: ComponentHandle;
+
+    fn build(self, world: &WorldHandle) -> Self::Component;
+}
+
+pub trait ComponentHandle {
+    // fn add(entity: &EntityHandle)
+
+    /// Returns `true` if and only if the entity has this component.
+    fn has(entity: &EntityHandle) -> bool;
+
+    /// Returns an handle to this entity's component. The component is added to
+    /// the entity if the entity did not have it.
+    fn new(entity: EntityHandle) -> Self;
+
+    fn entity(&self) -> &EntityHandle;
+
+    fn world(&self) -> &WorldHandle {
+        self.entity().world()
+    }
 }

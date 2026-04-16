@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+use uuid::uuid;
 
 use crate::environment::EnvironmentContext;
 use crate::mesh::MeshContext;
 use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
+use crate::world::{FieldId, StaticField};
 
 pub mod entity_component;
 pub mod environment;
@@ -131,6 +133,10 @@ impl Context {
     }
 }
 
+impl StaticField for Context {
+    const ID: FieldId = uuid!("94a0d02b-5aaa-41c4-9e2e-c3bfeda59f2e");
+}
+
 #[cfg(feature = "python")]
 #[pyo3::pymodule(name = "tonner")]
 pub mod py_tonner {
@@ -140,5 +146,5 @@ pub mod py_tonner {
     use Context;
 
     #[pymodule_export]
-    use world::{TonnerWorldHandle, TonnerEntityHandle};
+    use world::{TonnerEntityHandle, TonnerWorldHandle};
 }

@@ -2,10 +2,16 @@ use std::{
     fmt::{Debug, Display},
     iter::FusedIterator,
     num::{NonZeroU16, NonZeroU32},
+    sync::Arc,
 };
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+
+use crate::{
+    entity_component::component::{ComponentBuilder, ComponentHandle},
+    world::{FieldId, StaticField, WorldHandle, WorldRef},
+};
 
 /// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
@@ -197,6 +203,55 @@ impl<'a> ExactSizeIterator for Iter<'a> {
 }
 
 impl<'a> FusedIterator for Iter<'a> {}
+
+/// An handle to a world entity. An entity can be anything living inside a World.
+///
+/// An entity (from the Entity-Component-System (ECS) architecture) is a general-purpose
+/// object identified by a unique ID. It acts as a container and query interface for
+/// components — plain data objects that define the entity's characteristics and behaviour.
+/// Systems then operate on entities that possess specific combinations of components.
+///
+/// This type is not needed if only the rust API is used.
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "python",
+    pyclass(name = "Entity", skip_from_py_object, frozen)
+)]
+pub struct EntityHandle {
+    entity: EntityId,
+    world: WorldHandle,
+}
+
+impl EntityHandle {
+    pub fn new(entity: EntityId, world: WorldHandle) -> EntityHandle {
+        EntityHandle { entity, world }
+    }
+
+    pub fn id(&self) -> EntityId {
+        self.entity
+    }
+
+    pub fn world(&self) -> &WorldHandle {
+        &self.world
+    }
+
+    pub fn has<Component: ComponentHandle>(&self) -> bool {
+        Component::has(self)
+    }
+
+    pub fn get<Component: ComponentHandle>(&self) -> Option<Component> {
+        // Component::new(self.clone())
+        todo!()
+    }
+
+    pub fn set<Component: ComponentBuilder>(&self, builder: Component) {
+        todo!()
+    }
+
+    pub fn remove<Component: ComponentHandle>(&self) {
+        todo!()
+    }
+}
 
 #[cfg(test)]
 mod tests {

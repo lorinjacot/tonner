@@ -1,7 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+use uuid::Uuid;
 
 use crate::{
     Context,
@@ -9,13 +15,73 @@ use crate::{
     scene_graph::SceneGraph,
 };
 
-pub trait World {}
+pub trait WorldRef {
+    fn get<Field: StaticField>(&self) -> Option<Arc<Field>> {
+        self.get_dynamic(Field::ID)
+    }
+    
+    fn get_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>>;
+}
+
+#[derive(Debug, Default)]
+pub struct World {
+    fields: HashMap<Uuid, Arc<dyn DynamicField>>,
+}
+
+impl WorldRef for World {
+    fn get_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
+        self.fields.get(&id).map(|field| {
+            let any = field.clone() as Arc<dyn Any + Send + Sync>;
+            any.downcast().expect("world field id should be unique")
+        })
+    }
+}
+
+pub type FieldId = Uuid;
+
+pub trait StaticField: Send + Sync + Debug + 'static {
+    const ID: FieldId;
+}
+
+pub trait DynamicField: Any + Send + Sync + Debug {
+    fn id(&self) -> FieldId;
+}
+
+impl<T: StaticField> DynamicField for T {
+    fn id(&self) -> Uuid {
+        Self::ID
+    }
+}
+
+/// An handle to a World. A world is a collection of entities.
+///
+/// A world can:
+/// - be rendered
+/// - have physics
+/// - ...
+///
+/// This type is not needed if only the rust API is used.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object))]
+pub struct WorldHandle(Arc<Mutex<World>>);
+
+impl WorldRef for WorldHandle {
+    fn get_dynamic<Field: DynamicField>(&self, id: FieldId) -> Option<Arc<Field>> {
+        self.0.lock().unwrap().get_dynamic(id)
+    }
+}
+
+impl From<World> for WorldHandle {
+    fn from(value: World) -> Self {
+        WorldHandle(Arc::new(Mutex::new(value)))
+    }
+}
 
 #[derive(Debug)]
 pub struct TonnerWorld {
     context: Context,
     pub entity_manager: EntityManager,
-    pub scene_graph: SceneGraph,
+    pub scene_graph: Arc<Mutex<SceneGraph>>,
 }
 
 impl TonnerWorld {
@@ -24,7 +90,7 @@ impl TonnerWorld {
         TonnerWorld {
             context,
             entity_manager: EntityManager::new(),
-            scene_graph,
+            scene_graph: Arc::new(Mutex::new(scene_graph)),
         }
     }
 
@@ -33,10 +99,18 @@ impl TonnerWorld {
     }
 }
 
+/// An handle to a world. A world is a collection of entities.
+///
+/// A world can:
+/// - be rendered
+/// - have physics
+/// - ...
+///
+/// This type is not needed if only the rust API is used.
 #[derive(Debug, Clone)]
 #[cfg_attr(
     feature = "python",
-    pyclass(name = "TonnerWorld", dict, skip_from_py_object, frozen)
+    pyclass(name = "World", dict, skip_from_py_object, frozen)
 )]
 pub struct TonnerWorldHandle {
     pub world: Arc<Mutex<TonnerWorld>>,
@@ -63,16 +137,21 @@ impl TonnerWorldHandle {
     }
 }
 
-pub trait Entity {
-    fn id(&self) -> EntityId;
-}
-
+/// An handle to a World entity. An entity can be anything living inside a World.
+///
+/// An entity (from the Entity-Component-System (ECS) architecture) is a general-purpose
+/// object identified by a unique ID. It acts as a container and query interface for
+/// components — plain data objects that define the entity's characteristics and behaviour.
+/// Systems then operate on entities that possess specific combinations of components.
+///
+/// This type is not needed if only the rust API is used.
 #[derive(Debug, Clone)]
 #[cfg_attr(
     feature = "python",
-    pyclass(name = "TonnerEntity", dict, skip_from_py_object)
+    pyclass(name = "TonnerEntity", dict, skip_from_py_object, frozen)
 )]
 pub struct TonnerEntityHandle {
+    #[pyo3(get)]
     pub entity: EntityId,
     world: TonnerWorldHandle,
 }

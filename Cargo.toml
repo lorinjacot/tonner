@@ -7,6 +7,7 @@ members = [
     "glam-js",
     "billiard",
     "lightning",
+    "sandbox",
 ]
 resolver = "2"
 
@@ -19,7 +20,7 @@ console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
 data-url = "0.3.2"
 dashmap = "6.1.0"
-eframe = { version = "0.33.3", default-features = false, features = [
+eframe = { version = "0.34.1", default-features = false, features = [
     "accesskit",
     "default_fonts",
     "persistence",
@@ -28,10 +29,12 @@ eframe = { version = "0.33.3", default-features = false, features = [
     "wgpu",
     "x11"
 ] }
-egui = "0.33.3"
+egui = "0.34.1"
+egui-winit = "0.34.1"
+egui-wgpu = "0.34.1"
 env_logger = "0.11.8"
-image = "0.25.9"
-glam = "0.30.8"
+image = "0.25.10"
+glam = "0.32.1"
 log = "0.4.28"
 notify = "8.2.0"
 numpy = "0.28.0"
@@ -51,8 +54,8 @@ wasm-bindgen = "0.2.104"
 wasm-bindgen-futures = "0.4.54"
 wasm-bindgen-test = "0.3.34"
 web-sys = "0.3.81"
-winit = "0.30.12"
-wgpu = "27.0.1"
+winit = "0.30.13"
+wgpu = "29.0.1"
 
 tonner = { path = "tonner" }
 storm-animation = { path = "storm-animation" }

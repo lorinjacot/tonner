@@ -207,9 +207,9 @@ impl PrimitiveRenderer {
         let aligned_size = wgpu::util::align_to(size as u64, wgpu::COPY_BUFFER_ALIGNMENT);
         if self.vertex_buffer.size() < size as u64 {
             self.vertex_buffer = Self::create_vertex_buffer(aligned_size, true, ctx.device());
-            let mut view = self.vertex_buffer.get_mapped_range_mut(..);
-            view[..size].copy_from_slice(cast_slice(&data));
-            drop(view);
+            self.vertex_buffer
+                .get_mapped_range_mut(..size as wgpu::BufferAddress)
+                .copy_from_slice(cast_slice(&data));
             self.vertex_buffer.unmap();
         } else {
             ctx.queue()

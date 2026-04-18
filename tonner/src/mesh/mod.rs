@@ -158,8 +158,8 @@ impl MeshContext {
         let primitive_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Primitive render pipeline layout"),
-                bind_group_layouts: &[render_bind_group_layout, &primitive_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(render_bind_group_layout), Some(&primitive_bind_group_layout)],
+                immediate_size: 0,
             });
 
         Self {
@@ -210,7 +210,7 @@ impl MeshContext {
                 let (targets, depth_write_enabled) = match parameters.alpha_mode {
                     AlphaMode::Opaque | AlphaMode::Mask => (
                         &[Some(wgpu::TextureFormat::Rgba16Float.into()), None, None],
-                        true,
+                        Some(true),
                     ),
                     AlphaMode::Blend => (
                         &[
@@ -232,7 +232,7 @@ impl MeshContext {
                                 write_mask: wgpu::ColorWrites::ALL,
                             }),
                         ],
-                        false,
+                        Some(false),
                     ),
                 };
 
@@ -272,7 +272,7 @@ impl MeshContext {
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: wgpu::TextureFormat::Depth24Plus,
                         depth_write_enabled,
-                        depth_compare: wgpu::CompareFunction::Less,
+                        depth_compare: Some(wgpu::CompareFunction::Less),
                         stencil: wgpu::StencilState::default(),
                         bias: wgpu::DepthBiasState::default(),
                     }),
@@ -290,7 +290,7 @@ impl MeshContext {
                         },
                         targets,
                     }),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 };
 

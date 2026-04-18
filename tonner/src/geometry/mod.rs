@@ -398,10 +398,18 @@ impl GeometryBuilder {
             mapped_at_creation: true,
         });
 
-        let mut view = vertex_buffer.slice(..).get_mapped_range_mut();
-        view[0..header_size].copy_from_slice(bytes_of(&header));
-        view[header_size..size].copy_from_slice(cast_slice(&self.attributes));
-        drop(view);
+        let header_size = header_size as wgpu::BufferAddress;
+        let size = size as wgpu::BufferAddress;
+        vertex_buffer
+            .slice(0..header_size)
+            .get_mapped_range_mut()
+            .copy_from_slice(bytes_of(&header));
+        if header_size < size {
+            vertex_buffer
+                .slice(header_size..size)
+                .get_mapped_range_mut()
+                .copy_from_slice(cast_slice(&self.attributes));
+        }
         vertex_buffer.unmap();
 
         let indices = self.indices.map(|indices| {

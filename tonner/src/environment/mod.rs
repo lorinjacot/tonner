@@ -229,6 +229,7 @@ impl EnvironmentBuilder {
                                     depth_stencil_attachment: None,
                                     timestamp_writes: None,
                                     occlusion_query_set: None,
+                                    multiview_mask: None,
                                 });
 
                             render_pass.set_pipeline(
@@ -340,6 +341,7 @@ impl EnvironmentBuilder {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&ctx.environment_ctx.irradiance_pipeline);
@@ -422,6 +424,7 @@ impl EnvironmentBuilder {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
 
                 render_pass.set_pipeline(&ctx.environment_ctx.prefilter_pipeline);
@@ -618,10 +621,10 @@ impl EnvironmentContext {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Equirectangular to cubemap pipeline layout"),
                 bind_group_layouts: &[
-                    &view_projection_bind_group_layout,
-                    &radiance_bind_group_layout,
+                    Some(&view_projection_bind_group_layout),
+                    Some(&radiance_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
 
         let module = &device.create_shader_module(wgpu::include_wgsl!("environment.wgsl"));
@@ -672,7 +675,7 @@ impl EnvironmentContext {
                     },
                     targets: &[Some(ENVIRONMENT_MAP_FORMAT.into())],
                 }),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -680,10 +683,10 @@ impl EnvironmentContext {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Irradiance pipeline layout"),
                 bind_group_layouts: &[
-                    &view_projection_bind_group_layout,
-                    &skybox_bind_group_layout,
+                    Some(&view_projection_bind_group_layout),
+                    Some(&skybox_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
 
         let irradiance_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -730,7 +733,7 @@ impl EnvironmentContext {
                 },
                 targets: &[Some(IRRADIANCE_MAP_FORMAT.into())],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -753,11 +756,11 @@ impl EnvironmentContext {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Prefilter pipeline layout"),
                 bind_group_layouts: &[
-                    &view_projection_bind_group_layout,
-                    &skybox_bind_group_layout,
-                    &prefilter_roughness_bind_group_layout,
+                    Some(&view_projection_bind_group_layout),
+                    Some(&skybox_bind_group_layout),
+                    Some(&prefilter_roughness_bind_group_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
 
         let prefilter_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -804,7 +807,7 @@ impl EnvironmentContext {
                 },
                 targets: &[Some(PREFILTER_MAP_FORMAT.into())],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -812,7 +815,7 @@ impl EnvironmentContext {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("BRDF LUT pipeline layout"),
                 bind_group_layouts: &[],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
 
         let brdf_lut_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -851,7 +854,7 @@ impl EnvironmentContext {
                 },
                 targets: &[Some(BRDF_LUT_FORMAT.into())],
             }),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -890,6 +893,7 @@ impl EnvironmentContext {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             render_pass.set_pipeline(&brdf_lut_pipeline);
             render_pass.draw(0..3, 0..1);

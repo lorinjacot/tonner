@@ -1,8 +1,6 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use glam::{vec3, vec4};
-use pollster::block_on;
 use tonner::Context;
 use tonner::entity_component::EntityManager;
 use tonner::environment::{Environment, EnvironmentBuilder};
@@ -16,48 +14,66 @@ use tonner::renderer::light::LightManager;
 use tonner::scene_graph::SceneGraph;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
-#[derive(Default)]
-struct App {
-    scene: Option<Scene>,
-    surface: Option<wgpu::Surface<'static>>,
-    last_redraw: Option<Instant>,
-    window: Option<Arc<Window>>,
+struct Scene {
+    context: Context,
+    scene_graph: SceneGraph,
+    triangle: MeshInstance,
+    camera: Camera,
+    skin_manager: SkinManager,
+    light_manager: LightManager,
+    environment: Environment,
+    renderer: Renderer,
 }
 
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = Arc::new(
-            event_loop
-                .create_window(Window::default_attributes())
-                .unwrap(),
-        );
+impl Scene {
+    fn render(&mut self, texture_view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+        self.renderer
+            .render(
+                &self.camera,
+                &texture_view,
+                &mut self.scene_graph,
+                &mut self.skin_manager,
+                [&self.triangle],
+                &mut self.light_manager,
+                &self.environment,
+                &self.context,
+                encoder,
+            )
+            .unwrap();
+    }
+}
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let surface = instance.create_surface(window.clone()).unwrap();
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptionsBase {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .unwrap();
-        let (device, queue) =
-            block_on(adapter.request_device(&wgpu::wgt::DeviceDescriptor::default())).unwrap();
+struct State {
+    scene: Scene,
+    window: Arc<Window>,
+    size: winit::dpi::PhysicalSize<u32>,
+    instance: wgpu::Instance,
+    surface: wgpu::Surface<'static>,
+    surface_format: wgpu::TextureFormat,
+}
+
+impl State {
+    async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> State {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
+            Box::new(display),
+        ));
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .unwrap();
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .await
+            .unwrap();
+
         let size = window.inner_size();
-        surface.configure(
-            &device,
-            &wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                width: size.width,
-                height: size.height,
-                present_mode: wgpu::PresentMode::AutoVsync,
-                desired_maximum_frame_latency: 2,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                view_formats: vec![],
-            },
-        );
+
+        let surface = instance.create_surface(window.clone()).unwrap();
+        let cap = surface.get_capabilities(&adapter);
+        let surface_format = cap.formats[0];
 
         let context = Context::from_device(device, queue);
         let mut entity_manager = EntityManager::new();
@@ -101,7 +117,7 @@ impl ApplicationHandler for App {
 
         let triangle = entity_manager.new_entity();
         scene_graph.add(triangle, None);
-        let instance = red_triangle.new_instance(triangle);
+        let triangle = red_triangle.new_instance(triangle);
 
         let camera = entity_manager.new_entity();
         scene_graph.add(camera, None);
@@ -116,7 +132,7 @@ impl ApplicationHandler for App {
         let scene = Scene {
             context,
             scene_graph,
-            triangle: instance,
+            triangle,
             camera,
             skin_manager,
             light_manager,
@@ -124,76 +140,116 @@ impl ApplicationHandler for App {
             renderer,
         };
 
-        self.scene = Some(scene);
-        self.window = Some(window);
-        self.surface = Some(surface);
-        self.last_redraw = Some(Instant::now());
+        let state = State {
+            scene,
+            window,
+            size,
+            instance,
+            surface,
+            surface_format,
+        };
+
+        state.configure_surface();
+
+        state
+    }
+
+    fn configure_surface(&self) {
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: self.surface_format,
+            view_formats: vec![self.surface_format.add_srgb_suffix()],
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            width: self.size.width,
+            height: self.size.height,
+            desired_maximum_frame_latency: 2,
+            present_mode: wgpu::PresentMode::AutoVsync,
+        };
+        self.surface
+            .configure(self.scene.context.device(), &surface_config);
+    }
+
+    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        self.size = new_size;
+        self.configure_surface();
+    }
+
+    fn render(&mut self) {
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+            wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => return,
+            wgpu::CurrentSurfaceTexture::Suboptimal(_) | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.configure_surface();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                unreachable!("No error scope registered, so validation errors will panic")
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                self.surface = self.instance.create_surface(self.window.clone()).unwrap();
+                self.configure_surface();
+                return;
+            }
+        };
+        let texture_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor {
+                format: Some(self.surface_format.add_srgb_suffix()),
+                ..Default::default()
+            });
+
+        let mut encoder = self
+            .scene
+            .context
+            .device()
+            .create_command_encoder(&Default::default());
+
+        self.scene.render(&texture_view, &mut encoder);
+
+        self.scene.context.queue().submit([encoder.finish()]);
+        self.window.pre_present_notify();
+        surface_texture.present();
+    }
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let window = Arc::new(
+            event_loop
+                .create_window(Window::default_attributes())
+                .unwrap(),
+        );
+
+        let state = pollster::block_on(State::new(
+            event_loop.owned_display_handle(),
+            window.clone(),
+        ));
+        self.state = Some(state);
+
+        window.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        let state = self.state.as_mut().unwrap();
         match event {
             WindowEvent::CloseRequested => {
-                println!("The close button was pressed; stopping");
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                // Redraw the application.
-                //
-                // It's preferable for applications that do not render continuously to render in
-                // this event rather than in AboutToWait, since rendering in here allows
-                // the program to gracefully handle redraws requested by the OS.
-
-                // Draw.
-                let surface = self.surface.as_ref().unwrap();
-                let surface_texture = surface.get_current_texture().unwrap();
-                let surface_view = surface_texture
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-
-                let scene = self.scene.as_mut().unwrap();
-                let mut encoder = scene
-                    .context
-                    .device()
-                    .create_command_encoder(&Default::default());
-
-                scene
-                    .renderer
-                    .render(
-                        &scene.camera,
-                        &surface_view,
-                        &mut scene.scene_graph,
-                        &mut scene.skin_manager,
-                        [&scene.triangle],
-                        &mut scene.light_manager,
-                        &scene.environment,
-                        &scene.context,
-                        &mut encoder,
-                    )
-                    .unwrap();
-                scene.context.queue().submit([encoder.finish()]);
-                surface_texture.present();
-
-                // Queue a RedrawRequested event.
-                //
-                // You only need to call this if you've determined that you need to redraw in
-                // applications which do not always need to. Applications that redraw continuously
-                // can render here instead.
-                self.window.as_ref().unwrap().request_redraw();
+                state.render();
+                state.window.request_redraw();
+            }
+            WindowEvent::Resized(size) => {
+                state.resize(size);
             }
             _ => (),
         }
     }
 }
 
-struct Scene {
-    context: Context,
-    scene_graph: SceneGraph,
-    triangle: MeshInstance,
-    camera: Camera,
-    skin_manager: SkinManager,
-    light_manager: LightManager,
-    environment: Environment,
-    renderer: Renderer,
+#[derive(Default)]
+struct App {
+    state: Option<State>,
 }
 
 fn main() {

@@ -8,6 +8,69 @@ use crate::{gjk::SupportPoint, shape::ConvexShape};
 
 const MAX_ITERATION: usize = 100;
 
+pub struct Polyhedron {
+    pub vertices: Vec<SupportPoint>,
+    faces: BinaryHeap<Reverse<Face>>,
+}
+
+pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+    shape1: &S1,
+    shape2: &S2,
+    tetrahedron: [SupportPoint; 4],
+    steps: usize,
+) -> Polyhedron {
+    let mut vertices = Vec::from(tetrahedron);
+    let mut faces = BinaryHeap::from(
+        [[3, 2, 1], [3, 1, 0], [3, 0, 2], [2, 0, 1]]
+            .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
+    );
+
+    let mut unique_edges = Vec::new();
+    for _ in 0..steps {
+        let closest_face = &faces.peek().unwrap().0;
+
+        let support = SupportPoint::new(shape1, shape2, closest_face.normal);
+        let distance_support = support.difference.dot(closest_face.normal);
+
+        if (distance_support - closest_face.distance).abs() < 1e-4 {
+            break;
+        }
+
+        // In order to keep the polyhedron convex, we need to remove all faces visible from `support`.
+        // This creates an hole whose border is made up of all edges appearing in only one of the removed faces.
+        faces.retain(|face| {
+            if face.0.normal.dot(support.difference) > 0.0 {
+                face.0.edges().into_iter().for_each(|(i, j)| {
+                    match unique_edges
+                        .iter()
+                        .enumerate()
+                        .find(|(_, edge)| **edge == (j, i))
+                    {
+                        Some((i, _)) => {
+                            unique_edges.swap_remove(i);
+                        }
+                        None => unique_edges.push((i, j)),
+                    }
+                });
+
+                false
+            } else {
+                true
+            }
+        });
+
+        let k = vertices.len();
+        vertices.push(support);
+        faces.extend(
+            unique_edges
+                .drain(..)
+                .map(|(i, j)| Reverse(Face::from_vertex_indices([i, j, k], &vertices))),
+        );
+    }
+
+    Polyhedron { vertices, faces }
+}
+
 pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape1: &S1,
     shape2: &S2,

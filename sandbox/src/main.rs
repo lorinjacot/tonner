@@ -1,11 +1,14 @@
 use std::iter::once;
 use std::sync::Arc;
+use std::time::Instant;
 
-use glam::{vec3, vec4};
+use glam::{Quat, Vec3, vec3};
+use storm_controls::EguiControls;
+use storm_controls::orbit::OrbitControls;
 use tonner::Context;
 use tonner::entity_component::EntityManager;
 use tonner::environment::{Environment, EnvironmentBuilder};
-use tonner::geometry::GeometryBuilder;
+use tonner::geometry::SphereBuilder;
 use tonner::geometry::skin::SkinManager;
 use tonner::mesh::material::MaterialBuilder;
 use tonner::mesh::{MeshBuilder, MeshInstance};
@@ -18,26 +21,108 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
+use crate::epa::epa_dbg;
+use crate::gjk::gjk_tetrahedron;
+use crate::shape::{AxisAlignedBox, Ball};
+
+mod epa;
+mod gjk;
+mod shape;
+
 struct Scene {
     context: Context,
     scene_graph: SceneGraph,
-    triangle: MeshInstance,
-    camera: Camera,
+    points: Vec<MeshInstance>,
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
     renderer: Renderer,
+    controls: OrbitControls,
+    last_frame: Instant,
 }
 
 impl Scene {
+    fn new(context: Context, width: u32, height: u32) -> Scene {
+        let mut encoder =
+            context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("App::resumed command encoder"),
+                });
+
+        let mut entity_manager = EntityManager::new();
+        let mut scene_graph = SceneGraph::new(&context);
+
+        let camera = entity_manager.new_entity();
+        scene_graph.add_with_transform(camera, None, 2.0 * Vec3::Z, Quat::IDENTITY, Vec3::ONE);
+        let camera = Camera::new(camera);
+
+        let skin_manager = SkinManager::new(&context);
+        let light_manager = LightManager::new(&context);
+        let environment = EnvironmentBuilder::default().build(&context, &mut encoder);
+        let renderer = Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, &context);
+
+        let controls = OrbitControls::new(camera);
+
+        let red = MaterialBuilder::default()
+            .base_color_factor([1.0, 0.0, 0.0, 1.0])
+            .build(&context);
+
+        let point = SphereBuilder::default().radius(0.1).build(&context);
+        let point = MeshBuilder::default()
+            .primitive(point, red)
+            .build(&context)
+            .unwrap();
+
+        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+        let mut ball = Ball {
+            center: Vec3::ZERO,
+            radius: 1.0,
+        };
+        ball.center = vec3(1.57, 1.57, 1.57);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let polyhedron = epa_dbg(&aab, &ball, tetrahedron, 0);
+
+        let points = polyhedron
+            .vertices
+            .iter()
+            .map(|v| {
+                let entity = entity_manager.new_entity();
+                scene_graph.add_with_transform(
+                    entity,
+                    None,
+                    v.difference,
+                    Quat::IDENTITY,
+                    Vec3::ONE,
+                );
+                point.new_instance(entity)
+            })
+            .collect();
+
+        context.queue().submit([encoder.finish()]);
+
+        Scene {
+            context,
+            scene_graph,
+            points,
+            skin_manager,
+            light_manager,
+            environment,
+            renderer,
+            controls,
+            last_frame: Instant::now(),
+        }
+    }
+
     fn render(&mut self, texture_view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         self.renderer
             .render(
-                &self.camera,
+                &self.controls.camera,
                 &texture_view,
                 &mut self.scene_graph,
                 &mut self.skin_manager,
-                [&self.triangle],
+                &self.points,
                 &mut self.light_manager,
                 &self.environment,
                 &self.context,
@@ -95,69 +180,7 @@ impl State {
         );
 
         let context = Context::from_device(device, queue);
-        let mut entity_manager = EntityManager::new();
-
-        let mut encoder =
-            context
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("App::resumed command encoder"),
-                });
-
-        let mut scene_graph = SceneGraph::new(&context);
-        let renderer = Renderer::new(
-            size.width,
-            size.height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-            &context,
-        );
-
-        let triangle = GeometryBuilder::new(3, 0)
-            .name("Triangle")
-            .positions([
-                vec3(0.0, -0.5, -5.0),
-                vec3(0.5, 0.5, -5.0),
-                vec3(-0.5, 0.5, -5.0),
-            ])
-            .unwrap()
-            .build(&context)
-            .unwrap();
-
-        let red = MaterialBuilder::default()
-            .name("red")
-            .base_color_factor(vec4(1.0, 0.0, 0.0, 1.0))
-            .build(&context);
-
-        let red_triangle = MeshBuilder::default()
-            .name("Triangle")
-            .primitive(triangle, red)
-            .build(&context)
-            .unwrap();
-
-        let triangle = entity_manager.new_entity();
-        scene_graph.add(triangle, None);
-        let triangle = red_triangle.new_instance(triangle);
-
-        let camera = entity_manager.new_entity();
-        scene_graph.add(camera, None);
-        let camera = Camera::new(camera);
-
-        let skin_manager = SkinManager::new(&context);
-        let light_manager = LightManager::new(&context);
-        let environment = EnvironmentBuilder::default().build(&context, &mut encoder);
-
-        context.queue().submit([encoder.finish()]);
-
-        let scene = Scene {
-            context,
-            scene_graph,
-            triangle,
-            camera,
-            skin_manager,
-            light_manager,
-            environment,
-            renderer,
-        };
+        let scene = Scene::new(context, size.width, size.height);
 
         let state = State {
             scene,
@@ -211,9 +234,15 @@ impl State {
     }
 
     fn render(&mut self) {
+        let dt = self.scene.last_frame.elapsed();
+
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
-        let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |_ui| {
+        let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |ui| {
+            let response = ui.interact(ui.clip_rect(), egui::Id::new("scene"), egui::Sense::drag());
+            self.scene
+                .controls
+                .handle_response(response, ui, &mut self.scene.scene_graph);
             // egui::Panel::right("right panel").show_inside(ui, |ui| {
             //     ui.label("Hello world!");
             //     if ui.button("Click me").clicked() {
@@ -224,6 +253,12 @@ impl State {
 
         self.egui_state
             .handle_platform_output(&self.window, full_output.platform_output);
+
+        self.scene.controls.update(
+            &mut self.scene.scene_graph,
+            dt,
+            self.size.width as f32 / self.size.height as f32,
+        );
 
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,

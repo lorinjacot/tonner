@@ -3761,6 +3761,7 @@ dependencies = [
  "egui-winit",
  "glam 0.32.1",
  "pollster",
+ "storm-controls",
  "tonner",
  "wgpu",
  "winit",

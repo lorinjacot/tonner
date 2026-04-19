@@ -1,3 +1,5 @@
+use std::f32::consts::FRAC_PI_2;
+
 use glam::{Quat, Vec3};
 
 use crate::{
@@ -10,7 +12,7 @@ pub struct ArrowParts {
     pub body: Geometry,
 }
 
-/// A geometry builder for an arrow shape, consisting of a cylindrical body and a conical head. The arrow is oriented along the positive y-axis, with its base at the origin.
+/// A geometry builder for an arrow shape, consisting of a cylindrical body and a conical head. The arrow is oriented along the negative z-axis, with its base at the origin.
 ///
 /// The arrow is defined by the following parameters:
 /// - `length`: Total length of the arrow (head + body). Default is `1.0`.
@@ -92,13 +94,13 @@ impl ArrowBuilder {
 
     /// Rotation of the arrow. Default is no rotation (identity).
     ///
-    /// By default, the arrow is oriented along the positive y-axis. Setting a rotation will rotate the entire arrow by the specified quaternion.
+    /// By default, the arrow is oriented along the negative z-axis. Setting a rotation will rotate the entire arrow by the specified quaternion.
     pub fn rotate(mut self, rotation: Quat) -> Self {
         self.rotation = rotation;
         self
     }
 
-    /// Builds the arrow geometry. The arrow is oriented along the positive y-axis, with its base at the origin.
+    /// Builds the arrow geometry. The arrow is oriented along the negative z-axis, with its base at the origin.
     pub fn build(self, ctx: &Context) -> ArrowParts {
         let base_length = self.length - self.head_length;
 
@@ -109,7 +111,7 @@ impl ArrowBuilder {
             .height(base_length)
             .radial_segments(self.radial_segments)
             .translate(Vec3::Y * base_length / 2.0 + self.translation)
-            .rotate(self.rotation)
+            .rotate(self.rotation * Quat::from_rotation_x(-FRAC_PI_2))
             .build(ctx);
 
         let head = ConeBuilder::default()
@@ -118,7 +120,7 @@ impl ArrowBuilder {
             .height(self.head_length)
             .radial_segments(self.radial_segments)
             .translate(Vec3::Y * (base_length + self.head_length / 2.0) + self.translation)
-            .rotate(self.rotation)
+            .rotate(self.rotation * Quat::from_rotation_x(-FRAC_PI_2))
             .build(ctx);
 
         ArrowParts { head, body }

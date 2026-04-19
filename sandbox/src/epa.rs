@@ -27,7 +27,7 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 
     let mut unique_edges = Vec::new();
     for _ in 0..steps {
-        let closest_face = &faces.peek().unwrap().0;
+        let closest_face = faces.pop().unwrap().0;
 
         let support = SupportPoint::new(shape1, shape2, closest_face.normal);
         let distance_support = support.difference.dot(closest_face.normal);
@@ -35,11 +35,13 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         if (distance_support - closest_face.distance).abs() < 1e-4 {
             break;
         }
+        unique_edges.extend(closest_face.edges());
 
         // In order to keep the polyhedron convex, we need to remove all faces visible from `support`.
-        // This creates an hole whose border is made up of all edges appearing in only one of the removed faces.
+        // This creates a hole whose border is made up of all edges appearing in only one of the removed faces.
         faces.retain(|face| {
-            if face.0.normal.dot(support.difference) > 0.0 {
+            let point_on_face = vertices[face.0.indices[0]].difference;
+            if face.0.normal.dot(support.difference - point_on_face) > 0.0 {
                 face.0.edges().into_iter().for_each(|(i, j)| {
                     match unique_edges
                         .iter()
@@ -83,20 +85,23 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     );
 
     let mut unique_edges = Vec::new();
-    for _ in 0..MAX_ITERATION {
-        let closest_face = &faces.peek().unwrap().0;
+    for i in 0..MAX_ITERATION {
+        let closest_face = faces.pop().unwrap().0;
 
         let support = SupportPoint::new(shape1, shape2, closest_face.normal);
         let distance_support = support.difference.dot(closest_face.normal);
 
-        if (distance_support - closest_face.distance).abs() < 1e-4 {
+        if (distance_support - closest_face.distance).abs() < 1e-10 {
+            dbg!(i);
             break;
         }
+        unique_edges.extend(closest_face.edges());
 
         // In order to keep the polyhedron convex, we need to remove all faces visible from `support`.
-        // This creates an hole whose border is made up of all edges appearing in only one of the removed faces.
+        // This creates a hole whose border is made up of all edges appearing in only one of the removed faces.
         faces.retain(|face| {
-            if face.0.normal.dot(support.difference) > 0.0 {
+            let point_on_face = vertices[face.0.indices[0]].difference;
+            if face.0.normal.dot(support.difference - point_on_face) > 0.0 {
                 face.0.edges().into_iter().for_each(|(i, j)| {
                     match unique_edges
                         .iter()
@@ -140,7 +145,7 @@ impl Face {
     fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
         let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
         let mut normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
-            dbg!(vertices);
+            dbg!(b - a, c - a);
             todo!("abc is a line or a point")
         });
         let mut distance = a.dot(normal);

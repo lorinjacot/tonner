@@ -1,4 +1,4 @@
-use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::{FRAC_PI_2, PI};
 use std::iter::{once, repeat_n};
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,13 +25,86 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
-use crate::epa::epa_dbg;
+use crate::epa::{Polyhedron, epa_dbg};
 use crate::gjk::gjk_tetrahedron;
 use crate::shape::{AxisAlignedBox, Ball};
 
 mod epa;
 mod gjk;
 mod shape;
+
+fn create_points(
+    polyhedron: &Polyhedron,
+    entity_manager: &mut EntityManager,
+    scene_graph: &mut SceneGraph,
+    point: &Mesh,
+) -> SparseArray<MeshInstance> {
+    polyhedron
+        .vertices
+        .iter()
+        .map(|v| {
+            let entity = entity_manager.new_entity();
+            scene_graph.add_with_transform(entity, None, v.difference, Quat::IDENTITY, Vec3::ONE);
+            (entity, point.new_instance(entity))
+        })
+        .collect()
+}
+
+fn create_faces(
+    polyhedron: &Polyhedron,
+    entity_manager: &mut EntityManager,
+    scene_graph: &mut SceneGraph,
+    context: &Context,
+    face_material: &Material,
+) -> SparseArray<MeshInstance> {
+    polyhedron
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(i, face)| {
+            let entity = entity_manager.new_entity();
+            scene_graph.add(entity, None);
+            let face = GeometryBuilder::new(3, 0)
+                .positions(face.0.indices.map(|i| polyhedron.vertices[i].difference))
+                .unwrap()
+                .normals(repeat_n(face.0.normal, 3))
+                .unwrap()
+                .build(&context)
+                .unwrap();
+            let face = MeshBuilder::default()
+                .name(format!("Face {i}"))
+                .primitive(face, face_material.clone())
+                .build(&context)
+                .unwrap();
+            (entity, face.new_instance(entity))
+        })
+        .collect()
+}
+
+fn create_normals(
+    polyhedron: &Polyhedron,
+    entity_manager: &mut EntityManager,
+    scene_graph: &mut SceneGraph,
+    normal_mesh: &Mesh,
+) -> SparseArray<MeshInstance> {
+    polyhedron
+        .faces
+        .iter()
+        .map(|face| {
+            let entity = entity_manager.new_entity();
+            let vertices = face.0.indices.map(|i| polyhedron.vertices[i].difference);
+            let origin = vertices[0].midpoint(vertices[1]).midpoint(vertices[2]);
+            scene_graph.add_with_transform(
+                entity,
+                None,
+                origin,
+                Quat::look_to_rh(face.0.normal, Vec3::Y).inverse(),
+                Vec3::ONE,
+            );
+            (entity, normal_mesh.new_instance(entity))
+        })
+        .collect()
+}
 
 struct Scene {
     context: Context,
@@ -48,8 +121,10 @@ struct Scene {
     steps: usize,
     rendered_steps: usize,
     yellow: Material,
+    normal_mesh: Mesh,
     points: SparseArray<MeshInstance>,
     faces: SparseArray<MeshInstance>,
+    normals: SparseArray<MeshInstance>,
 }
 
 impl Scene {
@@ -82,34 +157,33 @@ impl Scene {
         let controls = OrbitControls::new(camera);
 
         let red = MaterialBuilder::default()
-            .base_color_factor([1.0, 0.0, 0.0, 0.6])
+            .base_color_factor([1.0, 0.0, 0.0, 0.9])
             .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let green = MaterialBuilder::default()
-            .base_color_factor([0.0, 1.0, 0.0, 0.6])
+            .base_color_factor([0.0, 1.0, 0.0, 0.9])
             .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let blue = MaterialBuilder::default()
-            .base_color_factor([0.0, 0.0, 1.0, 0.6])
+            .base_color_factor([0.0, 0.0, 1.0, 0.9])
             .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let x_axis = ArrowBuilder::default()
             .name("X Axis")
-            .rotate(Quat::from_rotation_z(-FRAC_PI_2))
+            .rotate(Quat::from_rotation_y(-FRAC_PI_2))
             .build(&context);
 
         let y_axis = ArrowBuilder::default()
             .name("Y Axis")
-            .length(1.0)
+            .rotate(Quat::from_rotation_x(FRAC_PI_2))
             .build(&context);
 
         let z_axis = ArrowBuilder::default()
             .name("Z Axis")
-            .length(1.0)
-            .rotate(Quat::from_rotation_x(FRAC_PI_2))
+            .rotate(Quat::from_rotation_x(PI))
             .build(&context);
 
         let axis = MeshBuilder::default()
@@ -132,7 +206,7 @@ impl Scene {
 
         let point = SphereBuilder::default().radius(0.02).build(&context);
         let point = MeshBuilder::default()
-            .primitive(point, black)
+            .primitive(point, black.clone())
             .build(&context)
             .unwrap();
 
@@ -147,50 +221,33 @@ impl Scene {
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
         let polyhedron = epa_dbg(&aab, &ball, tetrahedron, steps);
 
-        let points = polyhedron
-            .vertices
-            .iter()
-            .map(|v| {
-                let entity = entity_manager.new_entity();
-                scene_graph.add_with_transform(
-                    entity,
-                    None,
-                    v.difference,
-                    Quat::IDENTITY,
-                    Vec3::ONE,
-                );
-                (entity, point.new_instance(entity))
-            })
-            .collect();
-
         let yellow = MaterialBuilder::default()
             .base_color_factor([1.0, 1.0, 0.0, 0.8])
             .alpha_mode(AlphaMode::Opaque)
             .double_sided(true)
             .build(&context);
 
-        let faces = polyhedron
-            .faces
-            .iter()
-            .enumerate()
-            .map(|(i, face)| {
-                let entity = entity_manager.new_entity();
-                scene_graph.add(entity, None);
-                let face = GeometryBuilder::new(3, 0)
-                    .positions(face.0.indices.map(|i| polyhedron.vertices[i].difference))
-                    .unwrap()
-                    .normals(repeat_n(face.0.normal, 3))
-                    .unwrap()
-                    .build(&context)
-                    .unwrap();
-                let face = MeshBuilder::default()
-                    .name(format!("Face {i}"))
-                    .primitive(face, yellow.clone())
-                    .build(&context)
-                    .unwrap();
-                (entity, face.new_instance(entity))
-            })
-            .collect();
+        let normal_parts = ArrowBuilder::default().build(&context);
+        let normal_mesh = MeshBuilder::default()
+            .primitive(normal_parts.head, black.clone())
+            .primitive(normal_parts.body, black)
+            .build(&context)
+            .unwrap();
+
+        let points = create_points(&polyhedron, &mut entity_manager, &mut scene_graph, &point);
+        let faces = create_faces(
+            &polyhedron,
+            &mut entity_manager,
+            &mut scene_graph,
+            &context,
+            &yellow,
+        );
+        let normals = create_normals(
+            &polyhedron,
+            &mut entity_manager,
+            &mut scene_graph,
+            &normal_mesh,
+        );
 
         context.queue().submit([encoder.finish()]);
 
@@ -209,8 +266,10 @@ impl Scene {
             steps,
             rendered_steps: steps,
             yellow,
+            normal_mesh,
             points,
             faces,
+            normals,
         }
     }
 
@@ -235,44 +294,27 @@ impl Scene {
             let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
             let polyhedron = epa_dbg(&aab, &ball, tetrahedron, self.steps);
 
-            self.points = polyhedron
-                .vertices
-                .iter()
-                .map(|v| {
-                    let entity = self.entity_manager.new_entity();
-                    self.scene_graph.add_with_transform(
-                        entity,
-                        None,
-                        v.difference,
-                        Quat::IDENTITY,
-                        Vec3::ONE,
-                    );
-                    (entity, self.point.new_instance(entity))
-                })
-                .collect();
+            self.points = create_points(
+                &polyhedron,
+                &mut self.entity_manager,
+                &mut self.scene_graph,
+                &self.point,
+            );
 
-            self.faces = polyhedron
-                .faces
-                .iter()
-                .enumerate()
-                .map(|(i, face)| {
-                    let entity = self.entity_manager.new_entity();
-                    self.scene_graph.add(entity, None);
-                    let face = GeometryBuilder::new(3, 0)
-                        .positions(face.0.indices.map(|i| polyhedron.vertices[i].difference))
-                        .unwrap()
-                        .normals(repeat_n(face.0.normal, 3))
-                        .unwrap()
-                        .build(&self.context)
-                        .unwrap();
-                    let face = MeshBuilder::default()
-                        .name(format!("Face {i}"))
-                        .primitive(face, self.yellow.clone())
-                        .build(&self.context)
-                        .unwrap();
-                    (entity, face.new_instance(entity))
-                })
-                .collect();
+            self.faces = create_faces(
+                &polyhedron,
+                &mut self.entity_manager,
+                &mut self.scene_graph,
+                &self.context,
+                &self.yellow,
+            );
+
+            self.normals = create_normals(
+                &polyhedron,
+                &mut self.entity_manager,
+                &mut self.scene_graph,
+                &self.normal_mesh,
+            );
 
             self.rendered_steps = self.steps;
         }
@@ -286,6 +328,7 @@ impl Scene {
                 self.points
                     .values()
                     .chain(self.faces.values())
+                    .chain(self.normals.values())
                     .chain(once(&self.axis)),
                 &mut self.light_manager,
                 &self.environment,

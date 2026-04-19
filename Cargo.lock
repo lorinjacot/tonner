@@ -4043,7 +4043,6 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "glam 0.32.1",
- "thiserror 2.0.18",
  "tonner",
  "uuid",
 ]

@@ -9,13 +9,14 @@ use std::{
     io::{BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
+use storm_animation::AnimationManager;
+use thiserror::Error;
 use tonner::{
+    entity_component::EntityManager,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
     scene_graph::SceneGraph,
 };
-use storm_animation::AnimationManager;
-use thiserror::Error;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
 use animation::Animation;
@@ -209,14 +210,15 @@ impl GltfAsset {
     pub fn load_scene_into(
         &mut self,
         scene_index: usize,
-        base_node: Option<tonner::scene_graph::NodeId>,
+        base_node: Option<tonner::entity_component::EntityId>,
+        entity_manager: &mut EntityManager,
         scene_graph: &mut SceneGraph,
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
         animation_manager: &mut AnimationManager,
         ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<tonner::scene_graph::NodeId>> {
+    ) -> Result<Vec<tonner::entity_component::EntityId>> {
         let root_nodes_idx = self
             .json
             .scenes
@@ -230,8 +232,14 @@ impl GltfAsset {
         let mut root_nodes_ids = Vec::with_capacity(root_nodes_idx.len());
         for &node_index in root_nodes_idx.iter() {
             root_nodes_ids.push(
-                Node::load(node_index, &mut self.json.nodes, base_node, scene_graph)
-                    .with_context(scene_ctx)?,
+                Node::load(
+                    node_index,
+                    &mut self.json.nodes,
+                    base_node,
+                    entity_manager,
+                    scene_graph,
+                )
+                .with_context(scene_ctx)?,
             );
         }
 

@@ -7,8 +7,9 @@ use std::{
 use glam::{Mat4, Vec2, Vec3, vec2, vec3};
 use log::warn;
 use tonner::{
-    renderer::camera::Camera,
+    entity_component::ComponentsView,
     math::{Plane, Ray, Spherical},
+    renderer::camera::Camera,
     scene_graph::SceneGraph,
 };
 
@@ -221,7 +222,7 @@ impl OrbitControls {
         viewport_aspect_ratio: f32,
     ) {
         let v = scene_graph
-            .get(self.camera.node)
+            .get(self.camera.entity)
             .unwrap()
             .local_translation()
             - self.target;
@@ -301,10 +302,8 @@ impl OrbitControls {
 
         let v = spherical.to_vec3();
 
-        scene_graph
-            .set_local_transformation(self.camera.node, self.target + v, None, None)
-            .unwrap();
-        self.camera.look_at(self.target, scene_graph).unwrap();
+        scene_graph.set_local_transformation(self.camera.entity, self.target + v, None, None);
+        self.camera.look_at(self.target, scene_graph);
 
         if self.enable_damping {
             self.spherical_delta.theta *= 1.0 - self.damping_factor;
@@ -325,18 +324,16 @@ impl OrbitControls {
                 new_radius = Some(self.clamp_distance(previous_radius * self.scale));
 
                 let radius_delta = previous_radius - new_radius.unwrap();
-                scene_graph
-                    .set_local_transformation(
-                        self.camera.node,
-                        scene_graph
-                            .get(self.camera.node)
-                            .unwrap()
-                            .local_translation()
-                            + self.dolly_direction * radius_delta,
-                        None,
-                        None,
-                    )
-                    .unwrap();
+                scene_graph.set_local_transformation(
+                    self.camera.entity,
+                    scene_graph
+                        .get(self.camera.entity)
+                        .unwrap()
+                        .local_translation()
+                        + self.dolly_direction * radius_delta,
+                    None,
+                    None,
+                );
             } else if self.camera.is_orthographic() {
                 // adjust the ortho camera position based on zoom changes
                 let mouse_before = vec3(self.mouse.x, self.mouse.y, 0.0);
@@ -354,19 +351,17 @@ impl OrbitControls {
                     self.camera
                         .unproject(mouse_after, viewport_aspect_ratio, scene_graph);
 
-                scene_graph
-                    .set_local_transformation(
-                        self.camera.node,
-                        scene_graph
-                            .get(self.camera.node)
-                            .unwrap()
-                            .local_translation()
-                            - mouse_after
-                            + mouse_before,
-                        None,
-                        None,
-                    )
-                    .unwrap();
+                scene_graph.set_local_transformation(
+                    self.camera.entity,
+                    scene_graph
+                        .get(self.camera.entity)
+                        .unwrap()
+                        .local_translation()
+                        - mouse_after
+                        + mouse_before,
+                    None,
+                    None,
+                );
             } else {
                 warn!("Unknown camera type - zoom to cursor disabled.");
                 self.zoom_to_cursor = false;
@@ -377,24 +372,24 @@ impl OrbitControls {
                 if self.screen_space_panning {
                     // position the orbit target in front of the new camera position
                     self.target = scene_graph
-                        .get(self.camera.node)
+                        .get(self.camera.entity)
                         .unwrap()
                         .local_transformation()
                         .transform_vector3(vec3(0.0, 0.0, -1.0))
                         * new_radius
                         + scene_graph
-                            .get(self.camera.node)
+                            .get(self.camera.entity)
                             .unwrap()
                             .local_translation();
                 } else {
                     // get the ray and translation plane to compute target
                     let ray = Ray {
                         origin: scene_graph
-                            .get(self.camera.node)
+                            .get(self.camera.entity)
                             .unwrap()
                             .local_translation(),
                         direction: scene_graph
-                            .get(self.camera.node)
+                            .get(self.camera.entity)
                             .unwrap()
                             .local_transformation()
                             .transform_vector3(vec3(0.0, 0.0, -1.0)),
@@ -403,7 +398,7 @@ impl OrbitControls {
                     // if the camera is 20 degrees above the horizon then don't adjust the focus target to avoid
                     // extremely large values
                     if Vec3::Y.dot(ray.direction).abs() < TILT_LIMIT {
-                        self.camera.look_at(self.target, scene_graph).unwrap();
+                        self.camera.look_at(self.target, scene_graph);
                     } else {
                         let plane = Plane::from_normal_and_coplanar_point(Vec3::Y, self.target);
                         self.target = ray.intersect_plane(plane).unwrap();
@@ -455,7 +450,7 @@ impl OrbitControls {
     fn pan(&mut self, scene_graph: &mut SceneGraph, delta_x: f32, delta_y: f32, view_height: f32) {
         if let Some(projection) = self.camera.perspective_projection() {
             let v = scene_graph
-                .get(self.camera.node)
+                .get(self.camera.entity)
                 .unwrap()
                 .local_translation()
                 - self.target;
@@ -466,7 +461,7 @@ impl OrbitControls {
 
             // we use only clientHeight here so aspect ratio does not distort speed
             let node_local_transform = scene_graph
-                .get(self.camera.node)
+                .get(self.camera.entity)
                 .unwrap()
                 .local_transformation();
             self.pan_left(
@@ -479,7 +474,7 @@ impl OrbitControls {
             );
         } else if let Some(projection) = self.camera.orthographic_projection() {
             let node_local_transform = scene_graph
-                .get(self.camera.node)
+                .get(self.camera.entity)
                 .unwrap()
                 .local_transformation();
             // let zoom = projection.zoom;
@@ -534,7 +529,7 @@ impl OrbitControls {
             view_width / view_height,
             scene_graph,
         ) - scene_graph
-            .get(self.camera.node)
+            .get(self.camera.entity)
             .unwrap()
             .local_translation()
             .normalize();

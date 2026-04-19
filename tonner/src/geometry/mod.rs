@@ -365,7 +365,6 @@ impl GeometryBuilder {
             }
 
             if let Some(normal_tex_coord) = self.normal_tex_coord {
-                dbg!(normal_tex_coord);
                 for target in 0..=self.morph_target_count {
                     let start = target * self.vertex_count;
                     let end = start + self.vertex_count;

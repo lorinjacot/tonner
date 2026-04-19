@@ -10,15 +10,17 @@ use std::{
 };
 
 use dashmap::DashSet;
+use glam::{Quat, Vec3, vec3};
+use storm_animation::AnimationManager;
 use tonner::{
     Context,
+    entity_component::EntityManager,
     environment::Environment,
     geometry::skin::SkinManager,
     mesh::Mesh,
-    renderer::{camera::CameraBuilder, light::LightManager},
-    scene_graph::{NodeBuilder, SceneGraph},
+    renderer::{camera::Camera, light::LightManager},
+    scene_graph::SceneGraph,
 };
-use storm_animation::AnimationManager;
 
 use crate::{Scene, SceneView};
 
@@ -88,39 +90,39 @@ impl MeshExplorer {
         self.detached.store(value, Ordering::Relaxed);
     }
 
-    pub(super) fn ui(&self, egui_ctx: &egui::Context) {
+    pub(super) fn ui(&self, ui: &mut egui::Ui) {
         if self.show.load(Ordering::Relaxed) {
             if self.detached.load(Ordering::Relaxed) {
                 let this = self.clone();
-                egui_ctx.show_viewport_deferred(
+                ui.show_viewport_deferred(
                     egui::ViewportId::from_hash_of("Mesh explorer"),
                     egui::ViewportBuilder::default().with_title("Mesh explorer"),
-                    move |egui_ctx, class| {
-                        if class == egui::ViewportClass::Embedded {
-                            this.wrap_in_window(egui_ctx);
+                    move |ui, class| {
+                        if class == egui::ViewportClass::EmbeddedWindow {
+                            this.wrap_in_window(ui);
                         } else {
-                            egui::CentralPanel::default().show(egui_ctx, |ui| {
+                            egui::CentralPanel::default().show_inside(ui, |ui| {
                                 this.content(ui);
                             });
 
-                            if egui_ctx.input(|i| i.viewport().close_requested()) {
+                            if ui.input(|i| i.viewport().close_requested()) {
                                 this.show.store(false, Ordering::Relaxed);
                             }
                         }
                     },
                 )
             } else {
-                self.wrap_in_window(egui_ctx);
+                self.wrap_in_window(ui);
             }
         }
     }
 
-    fn wrap_in_window(&self, egui_ctx: &egui::Context) {
+    fn wrap_in_window(&self, ui: &mut egui::Ui) {
         let mut open = self.show.load(Ordering::Relaxed);
         egui::Window::new("Mesh explorer")
             .open(&mut open)
             .vscroll(true)
-            .show(egui_ctx, |ui| {
+            .show(ui.ctx(), |ui| {
                 self.content(ui);
             });
         self.show.store(open, Ordering::Relaxed);
@@ -141,6 +143,7 @@ impl MeshExplorer {
                 };
                 if ui.add(label.sense(egui::Sense::click())).double_clicked() {
                     let mut scene = Scene {
+                        entity_manager: EntityManager::new(),
                         name: mesh.name().to_string(),
                         scene_graph: SceneGraph::new(&self.ctx),
                         mesh_instances: HashMap::new(),
@@ -149,20 +152,20 @@ impl MeshExplorer {
                         light_manager: LightManager::new(&self.ctx),
                         environment: self.environment.clone(),
                     };
-                    let node = NodeBuilder::default()
-                        .build(&mut scene.scene_graph)
-                        .unwrap();
-                    let instance = mesh.new_instance(node);
+                    let mesh_entity = scene.entity_manager.new_entity();
+                    scene.scene_graph.add(mesh_entity, None);
+                    let instance = mesh.new_instance(mesh_entity);
                     scene.mesh_instances.insert(instance.id(), instance);
 
-                    let camera = CameraBuilder::default()
-                        .node(
-                            NodeBuilder::default()
-                                .local_translation([0.0, 0.0, 2.0])
-                                .build(&mut scene.scene_graph)
-                                .unwrap(),
-                        )
-                        .build(&mut scene.scene_graph);
+                    let camera_entity = scene.entity_manager.new_entity();
+                    scene.scene_graph.add_with_transform(
+                        camera_entity,
+                        None,
+                        vec3(0.0, 0.0, 2.0),
+                        Quat::IDENTITY,
+                        Vec3::ONE,
+                    );
+                    let camera = Camera::new(camera_entity);
 
                     let scene = Arc::new(Mutex::new(scene));
 

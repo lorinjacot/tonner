@@ -192,13 +192,17 @@ impl Sampler {
         };
         let (min_filter, mipmap_filter) = match self.min_filter {
             MinFilter::LinearMipmapNearest | MinFilter::Linear => {
-                (wgpu::FilterMode::Linear, wgpu::FilterMode::Nearest)
+                (wgpu::FilterMode::Linear, wgpu::MipmapFilterMode::Nearest)
             }
-            MinFilter::LinearMipmapLinear => (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear),
+            MinFilter::LinearMipmapLinear => {
+                (wgpu::FilterMode::Linear, wgpu::MipmapFilterMode::Linear)
+            }
             MinFilter::NearestMipmapNearest | MinFilter::Nearest | MinFilter::None => {
-                (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
+                (wgpu::FilterMode::Nearest, wgpu::MipmapFilterMode::Nearest)
             }
-            MinFilter::NearestMipmapLinear => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear),
+            MinFilter::NearestMipmapLinear => {
+                (wgpu::FilterMode::Nearest, wgpu::MipmapFilterMode::Linear)
+            }
         };
 
         let sampler = ctx.device().create_sampler(&wgpu::SamplerDescriptor {

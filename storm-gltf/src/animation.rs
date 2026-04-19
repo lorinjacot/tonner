@@ -200,7 +200,7 @@ impl Animation {
                     AnimationTargetPath::Weights => {
                         let (id, instance) = match mesh_instaces
                             .iter()
-                            .find(|(_, instance)| instance.node == node)
+                            .find(|(_, instance)| instance.entity == node)
                         {
                             Some((&id, instance)) => (id, instance),
                             None => continue,

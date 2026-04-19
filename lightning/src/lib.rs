@@ -5,18 +5,23 @@ use std::{
 };
 
 use egui::containers::menu::SubMenuButton;
+use glam::{Quat, Vec3, vec3};
 use image::{DynamicImage, codecs::hdr::HdrDecoder};
 pub use scene_view::SceneView;
+use storm_animation::AnimationManager;
+use storm_gltf::GltfAsset;
 use tonner::{
     Context,
+    entity_component::EntityManager,
     environment::{Environment, EnvironmentBuilder},
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
-    renderer::{camera::CameraBuilder, light::LightManager},
-    scene_graph::{NodeBuilder, SceneGraph},
+    renderer::{
+        camera::{Camera, CameraBuilder},
+        light::LightManager,
+    },
+    scene_graph::SceneGraph,
 };
-use storm_animation::AnimationManager;
-use storm_gltf::GltfAsset;
 
 use crate::mesh_explorer::MeshExplorer;
 
@@ -54,6 +59,7 @@ impl Default for State {
 #[derive(Debug)]
 pub struct Scene {
     name: String,
+    entity_manager: EntityManager,
     scene_graph: SceneGraph,
     mesh_instances: HashMap<MeshInstanceId, MeshInstance>,
     skin_manager: SkinManager,
@@ -107,6 +113,7 @@ impl App {
 
         let mut scene = Scene {
             name: String::from("Default scene"),
+            entity_manager: EntityManager::new(),
             scene_graph: SceneGraph::new(&storm_ctx),
             mesh_instances: HashMap::new(),
             skin_manager: SkinManager::new(&storm_ctx),
@@ -114,7 +121,8 @@ impl App {
             light_manager: LightManager::new(&storm_ctx),
             environment: environment.clone(),
         };
-        let camera = CameraBuilder::default().build(&mut scene.scene_graph);
+        let camera =
+            CameraBuilder::new(scene.entity_manager.new_entity()).build(&mut scene.scene_graph);
 
         let current_scene = Arc::new(Mutex::new(scene));
         let current_scene_view = SceneView::new(
@@ -184,6 +192,7 @@ impl App {
                 for (i, name) in names {
                     let mut scene = Scene {
                         name,
+                        entity_manager: EntityManager::new(),
                         scene_graph: SceneGraph::new(&ctx),
                         mesh_instances: HashMap::new(),
                         skin_manager: SkinManager::new(&ctx),
@@ -195,6 +204,7 @@ impl App {
                         .load_scene_into(
                             i,
                             None,
+                            &mut scene.entity_manager,
                             &mut scene.scene_graph,
                             &mut scene.mesh_instances,
                             &mut scene.skin_manager,
@@ -224,17 +234,16 @@ impl eframe::App for App {
         eframe::set_value(storage, eframe::APP_KEY, &self.state);
     }
 
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut encoder =
             self.storm_ctx
                 .device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("App::update command encoder"),
                 });
-        let duration = Duration::from_secs_f32(ctx.input(|input_state| input_state.stable_dt));
+        let duration = Duration::from_secs_f32(ui.input(|input_state| input_state.stable_dt));
 
-        ctx.input_mut(|input_state| {
+        ui.input_mut(|input_state| {
             if input_state.consume_shortcut(&shortcut::OPEN_FILE) {
                 self.open_file();
             }
@@ -249,7 +258,7 @@ impl eframe::App for App {
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+        egui::Panel::top("top_panel").show_inside(ui, |ui| {
             // The top panel is often a good place for a menu bar:
 
             egui::MenuBar::new().ui(ui, |ui| {
@@ -257,7 +266,7 @@ impl eframe::App for App {
                     if ui
                         .add(
                             egui::Button::new("Open File")
-                                .shortcut_text(ctx.format_shortcut(&shortcut::OPEN_FILE)),
+                                .shortcut_text(ui.format_shortcut(&shortcut::OPEN_FILE)),
                         )
                         .clicked()
                     {
@@ -268,7 +277,7 @@ impl eframe::App for App {
                     let is_web = cfg!(target_arch = "wasm32");
                     if !is_web {
                         if ui.button("Quit").clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            ui.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     }
                 });
@@ -277,7 +286,7 @@ impl eframe::App for App {
                     if ui
                         .add(
                             egui::Button::new("Mesh Explorer")
-                                .shortcut_text(ctx.format_shortcut(&shortcut::MESH_EXPLORER)),
+                                .shortcut_text(ui.format_shortcut(&shortcut::MESH_EXPLORER)),
                         )
                         .clicked()
                     {
@@ -314,14 +323,15 @@ impl eframe::App for App {
                             {
                                 let camera = {
                                     let mut scene = scene.lock().unwrap();
-                                    CameraBuilder::default()
-                                        .node(
-                                            NodeBuilder::default()
-                                                .local_translation([0.0, 0.0, 2.0])
-                                                .build(&mut scene.scene_graph)
-                                                .unwrap(),
-                                        )
-                                        .build(&mut scene.scene_graph)
+                                    let camera_entity = scene.entity_manager.new_entity();
+                                    scene.scene_graph.add_with_transform(
+                                        camera_entity,
+                                        None,
+                                        vec3(0.0, 0.0, 2.0),
+                                        Quat::IDENTITY,
+                                        Vec3::ONE,
+                                    );
+                                    Camera::new(camera_entity)
                                 };
 
                                 self.current_scene = scene.clone();
@@ -343,7 +353,7 @@ impl eframe::App for App {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             self.current_scene_view
                 .render(ui, &self.storm_ctx, &mut encoder);
 
@@ -352,10 +362,10 @@ impl eframe::App for App {
             });
         });
 
-        self.mesh_explorer.ui(ctx);
+        self.mesh_explorer.ui(ui);
 
         self.storm_ctx.queue().submit([encoder.finish()]);
-        ctx.request_repaint();
+        ui.request_repaint();
     }
 }
 

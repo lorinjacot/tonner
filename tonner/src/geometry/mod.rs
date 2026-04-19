@@ -5,7 +5,7 @@ use std::{
 
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use glam::{UVec4, Vec2, Vec3, Vec4, vec4};
+use glam::{Quat, UVec4, Vec2, Vec3, Vec4, Vec4Swizzles, vec4};
 use thiserror::Error;
 use uuid::Uuid;
 use wgpu::util::DeviceExt;
@@ -16,12 +16,14 @@ pub use r#box::BoxBuilder;
 pub use cone::ConeBuilder;
 pub use cylinder::CylinderBuilder;
 pub use sphere::{NotEnoughSegmentsError, SphereBuilder};
+pub use arrow::{ArrowBuilder, ArrowParts};
 
 mod r#box;
 mod cone;
 mod cylinder;
 pub mod skin;
 mod sphere;
+mod arrow;
 
 pub const MAX_MORPH_TARGET_COUNT: usize = 8;
 
@@ -276,6 +278,52 @@ impl GeometryBuilder {
     /// This must be set when using texture mapping with a geometry that doesn't have tangents.
     pub fn normal_tex_coord(mut self, normal_tex_coord: impl Into<u32>) -> Self {
         self.normal_tex_coord = Some(normal_tex_coord.into());
+        self
+    }
+
+    /// Translates the geometry in its local space. In other words, `translation` is added the position
+    /// of all the geometry vertices.
+    ///
+    /// This functions only modifies the positions attribute ([`GeometryBuilder::positions()`]).
+    /// Only the base geometry is translated, morph target positions are not affected.
+    /// Future call to [`GeometryBuilder::positions()`] will override the translation.
+    pub fn translate(mut self, translation: impl Into<Vec3>) -> Self {
+        let delta = translation.into();
+        self.attributes
+            .iter_mut()
+            .take(self.vertex_count)
+            .for_each(|a| a.position += delta);
+        self
+    }
+
+    /// Scales the geometry in its local space. In other words, the position of all the geometry vertices is multiplied by `scale`.
+    ///
+    /// This functions only modifies the positions attribute ([`GeometryBuilder::positions()`]). Only the base geometry is scaled, morph target positions are not affected.
+    /// Future call to [`GeometryBuilder::positions()`] will override the scaling.
+    pub fn scale(mut self, scale: impl Into<Vec3>) -> Self {
+        let delta = scale.into();
+        self.attributes
+            .iter_mut()
+            .take(self.vertex_count)
+            .for_each(|a| a.position *= delta);
+        self
+    }
+
+    /// Rotates the geometry in its local space around the origin. In other words, `rotation` is applied to the position, normal and tangent of all the geometry vertices.
+    /// 
+    /// This functions only modifies the positions, normals and tangents attributes ([`GeometryBuilder::positions()`], [`GeometryBuilder::normals()`],
+    /// [`GeometryBuilder::tangents()`]). Only the base geometry is rotated, morph target positions, normals and tangents are not affected.
+    /// Future call to [`GeometryBuilder::positions()`], [`GeometryBuilder::normals()`] or [`GeometryBuilder::tangents()`] will override the rotation.
+    pub fn rotate(mut self, rotation: impl Into<Quat>) -> Self {
+        let rotation = rotation.into();
+        self.attributes
+            .iter_mut()
+            .take(self.vertex_count)
+            .for_each(|a| {
+                a.position = rotation * a.position;
+                a.normal = rotation * a.normal;
+                a.tangent = a.tangent.with_xyz(rotation * a.tangent.xyz());
+            });
         self
     }
 

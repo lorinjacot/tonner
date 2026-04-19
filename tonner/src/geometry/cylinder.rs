@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use glam::{Vec2, Vec3, vec2, vec3};
+use glam::{Quat, Vec2, Vec3, vec2, vec3};
 
 use crate::{
     Context,
@@ -20,6 +20,8 @@ pub struct CylinderBuilder {
     open_ended: bool,
     theta_start: f32,
     theta_length: f32,
+    translation: Option<Vec3>,
+    rotation: Option<Quat>,
 }
 
 impl Default for CylinderBuilder {
@@ -34,6 +36,8 @@ impl Default for CylinderBuilder {
             open_ended: false,
             theta_start: 0.0,
             theta_length: 2.0 * PI,
+            translation: None,
+            rotation: None,
         }
     }
 }
@@ -94,6 +98,22 @@ impl CylinderBuilder {
         self
     }
 
+    /// Translation of the cylinder. Default is `Vec3::ZERO`.
+    ///
+    /// The cylinder is generated centered at the origin. The translation is applied after generation.
+    pub fn translate(mut self, translation: Vec3) -> Self {
+        self.translation = Some(translation);
+        self
+    }
+
+    /// Rotation of the cylinder. Default is `Quat::IDENTITY`.
+    ///  
+    /// The cylinder is generated oriented along the positive y-axis. The rotation is applied after generation.
+    pub fn rotate(mut self, rotation: Quat) -> Self {
+        self.rotation = Some(rotation);
+        self
+    }
+
     /// Creates and returns the cylinder geometry.
     pub fn build(self, ctx: &Context) -> Geometry {
         let mut vertex_count = self.torso_vertex_count();
@@ -123,6 +143,20 @@ impl CylinderBuilder {
             if self.radius_bottom > 0.0 {
                 self.generate_cap(&mut positions, &mut normals, &mut uvs, &mut indices, false);
             }
+        }
+
+        if let Some(translation) = self.translation {
+            positions
+                .iter_mut()
+                .for_each(|position| *position += translation);
+        }
+        if let Some(rotation) = self.rotation {
+            positions
+                .iter_mut()
+                .for_each(|position| *position = rotation * *position);
+            normals
+                .iter_mut()
+                .for_each(|normal| *normal = rotation * *normal);
         }
 
         GeometryBuilder::new(vertex_count, 0)

@@ -1,3 +1,4 @@
+use std::f32::consts::FRAC_PI_2;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,8 +9,8 @@ use storm_controls::orbit::OrbitControls;
 use tonner::Context;
 use tonner::entity_component::EntityManager;
 use tonner::environment::{Environment, EnvironmentBuilder};
-use tonner::geometry::SphereBuilder;
 use tonner::geometry::skin::SkinManager;
+use tonner::geometry::{ArrowBuilder, SphereBuilder};
 use tonner::mesh::material::MaterialBuilder;
 use tonner::mesh::{MeshBuilder, MeshInstance};
 use tonner::renderer::Renderer;
@@ -33,6 +34,7 @@ struct Scene {
     context: Context,
     scene_graph: SceneGraph,
     points: Vec<MeshInstance>,
+    axis: MeshInstance,
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
@@ -67,6 +69,44 @@ impl Scene {
         let red = MaterialBuilder::default()
             .base_color_factor([1.0, 0.0, 0.0, 1.0])
             .build(&context);
+
+        let green = MaterialBuilder::default()
+            .base_color_factor([0.0, 1.0, 0.0, 1.0])
+            .build(&context);
+
+        let blue = MaterialBuilder::default()
+            .base_color_factor([0.0, 0.0, 1.0, 1.0])
+            .build(&context);
+
+        let x_axis = ArrowBuilder::default()
+            .name("X Axis")
+            .rotate(Quat::from_rotation_z(-FRAC_PI_2))
+            .build(&context);
+
+        let y_axis = ArrowBuilder::default()
+            .name("Y Axis")
+            .length(1.0)
+            .build(&context);
+
+        let z_axis = ArrowBuilder::default()
+            .name("Z Axis")
+            .length(1.0)
+            .rotate(Quat::from_rotation_x(FRAC_PI_2))
+            .build(&context);
+
+        let axis = MeshBuilder::default()
+            .primitive(x_axis.head, red.clone())
+            .primitive(x_axis.body, red.clone())
+            .primitive(y_axis.head, green.clone())
+            .primitive(y_axis.body, green)
+            .primitive(z_axis.head, blue.clone())
+            .primitive(z_axis.body, blue)
+            .build(&context)
+            .unwrap();
+
+        let axis_entity = entity_manager.new_entity();
+        scene_graph.add(axis_entity, None);
+        let axis = axis.new_instance(axis_entity);
 
         let point = SphereBuilder::default().radius(0.1).build(&context);
         let point = MeshBuilder::default()
@@ -106,6 +146,7 @@ impl Scene {
             context,
             scene_graph,
             points,
+            axis,
             skin_manager,
             light_manager,
             environment,
@@ -122,7 +163,7 @@ impl Scene {
                 &texture_view,
                 &mut self.scene_graph,
                 &mut self.skin_manager,
-                &self.points,
+                self.points.iter().chain(once(&self.axis)),
                 &mut self.light_manager,
                 &self.environment,
                 &self.context,

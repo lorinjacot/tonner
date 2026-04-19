@@ -1,5 +1,7 @@
 use std::f32::consts::PI;
 
+use glam::{Quat, Vec3};
+
 use crate::{
     Context,
     geometry::{CylinderBuilder, Geometry},
@@ -17,6 +19,8 @@ pub struct ConeBuilder {
     open_ended: bool,
     theta_start: f32,
     theta_length: f32,
+    translation: Option<Vec3>,
+    rotation: Option<Quat>,
 }
 
 impl Default for ConeBuilder {
@@ -30,6 +34,8 @@ impl Default for ConeBuilder {
             open_ended: false,
             theta_start: 0.0,
             theta_length: 2.0 * PI,
+            translation: None,
+            rotation: None,
         }
     }
 }
@@ -84,16 +90,39 @@ impl ConeBuilder {
         self
     }
 
+    /// Translation applied to the cone geometry. Default is `Vec3::ZERO`.
+    ///
+    /// The cone is oriented along the positive z-axis, with its base at the origin. The translation is applied after the cone is generated.
+    pub fn translate(mut self, translation: Vec3) -> Self {
+        self.translation = Some(translation);
+        self
+    }
+
+    /// Rotation applied to the cone geometry. Default is `Quat::IDENTITY`.
+    ///
+    /// The cone is oriented along the positive z-axis, with its base at the origin. The rotation is applied after the cone is generated.
+    pub fn rotate(mut self, rotation: Quat) -> Self {
+        self.rotation = Some(rotation);
+        self
+    }
+
     pub fn build(self, ctx: &Context) -> Geometry {
-        CylinderBuilder::default()
+        let mut builder = CylinderBuilder::default()
             .name(self.name)
+            .height(self.height)
             .radius_top(0.0)
             .radius_bottom(self.radius)
             .radial_segments(self.radial_segments)
             .height_segments(self.height_segments)
             .open_ended(self.open_ended)
             .theta_start(self.theta_start)
-            .theta_length(self.theta_length)
-            .build(ctx)
+            .theta_length(self.theta_length);
+        if let Some(translation) = self.translation {
+            builder = builder.translate(translation);
+        }
+        if let Some(rotation) = self.rotation {
+            builder = builder.rotate(rotation);
+        }
+        builder.build(ctx)
     }
 }

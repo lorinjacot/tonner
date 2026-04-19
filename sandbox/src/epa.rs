@@ -10,7 +10,7 @@ const MAX_ITERATION: usize = 100;
 
 pub struct Polyhedron {
     pub vertices: Vec<SupportPoint>,
-    faces: BinaryHeap<Reverse<Face>>,
+    pub faces: BinaryHeap<Reverse<Face>>,
 }
 
 pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
@@ -130,10 +130,10 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 }
 
 #[derive(Debug)]
-struct Face {
-    indices: [usize; 3],
-    normal: Vec3,
-    distance: f32,
+pub struct Face {
+    pub indices: [usize; 3],
+    pub normal: Vec3,
+    pub distance: f32,
 }
 
 impl Face {

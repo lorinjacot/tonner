@@ -1,9 +1,11 @@
 use std::f32::consts::FRAC_PI_2;
-use std::iter::once;
+use std::iter::{once, repeat_n};
 use std::sync::Arc;
 use std::time::Instant;
 
 use glam::{Quat, Vec3, vec3};
+use image::DynamicImage;
+use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
 use storm_controls::orbit::OrbitControls;
 use tonner::Context;
@@ -11,8 +13,8 @@ use tonner::entity_component::EntityManager;
 use tonner::entity_component::component::sparse_array::SparseArray;
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::skin::SkinManager;
-use tonner::geometry::{ArrowBuilder, SphereBuilder};
-use tonner::mesh::material::{AlphaMode, MaterialBuilder};
+use tonner::geometry::{ArrowBuilder, GeometryBuilder, SphereBuilder};
+use tonner::mesh::material::{AlphaMode, Material, MaterialBuilder};
 use tonner::mesh::{Mesh, MeshBuilder, MeshInstance};
 use tonner::renderer::Renderer;
 use tonner::renderer::camera::Camera;
@@ -45,7 +47,9 @@ struct Scene {
     last_frame: Instant,
     steps: usize,
     rendered_steps: usize,
+    yellow: Material,
     points: SparseArray<MeshInstance>,
+    faces: SparseArray<MeshInstance>,
 }
 
 impl Scene {
@@ -66,23 +70,29 @@ impl Scene {
 
         let skin_manager = SkinManager::new(&context);
         let light_manager = LightManager::new(&context);
-        let environment = EnvironmentBuilder::default().build(&context, &mut encoder);
+        let radiance_image = include_bytes!("../../assets/newport_loft.hdr");
+        let radiance_image = std::io::Cursor::new(radiance_image);
+        let radiance_image = HdrDecoder::new(radiance_image).unwrap();
+        let radiance_image = DynamicImage::from_decoder(radiance_image).unwrap();
+        let environment = EnvironmentBuilder::default()
+            .equirectangular_map(radiance_image)
+            .build(&context, &mut encoder);
         let renderer = Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, &context);
 
         let controls = OrbitControls::new(camera);
 
         let red = MaterialBuilder::default()
-            .base_color_factor([1.0, 0.0, 0.0, 0.4])
+            .base_color_factor([1.0, 0.0, 0.0, 0.6])
             .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let green = MaterialBuilder::default()
-            .base_color_factor([0.0, 1.0, 0.0, 0.4])
+            .base_color_factor([0.0, 1.0, 0.0, 0.6])
             .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let blue = MaterialBuilder::default()
-            .base_color_factor([0.0, 0.0, 1.0, 0.4])
+            .base_color_factor([0.0, 0.0, 1.0, 0.6])
             .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
@@ -153,6 +163,35 @@ impl Scene {
             })
             .collect();
 
+        let yellow = MaterialBuilder::default()
+            .base_color_factor([1.0, 1.0, 0.0, 0.8])
+            .alpha_mode(AlphaMode::Opaque)
+            .double_sided(true)
+            .build(&context);
+
+        let faces = polyhedron
+            .faces
+            .iter()
+            .enumerate()
+            .map(|(i, face)| {
+                let entity = entity_manager.new_entity();
+                scene_graph.add(entity, None);
+                let face = GeometryBuilder::new(3, 0)
+                    .positions(face.0.indices.map(|i| polyhedron.vertices[i].difference))
+                    .unwrap()
+                    .normals(repeat_n(face.0.normal, 3))
+                    .unwrap()
+                    .build(&context)
+                    .unwrap();
+                let face = MeshBuilder::default()
+                    .name(format!("Face {i}"))
+                    .primitive(face, yellow.clone())
+                    .build(&context)
+                    .unwrap();
+                (entity, face.new_instance(entity))
+            })
+            .collect();
+
         context.queue().submit([encoder.finish()]);
 
         Scene {
@@ -169,13 +208,19 @@ impl Scene {
             last_frame: Instant::now(),
             steps,
             rendered_steps: steps,
+            yellow,
             points,
+            faces,
         }
     }
 
     fn render(&mut self, texture_view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         if self.steps != self.rendered_steps {
             self.points.drain().for_each(|(entity, _)| {
+                self.scene_graph.remove(entity);
+                self.entity_manager.delete_entity(entity);
+            });
+            self.faces.drain().for_each(|(entity, _)| {
                 self.scene_graph.remove(entity);
                 self.entity_manager.delete_entity(entity);
             });
@@ -206,6 +251,29 @@ impl Scene {
                 })
                 .collect();
 
+            self.faces = polyhedron
+                .faces
+                .iter()
+                .enumerate()
+                .map(|(i, face)| {
+                    let entity = self.entity_manager.new_entity();
+                    self.scene_graph.add(entity, None);
+                    let face = GeometryBuilder::new(3, 0)
+                        .positions(face.0.indices.map(|i| polyhedron.vertices[i].difference))
+                        .unwrap()
+                        .normals(repeat_n(face.0.normal, 3))
+                        .unwrap()
+                        .build(&self.context)
+                        .unwrap();
+                    let face = MeshBuilder::default()
+                        .name(format!("Face {i}"))
+                        .primitive(face, self.yellow.clone())
+                        .build(&self.context)
+                        .unwrap();
+                    (entity, face.new_instance(entity))
+                })
+                .collect();
+
             self.rendered_steps = self.steps;
         }
 
@@ -215,7 +283,10 @@ impl Scene {
                 &texture_view,
                 &mut self.scene_graph,
                 &mut self.skin_manager,
-                self.points.values().chain(once(&self.axis)),
+                self.points
+                    .values()
+                    .chain(self.faces.values())
+                    .chain(once(&self.axis)),
                 &mut self.light_manager,
                 &self.environment,
                 &self.context,
@@ -234,6 +305,8 @@ struct State {
     surface_format: wgpu::TextureFormat,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
+    next_shortcut: egui::KeyboardShortcut,
+    previous_shortcut: egui::KeyboardShortcut,
 }
 
 impl State {
@@ -266,6 +339,11 @@ impl State {
             Some(device.limits().max_texture_dimension_2d as usize),
         );
 
+        let next_shortcut =
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowRight);
+        let previous_shortcut =
+            egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowLeft);
+
         let egui_renderer = egui_wgpu::Renderer::new(
             &device,
             surface_format.remove_srgb_suffix(),
@@ -284,6 +362,8 @@ impl State {
             surface_format,
             egui_state,
             egui_renderer,
+            next_shortcut,
+            previous_shortcut,
         };
 
         state.configure_surface();
@@ -332,26 +412,29 @@ impl State {
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
         let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |ui| {
+            ui.input_mut(|input_state| {
+                if input_state.consume_shortcut(&self.next_shortcut) {
+                    self.scene.steps += 1;
+                }
+                if input_state.consume_shortcut(&self.previous_shortcut) {
+                    self.scene.steps = self.scene.steps.saturating_sub(1);
+                }
+            });
+
             let response = ui.interact(ui.clip_rect(), egui::Id::new("scene"), egui::Sense::drag());
             self.scene
                 .controls
                 .handle_response(response, ui, &mut self.scene.scene_graph);
             ui.label(format!("EPA steps: {}", self.scene.steps));
             ui.horizontal(|ui| {
-                ui.button("Next").clicked().then(|| self.scene.steps += 1);
                 ui.button("Previous")
                     .clicked()
                     .then(|| self.scene.steps = self.scene.steps.saturating_sub(1));
+                ui.button("Next").clicked().then(|| self.scene.steps += 1);
             });
             ui.button("Reset EPA")
                 .clicked()
                 .then(|| self.scene.steps = 0);
-            // egui::Panel::right("right panel").show_inside(ui, |ui| {
-            //     ui.label("Hello world!");
-            //     if ui.button("Click me").clicked() {
-            //         println!("Clicked");
-            //     }
-            // });
         });
 
         self.egui_state

@@ -8,6 +8,7 @@ egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
 glam.workspace = true
+image.workspace = true
 pollster.workspace = true
 storm-controls = { workspace = true, features = ["egui"] }
 tonner.workspace = true

@@ -3756,6 +3756,11 @@ dependencies = [
 name = "sandbox"
 version = "0.1.0"
 dependencies = [
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "glam 0.32.1",
+ "pollster",
  "tonner",
  "wgpu",
  "winit",

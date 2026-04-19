@@ -8,11 +8,12 @@ use storm_controls::EguiControls;
 use storm_controls::orbit::OrbitControls;
 use tonner::Context;
 use tonner::entity_component::EntityManager;
+use tonner::entity_component::component::sparse_array::SparseArray;
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::skin::SkinManager;
 use tonner::geometry::{ArrowBuilder, SphereBuilder};
-use tonner::mesh::material::MaterialBuilder;
-use tonner::mesh::{MeshBuilder, MeshInstance};
+use tonner::mesh::material::{AlphaMode, MaterialBuilder};
+use tonner::mesh::{Mesh, MeshBuilder, MeshInstance};
 use tonner::renderer::Renderer;
 use tonner::renderer::camera::Camera;
 use tonner::renderer::light::LightManager;
@@ -32,8 +33,9 @@ mod shape;
 
 struct Scene {
     context: Context,
+    entity_manager: EntityManager,
     scene_graph: SceneGraph,
-    points: Vec<MeshInstance>,
+    point: Mesh,
     axis: MeshInstance,
     skin_manager: SkinManager,
     light_manager: LightManager,
@@ -41,6 +43,9 @@ struct Scene {
     renderer: Renderer,
     controls: OrbitControls,
     last_frame: Instant,
+    steps: usize,
+    rendered_steps: usize,
+    points: SparseArray<MeshInstance>,
 }
 
 impl Scene {
@@ -67,15 +72,18 @@ impl Scene {
         let controls = OrbitControls::new(camera);
 
         let red = MaterialBuilder::default()
-            .base_color_factor([1.0, 0.0, 0.0, 1.0])
+            .base_color_factor([1.0, 0.0, 0.0, 0.4])
+            .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let green = MaterialBuilder::default()
-            .base_color_factor([0.0, 1.0, 0.0, 1.0])
+            .base_color_factor([0.0, 1.0, 0.0, 0.4])
+            .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let blue = MaterialBuilder::default()
-            .base_color_factor([0.0, 0.0, 1.0, 1.0])
+            .base_color_factor([0.0, 0.0, 1.0, 0.4])
+            .alpha_mode(AlphaMode::Blend)
             .build(&context);
 
         let x_axis = ArrowBuilder::default()
@@ -96,7 +104,7 @@ impl Scene {
 
         let axis = MeshBuilder::default()
             .primitive(x_axis.head, red.clone())
-            .primitive(x_axis.body, red.clone())
+            .primitive(x_axis.body, red)
             .primitive(y_axis.head, green.clone())
             .primitive(y_axis.body, green)
             .primitive(z_axis.head, blue.clone())
@@ -108,9 +116,13 @@ impl Scene {
         scene_graph.add(axis_entity, None);
         let axis = axis.new_instance(axis_entity);
 
-        let point = SphereBuilder::default().radius(0.1).build(&context);
+        let black = MaterialBuilder::default()
+            .base_color_factor([0.0, 0.0, 0.0, 1.0])
+            .build(&context);
+
+        let point = SphereBuilder::default().radius(0.02).build(&context);
         let point = MeshBuilder::default()
-            .primitive(point, red)
+            .primitive(point, black)
             .build(&context)
             .unwrap();
 
@@ -121,8 +133,9 @@ impl Scene {
             radius: 1.0,
         };
         ball.center = vec3(1.57, 1.57, 1.57);
+        let steps = 0;
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let polyhedron = epa_dbg(&aab, &ball, tetrahedron, 0);
+        let polyhedron = epa_dbg(&aab, &ball, tetrahedron, steps);
 
         let points = polyhedron
             .vertices
@@ -136,7 +149,7 @@ impl Scene {
                     Quat::IDENTITY,
                     Vec3::ONE,
                 );
-                point.new_instance(entity)
+                (entity, point.new_instance(entity))
             })
             .collect();
 
@@ -144,8 +157,9 @@ impl Scene {
 
         Scene {
             context,
+            entity_manager,
             scene_graph,
-            points,
+            point,
             axis,
             skin_manager,
             light_manager,
@@ -153,17 +167,55 @@ impl Scene {
             renderer,
             controls,
             last_frame: Instant::now(),
+            steps,
+            rendered_steps: steps,
+            points,
         }
     }
 
     fn render(&mut self, texture_view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+        if self.steps != self.rendered_steps {
+            self.points.drain().for_each(|(entity, _)| {
+                self.scene_graph.remove(entity);
+                self.entity_manager.delete_entity(entity);
+            });
+
+            let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+            let mut ball = Ball {
+                center: Vec3::ZERO,
+                radius: 1.0,
+            };
+            ball.center = vec3(1.57, 1.57, 1.57);
+            let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+            let polyhedron = epa_dbg(&aab, &ball, tetrahedron, self.steps);
+
+            self.points = polyhedron
+                .vertices
+                .iter()
+                .map(|v| {
+                    let entity = self.entity_manager.new_entity();
+                    self.scene_graph.add_with_transform(
+                        entity,
+                        None,
+                        v.difference,
+                        Quat::IDENTITY,
+                        Vec3::ONE,
+                    );
+                    (entity, self.point.new_instance(entity))
+                })
+                .collect();
+
+            self.rendered_steps = self.steps;
+        }
+
         self.renderer
             .render(
                 &self.controls.camera,
                 &texture_view,
                 &mut self.scene_graph,
                 &mut self.skin_manager,
-                self.points.iter().chain(once(&self.axis)),
+                self.points.values().chain(once(&self.axis)),
                 &mut self.light_manager,
                 &self.environment,
                 &self.context,
@@ -284,6 +336,16 @@ impl State {
             self.scene
                 .controls
                 .handle_response(response, ui, &mut self.scene.scene_graph);
+            ui.label(format!("EPA steps: {}", self.scene.steps));
+            ui.horizontal(|ui| {
+                ui.button("Next").clicked().then(|| self.scene.steps += 1);
+                ui.button("Previous")
+                    .clicked()
+                    .then(|| self.scene.steps = self.scene.steps.saturating_sub(1));
+            });
+            ui.button("Reset EPA")
+                .clicked()
+                .then(|| self.scene.steps = 0);
             // egui::Panel::right("right panel").show_inside(ui, |ui| {
             //     ui.label("Hello world!");
             //     if ui.button("Click me").clicked() {

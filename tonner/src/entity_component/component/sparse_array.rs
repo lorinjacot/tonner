@@ -50,6 +50,62 @@ impl<T> SparseArray<T> {
             dense: Vec::with_capacity(capacity),
         }
     }
+
+    /// Returns the number of components in the sparse array.
+    ///
+    /// This is not the same as the capacity of the sparse array, which is the maximum number of components it can hold without reallocating.
+    pub fn len(&self) -> usize {
+        self.dense.len()
+    }
+
+    /// Returns `true` if the sparse array contains no components.
+    ///
+    /// This is not the same as the capacity of the sparse array, which is the maximum number of components it can hold without reallocating.
+    pub fn is_empty(&self) -> bool {
+        self.dense.is_empty()
+    }
+
+    /// Returns an iterator over the entities and components of the sparse array.
+    ///
+    /// The order of the entities and components is not specified and may change when components are added or removed from the sparse array.
+    /// If only the components are needed, use [`SparseArray::values`] or [`SparseArray::values_mut`] instead.
+    pub fn values(&self) -> Values<'_, T> {
+        Values {
+            inner: self.dense.iter(),
+        }
+    }
+
+    /// Returns an iterator over the mutable components of the sparse array.
+    ///
+    /// The order of the components is not specified and may change when components are added or removed from the sparse array.
+    /// If only the components are needed, use [`SparseArray::values`] or [`SparseArray::values_mut`] instead.
+    pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
+        ValuesMut {
+            inner: self.dense.iter_mut(),
+        }
+    }
+
+    /// Removes all components from the sparse array, returning an iterator over the entities and components that were removed.
+    ///
+    /// The order of the entities and components is not specified.
+    /// The sparse array will be empty after this method returns.
+    ///
+    /// If the iterator is dropped before being fully consumed, it drops the remaining removed elements.
+    pub fn drain(&mut self) -> Drain<'_, T> {
+        Drain {
+            inner: self.dense.drain(..),
+        }
+    }
+}
+
+impl<T> FromIterator<(EntityId, T)> for SparseArray<T> {
+    fn from_iter<I: IntoIterator<Item = (EntityId, T)>>(iter: I) -> Self {
+        let mut sparse_array = SparseArray::new();
+        for (entity, component) in iter {
+            sparse_array.add(entity, component);
+        }
+        sparse_array
+    }
 }
 
 pub struct Iter<'a, T> {
@@ -147,6 +203,138 @@ impl<'a, T> ExactSizeIterator for IterMut<'a, T> {
 }
 
 impl<'a, T> FusedIterator for IterMut<'a, T> {}
+
+/// An iterator over the components of a `SparseArray<T>`.
+///
+/// The order of the components is not specified and may change when components are added or removed from the `SparseArray<T>`.
+/// If the entity is needed, use [`Iter`] or [`IterMut`] instead.
+pub struct Values<'a, T> {
+    inner: std::slice::Iter<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for Values<'a, T> {
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|dense_entry| &dense_entry.component)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, dense_entry| f(b, &dense_entry.component))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Values<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for Values<'a, T> {}
+
+/// An iterator over the mutable components of a `SparseArray<T>`.
+///
+/// The order of the components is not specified and may change when components are added or removed from the `SparseArray<T>`.
+/// If the entity is needed, use [`Iter`] or [`IterMut`] instead.
+pub struct ValuesMut<'a, T> {
+    inner: std::slice::IterMut<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for ValuesMut<'a, T> {
+    type Item = &'a mut T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|dense_entry| &mut dense_entry.component)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    #[inline]
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    #[inline]
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, dense_entry| f(b, &mut dense_entry.component))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ValuesMut<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for ValuesMut<'a, T> {}
+
+/// An iterator that drains the components of a `SparseArray<T>`, yielding the entities and components as mutable references.
+///
+/// This iterator is created by the [`SparseArray::drain`] method. See its documentation for more.
+pub struct Drain<'a, T> {
+    inner: std::vec::Drain<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for Drain<'a, T> {
+    type Item = (EntityId, T);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next()
+            .map(|dense_entry| (dense_entry.entity, dense_entry.component))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Drain<'a, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> FusedIterator for Drain<'a, T> {}
 
 impl<T> ComponentsView<T> for SparseArray<T> {
     type Iter<'a>

@@ -32,7 +32,7 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         let support = SupportPoint::new(shape1, shape2, closest_face.normal);
         let distance_support = support.difference.dot(closest_face.normal);
 
-        if (distance_support - closest_face.distance).abs() < 1e-4 {
+        if (distance_support - closest_face.distance).abs() < 1e-6 {
             break;
         }
         unique_edges.extend(closest_face.edges());
@@ -78,59 +78,9 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape2: &S2,
     tetrahedron: [SupportPoint; 4],
 ) -> Vec4 {
-    let mut vertices = Vec::from(tetrahedron);
-    let mut faces = BinaryHeap::from(
-        [[3, 2, 1], [3, 1, 0], [3, 0, 2], [2, 0, 1]]
-            .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
-    );
+    let res = epa_dbg(shape1, shape2, tetrahedron, MAX_ITERATION);
 
-    let mut unique_edges = Vec::new();
-    for i in 0..MAX_ITERATION {
-        let closest_face = faces.pop().unwrap().0;
-
-        let support = SupportPoint::new(shape1, shape2, closest_face.normal);
-        let distance_support = support.difference.dot(closest_face.normal);
-
-        if (distance_support - closest_face.distance).abs() < 1e-10 {
-            dbg!(i);
-            break;
-        }
-        unique_edges.extend(closest_face.edges());
-
-        // In order to keep the polyhedron convex, we need to remove all faces visible from `support`.
-        // This creates a hole whose border is made up of all edges appearing in only one of the removed faces.
-        faces.retain(|face| {
-            let point_on_face = vertices[face.0.indices[0]].difference;
-            if face.0.normal.dot(support.difference - point_on_face) > 0.0 {
-                face.0.edges().into_iter().for_each(|(i, j)| {
-                    match unique_edges
-                        .iter()
-                        .enumerate()
-                        .find(|(_, edge)| **edge == (j, i))
-                    {
-                        Some((i, _)) => {
-                            unique_edges.swap_remove(i);
-                        }
-                        None => unique_edges.push((i, j)),
-                    }
-                });
-
-                false
-            } else {
-                true
-            }
-        });
-
-        let k = vertices.len();
-        vertices.push(support);
-        faces.extend(
-            unique_edges
-                .drain(..)
-                .map(|(i, j)| Reverse(Face::from_vertex_indices([i, j, k], &vertices))),
-        );
-    }
-
-    let closest_face = &faces.peek().unwrap().0;
+    let closest_face = &res.faces.peek().unwrap().0;
     closest_face.normal.extend(closest_face.distance)
 }
 
@@ -145,7 +95,9 @@ impl Face {
     fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
         let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
         let mut normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
-            dbg!(b - a, c - a);
+            let pos: Vec<_> = vertices.iter().map(|v| v.difference).collect();
+            dbg!(pos);
+            dbg!(a, b, c);
             todo!("abc is a line or a point")
         });
         let mut distance = a.dot(normal);
@@ -248,8 +200,13 @@ mod tests {
             radius: 1.0,
         };
 
-        // let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        // dbg!(epa(&aab, &ball, tetrahedron));
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let separating_vector = epa(&aab, &ball, tetrahedron);
+        assert!(
+            (separating_vector.w - 2.0).abs() <= 1e-4,
+            "Expected 1.0, got {}",
+            separating_vector.w
+        );
 
         ball.center = vec3(1.99, 0.0, 0.0);
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
@@ -264,12 +221,12 @@ mod tests {
         ball.center = vec3(1.70, 1.70, 0.0);
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
         let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
+        assert_seperating_vector(ball.center.normalize(), 0.0101, separating_vector);
 
         ball.center = vec3(1.57, 1.57, 1.57);
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
         let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
+        assert_seperating_vector(ball.center.normalize(), 0.0127, separating_vector);
     }
 
     fn assert_seperating_vector(expected_direction: Vec3, expected_length: f32, actual: Vec4) {

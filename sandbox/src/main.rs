@@ -33,6 +33,18 @@ mod epa;
 mod gjk;
 mod shape;
 
+fn create_shapes() -> (AxisAlignedBox, Ball) {
+    let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+    let mut ball = Ball {
+        center: Vec3::ZERO,
+        radius: 1.0,
+    };
+    ball.center = vec3(1.57, 1.57, 1.57);
+
+    (aab, ball)
+}
+
 fn create_points(
     polyhedron: &Polyhedron,
     entity_manager: &mut EntityManager,
@@ -210,13 +222,8 @@ impl Scene {
             .build(&context)
             .unwrap();
 
-        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+        let (aab, ball) = create_shapes();
 
-        let mut ball = Ball {
-            center: Vec3::ZERO,
-            radius: 1.0,
-        };
-        ball.center = vec3(1.57, 1.57, 1.57);
         let steps = 0;
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
         let polyhedron = epa_dbg(&aab, &ball, tetrahedron, steps);
@@ -284,13 +291,7 @@ impl Scene {
                 self.entity_manager.delete_entity(entity);
             });
 
-            let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
-
-            let mut ball = Ball {
-                center: Vec3::ZERO,
-                radius: 1.0,
-            };
-            ball.center = vec3(1.57, 1.57, 1.57);
+            let (aab, ball) = create_shapes();
             let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
             let polyhedron = epa_dbg(&aab, &ball, tetrahedron, self.steps);
 

@@ -25,7 +25,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
-use crate::epa::{Polyhedron, epa_dbg};
+use crate::epa::{EpaResult, epa_dbg};
 use crate::gjk::gjk_tetrahedron;
 use crate::shape::{AxisAlignedBox, Ball};
 
@@ -46,12 +46,12 @@ fn create_shapes() -> (AxisAlignedBox, Ball) {
 }
 
 fn create_points(
-    polyhedron: &Polyhedron,
+    epa_result: &EpaResult,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     point: &Mesh,
 ) -> SparseArray<MeshInstance> {
-    polyhedron
+    epa_result
         .vertices
         .iter()
         .map(|v| {
@@ -63,13 +63,13 @@ fn create_points(
 }
 
 fn create_faces(
-    polyhedron: &Polyhedron,
+    epa_result: &EpaResult,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     context: &Context,
     face_material: &Material,
 ) -> SparseArray<MeshInstance> {
-    polyhedron
+    epa_result
         .faces
         .iter()
         .enumerate()
@@ -77,7 +77,7 @@ fn create_faces(
             let entity = entity_manager.new_entity();
             scene_graph.add(entity, None);
             let face = GeometryBuilder::new(3, 0)
-                .positions(face.0.indices.map(|i| polyhedron.vertices[i].difference))
+                .positions(face.0.indices.map(|i| epa_result.vertices[i].difference))
                 .unwrap()
                 .normals(repeat_n(face.0.normal, 3))
                 .unwrap()
@@ -94,17 +94,17 @@ fn create_faces(
 }
 
 fn create_normals(
-    polyhedron: &Polyhedron,
+    epa_result: &EpaResult,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     normal_mesh: &Mesh,
 ) -> SparseArray<MeshInstance> {
-    polyhedron
+    epa_result
         .faces
         .iter()
         .map(|face| {
             let entity = entity_manager.new_entity();
-            let vertices = face.0.indices.map(|i| polyhedron.vertices[i].difference);
+            let vertices = face.0.indices.map(|i| epa_result.vertices[i].difference);
             let origin = vertices[0].midpoint(vertices[1]).midpoint(vertices[2]);
             scene_graph.add_with_transform(
                 entity,
@@ -226,7 +226,7 @@ impl Scene {
 
         let steps = 0;
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let polyhedron = epa_dbg(&aab, &ball, tetrahedron, steps);
+        let epa_result = epa_dbg(&aab, &ball, tetrahedron, steps);
 
         let yellow = MaterialBuilder::default()
             .base_color_factor([1.0, 1.0, 0.0, 0.8])
@@ -241,16 +241,16 @@ impl Scene {
             .build(&context)
             .unwrap();
 
-        let points = create_points(&polyhedron, &mut entity_manager, &mut scene_graph, &point);
+        let points = create_points(&epa_result, &mut entity_manager, &mut scene_graph, &point);
         let faces = create_faces(
-            &polyhedron,
+            &epa_result,
             &mut entity_manager,
             &mut scene_graph,
             &context,
             &yellow,
         );
         let normals = create_normals(
-            &polyhedron,
+            &epa_result,
             &mut entity_manager,
             &mut scene_graph,
             &normal_mesh,
@@ -293,17 +293,17 @@ impl Scene {
 
             let (aab, ball) = create_shapes();
             let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-            let polyhedron = epa_dbg(&aab, &ball, tetrahedron, self.steps);
+            let epa_result = epa_dbg(&aab, &ball, tetrahedron, self.steps);
 
             self.points = create_points(
-                &polyhedron,
+                &epa_result,
                 &mut self.entity_manager,
                 &mut self.scene_graph,
                 &self.point,
             );
 
             self.faces = create_faces(
-                &polyhedron,
+                &epa_result,
                 &mut self.entity_manager,
                 &mut self.scene_graph,
                 &self.context,
@@ -311,7 +311,7 @@ impl Scene {
             );
 
             self.normals = create_normals(
-                &polyhedron,
+                &epa_result,
                 &mut self.entity_manager,
                 &mut self.scene_graph,
                 &self.normal_mesh,

@@ -8,7 +8,9 @@ use crate::{gjk::SupportPoint, shape::ConvexShape};
 
 const MAX_ITERATION: usize = 100;
 
-pub struct Polyhedron {
+pub struct EpaResult {
+    pub direction: Vec3,
+    pub distance: f32,
     pub vertices: Vec<SupportPoint>,
     pub faces: BinaryHeap<Reverse<Face>>,
 }
@@ -18,7 +20,7 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     shape2: &S2,
     tetrahedron: [SupportPoint; 4],
     steps: usize,
-) -> Polyhedron {
+) -> EpaResult {
     let mut vertices = Vec::from(tetrahedron);
     let mut faces = BinaryHeap::from(
         [[3, 2, 1], [3, 1, 0], [3, 0, 2], [2, 0, 1]]
@@ -27,7 +29,7 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 
     let mut unique_edges = Vec::new();
     for _ in 0..steps {
-        let closest_face = faces.pop().unwrap().0;
+        let closest_face = dbg!(&mut faces).pop().unwrap().0;
 
         let support = SupportPoint::new(shape1, shape2, closest_face.normal);
         let distance_support = support.difference.dot(closest_face.normal);
@@ -70,7 +72,14 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         );
     }
 
-    Polyhedron { vertices, faces }
+    let closest_face = &faces.peek().unwrap().0;
+
+    EpaResult {
+        direction: closest_face.normal,
+        distance: closest_face.distance,
+        vertices,
+        faces,
+    }
 }
 
 pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
@@ -80,8 +89,7 @@ pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 ) -> Vec4 {
     let res = epa_dbg(shape1, shape2, tetrahedron, MAX_ITERATION);
 
-    let closest_face = &res.faces.peek().unwrap().0;
-    closest_face.normal.extend(closest_face.distance)
+    res.direction.extend(res.distance)
 }
 
 #[derive(Debug)]
@@ -94,22 +102,36 @@ pub struct Face {
 impl Face {
     fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
         let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
-        let mut normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
-            let pos: Vec<_> = vertices.iter().map(|v| v.difference).collect();
-            dbg!(pos);
-            dbg!(a, b, c);
-            todo!("abc is a line or a point")
+        let normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
+            // handle degenerate triangles
+            if a.abs_diff_eq(b, 1e-4) {
+                if a.abs_diff_eq(c, 1e-4) {
+                    // point
+                    a.normalize_or(Vec3::X)
+                } else {
+                    // line
+                    let ac = c - a;
+                    ac.cross(Vec3::X).normalize_or(Vec3::Y)
+                }
+            } else {
+                // line
+                let ab = b - a;
+                ab.cross(Vec3::X).normalize_or(Vec3::Y)
+            }
         });
-        let mut distance = a.dot(normal);
+        let distance = a.dot(normal);
         if distance < 0.0 {
-            normal = -normal;
-            distance = -distance;
-        }
-
-        Face {
-            indices: vertex_indices,
-            normal,
-            distance,
+            Face {
+                indices: vertex_indices,
+                normal: -normal,
+                distance: -distance,
+            }
+        } else {
+            Face {
+                indices: vertex_indices,
+                normal,
+                distance,
+            }
         }
     }
 
@@ -151,12 +173,18 @@ mod tests {
 
     #[test]
     fn test_two_balls() {
-        // let origin = Ball {
-        //     center: Vec3::ZERO,
-        //     radius: 1.0,
-        // };
+        let origin = Ball {
+            center: Vec3::ZERO,
+            radius: 1.0,
+        };
 
-        // assert!(gjk(&origin, &origin));
+        let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
+        let separating_vector = epa(&origin, &origin, tetrahedron);
+        assert!(
+            (separating_vector.w - 2.0).abs() <= 1e-4,
+            "Expected 2.0, got {}",
+            separating_vector.w
+        );
 
         // let x = Ball {
         //     center: Vec3::X,

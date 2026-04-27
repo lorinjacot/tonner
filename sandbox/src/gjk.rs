@@ -15,7 +15,13 @@ pub(crate) fn gjk_tetrahedron<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized
     shape1: &S1,
     shape2: &S2,
 ) -> Option<[SupportPoint; 4]> {
-    let mut direction = shape2.centroid() - shape1.centroid();
+    let center1 = shape1.centroid();
+    let center2 = shape2.centroid();
+    let mut direction = if center1.abs_diff_eq(center2, 1e-4) {
+        Vec3::X
+    } else {
+        center2 - center1
+    };
     let a = SupportPoint::new(shape1, shape2, direction);
 
     direction = -a.difference;

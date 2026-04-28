@@ -22,30 +22,11 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     tetrahedron: [SupportPoint; 4],
     steps: usize,
 ) -> EpaResult {
-    let mut vertices: Vec<SupportPoint> = Vec::with_capacity(4 + steps);
-    tetrahedron.into_iter().for_each(|support_point| {
-        if vertices
-            .iter()
-            .find(|v| v.difference.abs_diff_eq(support_point.difference, 1e-4))
-            .is_none()
-        {
-            vertices.push(support_point);
-        }
-    });
-
-    let mut faces = if vertices.len() == 4 {
-        BinaryHeap::from(
-            [[0, 1, 2], [0, 2, 3], [0, 3, 1], [1, 3, 2]]
-                .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
-        )
-    } else if vertices.len() == 3 {
-        BinaryHeap::from(
-            [[0, 1, 2], [0, 2, 1]]
-                .map(|indicies| Reverse(Face::from_vertex_indices(indicies, &vertices))),
-        )
-    } else {
-        todo!()
-    };
+    let mut vertices: Vec<SupportPoint> = Vec::from_iter(tetrahedron);
+    let mut faces = BinaryHeap::from(
+        [[0, 1, 2], [2, 3, 0], [1, 0, 3], [3, 2, 1]]
+            .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
+    );
 
     let mut unique_edges = Vec::new();
     for _ in 0..steps {
@@ -121,7 +102,7 @@ pub struct Face {
 
 impl Face {
     fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
-        let [a, b, c] = dbg!(vertex_indices.map(|i| vertices[i].difference));
+        let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
         let normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
             // handle degenerate triangles
             if a.abs_diff_eq(b, 1e-4) {
@@ -148,17 +129,17 @@ impl Face {
         });
         let distance = a.dot(normal);
         if distance < 0.0 {
-            dbg!(Face {
+            Face {
                 indices: vertex_indices,
                 normal: -normal,
                 distance: -distance,
-            })
+            }
         } else {
-            dbg!(Face {
+            Face {
                 indices: vertex_indices,
                 normal,
                 distance,
-            })
+            }
         }
     }
 

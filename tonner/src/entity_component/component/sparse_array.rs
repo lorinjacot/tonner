@@ -463,7 +463,8 @@ impl<T> Index<EntityId> for SparseArray<T> {
 
 impl<T> IndexMut<EntityId> for SparseArray<T> {
     fn index_mut(&mut self, index: EntityId) -> &mut Self::Output {
-        self.get_mut(index).expect("no component for the entity")
+        self.get_mut(index)
+            .unwrap_or_else(|| panic!("no component for the entity {index}"))
     }
 }
 

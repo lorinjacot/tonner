@@ -286,6 +286,10 @@ impl Scene {
                 self.scene_graph.remove(entity);
                 self.entity_manager.delete_entity(entity);
             });
+            self.normals.drain().for_each(|(entity, _)| {
+                self.scene_graph.remove(entity);
+                self.entity_manager.delete_entity(entity);
+            });
 
             let (aab, ball) = create_shapes();
             let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();

@@ -41,7 +41,12 @@ fn create_shapes() -> (Ball, Ball) {
         radius: 1.0,
     };
 
-    (origin, origin.clone())
+    let x = Ball {
+        center: Vec3::X,
+        radius: 0.0,
+    };
+
+    (x, origin)
 }
 
 fn create_points(

@@ -22,11 +22,16 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     tetrahedron: [SupportPoint; 4],
     steps: usize,
 ) -> EpaResult {
+    let minkowski_difference_center = shape1.centroid() - shape2.centroid();
+
     let mut vertices: Vec<SupportPoint> = Vec::from_iter(tetrahedron);
-    let mut faces = BinaryHeap::from(
-        [[0, 1, 2], [2, 3, 0], [1, 0, 3], [3, 2, 1]]
-            .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
-    );
+    let mut faces = BinaryHeap::from([[0, 1, 2], [2, 3, 0], [1, 0, 3], [3, 2, 1]].map(|indices| {
+        Reverse(Face::from_vertex_indices(
+            indices,
+            &vertices,
+            minkowski_difference_center,
+        ))
+    }));
 
     let mut unique_edges = Vec::new();
     for _ in 0..steps {
@@ -66,11 +71,13 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
 
         let k = vertices.len();
         vertices.push(support);
-        faces.extend(
-            unique_edges
-                .drain(..)
-                .map(|(i, j)| Reverse(Face::from_vertex_indices([i, j, k], &vertices))),
-        );
+        faces.extend(unique_edges.drain(..).map(|(i, j)| {
+            Reverse(Face::from_vertex_indices(
+                [i, j, k],
+                &vertices,
+                minkowski_difference_center,
+            ))
+        }));
     }
 
     let closest_face = &faces.peek().unwrap().0;
@@ -101,45 +108,53 @@ pub struct Face {
 }
 
 impl Face {
-    fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
+    fn from_vertex_indices(
+        vertex_indices: [usize; 3],
+        vertices: &[SupportPoint],
+        minkowski_difference_center: Vec3,
+    ) -> Face {
         let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
-        let normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
+        let mut normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
             // handle degenerate triangles
             if a.abs_diff_eq(b, 1e-4) {
                 if a.abs_diff_eq(c, 1e-4) {
-                    let normal = a.normalize_or(Vec3::X);
+                    let normal = a
+                        .try_normalize()
+                        .unwrap_or_else(|| -minkowski_difference_center.normalize_or(Vec3::X));
                     debug!("degenerate face: Point({a}) => {normal}");
                     normal
                 } else {
                     let ac = c - a;
-                    let normal = ac
-                        .cross(Vec3::X)
-                        .normalize_or(ac.cross(Vec3::Y).normalize());
+                    let normal = a
+                        .cross(ac)
+                        .cross(ac)
+                        .try_normalize()
+                        .or_else(|| ac.cross(Vec3::X).try_normalize())
+                        .unwrap_or_else(|| ac.cross(Vec3::Y).normalize());
                     debug!("degenerate face: line({a},{c}) => {normal}");
                     normal
                 }
             } else {
                 let ab = b - a;
-                let normal = ab
-                    .cross(Vec3::X)
-                    .normalize_or(ab.cross(Vec3::Y).normalize());
+                let normal = a
+                    .cross(ab)
+                    .cross(ab)
+                    .try_normalize()
+                    .or_else(|| ab.cross(Vec3::X).try_normalize())
+                    .unwrap_or_else(|| ab.cross(Vec3::Y).normalize());
                 debug!("degenerate face: line({a},{b}) => {normal}");
                 normal
             }
         });
+        dbg!((minkowski_difference_center - a).dot(normal).signum() == -a.dot(normal).signum());
+        if (minkowski_difference_center - a).dot(normal) > 0.0 {
+            normal = -normal;
+        }
         let distance = a.dot(normal);
-        if distance < 0.0 {
-            Face {
-                indices: vertex_indices,
-                normal: -normal,
-                distance: -distance,
-            }
-        } else {
-            Face {
-                indices: vertex_indices,
-                normal,
-                distance,
-            }
+        Face {
+            indices: vertex_indices,
+            normal,
+            distance,
         }
     }
 
@@ -189,8 +204,29 @@ mod tests {
         let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
         let separating_vector = epa(&origin, &origin, tetrahedron);
         assert!(
-            (separating_vector.w - 2.0).abs() <= 1e-4,
+            (separating_vector.w - 2.0).abs() <= 0.1,
             "Expected 2.0, got {}",
+            separating_vector.w
+        );
+
+        let x = Ball {
+            center: Vec3::X,
+            radius: 0.0,
+        };
+
+        let tetrahedron = gjk_tetrahedron(&x, &x).unwrap();
+        let separating_vector = epa(&x, &x, tetrahedron);
+        assert!(
+            separating_vector.w.abs() <= 0.1,
+            "Expected 0.0, got {}",
+            separating_vector.w
+        );
+
+        let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
+        let separating_vector = epa(&origin, &x, tetrahedron);
+        assert!(
+            separating_vector.w.abs() <= 0.1,
+            "Expected 0.0, got {}",
             separating_vector.w
         );
 

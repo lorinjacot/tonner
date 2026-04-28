@@ -81,8 +81,7 @@ pub trait ConvexShape: Shape {
     /// This corresponds to furthest point in the given direction that is still on the shape.
     /// In general this point is not unique.
     ///
-    /// `direction` can have any length. If `direction` is of length `0.0`, any point
-    /// on the surface can be returned.
+    /// `direction` can have any length, but it must not be the zero vector.
     fn support_point(&self, direction: Vec3) -> Vec3;
 
     fn collides(&self, other: &impl ConvexShape) -> bool {
@@ -111,6 +110,6 @@ impl Shape for Ball {
 
 impl ConvexShape for Ball {
     fn support_point(&self, direction: Vec3) -> Vec3 {
-        self.center + direction.try_normalize().unwrap_or(Vec3::X) * self.radius
+        self.center + direction.normalize() * self.radius
     }
 }

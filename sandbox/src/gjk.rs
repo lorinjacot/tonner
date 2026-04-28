@@ -28,6 +28,9 @@ pub(crate) fn gjk_tetrahedron<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized
     let mut simplex = Simplex::Point([a]);
 
     loop {
+        if direction.abs_diff_eq(Vec3::ZERO, 1e-4) {
+            direction = Vec3::X;
+        }
         let a = SupportPoint::new(shape1, shape2, direction);
 
         if a.difference.dot(direction) < 0.0 {

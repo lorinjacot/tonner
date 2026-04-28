@@ -3,7 +3,7 @@ use std::iter::{once, repeat_n};
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::{Quat, Vec3, vec3};
+use glam::{Quat, Vec3};
 use image::DynamicImage;
 use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
@@ -27,22 +27,21 @@ use winit::window::{Window, WindowId};
 
 use crate::epa::{EpaResult, epa_dbg};
 use crate::gjk::gjk_tetrahedron;
-use crate::shape::{AxisAlignedBox, Ball};
+use crate::shape::Ball;
 
 mod epa;
 mod gjk;
 mod shape;
 
-fn create_shapes() -> (AxisAlignedBox, Ball) {
-    let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+const DEFAULT_STEPS: usize = 0;
 
-    let mut ball = Ball {
+fn create_shapes() -> (Ball, Ball) {
+    let origin = Ball {
         center: Vec3::ZERO,
         radius: 1.0,
     };
-    ball.center = vec3(1.57, 1.57, 1.57);
 
-    (aab, ball)
+    (origin, origin.clone())
 }
 
 fn create_points(
@@ -106,13 +105,11 @@ fn create_normals(
             let entity = entity_manager.new_entity();
             let vertices = face.0.indices.map(|i| epa_result.vertices[i].difference);
             let origin = vertices[0].midpoint(vertices[1]).midpoint(vertices[2]);
-            scene_graph.add_with_transform(
-                entity,
-                None,
-                origin,
-                Quat::look_to_rh(face.0.normal, Vec3::Y).inverse(),
-                Vec3::ONE,
-            );
+            let mut rotation = Quat::look_to_rh(face.0.normal, Vec3::Y);
+            if rotation.is_nan() {
+                rotation = Quat::look_to_rh(face.0.normal, Vec3::X);
+            }
+            scene_graph.add_with_transform(entity, None, origin, rotation.inverse(), Vec3::ONE);
             (entity, normal_mesh.new_instance(entity))
         })
         .collect()
@@ -224,9 +221,8 @@ impl Scene {
 
         let (aab, ball) = create_shapes();
 
-        let steps = 0;
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let epa_result = epa_dbg(&aab, &ball, tetrahedron, steps);
+        let epa_result = epa_dbg(&aab, &ball, tetrahedron, DEFAULT_STEPS);
 
         let yellow = MaterialBuilder::default()
             .base_color_factor([1.0, 1.0, 0.0, 0.8])
@@ -270,8 +266,8 @@ impl Scene {
             renderer,
             controls,
             last_frame: Instant::now(),
-            steps,
-            rendered_steps: steps,
+            steps: DEFAULT_STEPS,
+            rendered_steps: DEFAULT_STEPS,
             yellow,
             normal_mesh,
             points,
@@ -648,6 +644,8 @@ struct App {
 }
 
 fn main() {
+    env_logger::init();
+
     let event_loop = EventLoop::new().unwrap();
 
     event_loop.set_control_flow(ControlFlow::Poll);

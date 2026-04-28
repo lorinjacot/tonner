@@ -3,6 +3,7 @@
 use std::{cmp::Reverse, collections::BinaryHeap};
 
 use glam::{Vec3, Vec4};
+use log::debug;
 
 use crate::{gjk::SupportPoint, shape::ConvexShape};
 
@@ -21,15 +22,34 @@ pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
     tetrahedron: [SupportPoint; 4],
     steps: usize,
 ) -> EpaResult {
-    let mut vertices = Vec::from(tetrahedron);
-    let mut faces = BinaryHeap::from(
-        [[3, 2, 1], [3, 1, 0], [3, 0, 2], [2, 0, 1]]
-            .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
-    );
+    let mut vertices: Vec<SupportPoint> = Vec::with_capacity(4 + steps);
+    tetrahedron.into_iter().for_each(|support_point| {
+        if vertices
+            .iter()
+            .find(|v| v.difference.abs_diff_eq(support_point.difference, 1e-4))
+            .is_none()
+        {
+            vertices.push(support_point);
+        }
+    });
+
+    let mut faces = if vertices.len() == 4 {
+        BinaryHeap::from(
+            [[0, 1, 2], [0, 2, 3], [0, 3, 1], [1, 3, 2]]
+                .map(|indices| Reverse(Face::from_vertex_indices(indices, &vertices))),
+        )
+    } else if vertices.len() == 3 {
+        BinaryHeap::from(
+            [[0, 1, 2], [0, 2, 1]]
+                .map(|indicies| Reverse(Face::from_vertex_indices(indicies, &vertices))),
+        )
+    } else {
+        todo!()
+    };
 
     let mut unique_edges = Vec::new();
     for _ in 0..steps {
-        let closest_face = dbg!(&mut faces).pop().unwrap().0;
+        let closest_face = faces.pop().unwrap().0;
 
         let support = SupportPoint::new(shape1, shape2, closest_face.normal);
         let distance_support = support.difference.dot(closest_face.normal);
@@ -101,37 +121,44 @@ pub struct Face {
 
 impl Face {
     fn from_vertex_indices(vertex_indices: [usize; 3], vertices: &[SupportPoint]) -> Face {
-        let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
+        let [a, b, c] = dbg!(vertex_indices.map(|i| vertices[i].difference));
         let normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
             // handle degenerate triangles
             if a.abs_diff_eq(b, 1e-4) {
                 if a.abs_diff_eq(c, 1e-4) {
-                    // point
-                    a.normalize_or(Vec3::X)
+                    let normal = a.normalize_or(Vec3::X);
+                    debug!("degenerate face: Point({a}) => {normal}");
+                    normal
                 } else {
-                    // line
                     let ac = c - a;
-                    ac.cross(Vec3::X).normalize_or(Vec3::Y)
+                    let normal = ac
+                        .cross(Vec3::X)
+                        .normalize_or(ac.cross(Vec3::Y).normalize());
+                    debug!("degenerate face: line({a},{c}) => {normal}");
+                    normal
                 }
             } else {
-                // line
                 let ab = b - a;
-                ab.cross(Vec3::X).normalize_or(Vec3::Y)
+                let normal = ab
+                    .cross(Vec3::X)
+                    .normalize_or(ab.cross(Vec3::Y).normalize());
+                debug!("degenerate face: line({a},{b}) => {normal}");
+                normal
             }
         });
         let distance = a.dot(normal);
         if distance < 0.0 {
-            Face {
+            dbg!(Face {
                 indices: vertex_indices,
                 normal: -normal,
                 distance: -distance,
-            }
+            })
         } else {
-            Face {
+            dbg!(Face {
                 indices: vertex_indices,
                 normal,
                 distance,
-            }
+            })
         }
     }
 

@@ -2,182 +2,236 @@
 
 use std::{cmp::Reverse, collections::BinaryHeap};
 
-use glam::{Vec3, Vec4};
-use log::debug;
+use glam::Vec3;
 
 use crate::{gjk::SupportPoint, shape::ConvexShape};
 
-const MAX_ITERATION: usize = 100;
-
-pub struct EpaResult {
-    pub direction: Vec3,
-    pub distance: f32,
-    pub vertices: Vec<SupportPoint>,
-    pub faces: BinaryHeap<Reverse<Face>>,
+#[derive(Debug)]
+pub struct EpaEngine {
+    max_iteration: usize,
+    vertices: Vec<SupportPoint>,
+    faces: Vec<Face>,
+    priority_queue: BinaryHeap<Reverse<Entry>>,
+    abs_epsilon: f32,
+    edges: Vec<AdjacentFace>,
 }
 
-pub(crate) fn epa_dbg<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
-    shape1: &S1,
-    shape2: &S2,
-    tetrahedron: [SupportPoint; 4],
-    steps: usize,
-) -> EpaResult {
-    let minkowski_difference_center = shape1.centroid() - shape2.centroid();
+impl EpaEngine {
+    pub fn penetration_depth<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+        &mut self,
+        shape1: &S1,
+        shape2: &S2,
+        tetrahedron: [SupportPoint; 4],
+    ) -> Vec3 {
+        self.vertices.clear();
+        self.faces.clear();
+        self.priority_queue.clear();
 
-    let mut vertices: Vec<SupportPoint> = Vec::from_iter(tetrahedron);
-    let mut faces = BinaryHeap::from([[0, 1, 2], [2, 3, 0], [1, 0, 3], [3, 2, 1]].map(|indices| {
-        Reverse(Face::from_vertex_indices(
-            indices,
-            &vertices,
-            minkowski_difference_center,
-        ))
-    }));
+        self.vertices.extend(tetrahedron);
+        self.faces.extend([
+            Face::new_init(
+                [3, 2, 1],
+                [
+                    AdjacentFace { index: 1, edge: 1 },
+                    AdjacentFace { index: 3, edge: 1 },
+                    AdjacentFace { index: 2, edge: 1 },
+                ],
+                &self.vertices,
+            ),
+            Face::new_init(
+                [0, 2, 3],
+                [
+                    AdjacentFace { index: 3, edge: 2 },
+                    AdjacentFace { index: 0, edge: 0 },
+                    AdjacentFace { index: 2, edge: 0 },
+                ],
+                &self.vertices,
+            ),
+            Face::new_init(
+                [0, 3, 1],
+                [
+                    AdjacentFace { index: 1, edge: 2 },
+                    AdjacentFace { index: 0, edge: 2 },
+                    AdjacentFace { index: 3, edge: 0 },
+                ],
+                &self.vertices,
+            ),
+            Face::new_init(
+                [0, 1, 2],
+                [
+                    AdjacentFace { index: 2, edge: 2 },
+                    AdjacentFace { index: 0, edge: 1 },
+                    AdjacentFace { index: 1, edge: 0 },
+                ],
+                &self.vertices,
+            ),
+        ]);
+        self.priority_queue
+            .extend(self.faces.iter().enumerate().filter_map(|(index, face)| {
+                face.closest_is_internal().then(|| {
+                    Reverse(Entry {
+                        face: index,
+                        distance: face.distance,
+                    })
+                })
+            }));
 
-    let mut unique_edges = Vec::new();
-    for _ in 0..steps {
-        let closest_face = faces.pop().unwrap().0;
-
-        let support = SupportPoint::new(shape1, shape2, closest_face.normal);
-        let distance_support = support.difference.dot(closest_face.normal);
-
-        if (distance_support - closest_face.distance).abs() < 1e-6 {
-            break;
-        }
-        unique_edges.extend(closest_face.edges());
-
-        // In order to keep the polyhedron convex, we need to remove all faces visible from `support`.
-        // This creates a hole whose border is made up of all edges appearing in only one of the removed faces.
-        faces.retain(|face| {
-            let point_on_face = vertices[face.0.indices[0]].difference;
-            if face.0.normal.dot(support.difference - point_on_face) > 0.0 {
-                face.0.edges().into_iter().for_each(|(i, j)| {
-                    match unique_edges
-                        .iter()
-                        .enumerate()
-                        .find(|(_, edge)| **edge == (j, i))
-                    {
-                        Some((i, _)) => {
-                            unique_edges.swap_remove(i);
-                        }
-                        None => unique_edges.push((i, j)),
-                    }
-                });
-
-                false
-            } else {
-                true
+        loop {
+            let entry = self.priority_queue.pop().unwrap();
+            let closest_face = &mut self.faces[entry.0.face];
+            if closest_face.obsolete {
+                continue;
             }
-        });
 
-        let k = vertices.len();
-        vertices.push(support);
-        faces.extend(unique_edges.drain(..).map(|(i, j)| {
-            Reverse(Face::from_vertex_indices(
-                [i, j, k],
-                &vertices,
-                minkowski_difference_center,
-            ))
-        }));
+            let closest_point = closest_face.closest;
+            let support_point = SupportPoint::new(shape1, shape2, closest_point);
+            if closest_point.dot(support_point.difference) / closest_point.length()
+                - closest_point.length()
+                <= self.abs_epsilon
+            {
+                return closest_point;
+            }
+
+            closest_face.obsolete = true;
+
+            for adjacent_face in &closest_face.adjacents {
+                Self::silhouette(adjacent_face, &support_point, &mut self.edges);
+            }
+
+            self.vertices.push(support_point);
+            let support_index = self.vertices.len();
+
+            let old_face_count = self.faces.len();
+            let mut last_face_index = old_face_count + self.edges.len() - 1;
+            for adjacent_face in self.edges.drain(..) {
+                let current_face_index = self.faces.len();
+                let face = &mut self.faces[adjacent_face.index];
+                let adj = &mut face.adjacents[adjacent_face.edge];
+                adj.index = current_face_index;
+                adj.edge = 0;
+
+                let face = Face::new(
+                    [
+                        face.vertex_indices[adjacent_face.edge],
+                        face.vertex_indices[adjacent_face.edge + 1 % 3],
+                        support_index,
+                    ],
+                    [
+                        adjacent_face,
+                        AdjacentFace {
+                            index: current_face_index + 1,
+                            edge: 2,
+                        },
+                        AdjacentFace {
+                            index: last_face_index,
+                            edge: 1,
+                        },
+                    ],
+                    &self.vertices,
+                );
+
+                if face.closest_is_internal() {
+                    self.priority_queue.push(Reverse(Entry {
+                        face: current_face_index,
+                        distance: face.distance,
+                    }));
+                }
+
+                self.faces.push(face);
+                last_face_index = current_face_index;
+            }
+            self.faces[last_face_index].adjacents[2].index = old_face_count;
+        }
     }
 
-    let closest_face = &faces.peek().unwrap().0;
-
-    EpaResult {
-        direction: closest_face.normal,
-        distance: closest_face.distance,
-        vertices,
-        faces,
+    fn silhouette(
+        adjacent_face: &AdjacentFace,
+        support_point: &SupportPoint,
+        edges: &mut Vec<AdjacentFace>,
+    ) {
+        todo!()
     }
 }
 
-pub(crate) fn epa<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
-    shape1: &S1,
-    shape2: &S2,
-    tetrahedron: [SupportPoint; 4],
-) -> Vec4 {
-    let res = epa_dbg(shape1, shape2, tetrahedron, MAX_ITERATION);
+impl Default for EpaEngine {
+    fn default() -> Self {
+        EpaEngine {
+            max_iteration: 100,
+            vertices: Vec::with_capacity(104),
+            faces: Vec::with_capacity(104),
+            priority_queue: BinaryHeap::with_capacity(104),
+            abs_epsilon: 1e-6,
+            edges: Vec::new(),
+        }
+    }
+}
 
-    res.direction.extend(res.distance)
+#[derive(Debug, Clone, Copy)]
+struct AdjacentFace {
+    index: usize,
+    edge: usize,
 }
 
 #[derive(Debug)]
-pub struct Face {
-    pub indices: [usize; 3],
-    pub normal: Vec3,
-    pub distance: f32,
+struct Face {
+    vertex_indices: [usize; 3],
+    closest: Vec3,
+    barycentric_coordinates: [f32; 3],
+    distance: f32,
+    adjacents: [AdjacentFace; 3],
+    obsolete: bool,
 }
 
 impl Face {
-    fn from_vertex_indices(
+    fn new_init(
         vertex_indices: [usize; 3],
+        adjacents: [AdjacentFace; 3],
         vertices: &[SupportPoint],
-        minkowski_difference_center: Vec3,
     ) -> Face {
-        let [a, b, c] = vertex_indices.map(|i| vertices[i].difference);
-        let mut normal = (b - a).cross(c - a).try_normalize().unwrap_or_else(|| {
-            // handle degenerate triangles
-            if a.abs_diff_eq(b, 1e-4) {
-                if a.abs_diff_eq(c, 1e-4) {
-                    let normal = a
-                        .try_normalize()
-                        .unwrap_or_else(|| -minkowski_difference_center.normalize_or(Vec3::X));
-                    debug!("degenerate face: Point({a}) => {normal}");
-                    normal
-                } else {
-                    let ac = c - a;
-                    let normal = a
-                        .cross(ac)
-                        .cross(ac)
-                        .try_normalize()
-                        .or_else(|| ac.cross(Vec3::X).try_normalize())
-                        .unwrap_or_else(|| ac.cross(Vec3::Y).normalize());
-                    debug!("degenerate face: line({a},{c}) => {normal}");
-                    normal
-                }
-            } else {
-                let ab = b - a;
-                let normal = a
-                    .cross(ab)
-                    .cross(ab)
-                    .try_normalize()
-                    .or_else(|| ab.cross(Vec3::X).try_normalize())
-                    .unwrap_or_else(|| ab.cross(Vec3::Y).normalize());
-                debug!("degenerate face: line({a},{b}) => {normal}");
-                normal
-            }
-        });
-        dbg!((minkowski_difference_center - a).dot(normal).signum() == -a.dot(normal).signum());
-        if (minkowski_difference_center - a).dot(normal) > 0.0 {
-            normal = -normal;
-        }
-        let distance = a.dot(normal);
         Face {
-            indices: vertex_indices,
-            normal,
-            distance,
+            vertex_indices,
+            closest: todo!(),
+            barycentric_coordinates: todo!(),
+            distance: todo!(),
+            adjacents,
+            obsolete: false,
         }
     }
 
-    fn edges(&self) -> [(usize, usize); 3] {
-        [(0, 1), (1, 2), (2, 0)].map(|(i, j)| (self.indices[i], self.indices[j]))
+    fn new(
+        vertex_indices: [usize; 3],
+        adjacents: [AdjacentFace; 3],
+        vertices: &[SupportPoint],
+    ) -> Face {
+        todo!()
+    }
+
+    fn closest_is_internal(&self) -> bool {
+        todo!()
     }
 }
 
-impl PartialEq for Face {
+#[derive(Debug)]
+struct Entry {
+    face: usize,
+    distance: f32,
+}
+
+impl PartialEq for Entry {
     fn eq(&self, other: &Self) -> bool {
         self.distance == other.distance
     }
 }
 
-impl PartialOrd for Face {
+impl PartialOrd for Entry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for Face {}
+impl Eq for Entry {}
 
-impl Ord for Face {
+impl Ord for Entry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.distance.total_cmp(&other.distance)
     }
@@ -194,123 +248,123 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_two_balls() {
-        let origin = Ball {
-            center: Vec3::ZERO,
-            radius: 1.0,
-        };
+    // #[test]
+    // fn test_two_balls() {
+    //     let origin = Ball {
+    //         center: Vec3::ZERO,
+    //         radius: 1.0,
+    //     };
 
-        let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
-        let separating_vector = epa(&origin, &origin, tetrahedron);
-        assert!(
-            (separating_vector.w - 2.0).abs() <= 0.1,
-            "Expected 2.0, got {}",
-            separating_vector.w
-        );
+    //     let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
+    //     let separating_vector = epa(&origin, &origin, tetrahedron);
+    //     assert!(
+    //         (separating_vector.w - 2.0).abs() <= 0.1,
+    //         "Expected 2.0, got {}",
+    //         separating_vector.w
+    //     );
 
-        let x = Ball {
-            center: Vec3::X,
-            radius: 0.0,
-        };
+    //     let x = Ball {
+    //         center: Vec3::X,
+    //         radius: 0.0,
+    //     };
 
-        let tetrahedron = gjk_tetrahedron(&x, &x).unwrap();
-        let separating_vector = epa(&x, &x, tetrahedron);
-        assert!(
-            separating_vector.w.abs() <= 0.1,
-            "Expected 0.0, got {}",
-            separating_vector.w
-        );
+    //     let tetrahedron = gjk_tetrahedron(&x, &x).unwrap();
+    //     let separating_vector = epa(&x, &x, tetrahedron);
+    //     assert!(
+    //         separating_vector.w.abs() <= 0.1,
+    //         "Expected 0.0, got {}",
+    //         separating_vector.w
+    //     );
 
-        let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
-        let separating_vector = epa(&origin, &x, tetrahedron);
-        assert!(
-            separating_vector.w.abs() <= 0.1,
-            "Expected 0.0, got {}",
-            separating_vector.w
-        );
+    //     let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
+    //     let separating_vector = epa(&origin, &x, tetrahedron);
+    //     assert!(
+    //         separating_vector.w.abs() <= 0.1,
+    //         "Expected 0.0, got {}",
+    //         separating_vector.w
+    //     );
 
-        // let x = Ball {
-        //     center: Vec3::X,
-        //     radius: 1.0,
-        // };
-        // assert!(gjk(&x, &x));
-        // let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
-        // dbg!(epa(&origin, &x, tetrahedron));
-        // assert!(gjk(&origin, &x));
+    //     // let x = Ball {
+    //     //     center: Vec3::X,
+    //     //     radius: 1.0,
+    //     // };
+    //     // assert!(gjk(&x, &x));
+    //     // let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
+    //     // dbg!(epa(&origin, &x, tetrahedron));
+    //     // assert!(gjk(&origin, &x));
 
-        // let three_x = Ball {
-        //     center: 3.0 * Vec3::X,
-        //     radius: 1.0,
-        // };
-        // assert!(!gjk(&origin, &three_x));
-        // assert!(gjk(&x, &three_x));
+    //     // let three_x = Ball {
+    //     //     center: 3.0 * Vec3::X,
+    //     //     radius: 1.0,
+    //     // };
+    //     // assert!(!gjk(&origin, &three_x));
+    //     // assert!(gjk(&x, &three_x));
 
-        // let random_center = Ball {
-        //     center: vec3(-1.0312, 0.13312, 1.2),
-        //     radius: 1.0,
-        // };
-        // assert!(gjk(&origin, &random_center));
-        // assert!(!gjk(&x, &random_center));
+    //     // let random_center = Ball {
+    //     //     center: vec3(-1.0312, 0.13312, 1.2),
+    //     //     radius: 1.0,
+    //     // };
+    //     // assert!(gjk(&origin, &random_center));
+    //     // assert!(!gjk(&x, &random_center));
 
-        // let radius = 2.343;
-        // let random_radius = Ball {
-        //     center: Vec3::Y * radius,
-        //     radius,
-        // };
-        // assert!(gjk(&origin, &random_radius));
-        // assert!(gjk(&x, &random_radius));
-        // assert!(!gjk(&three_x, &random_radius));
-    }
+    //     // let radius = 2.343;
+    //     // let random_radius = Ball {
+    //     //     center: Vec3::Y * radius,
+    //     //     radius,
+    //     // };
+    //     // assert!(gjk(&origin, &random_radius));
+    //     // assert!(gjk(&x, &random_radius));
+    //     // assert!(!gjk(&three_x, &random_radius));
+    // }
 
-    #[test]
-    fn test_ball_axis_aligned_boxes() {
-        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+    // #[test]
+    // fn test_ball_axis_aligned_boxes() {
+    //     let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
 
-        let mut ball = Ball {
-            center: Vec3::ZERO,
-            radius: 1.0,
-        };
+    //     let mut ball = Ball {
+    //         center: Vec3::ZERO,
+    //         radius: 1.0,
+    //     };
 
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert!(
-            (separating_vector.w - 2.0).abs() <= 1e-4,
-            "Expected 1.0, got {}",
-            separating_vector.w
-        );
+    //     let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+    //     let separating_vector = epa(&aab, &ball, tetrahedron);
+    //     assert!(
+    //         (separating_vector.w - 2.0).abs() <= 1e-4,
+    //         "Expected 1.0, got {}",
+    //         separating_vector.w
+    //     );
 
-        ball.center = vec3(1.99, 0.0, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
+    //     ball.center = vec3(1.99, 0.0, 0.0);
+    //     let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+    //     let separating_vector = epa(&aab, &ball, tetrahedron);
+    //     assert_seperating_vector(ball.center.normalize(), 0.01, separating_vector);
 
-        ball.center = vec3(2.0, 0.0, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0, separating_vector);
+    //     ball.center = vec3(2.0, 0.0, 0.0);
+    //     let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+    //     let separating_vector = epa(&aab, &ball, tetrahedron);
+    //     assert_seperating_vector(ball.center.normalize(), 0.0, separating_vector);
 
-        ball.center = vec3(1.70, 1.70, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0101, separating_vector);
+    //     ball.center = vec3(1.70, 1.70, 0.0);
+    //     let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+    //     let separating_vector = epa(&aab, &ball, tetrahedron);
+    //     assert_seperating_vector(ball.center.normalize(), 0.0101, separating_vector);
 
-        ball.center = vec3(1.57, 1.57, 1.57);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let separating_vector = epa(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0127, separating_vector);
-    }
+    //     ball.center = vec3(1.57, 1.57, 1.57);
+    //     let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+    //     let separating_vector = epa(&aab, &ball, tetrahedron);
+    //     assert_seperating_vector(ball.center.normalize(), 0.0127, separating_vector);
+    // }
 
-    fn assert_seperating_vector(expected_direction: Vec3, expected_length: f32, actual: Vec4) {
-        assert!(
-            actual.truncate().abs_diff_eq(expected_direction, 1e-2),
-            "Expected {expected_direction}, got {}",
-            actual.truncate()
-        );
-        assert!(
-            (actual.w - expected_length).abs() <= 1e-4,
-            "Expected {expected_length}, got {}",
-            actual.w
-        );
-    }
+    // fn assert_seperating_vector(expected_direction: Vec3, expected_length: f32, actual: Vec4) {
+    //     assert!(
+    //         actual.truncate().abs_diff_eq(expected_direction, 1e-2),
+    //         "Expected {expected_direction}, got {}",
+    //         actual.truncate()
+    //     );
+    //     assert!(
+    //         (actual.w - expected_length).abs() <= 1e-4,
+    //         "Expected {expected_length}, got {}",
+    //         actual.w
+    //     );
+    // }
 }

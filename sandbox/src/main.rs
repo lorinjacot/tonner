@@ -1,9 +1,9 @@
 use std::f32::consts::{FRAC_PI_2, PI};
-use std::iter::{once, repeat_n};
+use std::iter::once;
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, vec3};
 use image::DynamicImage;
 use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
@@ -25,9 +25,9 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
-use crate::epa::{EpaResult, epa_dbg};
+use crate::epa::{EpaEngine, EpaState};
 use crate::gjk::gjk_tetrahedron;
-use crate::shape::Ball;
+use crate::shape::{AxisAlignedBox, Ball};
 
 mod epa;
 mod gjk;
@@ -35,27 +35,25 @@ mod shape;
 
 const DEFAULT_STEPS: usize = 0;
 
-fn create_shapes() -> (Ball, Ball) {
-    let origin = Ball {
+fn create_shapes() -> (AxisAlignedBox, Ball) {
+    let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+    let mut ball = Ball {
         center: Vec3::ZERO,
         radius: 1.0,
     };
+    ball.center = vec3(1.99, 0.0, 0.0);
 
-    let x = Ball {
-        center: Vec3::X,
-        radius: 0.0,
-    };
-
-    (x, origin)
+    (aab, ball)
 }
 
 fn create_points(
-    epa_result: &EpaResult,
+    epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     point: &Mesh,
 ) -> SparseArray<MeshInstance> {
-    epa_result
+    epa_state
         .vertices
         .iter()
         .map(|v| {
@@ -67,23 +65,25 @@ fn create_points(
 }
 
 fn create_faces(
-    epa_result: &EpaResult,
+    epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     context: &Context,
     face_material: &Material,
 ) -> SparseArray<MeshInstance> {
-    epa_result
+    epa_state
         .faces
         .iter()
         .enumerate()
+        .filter(|(_, face)| !face.obsolete)
         .map(|(i, face)| {
             let entity = entity_manager.new_entity();
             scene_graph.add(entity, None);
             let face = GeometryBuilder::new(3, 0)
-                .positions(face.0.indices.map(|i| epa_result.vertices[i].difference))
-                .unwrap()
-                .normals(repeat_n(face.0.normal, 3))
+                .positions(
+                    face.vertex_indices
+                        .map(|i| epa_state.vertices[i].difference),
+                )
                 .unwrap()
                 .build(&context)
                 .unwrap();
@@ -98,21 +98,22 @@ fn create_faces(
 }
 
 fn create_normals(
-    epa_result: &EpaResult,
+    epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     normal_mesh: &Mesh,
 ) -> SparseArray<MeshInstance> {
-    epa_result
+    epa_state
         .faces
         .iter()
+        .filter(|face| !face.obsolete)
         .map(|face| {
             let entity = entity_manager.new_entity();
-            let vertices = face.0.indices.map(|i| epa_result.vertices[i].difference);
-            let origin = vertices[0].midpoint(vertices[1]).midpoint(vertices[2]);
-            let mut rotation = Quat::look_to_rh(face.0.normal, Vec3::Y);
+            let origin = face.closest;
+            let dir = face.closest.normalize();
+            let mut rotation = Quat::look_to_rh(dir, Vec3::Y);
             if rotation.is_nan() {
-                rotation = Quat::look_to_rh(face.0.normal, Vec3::X);
+                rotation = Quat::look_to_rh(dir, Vec3::X);
             }
             scene_graph.add_with_transform(entity, None, origin, rotation.inverse(), Vec3::ONE);
             (entity, normal_mesh.new_instance(entity))
@@ -139,6 +140,7 @@ struct Scene {
     points: SparseArray<MeshInstance>,
     faces: SparseArray<MeshInstance>,
     normals: SparseArray<MeshInstance>,
+    epa_engine: EpaEngine,
 }
 
 impl Scene {
@@ -224,15 +226,18 @@ impl Scene {
             .build(&context)
             .unwrap();
 
+        let mut epa_engine = EpaEngine::default();
+
         let (aab, ball) = create_shapes();
 
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let epa_result = epa_dbg(&aab, &ball, tetrahedron, DEFAULT_STEPS);
+        let epa_result =
+            epa_engine.penetration_depth_details(&aab, &ball, tetrahedron, DEFAULT_STEPS);
 
         let yellow = MaterialBuilder::default()
             .base_color_factor([1.0, 1.0, 0.0, 0.8])
             .alpha_mode(AlphaMode::Opaque)
-            .double_sided(true)
+            .double_sided(false)
             .build(&context);
 
         let normal_parts = ArrowBuilder::default().build(&context);
@@ -278,6 +283,7 @@ impl Scene {
             points,
             faces,
             normals,
+            epa_engine,
         }
     }
 
@@ -298,7 +304,9 @@ impl Scene {
 
             let (aab, ball) = create_shapes();
             let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-            let epa_result = epa_dbg(&aab, &ball, tetrahedron, self.steps);
+            let epa_result =
+                self.epa_engine
+                    .penetration_depth_details(&aab, &ball, tetrahedron, self.steps);
 
             self.points = create_points(
                 &epa_result,

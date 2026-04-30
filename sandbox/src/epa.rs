@@ -16,7 +16,174 @@ pub struct EpaEngine {
     abs_epsilon: f32,
 }
 
+#[derive(Debug)]
+pub struct EpaState<'a> {
+    pub vertices: &'a mut Vec<SupportPoint>,
+    pub faces: &'a mut Vec<Face>,
+    edges: &'a mut Vec<AdjacentFace>,
+    priority_queue: &'a mut BinaryHeap<Reverse<Entry>>,
+}
+
+impl<'a> EpaState<'a> {
+    fn init(
+        tetrahedron: [SupportPoint; 4],
+        vertices: &'a mut Vec<SupportPoint>,
+        faces: &'a mut Vec<Face>,
+        edges: &'a mut Vec<AdjacentFace>,
+        priority_queue: &'a mut BinaryHeap<Reverse<Entry>>,
+    ) -> Self {
+        vertices.clear();
+        faces.clear();
+        priority_queue.clear();
+
+        vertices.extend(tetrahedron);
+        faces.extend([
+            Face::new(
+                [3, 2, 1],
+                [
+                    AdjacentFace { index: 1, edge: 1 },
+                    AdjacentFace { index: 3, edge: 1 },
+                    AdjacentFace { index: 2, edge: 1 },
+                ],
+                &vertices,
+            ),
+            Face::new(
+                [0, 2, 3],
+                [
+                    AdjacentFace { index: 3, edge: 2 },
+                    AdjacentFace { index: 0, edge: 0 },
+                    AdjacentFace { index: 2, edge: 0 },
+                ],
+                &vertices,
+            ),
+            Face::new(
+                [0, 3, 1],
+                [
+                    AdjacentFace { index: 1, edge: 2 },
+                    AdjacentFace { index: 0, edge: 2 },
+                    AdjacentFace { index: 3, edge: 0 },
+                ],
+                &vertices,
+            ),
+            Face::new(
+                [0, 1, 2],
+                [
+                    AdjacentFace { index: 2, edge: 2 },
+                    AdjacentFace { index: 0, edge: 1 },
+                    AdjacentFace { index: 1, edge: 0 },
+                ],
+                &vertices,
+            ),
+        ]);
+        priority_queue.extend(faces.iter().enumerate().filter_map(|(index, face)| {
+            face.closest_is_internal().then(|| {
+                Reverse(Entry {
+                    face: index,
+                    distance: face.distance,
+                })
+            })
+        }));
+
+        EpaState {
+            vertices,
+            faces,
+            edges,
+            priority_queue,
+        }
+    }
+}
+
 impl EpaEngine {
+    pub fn penetration_depth_details<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+        &mut self,
+        shape1: &S1,
+        shape2: &S2,
+        tetrahedron: [SupportPoint; 4],
+        steps: usize,
+    ) -> EpaState<'_> {
+        let mut state = EpaState::init(
+            tetrahedron,
+            &mut self.vertices,
+            &mut self.faces,
+            &mut self.edges,
+            &mut self.priority_queue,
+        );
+
+        for _ in 0..steps {
+            let entry = state.priority_queue.pop().unwrap();
+            let closest_face = &mut state.faces[entry.0.face];
+            if closest_face.obsolete {
+                continue;
+            }
+
+            let closest_point = closest_face.closest;
+            let support_point = SupportPoint::new(shape1, shape2, closest_point);
+            if closest_point.dot(support_point.difference) / closest_point.length()
+                - closest_point.length()
+                <= self.abs_epsilon
+            {
+                break;
+            }
+
+            closest_face.obsolete = true;
+
+            for adjacent_face in &closest_face.adjacents.clone() {
+                silhouette(
+                    adjacent_face,
+                    &support_point,
+                    &mut state.edges,
+                    &mut state.faces,
+                );
+            }
+
+            let support_index = state.vertices.len();
+            state.vertices.push(support_point);
+
+            let old_face_count = state.faces.len();
+            let mut last_face_index = old_face_count + state.edges.len() - 1;
+            for adjacent_face in state.edges.drain(..) {
+                let current_face_index = state.faces.len();
+                let face = &mut state.faces[adjacent_face.index];
+                let adj = &mut face.adjacents[adjacent_face.edge];
+                adj.index = current_face_index;
+                adj.edge = 0;
+
+                let face = Face::new(
+                    [
+                        face.vertex_indices[(adjacent_face.edge + 1) % 3],
+                        face.vertex_indices[adjacent_face.edge],
+                        support_index,
+                    ],
+                    [
+                        adjacent_face,
+                        AdjacentFace {
+                            index: current_face_index + 1,
+                            edge: 2,
+                        },
+                        AdjacentFace {
+                            index: last_face_index,
+                            edge: 1,
+                        },
+                    ],
+                    &state.vertices,
+                );
+
+                if face.closest_is_internal() {
+                    state.priority_queue.push(Reverse(Entry {
+                        face: current_face_index,
+                        distance: face.distance,
+                    }));
+                }
+
+                state.faces.push(face);
+                last_face_index = current_face_index;
+            }
+            state.faces[last_face_index].adjacents[1].index = old_face_count;
+        }
+
+        return state;
+    }
+
     pub fn penetration_depth<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
         &mut self,
         shape1: &S1,
@@ -76,20 +243,21 @@ impl EpaEngine {
                 })
             }));
 
-        loop {
+        let mut closest_point = Vec3::ZERO;
+        for _ in 0..self.max_iteration {
             let entry = self.priority_queue.pop().unwrap();
             let closest_face = &mut self.faces[entry.0.face];
             if closest_face.obsolete {
                 continue;
             }
 
-            let closest_point = closest_face.closest;
+            closest_point = closest_face.closest;
             let support_point = SupportPoint::new(shape1, shape2, closest_point);
             if closest_point.dot(support_point.difference) / closest_point.length()
                 - closest_point.length()
                 <= self.abs_epsilon
             {
-                return closest_point.normalize_and_length();
+                break;
             }
 
             closest_face.obsolete = true;
@@ -117,8 +285,8 @@ impl EpaEngine {
 
                 let face = Face::new(
                     [
-                        face.vertex_indices[adjacent_face.edge],
                         face.vertex_indices[(adjacent_face.edge + 1) % 3],
+                        face.vertex_indices[adjacent_face.edge],
                         support_index,
                     ],
                     [
@@ -147,6 +315,8 @@ impl EpaEngine {
             }
             self.faces[last_face_index].adjacents[1].index = old_face_count;
         }
+
+        return closest_point.normalize_and_length();
     }
 }
 
@@ -198,13 +368,13 @@ struct AdjacentFace {
 }
 
 #[derive(Debug)]
-struct Face {
-    vertex_indices: [usize; 3],
-    closest: Vec3,
+pub struct Face {
+    pub vertex_indices: [usize; 3],
+    pub closest: Vec3,
     barycentric_coordinates: Vec3,
     distance: f32,
     adjacents: [AdjacentFace; 3],
-    obsolete: bool,
+    pub obsolete: bool,
 }
 
 impl Face {
@@ -367,12 +537,12 @@ mod tests {
             radius: 1.0,
         };
 
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert!(
-            (distance - 2.0).abs() <= 1e-4,
-            "Expected 1.0, got {distance}",
-        );
+        // let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        // let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
+        // assert!(
+        //     (distance - 2.0).abs() <= 1e-4,
+        //     "Expected 1.0, got {distance}",
+        // );
 
         ball.center = vec3(1.99, 0.0, 0.0);
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();

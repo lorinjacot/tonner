@@ -106,7 +106,7 @@ fn create_normals(
     epa_state
         .faces
         .iter()
-        .filter(|face| !face.obsolete)
+        .filter(|face| !face.obsolete && face.closest_is_internal())
         .map(|face| {
             let entity = entity_manager.new_entity();
             let origin = face.closest;

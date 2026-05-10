@@ -3,6 +3,7 @@
 use std::{cmp::Reverse, collections::BinaryHeap};
 
 use glam::{Vec3, vec3};
+use log::debug;
 
 use crate::{gjk::SupportPoint, shape::ConvexShape};
 
@@ -14,6 +15,7 @@ pub struct EpaEngine {
     priority_queue: BinaryHeap<Reverse<Entry>>,
     edges: Vec<AdjacentFace>,
     abs_epsilon: f32,
+    relative_tolerance: f32,
 }
 
 #[derive(Debug)]
@@ -22,6 +24,8 @@ pub struct EpaState<'a> {
     pub faces: &'a mut Vec<Face>,
     edges: &'a mut Vec<AdjacentFace>,
     priority_queue: &'a mut BinaryHeap<Reverse<Entry>>,
+    upper_bound: f32,
+    closest_point: Vec3,
 }
 
 impl<'a> EpaState<'a> {
@@ -79,7 +83,7 @@ impl<'a> EpaState<'a> {
             face.closest_is_internal().then(|| {
                 Reverse(Entry {
                     face: index,
-                    distance: face.distance,
+                    distance_squared: face.closest.length_squared(),
                 })
             })
         }));
@@ -89,6 +93,8 @@ impl<'a> EpaState<'a> {
             faces,
             edges,
             priority_queue,
+            upper_bound: f32::INFINITY,
+            closest_point: Vec3::ZERO,
         }
     }
 }
@@ -109,20 +115,32 @@ impl EpaEngine {
             &mut self.priority_queue,
         );
 
-        for _ in 0..steps {
-            let entry = state.priority_queue.pop().unwrap();
-            let closest_face = &mut state.faces[entry.0.face];
-            if closest_face.obsolete {
-                continue;
+        let mut current_step = 0;
+        'expansion_loop: while let Some(closest_face) = state.priority_queue.pop() {
+            if current_step == steps {
+                debug!("EPA did not converge");
+                break 'expansion_loop;
             }
 
-            let closest_point = closest_face.closest;
-            let support_point = SupportPoint::new(shape1, shape2, closest_point);
-            if closest_point.dot(support_point.difference) / closest_point.length()
-                - closest_point.length()
-                <= self.abs_epsilon
-            {
-                break;
+            let closest_face = &mut state.faces[closest_face.0.face];
+            if closest_face.obsolete {
+                continue 'expansion_loop;
+            }
+
+            state.closest_point = closest_face.closest;
+            let support_point = SupportPoint::new(shape1, shape2, state.closest_point);
+
+            let dot = state.closest_point.dot(support_point.difference);
+            let distance_squared = dot * dot / state.closest_point.length_squared();
+            state.upper_bound = state.upper_bound.min(distance_squared);
+
+            let close_enough = state.upper_bound
+                <= (1.0 + self.relative_tolerance)
+                    * (1.0 + self.relative_tolerance)
+                    * state.closest_point.length_squared();
+            if close_enough {
+                debug!("EPA converged successfully");
+                break 'expansion_loop;
             }
 
             closest_face.obsolete = true;
@@ -168,10 +186,21 @@ impl EpaEngine {
                     &state.vertices,
                 );
 
-                if face.closest_is_internal() {
+                if face.affinely_dependent() {
+                    debug!(
+                        "EPA encountered an affinely dependent triangle: {:?}",
+                        face.vertex_indices.map(|i| state.vertices[i].difference)
+                    );
+                    break 'expansion_loop;
+                }
+
+                if face.closest_is_internal()
+                    && state.closest_point.length_squared() <= face.closest.length_squared()
+                    && face.closest.length_squared() <= state.upper_bound
+                {
                     state.priority_queue.push(Reverse(Entry {
                         face: current_face_index,
-                        distance: face.distance,
+                        distance_squared: face.closest.length_squared(),
                     }));
                 }
 
@@ -179,9 +208,11 @@ impl EpaEngine {
                 last_face_index = current_face_index;
             }
             state.faces[last_face_index].adjacents[1].index = old_face_count;
+
+            current_step += 1;
         }
 
-        return state;
+        state
     }
 
     pub fn penetration_depth<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
@@ -190,133 +221,8 @@ impl EpaEngine {
         shape2: &S2,
         tetrahedron: [SupportPoint; 4],
     ) -> (Vec3, f32) {
-        self.vertices.clear();
-        self.faces.clear();
-        self.priority_queue.clear();
-
-        self.vertices.extend(tetrahedron);
-        self.faces.extend([
-            Face::new(
-                [3, 2, 1],
-                [
-                    AdjacentFace { index: 1, edge: 1 },
-                    AdjacentFace { index: 3, edge: 1 },
-                    AdjacentFace { index: 2, edge: 1 },
-                ],
-                &self.vertices,
-            ),
-            Face::new(
-                [0, 2, 3],
-                [
-                    AdjacentFace { index: 3, edge: 2 },
-                    AdjacentFace { index: 0, edge: 0 },
-                    AdjacentFace { index: 2, edge: 0 },
-                ],
-                &self.vertices,
-            ),
-            Face::new(
-                [0, 3, 1],
-                [
-                    AdjacentFace { index: 1, edge: 2 },
-                    AdjacentFace { index: 0, edge: 2 },
-                    AdjacentFace { index: 3, edge: 0 },
-                ],
-                &self.vertices,
-            ),
-            Face::new(
-                [0, 1, 2],
-                [
-                    AdjacentFace { index: 2, edge: 2 },
-                    AdjacentFace { index: 0, edge: 1 },
-                    AdjacentFace { index: 1, edge: 0 },
-                ],
-                &self.vertices,
-            ),
-        ]);
-        self.priority_queue
-            .extend(self.faces.iter().enumerate().filter_map(|(index, face)| {
-                face.closest_is_internal().then(|| {
-                    Reverse(Entry {
-                        face: index,
-                        distance: face.distance,
-                    })
-                })
-            }));
-
-        let mut closest_point = Vec3::ZERO;
-        for _ in 0..self.max_iteration {
-            let entry = self.priority_queue.pop().unwrap();
-            let closest_face = &mut self.faces[entry.0.face];
-            if closest_face.obsolete {
-                continue;
-            }
-
-            closest_point = closest_face.closest;
-            let support_point = SupportPoint::new(shape1, shape2, closest_point);
-            if closest_point.dot(support_point.difference) / closest_point.length()
-                - closest_point.length()
-                <= self.abs_epsilon
-            {
-                break;
-            }
-
-            closest_face.obsolete = true;
-
-            for adjacent_face in &closest_face.adjacents.clone() {
-                silhouette(
-                    adjacent_face,
-                    &support_point,
-                    &mut self.edges,
-                    &mut self.faces,
-                );
-            }
-
-            let support_index = self.vertices.len();
-            self.vertices.push(support_point);
-
-            let old_face_count = self.faces.len();
-            let mut last_face_index = old_face_count + self.edges.len() - 1;
-            for adjacent_face in self.edges.drain(..) {
-                let current_face_index = self.faces.len();
-                let face = &mut self.faces[adjacent_face.index];
-                let adj = &mut face.adjacents[adjacent_face.edge];
-                adj.index = current_face_index;
-                adj.edge = 0;
-
-                let face = Face::new(
-                    [
-                        face.vertex_indices[(adjacent_face.edge + 1) % 3],
-                        face.vertex_indices[adjacent_face.edge],
-                        support_index,
-                    ],
-                    [
-                        adjacent_face,
-                        AdjacentFace {
-                            index: current_face_index + 1,
-                            edge: 2,
-                        },
-                        AdjacentFace {
-                            index: last_face_index,
-                            edge: 1,
-                        },
-                    ],
-                    &self.vertices,
-                );
-
-                if face.closest_is_internal() {
-                    self.priority_queue.push(Reverse(Entry {
-                        face: current_face_index,
-                        distance: face.distance,
-                    }));
-                }
-
-                self.faces.push(face);
-                last_face_index = current_face_index;
-            }
-            self.faces[last_face_index].adjacents[1].index = old_face_count;
-        }
-
-        return closest_point.normalize_and_length();
+        let state = self.penetration_depth_details(shape1, shape2, tetrahedron, self.max_iteration);
+        state.closest_point.normalize_and_length()
     }
 }
 
@@ -329,6 +235,7 @@ impl Default for EpaEngine {
             priority_queue: BinaryHeap::with_capacity(104),
             abs_epsilon: 1e-6,
             edges: Vec::new(),
+            relative_tolerance: 1e-6,
         }
     }
 }
@@ -371,8 +278,7 @@ struct AdjacentFace {
 pub struct Face {
     pub vertex_indices: [usize; 3],
     pub closest: Vec3,
-    barycentric_coordinates: Vec3,
-    distance: f32,
+    numerators: Vec3,
     adjacents: [AdjacentFace; 3],
     pub obsolete: bool,
 }
@@ -394,41 +300,43 @@ impl Face {
         let d12_1 = (p2 - p1).dot(p2);
         let d12_2 = -(p2 - p1).dot(p1);
 
-        let delta = vec3(
+        let numerators = vec3(
             d01_0 * d12_1 + d12_2 * (p1 - p0).dot(p2),
             d01_1 * d02_0 - d02_2 * (p1 - p0).dot(p2),
             d02_2 * d01_0 - d01_1 * (p2 - p0).dot(p1),
         );
-        let denominator = delta.element_sum();
-        let lambda = delta / denominator;
+        let delta = numerators.element_sum();
+        let lambda = numerators / delta;
 
         let closest = lambda.x * p0 + lambda.y * p1 + lambda.z * p2;
-        let distance = closest.length();
 
         Face {
             vertex_indices,
             closest,
-            barycentric_coordinates: lambda,
-            distance,
+            numerators,
             adjacents,
             obsolete: false,
         }
     }
 
-    fn closest_is_internal(&self) -> bool {
-        self.barycentric_coordinates.cmpge(Vec3::ZERO).all()
+    fn affinely_dependent(&self) -> bool {
+        self.numerators.element_sum() <= 0.0
+    }
+
+    pub fn closest_is_internal(&self) -> bool {
+        self.numerators.cmpge(Vec3::ZERO).all()
     }
 }
 
 #[derive(Debug)]
 struct Entry {
     face: usize,
-    distance: f32,
+    distance_squared: f32,
 }
 
 impl PartialEq for Entry {
     fn eq(&self, other: &Self) -> bool {
-        self.distance == other.distance
+        self.distance_squared == other.distance_squared
     }
 }
 
@@ -442,7 +350,7 @@ impl Eq for Entry {}
 
 impl Ord for Entry {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.distance.total_cmp(&other.distance)
+        self.distance_squared.total_cmp(&other.distance_squared)
     }
 }
 

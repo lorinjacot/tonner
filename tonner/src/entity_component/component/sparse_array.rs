@@ -108,6 +108,24 @@ impl<T> FromIterator<(EntityId, T)> for SparseArray<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a SparseArray<T> {
+    type Item = (EntityId, &'a T);
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut SparseArray<T> {
+    type Item = (EntityId, &'a mut T);
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 pub struct Iter<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }

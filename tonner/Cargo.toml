@@ -15,6 +15,7 @@ crate-type = ["lib", "cdylib"]
 bitflags.workspace = true
 bytemuck.workspace = true
 dashmap.workspace = true
+egui = { workspace = true, optional = true }
 glam = { workspace = true, features = ["bytemuck"] }
 image.workspace = true
 log.workspace = true
@@ -30,6 +31,7 @@ wgpu.workspace = true
 [features]
 python = ["dep:pyo3", "dep:numpy", "dep:pollster"]
 java-script = ["dep:wasm-bindgen"]
+egui = ["dep:egui"]
 
 [dev-dependencies]
 pollster.workspace = true

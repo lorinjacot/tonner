@@ -9,14 +9,15 @@ use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
 use storm_controls::orbit::OrbitControls;
 use tonner::Context;
-use tonner::entity_component::EntityManager;
 use tonner::entity_component::component::sparse_array::SparseArray;
+use tonner::entity_component::{ComponentStorage, EntityManager};
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::skin::SkinManager;
 use tonner::geometry::{ArrowBuilder, GeometryBuilder, SphereBuilder};
 use tonner::mesh::material::{AlphaMode, Material, MaterialBuilder};
 use tonner::mesh::{Mesh, MeshBuilder, MeshInstance};
 use tonner::renderer::Renderer;
+use tonner::renderer::billboard_label::BillboardLabel;
 use tonner::renderer::camera::Camera;
 use tonner::renderer::light::LightManager;
 use tonner::scene_graph::SceneGraph;
@@ -51,14 +52,17 @@ fn create_points(
     epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
+    labels: &mut SparseArray<BillboardLabel>,
     point: &Mesh,
 ) -> SparseArray<MeshInstance> {
     epa_state
         .vertices
         .iter()
-        .map(|v| {
+        .enumerate()
+        .map(|(index, v)| {
             let entity = entity_manager.new_entity();
             scene_graph.add_with_transform(entity, None, v.difference, Quat::IDENTITY, Vec3::ONE);
+            labels.add(entity, BillboardLabel::new(format!("Vertex {index}")));
             (entity, point.new_instance(entity))
         })
         .collect()
@@ -141,6 +145,7 @@ struct Scene {
     faces: SparseArray<MeshInstance>,
     normals: SparseArray<MeshInstance>,
     epa_engine: EpaEngine,
+    labels: SparseArray<BillboardLabel>,
 }
 
 impl Scene {
@@ -247,7 +252,14 @@ impl Scene {
             .build(&context)
             .unwrap();
 
-        let points = create_points(&epa_result, &mut entity_manager, &mut scene_graph, &point);
+        let mut labels = SparseArray::new();
+        let points = create_points(
+            &epa_result,
+            &mut entity_manager,
+            &mut scene_graph,
+            &mut labels,
+            &point,
+        );
         let faces = create_faces(
             &epa_result,
             &mut entity_manager,
@@ -284,11 +296,18 @@ impl Scene {
             faces,
             normals,
             epa_engine,
+            labels,
         }
     }
 
-    fn render(&mut self, texture_view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+    fn render(
+        &mut self,
+        texture_view: &wgpu::TextureView,
+        egui_ctx: &egui::Context,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
         if self.steps != self.rendered_steps {
+            self.labels.clear();
             self.points.drain().for_each(|(entity, _)| {
                 self.scene_graph.remove(entity);
                 self.entity_manager.delete_entity(entity);
@@ -312,6 +331,7 @@ impl Scene {
                 &epa_result,
                 &mut self.entity_manager,
                 &mut self.scene_graph,
+                &mut self.labels,
                 &self.point,
             );
 
@@ -348,6 +368,15 @@ impl Scene {
                 &self.environment,
                 &self.context,
                 encoder,
+            )
+            .unwrap();
+        self.renderer
+            .render_billboard_labels(
+                &self.controls.camera,
+                texture_view,
+                &self.scene_graph,
+                &self.labels,
+                egui_ctx,
             )
             .unwrap();
     }
@@ -532,7 +561,8 @@ impl State {
             .device()
             .create_command_encoder(&Default::default());
 
-        self.scene.render(&srgb_texture_view, &mut encoder);
+        self.scene
+            .render(&srgb_texture_view, self.egui_state.egui_ctx(), &mut encoder);
 
         let clipped_primitives = self
             .egui_state

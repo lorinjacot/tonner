@@ -4262,6 +4262,7 @@ dependencies = [
  "bitflags 2.11.1",
  "bytemuck",
  "dashmap",
+ "egui",
  "glam 0.32.1",
  "image",
  "log",

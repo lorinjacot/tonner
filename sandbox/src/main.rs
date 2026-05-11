@@ -72,6 +72,7 @@ fn create_faces(
     epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
+    labels: &mut SparseArray<BillboardLabel>,
     context: &Context,
     face_material: &Material,
 ) -> SparseArray<MeshInstance> {
@@ -83,11 +84,24 @@ fn create_faces(
         .map(|(i, face)| {
             let entity = entity_manager.new_entity();
             scene_graph.add(entity, None);
+
+            let positions = face
+                .vertex_indices
+                .map(|i| epa_state.vertices[i].difference);
+            let centroid = positions.iter().sum::<Vec3>() / 3.0;
+
+            let label_entity = entity_manager.new_entity();
+            scene_graph.add_with_transform(
+                label_entity,
+                Some(entity),
+                centroid,
+                Quat::IDENTITY,
+                Vec3::ONE,
+            );
+            labels.add(label_entity, BillboardLabel::new(format!("Triangle {i}")));
+
             let face = GeometryBuilder::new(3, 0)
-                .positions(
-                    face.vertex_indices
-                        .map(|i| epa_state.vertices[i].difference),
-                )
+                .positions(positions)
                 .unwrap()
                 .build(&context)
                 .unwrap();
@@ -264,6 +278,7 @@ impl Scene {
             &epa_result,
             &mut entity_manager,
             &mut scene_graph,
+            &mut labels,
             &context,
             &yellow,
         );
@@ -307,7 +322,10 @@ impl Scene {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if self.steps != self.rendered_steps {
-            self.labels.clear();
+            self.labels.drain().for_each(|(entity, _)| {
+                self.scene_graph.remove(entity);
+                self.entity_manager.delete_entity(entity);
+            });
             self.points.drain().for_each(|(entity, _)| {
                 self.scene_graph.remove(entity);
                 self.entity_manager.delete_entity(entity);
@@ -339,6 +357,7 @@ impl Scene {
                 &epa_result,
                 &mut self.entity_manager,
                 &mut self.scene_graph,
+                &mut self.labels,
                 &self.context,
                 &self.yellow,
             );
@@ -377,6 +396,8 @@ impl Scene {
                 &self.scene_graph,
                 &self.labels,
                 egui_ctx,
+                &self.context,
+                encoder,
             )
             .unwrap();
     }

@@ -429,7 +429,31 @@ impl Renderer {
         scene_graph: &SceneGraph,
         labels: impl IntoIterator<Item = (EntityId, &'a BillboardLabel)>,
         egui_ctx: &egui::Context,
+        ctx: &Context,
+        encoder: &mut wgpu::CommandEncoder,
     ) -> Result<(), RenderError> {
+        use crate::renderer::billboard_label::{CameraUniform, OutputUniform};
+        use bytemuck::cast_slice;
+
+        let (world_positions, texts): (Vec<_>, Vec<_>) = labels
+            .into_iter()
+            .filter_map(|(entity, label)| {
+                let Some(label_node) = scene_graph.get(entity) else {
+                    log::error!("Billboard label node ({entity}) is not part of the scene graph");
+                    return None;
+                };
+                let world_position = label_node
+                    .global_transformation()
+                    .transform_point3(Vec3::ZERO)
+                    .extend(1.0);
+                Some((world_position, label.text.clone()))
+            })
+            .unzip();
+
+        if world_positions.is_empty() {
+            return Ok(());
+        }
+
         let target_texture = target.texture();
         let aspect_ratio = target_texture.width() as f32 / target_texture.height() as f32;
         let projection_matrix = camera.projection_matrix(aspect_ratio);
@@ -445,79 +469,228 @@ impl Renderer {
             camera_matrix.transform_vector3(-Vec3::Z),
             camera_matrix.transform_vector3(Vec3::Y),
         );
-        let view_projection = projection_matrix * view_matrix;
 
-        use glam::Vec4;
-        let mut labels = labels
-            .into_iter()
-            .filter_map(|(entity, label)| {
-                let label_node = scene_graph.get(entity)?;
-                let world_position = label_node.global_transformation() * Vec4::W;
-                let clip = view_projection * world_position;
-                if clip.w <= 0.0 {
-                    return None;
-                }
+        let outputs_size =
+            (world_positions.len() * size_of::<OutputUniform>()) as wgpu::BufferAddress;
+        let aligned_outputs_size = wgpu::util::align_to(outputs_size, wgpu::COPY_BUFFER_ALIGNMENT);
 
-                let view_position = view_matrix * world_position;
-                let screen_position = egui::pos2(
-                    (clip.x / clip.w + 1.0) * 0.5 * target_texture.width() as f32,
-                    (1.0 - clip.y / clip.w) * 0.5 * target_texture.height() as f32,
-                );
+        let camera = CameraUniform {
+            view: view_matrix,
+            projection: projection_matrix,
+        };
+        let camera_buffer = ctx
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Billboard label camera buffer"),
+                contents: bytes_of(&camera),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
 
-                Some((view_position.z, label.text.as_str(), screen_position))
-            })
-            .collect::<Vec<_>>();
+        let world_positions_buffer =
+            ctx.device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Billboard label world positions buffer"),
+                    contents: cast_slice(&world_positions),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
 
-        // Farthest first, closest last.
-        labels.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let write_outputs_buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Billboard label write outputs buffer"),
+            size: aligned_outputs_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
 
-        let painter = egui_ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            egui::Id::new("billboard_labels"),
-        ));
+        let read_outputs_buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Billboard label write outputs buffer"),
+            size: aligned_outputs_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
 
-        let font_id = egui::FontId::proportional(14.0);
-        let style = egui_ctx.global_style();
-        let visuals = &style.visuals;
-        let margin = &style.spacing.window_margin;
-
-        for (_, text, screen_position) in labels {
-            let mut job = egui::text::LayoutJob::default();
-            job.append(
-                text,
-                0.0,
-                egui::TextFormat {
-                    font_id: font_id.clone(),
-                    color: visuals.text_color(),
-                    ..Default::default()
+        let bind_group = ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Billboard label bind group"),
+            layout: &ctx.renderer_ctx.billboard_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
                 },
-            );
-            job.wrap.max_width = 180.0;
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.depth_attachment),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&ctx.renderer_ctx.depth_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: world_positions_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: write_outputs_buffer.as_entire_binding(),
+                },
+            ],
+        });
 
-            let galley = egui_ctx.fonts_mut(|fonts| fonts.layout_job(job));
-
-            let rect = egui::Rect::from_min_size(
-                screen_position - egui::vec2(margin.left as f32, margin.top as f32),
-                galley.size()
-                    + egui::vec2(
-                        (margin.left + margin.right) as f32,
-                        (margin.top + margin.bottom) as f32,
-                    ),
-            );
-
-            painter.rect_filled(rect, visuals.window_corner_radius, visuals.window_fill);
-            painter.rect_stroke(
-                rect,
-                visuals.window_corner_radius,
-                visuals.window_stroke,
-                egui::StrokeKind::Inside,
-            );
-            painter.galley(
-                rect.min + egui::vec2(margin.left as f32, margin.top as f32),
-                galley,
-                visuals.text_color(),
-            );
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Billboard Label compute pass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&ctx.renderer_ctx.billboard_pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.dispatch_workgroups((world_positions.len() as u32 + 63) / 64, 1, 1);
         }
+
+        let egui_ctx = egui_ctx.clone();
+        let buffer = read_outputs_buffer.clone();
+        encoder.copy_buffer_to_buffer(&write_outputs_buffer, 0, &read_outputs_buffer, 0, None);
+        encoder.map_buffer_on_submit(
+            &read_outputs_buffer,
+            wgpu::MapMode::Read,
+            0..outputs_size,
+            move |result| {
+                if result.is_ok() {
+                    let outputs = buffer.get_mapped_range(0..outputs_size);
+                    let outputs: &[OutputUniform] = cast_slice(&outputs);
+
+                    let painter = egui_ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        egui::Id::new("billboard_labels"),
+                    ));
+
+                    let font_id = egui::FontId::proportional(14.0);
+                    let style = egui_ctx.global_style();
+                    let visuals = &style.visuals;
+                    let margin = &style.spacing.window_margin;
+
+                    let mut labels: Vec<_> = outputs
+                        .into_iter()
+                        .zip(texts)
+                        .filter(|(output, _)| output.visible == 1)
+                        .collect();
+
+                    labels.sort_by(|a, b| a.0.view_z.total_cmp(&b.0.view_z));
+
+                    for (output, text) in labels {
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(
+                            &text,
+                            0.0,
+                            egui::TextFormat {
+                                font_id: font_id.clone(),
+                                color: visuals.text_color(),
+                                ..Default::default()
+                            },
+                        );
+                        job.wrap.max_width = 180.0;
+
+                        let galley = egui_ctx.fonts_mut(|fonts| fonts.layout_job(job));
+
+                        let rect = egui::Rect::from_min_size(
+                            output.screen_position
+                                - egui::vec2(margin.left as f32, margin.top as f32),
+                            galley.size()
+                                + egui::vec2(
+                                    (margin.left + margin.right) as f32,
+                                    (margin.top + margin.bottom) as f32,
+                                ),
+                        );
+
+                        painter.rect_filled(
+                            rect,
+                            visuals.window_corner_radius,
+                            visuals.window_fill,
+                        );
+                        painter.rect_stroke(
+                            rect,
+                            visuals.window_corner_radius,
+                            visuals.window_stroke,
+                            egui::StrokeKind::Inside,
+                        );
+                        painter.galley(
+                            rect.min + egui::vec2(margin.left as f32, margin.top as f32),
+                            galley,
+                            visuals.text_color(),
+                        );
+                    }
+                }
+            },
+        );
+
+        // let mut labels = labels
+        //     .into_iter()
+        //     .filter_map(|(entity, label)| {
+        //         let label_node = scene_graph.get(entity)?;
+        //         let world_position = label_node.global_transformation() * Vec4::W;
+        //         let clip = view_projection * world_position;
+        //         if clip.w <= 0.0 {
+        //             return None;
+        //         }
+
+        //         let view_position = view_matrix * world_position;
+        //         let screen_position = egui::pos2(
+        //             (clip.x / clip.w + 1.0) * 0.5 * target_texture.width() as f32,
+        //             (1.0 - clip.y / clip.w) * 0.5 * target_texture.height() as f32,
+        //         );
+
+        //         Some((view_position.z, label.text.as_str(), screen_position))
+        //     })
+        //     .collect::<Vec<_>>();
+
+        // // Farthest first, closest last.
+        // labels.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        // let painter = egui_ctx.layer_painter(egui::LayerId::new(
+        //     egui::Order::Foreground,
+        //     egui::Id::new("billboard_labels"),
+        // ));
+
+        // let font_id = egui::FontId::proportional(14.0);
+        // let style = egui_ctx.global_style();
+        // let visuals = &style.visuals;
+        // let margin = &style.spacing.window_margin;
+
+        // for (_, text, screen_position) in labels {
+        //     let mut job = egui::text::LayoutJob::default();
+        //     job.append(
+        //         text,
+        //         0.0,
+        //         egui::TextFormat {
+        //             font_id: font_id.clone(),
+        //             color: visuals.text_color(),
+        //             ..Default::default()
+        //         },
+        //     );
+        //     job.wrap.max_width = 180.0;
+
+        //     let galley = egui_ctx.fonts_mut(|fonts| fonts.layout_job(job));
+
+        //     let rect = egui::Rect::from_min_size(
+        //         screen_position - egui::vec2(margin.left as f32, margin.top as f32),
+        //         galley.size()
+        //             + egui::vec2(
+        //                 (margin.left + margin.right) as f32,
+        //                 (margin.top + margin.bottom) as f32,
+        //             ),
+        //     );
+
+        //     painter.rect_filled(rect, visuals.window_corner_radius, visuals.window_fill);
+        //     painter.rect_stroke(
+        //         rect,
+        //         visuals.window_corner_radius,
+        //         visuals.window_stroke,
+        //         egui::StrokeKind::Inside,
+        //     );
+        //     painter.galley(
+        //         rect.min + egui::vec2(margin.left as f32, margin.top as f32),
+        //         galley,
+        //         visuals.text_color(),
+        //     );
+        // }
 
         Ok(())
     }
@@ -557,6 +730,9 @@ pub(crate) struct RendererContext {
     brightness_bind_group_layout: wgpu::BindGroupLayout,
     gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
     bloom_sampler: wgpu::Sampler,
+    billboard_bind_group_layout: wgpu::BindGroupLayout,
+    billboard_pipeline: wgpu::ComputePipeline,
+    depth_sampler: wgpu::Sampler,
 }
 
 impl RendererContext {
@@ -988,6 +1164,90 @@ impl RendererContext {
             ..Default::default()
         });
 
+        let billboard_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Billboard label bind gorup layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let billboard_shader_module =
+            device.create_shader_module(wgpu::include_wgsl!("billboard_label.wgsl"));
+
+        let billboard_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Billobard label pipeline layout"),
+                bind_group_layouts: &[Some(&billboard_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+        let billboard_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Billboard label pipeline"),
+            layout: Some(&billboard_pipeline_layout),
+            module: &billboard_shader_module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        let depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Depth texture sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+
         Self {
             render_bind_group_layout,
             skybox_pipeline,
@@ -1001,6 +1261,9 @@ impl RendererContext {
             brightness_bind_group_layout,
             gaussian_blur_bind_group_layout,
             bloom_sampler,
+            billboard_bind_group_layout,
+            billboard_pipeline,
+            depth_sampler,
         }
     }
 }
@@ -1065,7 +1328,7 @@ fn create_render_attachments(
     let depth_attachment = TextureBuilder::default()
         .name("Depth render attachment")
         .empty(size, wgpu::TextureFormat::Depth24Plus)
-        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
         .build(ctx, encoder)
         .create_view(&wgpu::TextureViewDescriptor {
             label: Some("Depth render attachment"),

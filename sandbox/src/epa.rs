@@ -15,6 +15,7 @@ pub struct EpaEngine {
     priority_queue: BinaryHeap<Reverse<Entry>>,
     edges: Vec<AdjacentFace>,
     relative_tolerance: f32,
+    tolerance_factor: f32,
 }
 
 #[derive(Debug)]
@@ -134,16 +135,14 @@ impl EpaEngine {
             state.closest_point = closest_face.closest;
             let support_point = SupportPoint::new(shape1, shape2, closest_face.normal);
 
-            let dot = state.closest_point.dot(support_point.difference);
-            let distance_squared = dot * dot / state.closest_point.length_squared();
+            let dot = closest_face.normal.dot(support_point.difference);
+            let distance_squared = dot * dot / closest_face.normal.length_squared();
             state.upper_bound = state.upper_bound.min(distance_squared);
 
-            let close_enough = state.upper_bound
-                <= (1.0 + self.relative_tolerance)
-                    * (1.0 + self.relative_tolerance)
-                    * state.closest_point.length_squared();
+            let close_enough =
+                state.upper_bound <= self.tolerance_factor * state.closest_point.length_squared();
             if close_enough {
-                debug!("EPA converged successfully");
+                debug!("EPA successfully converged");
                 break 'expansion_loop;
             }
 
@@ -198,9 +197,11 @@ impl EpaEngine {
                     break 'expansion_loop;
                 }
 
+                let a = state.vertices[face.vertex_indices[0]].difference;
+                let proj = a.project_onto(face.normal);
                 if face.closest_is_internal()
-                    && state.closest_point.length_squared() <= face.closest.length_squared()
-                    && face.closest.length_squared() <= state.upper_bound
+                    && state.closest_point.length_squared() <= proj.length_squared()
+                    && proj.length_squared() <= state.upper_bound * self.tolerance_factor
                 {
                     state.priority_queue.push(Reverse(Entry {
                         face: current_face_index,
@@ -232,13 +233,16 @@ impl EpaEngine {
 
 impl Default for EpaEngine {
     fn default() -> Self {
+        let relative_tolerance = f32::EPSILON;
+
         EpaEngine {
             max_iteration: 100,
             vertices: Vec::with_capacity(104),
             faces: Vec::with_capacity(104),
             priority_queue: BinaryHeap::with_capacity(104),
             edges: Vec::new(),
-            relative_tolerance: f32::EPSILON,
+            relative_tolerance,
+            tolerance_factor: (1.0 + relative_tolerance) * (1.0 + relative_tolerance),
         }
     }
 }
@@ -452,12 +456,12 @@ mod tests {
             radius: 1.0,
         };
 
-        // let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        // let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
-        // assert!(
-        //     (distance - 2.0).abs() <= 1e-4,
-        //     "Expected 1.0, got {distance}",
-        // );
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
+        assert!(
+            (distance - 2.0).abs() <= 1e-4,
+            "Expected 1.0, got {distance}",
+        );
 
         ball.center = vec3(1.99, 0.0, 0.0);
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();

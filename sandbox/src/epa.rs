@@ -14,7 +14,6 @@ pub struct EpaEngine {
     faces: Vec<Face>,
     priority_queue: BinaryHeap<Reverse<Entry>>,
     edges: Vec<AdjacentFace>,
-    abs_epsilon: f32,
     relative_tolerance: f32,
 }
 
@@ -25,7 +24,7 @@ pub struct EpaState<'a> {
     edges: &'a mut Vec<AdjacentFace>,
     priority_queue: &'a mut BinaryHeap<Reverse<Entry>>,
     upper_bound: f32,
-    closest_point: Vec3,
+    pub closest_point: Vec3,
 }
 
 impl<'a> EpaState<'a> {
@@ -116,11 +115,16 @@ impl EpaEngine {
         );
 
         let mut current_step = 0;
-        'expansion_loop: while let Some(closest_face) = state.priority_queue.pop() {
+        'expansion_loop: loop {
             if current_step == steps {
                 debug!("EPA did not converge");
                 break 'expansion_loop;
             }
+
+            let Some(closest_face) = state.priority_queue.pop() else {
+                debug!("EPA ran out of candidate faces");
+                break 'expansion_loop;
+            };
 
             let closest_face = &mut state.faces[closest_face.0.face];
             if closest_face.obsolete {
@@ -128,7 +132,7 @@ impl EpaEngine {
             }
 
             state.closest_point = closest_face.closest;
-            let support_point = SupportPoint::new(shape1, shape2, state.closest_point);
+            let support_point = SupportPoint::new(shape1, shape2, closest_face.normal);
 
             let dot = state.closest_point.dot(support_point.difference);
             let distance_squared = dot * dot / state.closest_point.length_squared();
@@ -233,9 +237,8 @@ impl Default for EpaEngine {
             vertices: Vec::with_capacity(104),
             faces: Vec::with_capacity(104),
             priority_queue: BinaryHeap::with_capacity(104),
-            abs_epsilon: 1e-6,
             edges: Vec::new(),
-            relative_tolerance: 1e-6,
+            relative_tolerance: 1e-12,
         }
     }
 }
@@ -251,7 +254,7 @@ fn silhouette(
         return;
     }
 
-    if face.closest.dot(support_point.difference) < face.closest.length_squared() {
+    if face.normal.dot(support_point.difference - face.closest) < 0.0 {
         // face not visible from  `support_point`
         edges.push(*adjacent_face);
     } else {
@@ -269,17 +272,18 @@ fn silhouette(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct AdjacentFace {
-    index: usize,
-    edge: usize,
+pub struct AdjacentFace {
+    pub index: usize,
+    pub edge: usize,
 }
 
 #[derive(Debug)]
 pub struct Face {
     pub vertex_indices: [usize; 3],
+    normal: Vec3,
     pub closest: Vec3,
     numerators: Vec3,
-    adjacents: [AdjacentFace; 3],
+    pub adjacents: [AdjacentFace; 3],
     pub obsolete: bool,
 }
 
@@ -290,6 +294,8 @@ impl Face {
         vertices: &[SupportPoint],
     ) -> Face {
         let [p0, p1, p2] = vertex_indices.map(|idx| vertices[idx].difference);
+
+        let normal = (p1 - p0).cross(p2 - p0);
 
         let d01_0 = (p1 - p0).dot(p1);
         let d01_1 = -(p1 - p0).dot(p0);
@@ -312,6 +318,7 @@ impl Face {
 
         Face {
             vertex_indices,
+            normal,
             closest,
             numerators,
             adjacents,

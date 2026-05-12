@@ -34,9 +34,9 @@ mod epa;
 mod gjk;
 mod shape;
 
-const DEFAULT_STEPS: usize = 14;
+const DEFAULT_STEPS: usize = 0;
 const VERTEX_LABELS: bool = false;
-const FACE_LABELS: bool = true;
+const FACE_LABELS: bool = false;
 const EDGE_LABELS: bool = false;
 
 fn create_shapes() -> (AxisAlignedBox, Ball) {

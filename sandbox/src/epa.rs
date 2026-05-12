@@ -2,7 +2,7 @@
 
 use std::{cmp::Reverse, collections::BinaryHeap};
 
-use glam::{Vec3, vec3};
+use glam::Vec3;
 use log::debug;
 
 use crate::{gjk::SupportPoint, shape::ConvexShape};
@@ -140,7 +140,7 @@ impl EpaEngine {
             state.upper_bound = state.upper_bound.min(distance_squared);
 
             let close_enough =
-                state.upper_bound <= self.tolerance_factor * state.closest_point.length_squared();
+                state.upper_bound <= self.tolerance_factor * closest_face.closest.length_squared();
             if close_enough {
                 debug!("EPA successfully converged");
                 break 'expansion_loop;
@@ -197,11 +197,9 @@ impl EpaEngine {
                     break 'expansion_loop;
                 }
 
-                let a = state.vertices[face.vertex_indices[0]].difference;
-                let proj = a.project_onto(face.normal);
                 if face.closest_is_internal()
-                    && state.closest_point.length_squared() <= proj.length_squared()
-                    && proj.length_squared() <= state.upper_bound * self.tolerance_factor
+                    && state.closest_point.length_squared() <= face.closest.length_squared()
+                    && face.closest.length_squared() <= self.tolerance_factor * state.upper_bound
                 {
                     state.priority_queue.push(Reverse(Entry {
                         face: current_face_index,
@@ -284,9 +282,9 @@ pub struct AdjacentFace {
 #[derive(Debug)]
 pub struct Face {
     pub vertex_indices: [usize; 3],
-    normal: Vec3,
+    pub normal: Vec3,
     pub closest: Vec3,
-    numerators: Vec3,
+    pub closest_is_internal: bool,
     pub adjacents: [AdjacentFace; 3],
     pub obsolete: bool,
 }
@@ -297,45 +295,35 @@ impl Face {
         adjacents: [AdjacentFace; 3],
         vertices: &[SupportPoint],
     ) -> Face {
-        let [p0, p1, p2] = vertex_indices.map(|idx| vertices[idx].difference);
+        let [a, b, c] = vertex_indices.map(|idx| vertices[idx].difference);
 
-        let normal = (p1 - p0).cross(p2 - p0);
+        let ab = b - a;
+        let bc = c - b;
+        let ca = a - c;
 
-        let d01_0 = (p1 - p0).dot(p1);
-        let d01_1 = -(p1 - p0).dot(p0);
+        let normal = ab.cross(bc);
+        let closest = a.project_onto(normal);
 
-        let d02_0 = (p2 - p0).dot(p2);
-        let d02_2 = -(p2 - p0).dot(p0);
-
-        let d12_1 = (p2 - p1).dot(p2);
-        let d12_2 = -(p2 - p1).dot(p1);
-
-        let numerators = vec3(
-            d01_0 * d12_1 + d12_2 * (p1 - p0).dot(p2),
-            d01_1 * d02_0 - d02_2 * (p1 - p0).dot(p2),
-            d02_2 * d01_0 - d01_1 * (p2 - p0).dot(p1),
-        );
-        let delta = numerators.element_sum();
-        let lambda = numerators / delta;
-
-        let closest = lambda.x * p0 + lambda.y * p1 + lambda.z * p2;
+        let external = ab.cross(normal).dot(-a) > 0.0
+            || bc.cross(normal).dot(-b) > 0.0
+            || ca.cross(normal).dot(-a) > 0.0;
 
         Face {
             vertex_indices,
             normal,
             closest,
-            numerators,
+            closest_is_internal: !external,
             adjacents,
             obsolete: false,
         }
     }
 
     fn affinely_dependent(&self) -> bool {
-        self.numerators.element_sum() <= 0.0
+        self.normal.length_squared() <= f32::EPSILON * f32::EPSILON
     }
 
     pub fn closest_is_internal(&self) -> bool {
-        self.numerators.cmpge(Vec3::ZERO).all()
+        self.closest_is_internal
     }
 }
 

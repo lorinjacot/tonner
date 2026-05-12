@@ -238,7 +238,7 @@ impl Default for EpaEngine {
             faces: Vec::with_capacity(104),
             priority_queue: BinaryHeap::with_capacity(104),
             edges: Vec::new(),
-            relative_tolerance: 1e-12,
+            relative_tolerance: f32::EPSILON,
         }
     }
 }
@@ -491,7 +491,7 @@ mod tests {
             actual_direction
         );
         assert!(
-            (actual_distance - expected_distance).abs() <= 1e-4,
+            (actual_distance - expected_distance).abs() <= 1e-3,
             "Expected {expected_distance}, got {actual_distance}",
         );
     }

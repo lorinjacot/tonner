@@ -34,7 +34,10 @@ mod epa;
 mod gjk;
 mod shape;
 
-const DEFAULT_STEPS: usize = 2;
+const DEFAULT_STEPS: usize = 0;
+const VERTEX_LABELS: bool = false;
+const FACE_LABELS: bool = false;
+const EDGE_LABELS: bool = false;
 
 fn create_shapes() -> (AxisAlignedBox, Ball) {
     let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
@@ -43,7 +46,7 @@ fn create_shapes() -> (AxisAlignedBox, Ball) {
         center: Vec3::ZERO,
         radius: 1.0,
     };
-    ball.center = vec3(1.99, 0.0, 0.0);
+    ball.center = vec3(1.70, 1.70, 0.0);
 
     (aab, ball)
 }
@@ -62,7 +65,9 @@ fn create_points(
         .map(|(index, v)| {
             let entity = entity_manager.new_entity();
             scene_graph.add_with_transform(entity, None, v.difference, Quat::IDENTITY, Vec3::ONE);
-            labels.add(entity, BillboardLabel::new(format!("Vertex {index}")));
+            if VERTEX_LABELS {
+                labels.add(entity, BillboardLabel::new(format!("Vertex {index}")));
+            }
             (entity, point.new_instance(entity))
         })
         .collect()
@@ -90,39 +95,43 @@ fn create_faces(
                 .map(|i| epa_state.vertices[i].difference);
             let triangle_centroid = positions.iter().sum::<Vec3>() / 3.0;
 
-            let label_entity = entity_manager.new_entity();
-            scene_graph.add_with_transform(
-                label_entity,
-                Some(entity),
-                triangle_centroid,
-                Quat::IDENTITY,
-                Vec3::ONE,
-            );
-            labels.add(
-                label_entity,
-                BillboardLabel::new(format!("Triangle {i} ({:?})", face.vertex_indices)),
-            );
-
-            for (index, edge) in face.adjacents.iter().enumerate() {
-                let a = positions[index];
-                let b = positions[(index + 1) % 3];
-                let edge_center = (a + b) / 2.0;
-
-                let edge_entity = entity_manager.new_entity();
+            if FACE_LABELS {
+                let label_entity = entity_manager.new_entity();
                 scene_graph.add_with_transform(
-                    edge_entity,
+                    label_entity,
                     Some(entity),
-                    edge_center.lerp(triangle_centroid, 0.2),
+                    triangle_centroid,
                     Quat::IDENTITY,
                     Vec3::ONE,
                 );
                 labels.add(
-                    edge_entity,
-                    BillboardLabel::new(format!(
-                        "Edge {i}-{index} to {}-{}",
-                        edge.index, edge.edge
-                    )),
+                    label_entity,
+                    BillboardLabel::new(format!("Triangle {i} ({:?})", face.vertex_indices)),
                 );
+            }
+
+            if EDGE_LABELS {
+                for (index, edge) in face.adjacents.iter().enumerate() {
+                    let a = positions[index];
+                    let b = positions[(index + 1) % 3];
+                    let edge_center = (a + b) / 2.0;
+
+                    let edge_entity = entity_manager.new_entity();
+                    scene_graph.add_with_transform(
+                        edge_entity,
+                        Some(entity),
+                        edge_center.lerp(triangle_centroid, 0.2),
+                        Quat::IDENTITY,
+                        Vec3::ONE,
+                    );
+                    labels.add(
+                        edge_entity,
+                        BillboardLabel::new(format!(
+                            "Edge {i}-{index} to {}-{}",
+                            edge.index, edge.edge
+                        )),
+                    );
+                }
             }
 
             let face = GeometryBuilder::new(3, 0)
@@ -278,7 +287,7 @@ impl Scene {
         let epa_result =
             epa_engine.penetration_depth_details(&aab, &ball, tetrahedron, DEFAULT_STEPS);
 
-        dbg!(epa_result.closest_point);
+        dbg!(epa_result.closest_point.normalize_and_length());
 
         let yellow = MaterialBuilder::default()
             .base_color_factor([1.0, 1.0, 0.0, 0.8])
@@ -372,7 +381,7 @@ impl Scene {
                 self.epa_engine
                     .penetration_depth_details(&aab, &ball, tetrahedron, self.steps);
 
-            dbg!(epa_result.closest_point);
+            dbg!(epa_result.closest_point.normalize_and_length());
 
             self.points = create_points(
                 &epa_result,

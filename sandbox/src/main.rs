@@ -35,7 +35,7 @@ mod gjk;
 mod shape;
 
 const DEFAULT_STEPS: usize = 0;
-const VERTEX_LABELS: bool = false;
+const VERTEX_LABELS: bool = true;
 const FACE_LABELS: bool = false;
 const EDGE_LABELS: bool = false;
 
@@ -46,7 +46,7 @@ fn create_shapes() -> (AxisAlignedBox, Ball) {
         center: Vec3::ZERO,
         radius: 1.0,
     };
-    ball.center = vec3(1.70, 1.70, 0.0);
+    ball.center = vec3(2.0, 0.0, 0.0);
 
     (aab, ball)
 }

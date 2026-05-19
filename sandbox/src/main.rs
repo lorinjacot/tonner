@@ -39,16 +39,13 @@ const VERTEX_LABELS: bool = true;
 const FACE_LABELS: bool = false;
 const EDGE_LABELS: bool = false;
 
-fn create_shapes() -> (AxisAlignedBox, Ball) {
-    let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
-
-    let mut ball = Ball {
+fn create_shapes() -> (Ball, Ball) {
+    let origin = Ball {
         center: Vec3::ZERO,
         radius: 1.0,
     };
-    ball.center = vec3(2.0, 0.0, 0.0);
 
-    (aab, ball)
+    (origin.clone(), origin)
 }
 
 fn create_points(

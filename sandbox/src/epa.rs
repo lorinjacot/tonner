@@ -70,14 +70,15 @@ impl EpaEngine {
             let b = s.vertices[1].difference;
 
             let dir = b - a;
+            let dir_abs = dir.abs();
 
             let mut axis = Vec3::X;
-            let mut max = dir.x;
-            if dir.y > max {
-                max = dir.y;
+            let mut min = dir_abs.x;
+            if dir_abs.y < min {
+                min = dir_abs.y;
                 axis = Vec3::Y;
             }
-            if dir.z > max {
+            if dir_abs.z < min {
                 axis = Vec3::Z;
             }
             let v1 = dir.cross(axis);
@@ -128,13 +129,13 @@ impl EpaEngine {
             // if the origin lives on the line, the hexahedron might not contain the origin
             // or it might have degenerate faces
             for face in &faces[..3] {
-                if face.normal.dot(a) >= 0.0 || face.affinely_dependent() {
+                if face.normal.dot(a) <= 0.0 || face.affinely_dependent() {
                     s.closest_point = Vec3::ZERO;
                     return s;
                 }
             }
             for face in &faces[3..] {
-                if face.normal.dot(b) >= 0.0 || face.affinely_dependent() {
+                if face.normal.dot(b) <= 0.0 || face.affinely_dependent() {
                     s.closest_point = Vec3::ZERO;
                     return s;
                 }
@@ -449,6 +450,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_ball_axis_aligned_boxes() {
+        let mut engine = EpaEngine::default();
+
+        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+        let mut ball = Ball {
+            center: Vec3::ZERO,
+            radius: 1.0,
+        };
+
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
+        assert_seperating_distance(2.0, distance);
+
+        ball.center = vec3(1.99, 0.0, 0.0);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
+        assert_seperating_vector(ball.center.normalize(), 0.01, result);
+
+        ball.center = vec3(2.0, 0.0, 0.0);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
+        assert_seperating_distance(0.0, distance);
+
+        ball.center = vec3(1.70, 1.70, 0.0);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
+        assert_seperating_vector(ball.center.normalize(), 0.0101, result);
+
+        ball.center = vec3(1.57, 1.57, 1.57);
+        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
+        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
+        assert_seperating_vector(ball.center.normalize(), 0.0127, result);
+    }
+
+    #[test]
     fn test_two_balls() {
         let mut engine = EpaEngine::default();
 
@@ -457,12 +494,10 @@ mod tests {
             radius: 1.0,
         };
 
-        // let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
-        // let (_, distance) = engine.penetration_depth(&origin, &origin, tetrahedron);
-        // assert!(
-        //     (distance - 2.0).abs() <= 0.1,
-        //     "Expected 2.0, got {distance}",
-        // );
+        let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
+        let (_, distance) = engine.penetration_depth(&origin, &origin, tetrahedron);
+        // slowest converging case -> need lower tolerance
+        assert_seperating_distance_tolerance(2.0, distance, 0.1);
 
         let x = Ball {
             center: Vec3::X,
@@ -510,47 +545,15 @@ mod tests {
         // assert!(!gjk(&three_x, &random_radius));
     }
 
-    #[test]
-    fn test_ball_axis_aligned_boxes() {
-        let mut engine = EpaEngine::default();
-
-        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
-
-        let mut ball = Ball {
-            center: Vec3::ZERO,
-            radius: 1.0,
-        };
-
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_distance(2.0, distance);
-
-        ball.center = vec3(1.99, 0.0, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.01, result);
-
-        ball.center = vec3(2.0, 0.0, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_distance(0.0, distance);
-
-        ball.center = vec3(1.70, 1.70, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0101, result);
-
-        ball.center = vec3(1.57, 1.57, 1.57);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0127, result);
+    fn assert_seperating_distance_tolerance(expected: f32, actual: f32, tolerance: f32) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "Expected {expected}, got {actual}",
+        );
     }
 
     fn assert_seperating_distance(expected: f32, actual: f32) {
-        assert!(
-            (actual - expected).abs() <= 1e-3,
-            "Expected {expected}, got {actual}",
-        );
+        assert_seperating_distance_tolerance(expected, actual, 1e-3);
     }
 
     fn assert_seperating_vector(

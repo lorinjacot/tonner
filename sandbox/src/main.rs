@@ -1,9 +1,9 @@
 use std::f32::consts::{FRAC_PI_2, PI};
-use std::iter::{once, repeat_n};
+use std::iter::once;
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, vec3};
 use image::DynamicImage;
 use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
@@ -26,68 +26,116 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowId};
 
-use crate::epa::{EpaResult, epa_dbg};
+use crate::epa::{EpaEngine, EpaState};
 use crate::gjk::gjk_tetrahedron;
-use crate::shape::Ball;
+use crate::shape::{AxisAlignedBox, Ball};
 
 mod epa;
 mod gjk;
 mod shape;
 
 const DEFAULT_STEPS: usize = 0;
+const VERTEX_LABELS: bool = true;
+const FACE_LABELS: bool = false;
+const EDGE_LABELS: bool = false;
 
-fn create_shapes() -> (Ball, Ball) {
-    let origin = Ball {
+fn create_shapes() -> (AxisAlignedBox, Ball) {
+    let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+
+    let mut ball = Ball {
         center: Vec3::ZERO,
         radius: 1.0,
     };
+    ball.center = vec3(2.0, 0.0, 0.0);
 
-    let x = Ball {
-        center: Vec3::X,
-        radius: 0.0,
-    };
-
-    (x, origin)
+    (aab, ball)
 }
 
 fn create_points(
-    epa_result: &EpaResult,
+    epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     labels: &mut SparseArray<BillboardLabel>,
     point: &Mesh,
 ) -> SparseArray<MeshInstance> {
-    epa_result
+    epa_state
         .vertices
         .iter()
         .enumerate()
         .map(|(index, v)| {
             let entity = entity_manager.new_entity();
             scene_graph.add_with_transform(entity, None, v.difference, Quat::IDENTITY, Vec3::ONE);
-            labels.add(entity, BillboardLabel::new(format!("Vertex {index}")));
+            if VERTEX_LABELS {
+                labels.add(entity, BillboardLabel::new(format!("Vertex {index}")));
+            }
             (entity, point.new_instance(entity))
         })
         .collect()
 }
 
 fn create_faces(
-    epa_result: &EpaResult,
+    epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
+    labels: &mut SparseArray<BillboardLabel>,
     context: &Context,
     face_material: &Material,
 ) -> SparseArray<MeshInstance> {
-    epa_result
+    epa_state
         .faces
         .iter()
         .enumerate()
+        .filter(|(_, face)| !face.obsolete)
         .map(|(i, face)| {
             let entity = entity_manager.new_entity();
             scene_graph.add(entity, None);
+
+            let positions = face
+                .vertex_indices
+                .map(|i| epa_state.vertices[i].difference);
+            let triangle_centroid = positions.iter().sum::<Vec3>() / 3.0;
+
+            if FACE_LABELS {
+                let label_entity = entity_manager.new_entity();
+                scene_graph.add_with_transform(
+                    label_entity,
+                    Some(entity),
+                    triangle_centroid,
+                    Quat::IDENTITY,
+                    Vec3::ONE,
+                );
+                labels.add(
+                    label_entity,
+                    BillboardLabel::new(format!("Triangle {i} ({:?})", face.vertex_indices)),
+                );
+            }
+
+            if EDGE_LABELS {
+                for (index, edge) in face.adjacents.iter().enumerate() {
+                    let a = positions[index];
+                    let b = positions[(index + 1) % 3];
+                    let edge_center = (a + b) / 2.0;
+
+                    let edge_entity = entity_manager.new_entity();
+                    scene_graph.add_with_transform(
+                        edge_entity,
+                        Some(entity),
+                        edge_center.lerp(triangle_centroid, 0.2),
+                        Quat::IDENTITY,
+                        Vec3::ONE,
+                    );
+                    labels.add(
+                        edge_entity,
+                        BillboardLabel::new(format!(
+                            "Edge {i}-{index} to {}-{}",
+                            edge.index, edge.edge
+                        )),
+                    );
+                }
+            }
+
             let face = GeometryBuilder::new(3, 0)
-                .positions(face.0.indices.map(|i| epa_result.vertices[i].difference))
-                .unwrap()
-                .normals(repeat_n(face.0.normal, 3))
+                .positions(positions)
                 .unwrap()
                 .build(&context)
                 .unwrap();
@@ -102,21 +150,22 @@ fn create_faces(
 }
 
 fn create_normals(
-    epa_result: &EpaResult,
+    epa_state: &EpaState,
     entity_manager: &mut EntityManager,
     scene_graph: &mut SceneGraph,
     normal_mesh: &Mesh,
 ) -> SparseArray<MeshInstance> {
-    epa_result
+    epa_state
         .faces
         .iter()
+        .filter(|face| !face.obsolete && face.closest_is_internal())
         .map(|face| {
             let entity = entity_manager.new_entity();
-            let vertices = face.0.indices.map(|i| epa_result.vertices[i].difference);
-            let origin = vertices[0].midpoint(vertices[1]).midpoint(vertices[2]);
-            let mut rotation = Quat::look_to_rh(face.0.normal, Vec3::Y);
+            let origin = face.closest;
+            let dir = face.closest.normalize();
+            let mut rotation = Quat::look_to_rh(dir, Vec3::Y);
             if rotation.is_nan() {
-                rotation = Quat::look_to_rh(face.0.normal, Vec3::X);
+                rotation = Quat::look_to_rh(dir, Vec3::X);
             }
             scene_graph.add_with_transform(entity, None, origin, rotation.inverse(), Vec3::ONE);
             (entity, normal_mesh.new_instance(entity))
@@ -143,6 +192,7 @@ struct Scene {
     points: SparseArray<MeshInstance>,
     faces: SparseArray<MeshInstance>,
     normals: SparseArray<MeshInstance>,
+    epa_engine: EpaEngine,
     labels: SparseArray<BillboardLabel>,
 }
 
@@ -229,15 +279,20 @@ impl Scene {
             .build(&context)
             .unwrap();
 
+        let mut epa_engine = EpaEngine::default();
+
         let (aab, ball) = create_shapes();
 
         let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let epa_result = epa_dbg(&aab, &ball, tetrahedron, DEFAULT_STEPS);
+        let epa_result =
+            epa_engine.penetration_depth_details(&aab, &ball, tetrahedron, DEFAULT_STEPS);
+
+        dbg!(epa_result.closest_point.normalize_and_length());
 
         let yellow = MaterialBuilder::default()
             .base_color_factor([1.0, 1.0, 0.0, 0.8])
             .alpha_mode(AlphaMode::Opaque)
-            .double_sided(true)
+            .double_sided(false)
             .build(&context);
 
         let normal_parts = ArrowBuilder::default().build(&context);
@@ -259,6 +314,7 @@ impl Scene {
             &epa_result,
             &mut entity_manager,
             &mut scene_graph,
+            &mut labels,
             &context,
             &yellow,
         );
@@ -290,6 +346,7 @@ impl Scene {
             points,
             faces,
             normals,
+            epa_engine,
             labels,
         }
     }
@@ -301,7 +358,10 @@ impl Scene {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if self.steps != self.rendered_steps {
-            self.labels.clear();
+            self.labels.drain().for_each(|(entity, _)| {
+                self.scene_graph.remove(entity);
+                self.entity_manager.delete_entity(entity);
+            });
             self.points.drain().for_each(|(entity, _)| {
                 self.scene_graph.remove(entity);
                 self.entity_manager.delete_entity(entity);
@@ -317,7 +377,11 @@ impl Scene {
 
             let (aab, ball) = create_shapes();
             let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-            let epa_result = epa_dbg(&aab, &ball, tetrahedron, self.steps);
+            let epa_result =
+                self.epa_engine
+                    .penetration_depth_details(&aab, &ball, tetrahedron, self.steps);
+
+            dbg!(epa_result.closest_point.normalize_and_length());
 
             self.points = create_points(
                 &epa_result,
@@ -331,6 +395,7 @@ impl Scene {
                 &epa_result,
                 &mut self.entity_manager,
                 &mut self.scene_graph,
+                &mut self.labels,
                 &self.context,
                 &self.yellow,
             );
@@ -369,6 +434,8 @@ impl Scene {
                 &self.scene_graph,
                 &self.labels,
                 egui_ctx,
+                &self.context,
+                encoder,
             )
             .unwrap();
     }

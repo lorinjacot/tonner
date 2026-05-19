@@ -59,7 +59,7 @@ impl EpaEngine {
                 s.vertices.push(support_point);
             }
         }
-        if dbg!(s.vertices.len()) == 1 {
+        if s.vertices.len() == 1 {
             // GJK returned a point -> this point must be the origin
             s.closest_point = Vec3::ZERO;
             return s;
@@ -144,10 +144,6 @@ impl EpaEngine {
             s.faces.extend(faces);
         } else if s.vertices.len() == 3 {
             // GJK returned a triangle -> construct a tetrahedron
-
-            // let a = s.vertices.pop().unwrap();
-            // let b = s.vertices.pop().unwrap();
-            // let c = s.vertices.pop().unwrap();
 
             todo!()
         } else {
@@ -511,38 +507,6 @@ mod tests {
         let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
         let result = engine.penetration_depth(&origin, &x, tetrahedron);
         assert!(result.1.abs() <= 0.1, "Expected 0.0, got {}", result.0);
-
-        // let x = Ball {
-        //     center: Vec3::X,
-        //     radius: 1.0,
-        // };
-        // assert!(gjk(&x, &x));
-        // let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
-        // dbg!(epa(&origin, &x, tetrahedron));
-        // assert!(gjk(&origin, &x));
-
-        // let three_x = Ball {
-        //     center: 3.0 * Vec3::X,
-        //     radius: 1.0,
-        // };
-        // assert!(!gjk(&origin, &three_x));
-        // assert!(gjk(&x, &three_x));
-
-        // let random_center = Ball {
-        //     center: vec3(-1.0312, 0.13312, 1.2),
-        //     radius: 1.0,
-        // };
-        // assert!(gjk(&origin, &random_center));
-        // assert!(!gjk(&x, &random_center));
-
-        // let radius = 2.343;
-        // let random_radius = Ball {
-        //     center: Vec3::Y * radius,
-        //     radius,
-        // };
-        // assert!(gjk(&origin, &random_radius));
-        // assert!(gjk(&x, &random_radius));
-        // assert!(!gjk(&three_x, &random_radius));
     }
 
     fn assert_seperating_distance_tolerance(expected: f32, actual: f32, tolerance: f32) {

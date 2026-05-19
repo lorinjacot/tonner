@@ -126,14 +126,15 @@ impl EpaEngine {
             ];
 
             // if the origin lives on the line, the hexahedron might not contain the origin
+            // or it might have degenerate faces
             for face in &faces[..3] {
-                if face.normal.dot(a) >= 0.0 {
+                if face.normal.dot(a) >= 0.0 || face.affinely_dependent() {
                     s.closest_point = Vec3::ZERO;
                     return s;
                 }
             }
             for face in &faces[3..] {
-                if face.normal.dot(b) >= 0.0 {
+                if face.normal.dot(b) >= 0.0 || face.affinely_dependent() {
                     s.closest_point = Vec3::ZERO;
                     return s;
                 }

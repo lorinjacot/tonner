@@ -1,10 +1,12 @@
+#[cfg(feature = "pyo3")]
+use std::sync::{Arc, Mutex};
 use std::{iter::FusedIterator, ops::Index};
 
 use glam::{Mat4, Quat, Vec3};
 
-// #[cfg(feature = "python")]
-// use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1};
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
+use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1};
+#[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
 use crate::{
@@ -19,7 +21,6 @@ use crate::{
 /// creating logical groupings where transformations (position, rotation, scale) applied to parent nodes automatically
 /// affect all their children - simplifying complex object manipulation and animation.
 #[derive(Debug)]
-#[cfg_attr(feature = "python", pyclass)]
 pub struct SceneGraph {
     nodes: SparseArray<Node>,
     first_root: Option<EntityId>,
@@ -246,21 +247,15 @@ impl SceneGraph {
         }
     }
 
-    /// Sets the node's local translation (if not `None`), rotation (if not `None`) and scale (if not `None`).
-    /// See [Node::local_transformation] for more informations.
-    /// This function will fail the node contains an invalid parent or if any of the children
-    /// (direct and indirect) is invalid.
-    ///
-    /// ## Panics
-    ///
-    /// Panics if `entity` is not a node.
-    pub fn set_local_transformation(
+    /// Sets the node's local translation (if not `None`), rotation (if not `None`) and scale (if not `None`) and returns `Ok(())`.
+    /// Returns `Err(())` if `entity` is not a node. See [Node::local_transformation] for more informations.
+    pub fn try_set_local_transformation(
         &mut self,
         entity: EntityId,
         translation: impl Into<Option<Vec3>>,
         rotation: impl Into<Option<Quat>>,
         scale: impl Into<Option<Vec3>>,
-    ) {
+    ) -> Result<(), ()> {
         let parent_transform = match self[entity].parent {
             Some(parent) => self[parent].global_transformation,
             None => Mat4::IDENTITY,
@@ -299,6 +294,25 @@ impl SceneGraph {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Sets the node's local translation (if not `None`), rotation (if not `None`) and scale (if not `None`).
+    /// See [Node::local_transformation] for more informations.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `entity` is not a node.
+    pub fn set_local_transformation(
+        &mut self,
+        entity: EntityId,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
+    ) {
+        self.try_set_local_transformation(entity, translation, rotation, scale)
+            .expect("entity should be part of the scene graph");
     }
 }
 
@@ -573,184 +587,278 @@ struct UpdateTransformIterState {
     parent_transform: Mat4,
 }
 
-// #[cfg(feature = "python")]
-// #[pyclass(frozen)]
-// pub struct PyNode {
-//     id: EntityId,
-//     scene_graph: Py<SceneGraph>,
-// }
+/// A Scene Graph node handle. This type is only needed when using the python or the webassembly bindings.
+#[pyclass(frozen, name = "Node")]
+pub struct NodeHandle {
+    entity: EntityId,
+    scene_graph: Arc<Mutex<SceneGraph>>,
+}
 
-// #[cfg(feature = "python")]
-// impl PyNode {
-//     pub fn new(id: EntityId, scene_graph: Py<SceneGraph>) -> Self {
-//         Self { id, scene_graph }
-//     }
+impl NodeHandle {
+    /// Creates a new node handle for the given entity and scene graph.
+    pub fn new(entity: EntityId, scene_graph: Arc<Mutex<SceneGraph>>) -> NodeHandle {
+        NodeHandle {
+            entity,
+            scene_graph,
+        }
+    }
 
-//     fn deleted_error(id: EntityId) -> PyErr {
-//         pyo3::exceptions::PyRuntimeError::new_err(format!(
-//             "Node {id} has been deleted from the scene graph"
-//         ))
-//     }
+    /// Returns the local translation of the node or `Err(())` if the node is not part of the scene graph anymore.
+    pub fn local_translation(&self) -> Result<Vec3, ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .map(|node| node.local_translation)
+            .ok_or(())
+    }
 
-//     fn get<'a>(&self, scene_graph: &'a SceneGraph) -> PyResult<&'a Node> {
-//         scene_graph
-//             .get(self.id)
-//             .ok_or_else(|| Self::deleted_error(self.id))
-//     }
+    /// Sets the local translation of the node or returns `Err(())` if the node is not part of the scene graph anymore.
+    pub fn set_local_translation(&self, translation: Vec3) -> Result<(), ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(self.entity, Some(translation), None, None)
+    }
 
-//     fn get_mut<'a>(&self, scene_graph: &'a mut SceneGraph) -> PyResult<&'a mut Node> {
-//         scene_graph
-//             .get_mut(self.id)
-//             .ok_or_else(|| Self::deleted_error(self.id))
-//     }
-// }
+    /// Returns the local rotation of the node or `Err(())` if the node is not part of the scene graph anymore.
+    pub fn local_rotation(&self) -> Result<Quat, ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .map(|node| node.local_rotation)
+            .ok_or(())
+    }
 
-// #[cfg(feature = "python")]
-// #[pymethods]
-// impl PyNode {
-//     #[getter]
-//     pub fn id(&self) -> EntityId {
-//         self.id
-//     }
+    /// Sets the local rotation of the node or returns `Err(())` if the node is not part of the scene graph anymore.
+    pub fn set_local_rotation(&self, rotation: Quat) -> Result<(), ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(self.entity, None, Some(rotation), None)
+    }
 
-//     #[getter]
-//     fn name(&self, py: Python) -> PyResult<String> {
-//         Ok(self.get(&self.scene_graph.borrow(py))?.name.clone())
-//     }
+    /// Returns the local scale of the node or `Err(())` if the node is not part of the scene graph anymore.
+    pub fn local_scale(&self) -> Result<Vec3, ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .map(|node| node.local_scale)
+            .ok_or(())
+    }
 
-//     #[setter]
-//     fn set_name(&self, py: Python, name: String) -> PyResult<()> {
-//         self.get_mut(&mut self.scene_graph.borrow_mut(py))?.name = name;
-//         Ok(())
-//     }
+    /// Sets the local scale of the node or returns `Err(())` if the node is not part of the scene graph anymore.
+    pub fn set_local_scale(&self, scale: Vec3) -> Result<(), ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(self.entity, None, None, Some(scale))
+    }
 
-//     fn parent(&self, py: Python) -> PyResult<Option<PyNode>> {
-//         Ok(self
-//             .get(&self.scene_graph.borrow(py))?
-//             .parent
-//             .map(|id| PyNode {
-//                 id,
-//                 scene_graph: self.scene_graph.clone_ref(py),
-//             }))
-//     }
+    /// Returns the local transformation of the node or `Err(())` if the node is not part of the scene graph anymore.
+    ///
+    /// The local transformation is the matrix `T * R * S` where
+    /// - `T` is the translation matrix corresponding to the node's local translation (see [Node::local_translation]),
+    /// - `R` is the rotation matrix corresponding to the node's local rotation (see [Node::local_rotation]),
+    /// - `S` is the scale matrix corresponding to the node's local scale (see [Node::local_scale]).
+    pub fn local_transformation(&self) -> Result<Mat4, ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .map(|node| node.local_transformation())
+            .ok_or(())
+    }
 
-//     #[getter]
-//     fn local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-//         let translation = self.get(&self.scene_graph.borrow(py))?.local_translation;
-//         Ok(PyArray1::from_slice(py, &translation.to_array()))
-//     }
+    /// Sets the local transformation of the node or returns `Err(())` if the node is not part of the scene graph anymore.
+    ///
+    /// The local transformation is the matrix `T * R * S` where
+    /// - `T` is the translation matrix corresponding to the node's local translation (see [Node::local_translation]),
+    /// - `R` is the rotation matrix corresponding to the node's local rotation (see [Node::local_rotation]),
+    /// - `S` is the scale matrix corresponding to the node's local scale (see [Node::local_scale]).
+    /// Only the non-`None` parameters will be updated. For example, if `rotation` is `None`, the local rotation of the node will not be changed.
+    pub fn set_local_transformation(
+        &self,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
+    ) -> Result<(), ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(self.entity, translation, rotation, scale)
+    }
 
-//     #[setter]
-//     fn set_local_translation<'py>(
-//         &self,
-//         py: Python<'py>,
-//         translation: PyArrayLike1<'py, f32, AllowTypeChange>,
-//     ) -> PyResult<()> {
-//         use glam::vec3;
+    /// Returns the global transformation of the node or `Err(())` if the node is not part of the scene graph anymore.
+    pub fn global_transformation(&self) -> Result<Mat4, ()> {
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .map(|node| node.global_transformation())
+            .ok_or(())
+    }
+}
 
-//         let translation = translation.as_array();
-//         if translation.dim() != 3 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "translation.shape must be (3,)",
-//             ));
-//         }
-//         self.scene_graph
-//             .borrow_mut(py)
-//             .set_local_transformation(
-//                 self.id,
-//                 vec3(translation[0], translation[1], translation[2]),
-//                 None,
-//                 None,
-//             )
-//             .map_err(|_| Self::deleted_error(self.id))
-//     }
+#[cfg(feature = "pyo3")]
+impl NodeHandle {
+    fn deleted_error(&self) -> PyErr {
+        pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "Entity {} is no longer part of the scene graph",
+            self.entity
+        ))
+    }
+}
 
-//     #[getter]
-//     fn local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-//         let rotation = self.get(&self.scene_graph.borrow(py))?.local_rotation;
-//         Ok(PyArray1::from_slice(
-//             py,
-//             &[rotation.w, rotation.x, rotation.y, rotation.z],
-//         ))
-//     }
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl NodeHandle {
+    /// Returns the entity associated with the node.
+    #[getter]
+    pub fn entity(&self) -> EntityId {
+        self.entity
+    }
 
-//     #[setter]
-//     fn set_local_rotation<'py>(
-//         &self,
-//         py: Python<'py>,
-//         rotation: PyArrayLike1<'py, f32, AllowTypeChange>,
-//     ) -> PyResult<()> {
-//         use glam::quat;
+    #[getter(local_translation)]
+    fn py_local_translation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let translation = self.local_translation().map_err(|_| self.deleted_error())?;
+        Ok(PyArray1::from_slice(py, &translation.to_array()))
+    }
 
-//         let rotation = rotation.as_array();
-//         if rotation.dim() != 4 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "rotation.shape must be (4,)",
-//             ));
-//         }
-//         self.scene_graph
-//             .borrow_mut(py)
-//             .set_local_transformation(
-//                 self.id,
-//                 None,
-//                 quat(rotation[1], rotation[2], rotation[3], rotation[0]),
-//                 None,
-//             )
-//             .map_err(|_| Self::deleted_error(self.id))
-//     }
+    #[setter(local_translation)]
+    fn py_set_local_translation<'py>(
+        &self,
+        translation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::vec3;
 
-//     #[getter]
-//     fn local_scale<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
-//         let scale = self.get(&self.scene_graph.borrow(py))?.local_scale;
-//         Ok(PyArray1::from_slice(py, &scale.to_array()))
-//     }
+        let translation = translation.as_array();
+        if translation.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "translation.shape must be (3,)",
+            ));
+        }
 
-//     #[setter]
-//     fn set_local_scale<'py>(
-//         &self,
-//         py: Python<'py>,
-//         scale: PyArrayLike1<'py, f32, AllowTypeChange>,
-//     ) -> PyResult<()> {
-//         use glam::vec3;
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(
+                self.entity,
+                vec3(translation[0], translation[1], translation[2]),
+                None,
+                None,
+            )
+            .map_err(|()| self.deleted_error())
+    }
 
-//         let scale = scale.as_array();
-//         if scale.dim() != 3 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "scale.shape must be (3,)",
-//             ));
-//         }
-//         self.scene_graph
-//             .borrow_mut(py)
-//             .set_local_transformation(self.id, None, None, vec3(scale[0], scale[1], scale[2]))
-//             .map_err(|_| Self::deleted_error(self.id))
-//     }
+    #[getter(local_rotation)]
+    fn py_local_rotation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let rotation = self
+            .scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .ok_or_else(|| self.deleted_error())?
+            .local_rotation;
+        Ok(PyArray1::from_slice(
+            py,
+            &[rotation.w, rotation.x, rotation.y, rotation.z],
+        ))
+    }
 
-//     #[getter]
-//     fn local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
-//         use numpy::ndarray::aview2;
+    #[setter(local_rotation)]
+    fn py_set_local_rotation<'py>(
+        &self,
+        rotation: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::quat;
 
-//         let transformation = self
-//             .get(&self.scene_graph.borrow(py))?
-//             .local_transformation()
-//             .transpose()
-//             .to_cols_array_2d();
-//         let array = aview2(&transformation);
-//         Ok(PyArray2::from_array(py, &array))
-//     }
+        let rotation = rotation.as_array();
+        if rotation.dim() != 4 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "rotation.shape must be (4,)",
+            ));
+        }
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(
+                self.entity,
+                None,
+                quat(rotation[1], rotation[2], rotation[3], rotation[0]),
+                None,
+            )
+            .map_err(|()| self.deleted_error())
+    }
 
-//     #[getter]
-//     fn global_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
-//         use numpy::ndarray::aview2;
+    #[getter(local_scale)]
+    fn py_local_scale<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f32>>> {
+        let scale = self
+            .scene_graph
+            .lock()
+            .unwrap()
+            .get(self.entity)
+            .ok_or_else(|| self.deleted_error())?
+            .local_scale;
+        Ok(PyArray1::from_slice(py, &scale.to_array()))
+    }
 
-//         let transformation = self
-//             .get(&self.scene_graph.borrow(py))?
-//             .global_transformation()
-//             .transpose()
-//             .to_cols_array_2d();
-//         let array = aview2(&transformation);
-//         Ok(PyArray2::from_array(py, &array))
-//     }
-// }
+    #[setter(local_scale)]
+    fn py_set_local_scale<'py>(
+        &self,
+        scale: PyArrayLike1<'py, f32, AllowTypeChange>,
+    ) -> PyResult<()> {
+        use glam::vec3;
+
+        let scale = scale.as_array();
+        if scale.dim() != 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "scale.shape must be (3,)",
+            ));
+        }
+        self.scene_graph
+            .lock()
+            .unwrap()
+            .try_set_local_transformation(
+                self.entity,
+                None,
+                None,
+                vec3(scale[0], scale[1], scale[2]),
+            )
+            .map_err(|()| self.deleted_error())
+    }
+
+    #[getter(local_transformation)]
+    fn py_local_transformation<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        use numpy::ndarray::aview2;
+
+        let transformation = self
+            .local_transformation()
+            .map_err(|_| self.deleted_error())?
+            .transpose()
+            .to_cols_array_2d();
+        let array = aview2(&transformation);
+        Ok(PyArray2::from_array(py, &array))
+    }
+
+    #[getter(global_transformation)]
+    fn py_global_transformation<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyArray2<f32>>> {
+        use numpy::ndarray::aview2;
+
+        let transformation = self
+            .global_transformation()
+            .map_err(|_| self.deleted_error())?
+            .transpose()
+            .to_cols_array_2d();
+        let array = aview2(&transformation);
+        Ok(PyArray2::from_array(py, &array))
+    }
+}
 
 // /// A Scene Graph node builder. See [SceneGraph] for more informations.
 // #[must_use]

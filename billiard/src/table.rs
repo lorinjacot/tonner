@@ -1,12 +1,17 @@
 use glam::{Vec3, vec3};
 use tonner::{
     Context,
+    entity_component::EntityManager,
     geometry::BoxBuilder,
     mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
-    scene_graph::{NodeBuilder, SceneGraph},
+    scene_graph::SceneGraph,
 };
 
-pub fn table(scene_graph: &mut SceneGraph, ctx: &Context) -> MeshInstance {
+pub fn table(
+    entity_manager: &mut EntityManager,
+    scene_graph: &mut SceneGraph,
+    ctx: &Context,
+) -> MeshInstance {
     let surface = BoxBuilder::default()
         .name("Table surface")
         .width(1.3)
@@ -54,10 +59,8 @@ pub fn table(scene_graph: &mut SceneGraph, ctx: &Context) -> MeshInstance {
         .roughness_factor(0.2)
         .build(&ctx);
 
-    let table_node = NodeBuilder::default()
-        .name("Table")
-        .build(scene_graph)
-        .unwrap();
+    let table_entity = entity_manager.new_entity();
+    scene_graph.add(table_entity, None);
 
     MeshBuilder::default()
         .name("Table")
@@ -70,5 +73,5 @@ pub fn table(scene_graph: &mut SceneGraph, ctx: &Context) -> MeshInstance {
         .primitive(surface, table_material)
         .build(&ctx)
         .unwrap()
-        .new_instance(table_node)
+        .new_instance(table_entity)
 }

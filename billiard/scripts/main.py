@@ -4,8 +4,8 @@ import importlib, sys
 import numpy as np
 import quaternion
 
-import debugpy
-debugpy.listen(5678, in_process_debug_adapter=True)
+# import debugpy
+# debugpy.listen(5678, in_process_debug_adapter=True)
 
 if "physics" in sys.modules:
     importlib.reload(sys.modules["physics"])
@@ -160,7 +160,7 @@ def mouse_wheel(dx: float, dy: float):
 
 def update(
         delta_time: float,
-        scene_graph, camera_node,
+        camera_node,
         balls: list,
         force_manager,
         constraint_manager,
@@ -172,12 +172,12 @@ def update(
         force_manager.clear()
         force_manager.push(
             "gravity",
-            [ball.node.id for ball in balls],
+            [ball.node.entity for ball in balls],
             physics.gravity,
         )
         force_manager.push(
             "drag",
-            [ball.node.id for ball in balls],
+            [ball.node.entity for ball in balls],
             physics.drag,
         )
 

@@ -4,13 +4,13 @@ use std::{
     num::{NonZeroU16, NonZeroU32},
 };
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
 /// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "python", pyclass(frozen, str, from_py_object))]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, str, from_py_object))]
 #[repr(transparent)]
 pub struct EntityId(NonZeroU32);
 

@@ -10,7 +10,7 @@ use log::{error, info};
 use notify::Watcher;
 use numpy::{AllowTypeChange, PyArray2, PyArrayLike2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
-use tonner::scene_graph::{NodeId, PyNode, SceneGraph};
+use tonner::{entity_component::EntityId, scene_graph::NodeHandle};
 
 use crate::{
     arrow::Arrow,
@@ -58,7 +58,7 @@ impl ForceManager {
         self.forces.clear();
     }
 
-    fn push(&mut self, name: String, entities: Vec<NodeId>, value: Py<PyAny>) {
+    fn push(&mut self, name: String, entities: Vec<EntityId>, value: Py<PyAny>) {
         self.forces.push(Box::new(PyForce {
             name,
             entities,
@@ -73,12 +73,12 @@ impl ForceManager {
 
 struct PyForce {
     name: String,
-    entities: Vec<NodeId>,
+    entities: Vec<EntityId>,
     value: Py<PyAny>,
 }
 
 impl Force for PyForce {
-    fn entities(&self) -> &[NodeId] {
+    fn entities(&self) -> &[EntityId] {
         &self.entities
     }
 
@@ -138,7 +138,7 @@ impl ConstraintManager {
     fn push(
         &mut self,
         name: String,
-        entities: Vec<NodeId>,
+        entities: Vec<EntityId>,
         value: Py<PyAny>,
         gradient: Py<PyAny>,
         alpha: f32,
@@ -159,14 +159,14 @@ impl ConstraintManager {
 
 struct PyConstraint {
     name: String,
-    entities: Vec<NodeId>,
+    entities: Vec<EntityId>,
     value: Py<PyAny>,
     gradient: Py<PyAny>,
     alpha: f32,
 }
 
 impl Constraint for PyConstraint {
-    fn entities(&self) -> &[NodeId] {
+    fn entities(&self) -> &[EntityId] {
         &self.entities
     }
 
@@ -304,8 +304,7 @@ impl PyScripts {
         &mut self,
         py: Python,
         delta_time: f32,
-        scene_graph: &Py<SceneGraph>,
-        camera_node: &Py<PyNode>,
+        camera_node: &Py<NodeHandle>,
         balls: &[Py<Ball>],
         force_manager: &Py<ForceManager>,
         constraint_manager: &Py<ConstraintManager>,
@@ -335,7 +334,6 @@ impl PyScripts {
                 py,
                 (
                     delta_time,
-                    scene_graph,
                     camera_node,
                     balls,
                     force_manager,
@@ -359,7 +357,7 @@ impl PyScripts {
         &self,
         x: f64,
         y: f64,
-        camera_node: &Py<PyNode>,
+        camera_node: &Py<NodeHandle>,
         projection_matrix: Mat4,
         balls: &[Py<Ball>],
         arrow: &Py<Arrow>,

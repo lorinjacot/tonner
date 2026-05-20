@@ -29,7 +29,7 @@ wasm-bindgen = { workspace = true, optional = true }
 wgpu.workspace = true
 
 [features]
-python = ["dep:pyo3", "dep:numpy", "dep:pollster"]
+pyo3 = ["dep:pyo3", "dep:numpy", "dep:pollster"]
 java-script = ["dep:wasm-bindgen"]
 egui = ["dep:egui"]
 

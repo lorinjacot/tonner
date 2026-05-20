@@ -1,26 +1,32 @@
+use std::sync::{Arc, Mutex};
+
 use pyo3::prelude::*;
 use tonner::{
     Context,
+    entity_component::EntityManager,
     geometry::CylinderBuilder,
     mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
-    scene_graph::{NodeBuilder, PyNode, SceneGraph},
+    scene_graph::{NodeHandle, SceneGraph},
 };
 
 #[pyclass]
 pub struct Arrow {
     #[pyo3(get)]
-    node: Py<PyNode>,
+    node: Py<NodeHandle>,
     #[pyo3(get, set)]
     pub show: bool,
     mesh_instances: [MeshInstance; 1],
 }
 
 impl Arrow {
-    pub fn new(py: Python, scene_graph: Py<SceneGraph>, ctx: &Context) -> Arrow {
-        let node = NodeBuilder::default()
-            .name("Arrow")
-            .build(&mut scene_graph.borrow_mut(py))
-            .unwrap();
+    pub fn new(
+        py: Python,
+        entity_manager: &mut EntityManager,
+        scene_graph: Arc<Mutex<SceneGraph>>,
+        ctx: &Context,
+    ) -> Arrow {
+        let entity = entity_manager.new_entity();
+        scene_graph.lock().unwrap().add(entity, None);
 
         let radius = 0.005;
         let stick = CylinderBuilder::default()
@@ -36,20 +42,14 @@ impl Arrow {
             .metallic_factor(0.2)
             .build(ctx);
 
-        let arrow_node = NodeBuilder::default()
-            .name("Arrow body")
-            .parent(node)
-            .build(&mut scene_graph.borrow_mut(py))
-            .unwrap();
-
         let arrow_body = MeshBuilder::default()
             .name("Arrow body")
             .primitive(stick, black)
             .build(ctx)
             .unwrap()
-            .new_instance(arrow_node);
+            .new_instance(entity);
 
-        let node = Py::new(py, PyNode::new(node, scene_graph.clone_ref(py))).unwrap();
+        let node = Py::new(py, NodeHandle::new(entity, scene_graph)).unwrap();
 
         Arrow {
             node,

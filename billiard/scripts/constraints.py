@@ -29,7 +29,7 @@ def register_distance_constraint(ball1, ball2, constraint_manager):
     
     constraint_manager.push(
         f"distance({ball1.number}, {ball2.number})",
-        [ball1.node.id, ball2.node.id],
+        [ball1.node.entity, ball2.node.entity],
         value,
         grad,
         ALPHA,
@@ -49,7 +49,7 @@ def register_table_surface_constraint(ball, constraint_manager):
     
     constraint_manager.push(
         f"tableSurface({ball.number})",
-        [ball.node.id],
+        [ball.node.entity],
         value,
         grad,
         ALPHA,
@@ -70,7 +70,7 @@ def register_table_short_side_constraint(ball, constraint_manager):
     
     constraint_manager.push(
         f"tableShortSide({ball.number})",
-        [ball.node.id],
+        [ball.node.entity],
         value,
         grad,
         ALPHA,
@@ -91,7 +91,7 @@ def register_table_long_side_constraint(ball, constraint_manager):
     
     constraint_manager.push(
         f"tableLongSide({ball.number})",
-        [ball.node.id],
+        [ball.node.entity],
         value,
         grad,
         ALPHA,

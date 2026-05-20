@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Deref, time::Duration};
 use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
-use tonner::scene_graph::{NodeId, SceneGraph};
+use tonner::{entity_component::EntityId, scene_graph::SceneGraph};
 
 use crate::ball::Ball;
 
@@ -11,7 +11,7 @@ const SUBSTEP_COUNT: usize = 10;
 
 pub trait Force: Send + Sync {
     /// All entities impacted or impacting the force.
-    fn entities(&self) -> &[NodeId];
+    fn entities(&self) -> &[EntityId];
 
     /// Force (in N) to apply on the entities. for the given positions.
     /// The order and length the returned `Vec` and of `positions` must match
@@ -21,7 +21,7 @@ pub trait Force: Send + Sync {
 
 pub trait Constraint: Send + Sync {
     /// All entities impacted or impacting the contraint.
-    fn entities(&self) -> &[NodeId];
+    fn entities(&self) -> &[EntityId];
 
     /// Value of the constraint for the given positions. The order and length of `positions` depends on the last
     /// [`Constraint::entities()`] return.
@@ -56,7 +56,7 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
     let mut particles: HashMap<_, _> = balls
         .into_iter()
         .map(|ball| {
-            let node = ball.node().borrow(py).id();
+            let node = ball.node().borrow(py).entity();
             let mass = 1.0;
             let position = scene_graph[node]
                 .global_transformation()
@@ -129,9 +129,7 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
     }
 
     particles.iter_mut().for_each(|(node, p)| {
-        scene_graph
-            .set_local_transformation(*node, p.position, None, None)
-            .unwrap();
+        scene_graph.set_local_transformation(*node, p.position, None, None);
         p.ball.velocity =
             PyArray1::from_iter(py, p.velocity.to_array().iter().map(|c| *c as f64)).unbind();
     });

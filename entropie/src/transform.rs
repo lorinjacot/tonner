@@ -1,6 +1,7 @@
 use glam::{Quat, Vec3};
 
 /// A transform is a combination of a translation and a rotation. The translation is always applied before the rotation.
+#[derive(Debug, Clone)]
 pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,
@@ -41,7 +42,7 @@ impl Transform {
     }
 
     /// Creates a `Transform` from the given `rotation` and zero translation. This results in a pure rotation.
-    /// 
+    ///
     /// ## Example
     /// ```
     /// # use glam::{Vec3, Quat};

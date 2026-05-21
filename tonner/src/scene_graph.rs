@@ -1,4 +1,3 @@
-#[cfg(feature = "pyo3")]
 use std::sync::{Arc, Mutex};
 use std::{iter::FusedIterator, ops::Index};
 
@@ -588,7 +587,7 @@ struct UpdateTransformIterState {
 }
 
 /// A Scene Graph node handle. This type is only needed when using the python or the webassembly bindings.
-#[pyclass(frozen, name = "Node")]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, name = "Node"))]
 pub struct NodeHandle {
     entity: EntityId,
     scene_graph: Arc<Mutex<SceneGraph>>,

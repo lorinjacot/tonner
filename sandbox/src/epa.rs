@@ -2,10 +2,11 @@
 
 use std::{cmp::Reverse, collections::BinaryHeap, f32::consts::FRAC_PI_3};
 
+use entropie::{Transform, shape::ConvexShape3D};
 use glam::{Mat3, Vec3};
 use log::debug;
 
-use crate::{gjk::SupportPoint, shape::ConvexShape};
+use crate::gjk::SupportPoint;
 
 #[derive(Debug)]
 pub struct EpaEngine {
@@ -37,10 +38,12 @@ impl EpaState {
 }
 
 impl EpaEngine {
-    pub fn penetration_depth_details<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+    pub fn penetration_depth_details<S1: ConvexShape3D + ?Sized, S2: ConvexShape3D + ?Sized>(
         &mut self,
         shape1: &S1,
+        transform1: &Transform,
         shape2: &S2,
+        transform2: &Transform,
         tetrahedron: [SupportPoint; 4],
         steps: usize,
     ) -> &EpaState {
@@ -86,9 +89,9 @@ impl EpaEngine {
             let v2 = r * v1;
             let v3 = r * v2;
 
-            let c = SupportPoint::new(shape1, shape2, v1);
-            let d = SupportPoint::new(shape1, shape2, v2);
-            let e = SupportPoint::new(shape1, shape2, v3);
+            let c = SupportPoint::new(shape1, transform1, shape2, transform2, v1);
+            let d = SupportPoint::new(shape1, transform1, shape2, transform2, v2);
+            let e = SupportPoint::new(shape1, transform1, shape2, transform2, v3);
 
             s.vertices.extend([c, d, e]);
 
@@ -215,7 +218,8 @@ impl EpaEngine {
             }
 
             s.closest_point = closest_face.closest;
-            let support_point = SupportPoint::new(shape1, shape2, closest_face.normal);
+            let support_point =
+                SupportPoint::new(shape1, transform1, shape2, transform2, closest_face.normal);
 
             let dot = closest_face.normal.dot(support_point.difference);
             let distance_squared = dot * dot / closest_face.normal.length_squared();
@@ -295,13 +299,22 @@ impl EpaEngine {
         s
     }
 
-    pub fn penetration_depth<S1: ConvexShape + ?Sized, S2: ConvexShape + ?Sized>(
+    pub fn penetration_depth<S1: ConvexShape3D + ?Sized, S2: ConvexShape3D + ?Sized>(
         &mut self,
         shape1: &S1,
+        transform1: &Transform,
         shape2: &S2,
+        transform2: &Transform,
         tetrahedron: [SupportPoint; 4],
     ) -> (Vec3, f32) {
-        let state = self.penetration_depth_details(shape1, shape2, tetrahedron, self.max_iteration);
+        let state = self.penetration_depth_details(
+            shape1,
+            transform1,
+            shape2,
+            transform2,
+            tetrahedron,
+            self.max_iteration,
+        );
         state.closest_point.normalize_and_length()
     }
 }
@@ -436,12 +449,10 @@ impl Ord for Entry {
 
 #[cfg(test)]
 mod tests {
+    use entropie::shape::{Ball, Box3D};
     use glam::vec3;
 
-    use crate::{
-        gjk::gjk_tetrahedron,
-        shape::{AxisAlignedBox, Ball},
-    };
+    use crate::gjk::gjk_tetrahedron;
 
     use super::*;
 
@@ -449,63 +460,69 @@ mod tests {
     fn test_ball_axis_aligned_boxes() {
         let mut engine = EpaEngine::default();
 
-        let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+        let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
+        let ball = Ball::from_radius(1.0);
 
-        let mut ball = Ball {
-            center: Vec3::ZERO,
-            radius: 1.0,
-        };
+        let identity = Transform::IDENTITY;
 
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
+        let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &identity).unwrap();
+        let (_, distance) =
+            engine.penetration_depth(&box_, &identity, &ball, &identity, tetrahedron);
         assert_seperating_distance(2.0, distance);
 
-        ball.center = vec3(1.99, 0.0, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.01, result);
+        let transform = Transform::from_translation(vec3(1.99, 0.0, 0.0));
+        let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
+        let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
+        assert_seperating_vector(transform.translation.normalize(), 0.01, result);
 
-        ball.center = vec3(2.0, 0.0, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let (_, distance) = engine.penetration_depth(&aab, &ball, tetrahedron);
+        let transform = Transform::from_translation(vec3(2.0, 0.0, 0.0));
+        let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
+        let (_, distance) =
+            engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
         assert_seperating_distance(0.0, distance);
 
-        ball.center = vec3(1.70, 1.70, 0.0);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0101, result);
+        let transform = Transform::from_translation(vec3(1.70, 1.70, 0.0));
+        let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
+        let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
+        assert_seperating_vector(transform.translation.normalize(), 0.0101, result);
 
-        ball.center = vec3(1.57, 1.57, 1.57);
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let result = engine.penetration_depth(&aab, &ball, tetrahedron);
-        assert_seperating_vector(ball.center.normalize(), 0.0127, result);
+        let transform = Transform::from_translation(vec3(1.57, 1.57, 1.57));
+        let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
+        let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
+        assert_seperating_vector(transform.translation.normalize(), 0.0127, result);
     }
 
     #[test]
     fn test_two_balls() {
         let mut engine = EpaEngine::default();
 
-        let origin = Ball {
-            center: Vec3::ZERO,
-            radius: 1.0,
-        };
+        let unit_ball = Ball::from_radius(1.0);
 
-        let tetrahedron = gjk_tetrahedron(&origin, &origin).unwrap();
-        let (_, distance) = engine.penetration_depth(&origin, &origin, tetrahedron);
+        let identity = Transform::IDENTITY;
+
+        let tetrahedron = gjk_tetrahedron(&unit_ball, &identity, &unit_ball, &identity).unwrap();
+        let (_, distance) =
+            engine.penetration_depth(&unit_ball, &identity, &unit_ball, &identity, tetrahedron);
         // slowest converging case -> need lower tolerance
         assert_seperating_distance_tolerance(2.0, distance, 0.1);
 
-        let x = Ball {
-            center: Vec3::X,
-            radius: 0.0,
-        };
+        let point_ball = Ball::from_radius(0.0);
+        let transform = Transform::from_translation(Vec3::X);
 
-        let tetrahedron = gjk_tetrahedron(&x, &x).unwrap();
-        let result = engine.penetration_depth(&x, &x, tetrahedron);
+        let tetrahedron =
+            gjk_tetrahedron(&point_ball, &transform, &point_ball, &transform).unwrap();
+        let result = engine.penetration_depth(
+            &point_ball,
+            &transform,
+            &point_ball,
+            &transform,
+            tetrahedron,
+        );
         assert!(result.1.abs() <= 0.1, "Expected 0.0, got {}", result.0);
 
-        let tetrahedron = gjk_tetrahedron(&origin, &x).unwrap();
-        let result = engine.penetration_depth(&origin, &x, tetrahedron);
+        let tetrahedron = gjk_tetrahedron(&unit_ball, &identity, &point_ball, &transform).unwrap();
+        let result =
+            engine.penetration_depth(&unit_ball, &identity, &point_ball, &transform, tetrahedron);
         assert!(result.1.abs() <= 0.1, "Expected 0.0, got {}", result.0);
     }
 

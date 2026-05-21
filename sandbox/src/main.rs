@@ -3,6 +3,8 @@ use std::iter::once;
 use std::sync::Arc;
 use std::time::Instant;
 
+use entropie::Transform;
+use entropie::shape::{Ball, Box3D};
 use glam::{Quat, Vec3, vec3};
 use image::DynamicImage;
 use image::codecs::hdr::HdrDecoder;
@@ -28,27 +30,23 @@ use winit::window::{Window, WindowId};
 
 use crate::epa::{EpaEngine, EpaState};
 use crate::gjk::gjk_tetrahedron;
-use crate::shape::{AxisAlignedBox, Ball};
 
 mod epa;
 mod gjk;
-mod shape;
 
 const DEFAULT_STEPS: usize = 0;
 const VERTEX_LABELS: bool = true;
 const FACE_LABELS: bool = false;
 const EDGE_LABELS: bool = false;
 
-fn create_shapes() -> (AxisAlignedBox, Ball) {
-    let aab = AxisAlignedBox::from_center_dimension(Vec3::ZERO, 2.0, 2.0, 2.0);
+fn create_shapes() -> ((Box3D, Transform), (Ball, Transform)) {
+    let aab = Box3D::from_dimensions(2.0, 2.0, 2.0);
+    let aab_transform = Transform::IDENTITY;
 
-    let mut ball = Ball {
-        center: Vec3::ZERO,
-        radius: 1.0,
-    };
-    ball.center = vec3(2.0, 0.0, 0.0);
+    let ball = Ball::from_radius(1.0);
+    let ball_transform = Transform::from_translation(vec3(2.0, 0.0, 0.0));
 
-    (aab, ball)
+    ((aab, aab_transform), (ball, ball_transform))
 }
 
 fn create_points(
@@ -281,11 +279,16 @@ impl Scene {
 
         let mut epa_engine = EpaEngine::default();
 
-        let (aab, ball) = create_shapes();
-
-        let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-        let epa_result =
-            epa_engine.penetration_depth_details(&aab, &ball, tetrahedron, DEFAULT_STEPS);
+        let (a, b) = create_shapes();
+        let tetrahedron = gjk_tetrahedron(&a.0, &a.1, &b.0, &b.1).unwrap();
+        let epa_result = epa_engine.penetration_depth_details(
+            &a.0,
+            &a.1,
+            &b.0,
+            &b.1,
+            tetrahedron,
+            DEFAULT_STEPS,
+        );
 
         dbg!(epa_result.closest_point.normalize_and_length());
 
@@ -375,11 +378,16 @@ impl Scene {
                 self.entity_manager.delete_entity(entity);
             });
 
-            let (aab, ball) = create_shapes();
-            let tetrahedron = gjk_tetrahedron(&aab, &ball).unwrap();
-            let epa_result =
-                self.epa_engine
-                    .penetration_depth_details(&aab, &ball, tetrahedron, self.steps);
+            let (a, b) = create_shapes();
+            let tetrahedron = gjk_tetrahedron(&a.0, &a.1, &b.0, &b.1).unwrap();
+            let epa_result = self.epa_engine.penetration_depth_details(
+                &a.0,
+                &a.1,
+                &b.0,
+                &b.1,
+                tetrahedron,
+                DEFAULT_STEPS,
+            );
 
             dbg!(epa_result.closest_point.normalize_and_length());
 

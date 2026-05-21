@@ -3766,6 +3766,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "entropie",
  "env_logger",
  "glam 0.32.1",
  "image",

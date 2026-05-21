@@ -32,11 +32,8 @@ use crate::table::table;
 
 mod arrow;
 mod ball;
-mod epa;
-mod gjk;
 mod physics;
 mod python;
-mod shape;
 mod table;
 
 struct State {

@@ -1,4 +1,4 @@
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
 use crate::environment::EnvironmentContext;
@@ -29,7 +29,7 @@ pub mod texture;
 /// - pipelines
 /// - default buffers, textures, samplers
 /// - ...
-#[cfg_attr(feature = "python", pyclass(frozen, skip_from_py_object))]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, skip_from_py_object))]
 #[derive(Debug, Clone)]
 
 pub struct Context {
@@ -119,7 +119,7 @@ impl Context {
     }
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 #[pymethods]
 impl Context {
     #[new]
@@ -128,7 +128,7 @@ impl Context {
     }
 }
 
-#[cfg(feature = "python")]
+#[cfg(feature = "pyo3")]
 #[pyo3::pymodule(name = "tonner")]
 mod tonner_py {
     use super::*;

@@ -659,8 +659,11 @@ pub(crate) struct RendererContext {
     brightness_bind_group_layout: wgpu::BindGroupLayout,
     gaussian_blur_bind_group_layout: wgpu::BindGroupLayout,
     bloom_sampler: wgpu::Sampler,
+    #[cfg(feature = "egui")]
     billboard_bind_group_layout: wgpu::BindGroupLayout,
+    #[cfg(feature = "egui")]
     billboard_pipeline: wgpu::ComputePipeline,
+    #[cfg(feature = "egui")]
     depth_sampler: wgpu::Sampler,
 }
 
@@ -1092,7 +1095,8 @@ impl RendererContext {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-
+        
+        #[cfg(feature = "egui")]
         let billboard_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Billboard label bind gorup layout"),
@@ -1146,9 +1150,11 @@ impl RendererContext {
                 ],
             });
 
+        #[cfg(feature = "egui")]
         let billboard_shader_module =
             device.create_shader_module(wgpu::include_wgsl!("billboard_label.wgsl"));
 
+        #[cfg(feature = "egui")]
         let billboard_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Billobard label pipeline layout"),
@@ -1156,6 +1162,7 @@ impl RendererContext {
                 immediate_size: 0,
             });
 
+        #[cfg(feature = "egui")]
         let billboard_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Billboard label pipeline"),
             layout: Some(&billboard_pipeline_layout),
@@ -1165,6 +1172,7 @@ impl RendererContext {
             cache: None,
         });
 
+        #[cfg(feature = "egui")]
         let depth_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Depth texture sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -1190,8 +1198,11 @@ impl RendererContext {
             brightness_bind_group_layout,
             gaussian_blur_bind_group_layout,
             bloom_sampler,
+            #[cfg(feature = "egui")]
             billboard_bind_group_layout,
+            #[cfg(feature = "egui")]
             billboard_pipeline,
+            #[cfg(feature = "egui")]
             depth_sampler,
         }
     }

@@ -2,6 +2,7 @@ use glam::Vec3;
 
 use crate::{
     AABB, Transform,
+    collision::CollisionInfo,
     shape::{ConvexShape3D, Shape3D},
 };
 
@@ -12,9 +13,9 @@ pub struct Ball {
 }
 
 impl Ball {
-    /// A unit ball of radius `1.0`.
-    /// 
-    /// ## Example
+    /// A ball of radius `1.0`.
+    ///
+    /// # Example
     /// ```
     /// # use entropie::shape::Ball;
     /// let ball = Ball::UNIT;
@@ -23,8 +24,8 @@ impl Ball {
     pub const UNIT: Ball = Ball { radius: 1.0 };
 
     /// Creates a `Ball` from its radius.
-    /// 
-    /// ## Example
+    ///
+    /// # Example
     /// ```
     /// # use entropie::shape::Ball;
     /// let ball = Ball::from_radius(2.5);
@@ -35,8 +36,8 @@ impl Ball {
     }
 
     /// Returns the radius of the ball.
-    /// 
-    /// ## Example
+    ///
+    /// # Example
     /// ```
     /// # use entropie::shape::Ball;
     /// let ball = Ball::from_radius(2.5);
@@ -44,35 +45,6 @@ impl Ball {
     /// ```
     pub fn radius(&self) -> f32 {
         self.radius
-    }
-
-    /// Returns `true` iff `self` collides/overlaps with `other` when applying the given transforms.
-    /// If the two balls are exactly touching, this function returns `false`.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// # use glam::vec3;
-    /// # use entropie::{Transform, shape::Ball};
-    /// let ball = Ball::UNIT;
-    /// 
-    /// let transform1 = Transform::IDENTITY;
-    /// let transform2 = Transform::from_translation(vec3(1.0, 0.0, 0.0));
-    /// let transform3 = Transform::from_translation(vec3(2.0, 0.0, 0.0));
-    /// 
-    /// assert!(ball.collides_ball(&transform1, &ball, &transform1));
-    /// assert!(ball.collides_ball(&transform1, &ball, &transform2));
-    /// assert!(!ball.collides_ball(&transform1, &ball, &transform3));
-    /// ```
-    pub fn collides_ball(
-        &self,
-        transform: &Transform,
-        other: &Ball,
-        other_transform: &Transform,
-    ) -> bool {
-        let center_distance = transform.translation - other_transform.translation;
-        let radii_sum = self.radius + other.radius;
-        center_distance.length_squared() < radii_sum * radii_sum
     }
 }
 
@@ -92,5 +64,83 @@ impl Shape3D for Ball {
 impl ConvexShape3D for Ball {
     fn support_point(&self, transform: &Transform, direction: Vec3) -> Vec3 {
         transform.translation + self.radius * direction.normalize_or(Vec3::X)
+    }
+}
+
+/// Returns `true` iff the two balls collide when applying the given transforms.
+/// If the two balls are exactly touching, this function returns `false`.
+///
+/// # Examples
+///
+/// ```
+/// # use glam::vec3;
+/// # use entropie::{Transform, shape::Ball, shape::collides_2balls};
+/// let ball = Ball::UNIT;
+///
+/// let transform1 = Transform::IDENTITY;
+/// let transform2 = Transform::from_translation(vec3(1.0, 0.0, 0.0));
+/// let transform3 = Transform::from_translation(vec3(2.0, 0.0, 0.0));
+///
+/// assert!(collides_2balls((&ball, &transform1), (&ball, &transform1)));
+/// assert!(collides_2balls((&ball, &transform1), (&ball, &transform2)));
+/// assert!(!collides_2balls((&ball, &transform1), (&ball, &transform3)));
+/// ```
+pub fn collides_2balls(
+    (ball1, transform1): (&Ball, &Transform),
+    (ball2, transform2): (&Ball, &Transform),
+) -> bool {
+    let center_distance = transform1.translation - transform2.translation;
+    let radii_sum = ball1.radius + ball2.radius;
+    center_distance.length_squared() < radii_sum * radii_sum
+}
+
+/// Returns the squared distance between the two balls when applying the given transforms.
+/// If the two balls are touching or overlapping, this function returns `0.0`.
+///
+/// # Examples
+/// ```
+/// # use glam::vec3;
+/// # use entropie::{Transform, shape::Ball, shape::distance_2balls};
+/// let ball = Ball::UNIT;
+/// let transform1 = Transform::IDENTITY;
+/// let transform2 = Transform::from_translation(vec3(3.0, 0.0, 0.0));
+/// assert_eq!(distance_2balls((&ball, &transform1), (&ball, &transform2)), 1.0);
+/// ```
+pub fn distance_2balls(
+    (ball1, transform1): (&Ball, &Transform),
+    (ball2, transform2): (&Ball, &Transform),
+) -> f32 {
+    let center_distance = transform1.translation - transform2.translation;
+    let radii_sum = ball1.radius + ball2.radius;
+    0.0f32.max(center_distance.length() - radii_sum)
+}
+
+/// Returns information about the collision between the two balls when applying the given transforms.
+///
+/// # Examples
+/// ```
+/// # use glam::vec3;
+/// # use entropie::{Transform, shape::Ball, shape::collision_info_2balls};
+/// let ball = Ball::UNIT;
+/// let transform1 = Transform::IDENTITY;
+/// let transform2 = Transform::from_translation(vec3(1.5, 0.0, 0.0));
+/// let collision_info = collision_info_2balls((&ball, &transform1), (&ball, &transform2));
+/// assert_eq!(collision_info.separating_vector, vec3(0.5, 0.0, 0.0));
+/// assert_eq!(collision_info.contact_point_1, vec3(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.contact_point_2, vec3(0.5, 0.0, 0.0));
+/// ```
+pub fn collision_info_2balls(
+    (ball1, transform1): (&Ball, &Transform),
+    (ball2, transform2): (&Ball, &Transform),
+) -> CollisionInfo {
+    let center_distance = transform1.translation - transform2.translation;
+    let separating_dir = center_distance.normalize_or(Vec3::X);
+    let contact_point_1 = transform1.translation - ball1.radius * separating_dir;
+    let contact_point_2 = transform2.translation + ball2.radius * separating_dir;
+    let separating_vector = contact_point_1 - contact_point_2;
+    CollisionInfo {
+        separating_vector,
+        contact_point_1,
+        contact_point_2,
     }
 }

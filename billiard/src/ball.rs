@@ -17,7 +17,7 @@ pub struct Ball {
     #[pyo3(get)]
     node: Py<NodeHandle>,
     #[pyo3(get)]
-    radius: f64,
+    pub radius: f64,
     #[pyo3(get, set)]
     pub velocity: Py<PyArray1<f64>>,
     #[pyo3(get, set)]

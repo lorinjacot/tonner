@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 
 /// Unique id for a [`manager`] entity. This is used to associate
 /// entities with their components.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "pyo3", pyclass(frozen, str, from_py_object))]
 #[repr(transparent)]
 pub struct EntityId(NonZeroU32);

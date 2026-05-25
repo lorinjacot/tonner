@@ -1,11 +1,10 @@
 use std::{collections::HashMap, ops::Deref, time::Duration};
 
+use entropie::{Transform, collision::CollisionInfo, shape};
 use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 use tonner::{entity_component::EntityId, scene_graph::SceneGraph};
-
-use crate::ball::Ball;
 
 const SUBSTEP_COUNT: usize = 10;
 
@@ -36,8 +35,39 @@ pub trait Constraint: Send + Sync {
     }
 }
 
+struct ContactConstraint {
+    entities: [EntityId; 2],
+    shapes: [shape::Ball; 2],
+}
+
+impl ContactConstraint {
+    fn collision_info(&self, positions: &[Vec3]) -> CollisionInfo {
+        let [ball1, ball2] = &self.shapes;
+        let transform1 = &Transform::from_translation(positions[0]);
+        let transform2 = &Transform::from_translation(positions[1]);
+        shape::collision_info_2balls((ball1, transform1), (ball2, transform2))
+    }
+}
+
+impl Constraint for ContactConstraint {
+    fn entities(&self) -> &[EntityId] {
+        &self.entities
+    }
+
+    fn value(&self, positions: &[Vec3]) -> f32 {
+        let info = self.collision_info(positions);
+        info.separating_vector.length()
+    }
+
+    fn gradient(&self, positions: &[Vec3]) -> Vec<Vec3> {
+        let info = self.collision_info(positions);
+        let dir = info.separating_vector.normalize_or_zero();
+        vec![dir, -dir]
+    }
+}
+
 struct Particle<'a> {
-    ball: &'a mut Ball,
+    ball: &'a mut crate::ball::Ball,
     mass: f32,
     inverse_mass: f32,
     position: Vec3,
@@ -49,7 +79,7 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
     py: Python<'py>,
     delta_time: Duration,
     scene_graph: &mut SceneGraph,
-    balls: impl IntoIterator<Item = &'a mut Ball>,
+    balls: impl IntoIterator<Item = &'a mut crate::ball::Ball>,
     forces: &[F],
     constraints: &[C],
 ) {
@@ -77,9 +107,11 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
         })
         .collect();
 
+    let mut contact_constraints = Vec::with_capacity(particles.len());
+
     let h = delta_time.as_secs_f32() / SUBSTEP_COUNT as f32;
     for _ in 0..SUBSTEP_COUNT {
-        forces.iter().for_each(|f| {
+        for f in forces {
             let entities = f.entities();
             let positions: Vec<_> = entities
                 .iter()
@@ -93,14 +125,53 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
             entities.iter().zip(force).for_each(|(node, force)| {
                 particles.get_mut(node).unwrap().velocity += h * force;
             })
-        });
+        }
 
-        particles.values_mut().for_each(|p| {
+        for p in particles.values_mut() {
             p.previous_position = p.position;
             p.position += h * p.velocity;
-        });
+        }
+
+        for (&entity1, particle1) in &particles {
+            for (&entity2, particle2) in &particles {
+                if entity1 < entity2 {
+                    let ball1 = shape::Ball::from_radius(particle1.ball.radius as f32);
+                    let transform1 = &Transform::from_translation(particle1.position);
+                    let ball2 = shape::Ball::from_radius(particle2.ball.radius as f32);
+                    let transform2 = &Transform::from_translation(particle2.position);
+                    if shape::collides_2balls((&ball1, &transform1), (&ball2, &transform2)) {
+                        contact_constraints.push(ContactConstraint {
+                            entities: [entity1, entity2],
+                            shapes: [ball1, ball2],
+                        });
+                    }
+                }
+            }
+        }
 
         for c in constraints {
+            let nodes = c.entities();
+            let mut particles: Vec<_> = particles
+                .iter_mut()
+                .filter(|(node, _)| nodes.contains(*node))
+                .map(|(_, p)| p)
+                .collect();
+
+            let positions: Vec<_> = particles.iter().map(|p| p.position).collect();
+
+            let loss = c.value(&positions);
+            if loss.abs() > 1e-6 {
+                let total_inverse_mass: f32 = particles.iter().map(|p| p.inverse_mass).sum();
+                let lambda = -loss / (total_inverse_mass + c.alpha() / (h * h));
+
+                let gradients = c.gradient(&positions);
+                particles.iter_mut().zip(gradients).for_each(|(p, grad)| {
+                    let impulse = lambda * grad.normalize();
+                    p.position += impulse / p.mass;
+                });
+            }
+        }
+        for c in contact_constraints.drain(..) {
             let nodes = c.entities();
             let mut particles: Vec<_> = particles
                 .iter_mut()
@@ -128,9 +199,9 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
         });
     }
 
-    particles.iter_mut().for_each(|(node, p)| {
+    for (node, p) in &mut particles {
         scene_graph.set_local_transformation(*node, p.position, None, None);
         p.ball.velocity =
             PyArray1::from_iter(py, p.velocity.to_array().iter().map(|c| *c as f64)).unbind();
-    });
+    }
 }

@@ -27,13 +27,13 @@ def register_distance_constraint(ball1, ball2, constraint_manager):
 
         return grad
     
-    constraint_manager.push(
-        f"distance({ball1.number}, {ball2.number})",
-        [ball1.node.entity, ball2.node.entity],
-        value,
-        grad,
-        ALPHA,
-    )
+    # constraint_manager.push(
+    #     f"distance({ball1.number}, {ball2.number})",
+    #     [ball1.node.entity, ball2.node.entity],
+    #     value,
+    #     grad,
+    #     ALPHA,
+    # )
 
 def register_table_surface_constraint(ball, constraint_manager):
     MIN_Y = BALL_RADIUS

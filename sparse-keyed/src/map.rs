@@ -4,7 +4,7 @@ use std::{
     ops::{Deref, Index, IndexMut},
 };
 
-use crate::Key;
+use crate::{Key, KeyRegistry};
 
 #[derive(Debug, Clone)]
 struct SparseEntry {
@@ -82,6 +82,18 @@ impl<T> SecondaryMap<T> {
                 Some(self.dense.swap_remove(dense_index).1)
             }
             _ => None,
+        }
+    }
+
+    pub fn remove_deleted(&mut self, registry: &KeyRegistry) {
+        let mut i = 0;
+        while i < self.dense.len() {
+            let key = self.dense[i].0;
+            if registry.contains(key) {
+                i += 1;
+            } else {
+                self.remove(key);
+            }
         }
     }
 

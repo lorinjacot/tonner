@@ -4,6 +4,7 @@ use std::{
     iter::{FusedIterator, once, repeat_n},
     num::NonZeroU32,
     ops::{Deref, Index, IndexMut},
+    slice::SliceIndex,
 };
 
 use crate::{Key, KeyRegistry};
@@ -179,6 +180,34 @@ impl<T> SecondaryMap<T> {
         }
     }
 
+    /// Returns the index of the value associated with a key in the dense vector, or `None` if the key does not have a value in the map. The returned index is only valid until the next map modification. The index of one `SecondaryMap` is in general different from the index of another `SecondaryMap` for the same key. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method. This method can be used to manually index into the dense vector of the map for advanced use cases.
+    ///
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// # use sparse_keyed::SecondaryMap;
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key = registry.create();
+    /// assert!(map.index(key).is_none());
+    ///
+    /// map.insert(key, "value");
+    /// assert!(map.index(key).is_some());
+    ///
+    /// let index = map.index(key).unwrap();
+    /// assert_eq!(map[index].0, key);
+    /// assert_eq!(map[index].1, "value");
+    ///
+    /// let key_2 = registry.create();
+    /// map.insert(key_2, "value 2");
+    /// // assert_eq!(map[index].0, key); // might panic
+    /// ```
+    pub fn index(&self, key: Key) -> Option<usize> {
+        match self.sparse.get(key.index() as usize) {
+            Some(entry) if entry.version == Some(key.version()) => Some(entry.dense_index as usize),
+            _ => None,
+        }
+    }
+
     /// Returns `true` if the map contains a value for the given key, or `false` if the key does not have a value in the map. Note that this does not check if the key is present in the registry, so it may return `true` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`].
     ///
     /// # Examples
@@ -200,10 +229,7 @@ impl<T> SecondaryMap<T> {
     /// assert!(!map.contains(key));
     /// ```
     pub fn contains(&self, key: Key) -> bool {
-        match self.sparse.get(key.index() as usize) {
-            Some(entry) if entry.version == Some(key.version()) => true,
-            _ => false,
-        }
+        self.index(key).is_some()
     }
 
     /// Returns a reference to the value associated with a key in the map, or `None` if the key does not have a value in the map. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
@@ -227,12 +253,7 @@ impl<T> SecondaryMap<T> {
     /// assert!(map.get(key).is_none());
     /// ```
     pub fn get(&self, key: Key) -> Option<&T> {
-        match self.sparse.get(key.index() as usize) {
-            Some(sparse_entry) if sparse_entry.version == Some(key.version()) => {
-                Some(&self.dense[sparse_entry.dense_index as usize].1)
-            }
-            _ => None,
-        }
+        self.index(key).map(|index| &self.dense[index].1)
     }
 
     /// Returns a mutable reference to the value associated with a key in the map, or `None` if the key does not have a value in the map. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
@@ -253,12 +274,7 @@ impl<T> SecondaryMap<T> {
     /// assert_eq!(map.get(key), Some(&"new value"));
     /// ```
     pub fn get_mut(&mut self, key: Key) -> Option<&mut T> {
-        match self.sparse.get(key.index() as usize) {
-            Some(sparse_entry) if sparse_entry.version == Some(key.version()) => {
-                Some(&mut self.dense[sparse_entry.dense_index as usize].1)
-            }
-            _ => None,
-        }
+        self.index(key).map(|index| &mut self.dense[index].1)
     }
 
     /// Returns an iterator visiting all entries in arbitrary order with mutable references to their values. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
@@ -390,8 +406,16 @@ impl<T> Deref for SecondaryMap<T> {
     }
 }
 
+impl<T, I: SliceIndex<[(Key, T)]>> Index<I> for SecondaryMap<T> {
+    type Output = I::Output;
+
+    fn index(&self, index: I) -> &Self::Output {
+        &self.dense[index]
+    }
+}
+
 /// An iterator visiting all entries in arbitrary order with mutable references to their values. Created by [`SecondaryMap::iter_mut()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::{KeyRegistry, SecondaryMap};
@@ -401,7 +425,7 @@ impl<T> Deref for SecondaryMap<T> {
 /// let key_1 = registry.create();
 /// map.insert(key_0, "value 0");
 /// map.insert(key_1, "value 1");
-/// 
+///
 /// for (key, value) in map.iter_mut() {
 ///    *value = "new value";
 /// }
@@ -468,7 +492,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
 impl<'a, T> FusedIterator for IterMut<'a, T> {}
 
 /// An iterator visiting all keys in arbitrary order. Created by [`SecondaryMap::keys()`]. Note that this does not check if the keys are present in the registry, so it may return keys for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::{KeyRegistry, SecondaryMap};
@@ -545,7 +569,7 @@ impl<'a, T> DoubleEndedIterator for Keys<'a, T> {
 impl<'a, T> FusedIterator for Keys<'a, T> {}
 
 /// An iterator visiting all values in arbitrary order. Created by [`SecondaryMap::values()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return values for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::{KeyRegistry, SecondaryMap};
@@ -555,7 +579,7 @@ impl<'a, T> FusedIterator for Keys<'a, T> {}
 /// let key_1 = registry.create();
 /// map.insert(key_0, "value 0");
 /// map.insert(key_1, "value 1");
-/// 
+///
 /// let mut values = map.values();
 /// assert_eq!(values.next(), Some(&"value 0"));
 /// assert_eq!(values.next(), Some(&"value 1"));
@@ -622,7 +646,7 @@ impl<'a, T> DoubleEndedIterator for Values<'a, T> {
 impl<'a, T> FusedIterator for Values<'a, T> {}
 
 /// An iterator visiting all values in arbitrary order with mutable references to their values. Created by [`SecondaryMap::values_mut()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return values for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::{KeyRegistry, SecondaryMap};
@@ -632,7 +656,7 @@ impl<'a, T> FusedIterator for Values<'a, T> {}
 /// let key_1 = registry.create();
 /// map.insert(key_0, "value 0");
 /// map.insert(key_1, "value 1");
-/// 
+///
 /// for value in map.values_mut() {
 ///   *value = "new value";
 /// }

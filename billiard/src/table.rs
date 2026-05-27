@@ -1,14 +1,14 @@
 use glam::{Vec3, vec3};
 use tonner::{
     Context,
-    entity_component::EntityManager,
+    ecs::EntityRegistry,
     geometry::BoxBuilder,
     mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
     scene_graph::SceneGraph,
 };
 
 pub fn table(
-    entity_manager: &mut EntityManager,
+    entity_registry: &mut EntityRegistry,
     scene_graph: &mut SceneGraph,
     ctx: &Context,
 ) -> MeshInstance {
@@ -59,7 +59,7 @@ pub fn table(
         .roughness_factor(0.2)
         .build(&ctx);
 
-    let table_entity = entity_manager.new_entity();
+    let table_entity = entity_registry.create();
     scene_graph.add(table_entity, None);
 
     MeshBuilder::default()

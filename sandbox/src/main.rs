@@ -11,8 +11,7 @@ use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
 use storm_controls::orbit::OrbitControls;
 use tonner::Context;
-use tonner::entity_component::component::sparse_array::SparseArray;
-use tonner::entity_component::{ComponentStorage, EntityManager};
+use tonner::ecs::{ComponentStorage, EntityRegistry};
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::skin::SkinManager;
 use tonner::geometry::{ArrowBuilder, GeometryBuilder, SphereBuilder};
@@ -51,20 +50,20 @@ fn create_shapes() -> ((Box3D, Transform), (Ball, Transform)) {
 
 fn create_points(
     epa_state: &EpaState,
-    entity_manager: &mut EntityManager,
+    entity_registry: &mut EntityRegistry,
     scene_graph: &mut SceneGraph,
-    labels: &mut SparseArray<BillboardLabel>,
+    labels: &mut ComponentStorage<BillboardLabel>,
     point: &Mesh,
-) -> SparseArray<MeshInstance> {
+) -> ComponentStorage<MeshInstance> {
     epa_state
         .vertices
         .iter()
         .enumerate()
         .map(|(index, v)| {
-            let entity = entity_manager.new_entity();
+            let entity = entity_registry.create();
             scene_graph.add_with_transform(entity, None, v.difference, Quat::IDENTITY, Vec3::ONE);
             if VERTEX_LABELS {
-                labels.add(entity, BillboardLabel::new(format!("Vertex {index}")));
+                labels.insert(entity, BillboardLabel::new(format!("Vertex {index}")));
             }
             (entity, point.new_instance(entity))
         })
@@ -73,19 +72,19 @@ fn create_points(
 
 fn create_faces(
     epa_state: &EpaState,
-    entity_manager: &mut EntityManager,
+    entity_registry: &mut EntityRegistry,
     scene_graph: &mut SceneGraph,
-    labels: &mut SparseArray<BillboardLabel>,
+    labels: &mut ComponentStorage<BillboardLabel>,
     context: &Context,
     face_material: &Material,
-) -> SparseArray<MeshInstance> {
+) -> ComponentStorage<MeshInstance> {
     epa_state
         .faces
         .iter()
         .enumerate()
         .filter(|(_, face)| !face.obsolete)
         .map(|(i, face)| {
-            let entity = entity_manager.new_entity();
+            let entity = entity_registry.create();
             scene_graph.add(entity, None);
 
             let positions = face
@@ -94,7 +93,7 @@ fn create_faces(
             let triangle_centroid = positions.iter().sum::<Vec3>() / 3.0;
 
             if FACE_LABELS {
-                let label_entity = entity_manager.new_entity();
+                let label_entity = entity_registry.create();
                 scene_graph.add_with_transform(
                     label_entity,
                     Some(entity),
@@ -102,7 +101,7 @@ fn create_faces(
                     Quat::IDENTITY,
                     Vec3::ONE,
                 );
-                labels.add(
+                labels.insert(
                     label_entity,
                     BillboardLabel::new(format!("Triangle {i} ({:?})", face.vertex_indices)),
                 );
@@ -114,7 +113,7 @@ fn create_faces(
                     let b = positions[(index + 1) % 3];
                     let edge_center = (a + b) / 2.0;
 
-                    let edge_entity = entity_manager.new_entity();
+                    let edge_entity = entity_registry.create();
                     scene_graph.add_with_transform(
                         edge_entity,
                         Some(entity),
@@ -122,7 +121,7 @@ fn create_faces(
                         Quat::IDENTITY,
                         Vec3::ONE,
                     );
-                    labels.add(
+                    labels.insert(
                         edge_entity,
                         BillboardLabel::new(format!(
                             "Edge {i}-{index} to {}-{}",
@@ -149,16 +148,16 @@ fn create_faces(
 
 fn create_normals(
     epa_state: &EpaState,
-    entity_manager: &mut EntityManager,
+    entity_registry: &mut EntityRegistry,
     scene_graph: &mut SceneGraph,
     normal_mesh: &Mesh,
-) -> SparseArray<MeshInstance> {
+) -> ComponentStorage<MeshInstance> {
     epa_state
         .faces
         .iter()
         .filter(|face| !face.obsolete && face.closest_is_internal())
         .map(|face| {
-            let entity = entity_manager.new_entity();
+            let entity = entity_registry.create();
             let origin = face.closest;
             let dir = face.closest.normalize();
             let mut rotation = Quat::look_to_rh(dir, Vec3::Y);
@@ -173,7 +172,7 @@ fn create_normals(
 
 struct Scene {
     context: Context,
-    entity_manager: EntityManager,
+    entity_registry: EntityRegistry,
     scene_graph: SceneGraph,
     point: Mesh,
     axis: MeshInstance,
@@ -187,11 +186,11 @@ struct Scene {
     rendered_steps: usize,
     yellow: Material,
     normal_mesh: Mesh,
-    points: SparseArray<MeshInstance>,
-    faces: SparseArray<MeshInstance>,
-    normals: SparseArray<MeshInstance>,
+    points: ComponentStorage<MeshInstance>,
+    faces: ComponentStorage<MeshInstance>,
+    normals: ComponentStorage<MeshInstance>,
     epa_engine: EpaEngine,
-    labels: SparseArray<BillboardLabel>,
+    labels: ComponentStorage<BillboardLabel>,
 }
 
 impl Scene {
@@ -203,10 +202,10 @@ impl Scene {
                     label: Some("App::resumed command encoder"),
                 });
 
-        let mut entity_manager = EntityManager::new();
+        let mut entity_registry = EntityRegistry::new();
         let mut scene_graph = SceneGraph::new(&context);
 
-        let camera = entity_manager.new_entity();
+        let camera = entity_registry.create();
         scene_graph.add_with_transform(camera, None, 2.0 * Vec3::Z, Quat::IDENTITY, Vec3::ONE);
         let camera = Camera::new(camera);
 
@@ -263,7 +262,7 @@ impl Scene {
             .build(&context)
             .unwrap();
 
-        let axis_entity = entity_manager.new_entity();
+        let axis_entity = entity_registry.create();
         scene_graph.add(axis_entity, None);
         let axis = axis.new_instance(axis_entity);
 
@@ -305,17 +304,17 @@ impl Scene {
             .build(&context)
             .unwrap();
 
-        let mut labels = SparseArray::new();
+        let mut labels = ComponentStorage::new();
         let points = create_points(
             &epa_result,
-            &mut entity_manager,
+            &mut entity_registry,
             &mut scene_graph,
             &mut labels,
             &point,
         );
         let faces = create_faces(
             &epa_result,
-            &mut entity_manager,
+            &mut entity_registry,
             &mut scene_graph,
             &mut labels,
             &context,
@@ -323,7 +322,7 @@ impl Scene {
         );
         let normals = create_normals(
             &epa_result,
-            &mut entity_manager,
+            &mut entity_registry,
             &mut scene_graph,
             &normal_mesh,
         );
@@ -332,7 +331,7 @@ impl Scene {
 
         Scene {
             context,
-            entity_manager,
+            entity_registry,
             scene_graph,
             point,
             axis,
@@ -361,22 +360,29 @@ impl Scene {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if self.steps != self.rendered_steps {
-            self.labels.drain().for_each(|(entity, _)| {
+            self.labels.keys().for_each(|&entity| {
                 self.scene_graph.remove(entity);
-                self.entity_manager.delete_entity(entity);
+                self.entity_registry.delete(entity);
             });
-            self.points.drain().for_each(|(entity, _)| {
+            self.labels.clear();
+
+            self.points.keys().for_each(|&entity| {
                 self.scene_graph.remove(entity);
-                self.entity_manager.delete_entity(entity);
+                self.entity_registry.delete(entity);
             });
-            self.faces.drain().for_each(|(entity, _)| {
+            self.points.clear();
+
+            self.faces.keys().for_each(|&entity| {
                 self.scene_graph.remove(entity);
-                self.entity_manager.delete_entity(entity);
+                self.entity_registry.delete(entity);
             });
-            self.normals.drain().for_each(|(entity, _)| {
+            self.faces.clear();
+
+            self.normals.keys().for_each(|&entity| {
                 self.scene_graph.remove(entity);
-                self.entity_manager.delete_entity(entity);
+                self.entity_registry.delete(entity);
             });
+            self.normals.clear();
 
             let (a, b) = create_shapes();
             let tetrahedron = gjk_tetrahedron(&a.0, &a.1, &b.0, &b.1).unwrap();
@@ -393,7 +399,7 @@ impl Scene {
 
             self.points = create_points(
                 &epa_result,
-                &mut self.entity_manager,
+                &mut self.entity_registry,
                 &mut self.scene_graph,
                 &mut self.labels,
                 &self.point,
@@ -401,7 +407,7 @@ impl Scene {
 
             self.faces = create_faces(
                 &epa_result,
-                &mut self.entity_manager,
+                &mut self.entity_registry,
                 &mut self.scene_graph,
                 &mut self.labels,
                 &self.context,
@@ -410,7 +416,7 @@ impl Scene {
 
             self.normals = create_normals(
                 &epa_result,
-                &mut self.entity_manager,
+                &mut self.entity_registry,
                 &mut self.scene_graph,
                 &self.normal_mesh,
             );
@@ -440,7 +446,7 @@ impl Scene {
                 &self.controls.camera,
                 texture_view,
                 &self.scene_graph,
-                &self.labels,
+                self.labels.iter().map(|(entity, label)| (*entity, label)),
                 egui_ctx,
                 &self.context,
                 encoder,

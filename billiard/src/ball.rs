@@ -4,7 +4,7 @@ use glam::{Quat, U8Vec4, Vec3, vec3};
 use numpy::{PyArray1, ToPyArray, ndarray::arr1};
 use pyo3::prelude::*;
 use tonner::{
-    Context, entity_component::EntityManager, geometry::Geometry, mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder}, scene_graph::{NodeHandle, SceneGraph}
+    Context, ecs::EntityRegistry, geometry::Geometry, mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder}, scene_graph::{NodeHandle, SceneGraph}
 };
 
 const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
@@ -71,11 +71,11 @@ impl Ball {
         color: impl Into<U8Vec4>,
         position: impl Into<Vec3>,
         velocity: impl Into<Vec3>,
-        entity_manager: &mut EntityManager,
+        entity_registry: &mut EntityRegistry,
         scene_graph: Arc<Mutex<SceneGraph>>,
         ctx: &Context,
     ) -> Bound<'py, Ball> {
-        let entity = entity_manager.new_entity();
+        let entity = entity_registry.create();
         scene_graph.lock().unwrap().add_with_transform(entity, None, position.into(), Quat::IDENTITY, Vec3::ONE);
 
         let velocity = arr1(&velocity.into().to_array().map(|f| f as f64)).to_pyarray(py);

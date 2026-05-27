@@ -12,7 +12,7 @@ use storm_animation::AnimationManager;
 use storm_gltf::GltfAsset;
 use tonner::{
     Context,
-    entity_component::EntityManager,
+    ecs::EntityRegistry,
     environment::{Environment, EnvironmentBuilder},
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
@@ -59,7 +59,7 @@ impl Default for State {
 #[derive(Debug)]
 pub struct Scene {
     name: String,
-    entity_manager: EntityManager,
+    entity_registry: EntityRegistry,
     scene_graph: SceneGraph,
     mesh_instances: HashMap<MeshInstanceId, MeshInstance>,
     skin_manager: SkinManager,
@@ -113,7 +113,7 @@ impl App {
 
         let mut scene = Scene {
             name: String::from("Default scene"),
-            entity_manager: EntityManager::new(),
+            entity_registry: EntityRegistry::new(),
             scene_graph: SceneGraph::new(&storm_ctx),
             mesh_instances: HashMap::new(),
             skin_manager: SkinManager::new(&storm_ctx),
@@ -122,7 +122,7 @@ impl App {
             environment: environment.clone(),
         };
         let camera =
-            CameraBuilder::new(scene.entity_manager.new_entity()).build(&mut scene.scene_graph);
+            CameraBuilder::new(scene.entity_registry.new_entity()).build(&mut scene.scene_graph);
 
         let current_scene = Arc::new(Mutex::new(scene));
         let current_scene_view = SceneView::new(
@@ -192,7 +192,7 @@ impl App {
                 for (i, name) in names {
                     let mut scene = Scene {
                         name,
-                        entity_manager: EntityManager::new(),
+                        entity_registry: EntityRegistry::new(),
                         scene_graph: SceneGraph::new(&ctx),
                         mesh_instances: HashMap::new(),
                         skin_manager: SkinManager::new(&ctx),
@@ -204,7 +204,7 @@ impl App {
                         .load_scene_into(
                             i,
                             None,
-                            &mut scene.entity_manager,
+                            &mut scene.entity_registry,
                             &mut scene.scene_graph,
                             &mut scene.mesh_instances,
                             &mut scene.skin_manager,
@@ -323,7 +323,7 @@ impl eframe::App for App {
                             {
                                 let camera = {
                                     let mut scene = scene.lock().unwrap();
-                                    let camera_entity = scene.entity_manager.new_entity();
+                                    let camera_entity = scene.entity_registry.new_entity();
                                     scene.scene_graph.add_with_transform(
                                         camera_entity,
                                         None,

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use tonner::{
-    entity_component::EntityManager,
+    ecs::EntityRegistry,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
     scene_graph::SceneGraph,
@@ -27,7 +27,7 @@ use crate::{Mesh, skin::Skin};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    pub(super) id: Option<tonner::entity_component::EntityId>,
+    pub(super) id: Option<tonner::ecs::EntityId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -91,17 +91,17 @@ impl Node {
     pub(super) fn load(
         index: usize,
         nodes: &mut [Node],
-        parent: Option<tonner::entity_component::EntityId>,
-        entity_manager: &mut EntityManager,
+        parent: Option<tonner::ecs::EntityId>,
+        entity_registry: &mut EntityRegistry,
         scene_graph: &mut SceneGraph,
-    ) -> Result<tonner::entity_component::EntityId> {
+    ) -> Result<tonner::ecs::EntityId> {
         let node = nodes
             .get_mut(index)
             .with_context(|| format!("node {index} is out of range."))?;
 
         let node_ctx = || format!("failed to load node {index}.");
 
-        let entity = entity_manager.new_entity();
+        let entity = entity_registry.new_entity();
         let (scale, rotation, translation) = match &node.matrix {
             Some(matrix) => Mat4::from_cols_array(matrix).to_scale_rotation_translation(),
             None => (
@@ -118,7 +118,7 @@ impl Node {
                 child_index,
                 nodes,
                 Some(entity),
-                entity_manager,
+                entity_registry,
                 scene_graph,
             )
             .with_context(node_ctx)?;

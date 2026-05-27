@@ -12,7 +12,7 @@ use std::{
 use storm_animation::AnimationManager;
 use thiserror::Error;
 use tonner::{
-    entity_component::EntityManager,
+    ecs::EntityRegistry,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
     scene_graph::SceneGraph,
@@ -210,15 +210,15 @@ impl GltfAsset {
     pub fn load_scene_into(
         &mut self,
         scene_index: usize,
-        base_node: Option<tonner::entity_component::EntityId>,
-        entity_manager: &mut EntityManager,
+        base_node: Option<tonner::ecs::EntityId>,
+        entity_registry: &mut EntityRegistry,
         scene_graph: &mut SceneGraph,
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
         animation_manager: &mut AnimationManager,
         ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<tonner::entity_component::EntityId>> {
+    ) -> Result<Vec<tonner::ecs::EntityId>> {
         let root_nodes_idx = self
             .json
             .scenes
@@ -236,7 +236,7 @@ impl GltfAsset {
                     node_index,
                     &mut self.json.nodes,
                     base_node,
-                    entity_manager,
+                    entity_registry,
                     scene_graph,
                 )
                 .with_context(scene_ctx)?,

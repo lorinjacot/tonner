@@ -14,7 +14,7 @@ use glam::{Quat, Vec3, vec3};
 use storm_animation::AnimationManager;
 use tonner::{
     Context,
-    entity_component::EntityManager,
+    ecs::EntityRegistry,
     environment::Environment,
     geometry::skin::SkinManager,
     mesh::Mesh,
@@ -143,7 +143,7 @@ impl MeshExplorer {
                 };
                 if ui.add(label.sense(egui::Sense::click())).double_clicked() {
                     let mut scene = Scene {
-                        entity_manager: EntityManager::new(),
+                        entity_registry: EntityRegistry::new(),
                         name: mesh.name().to_string(),
                         scene_graph: SceneGraph::new(&self.ctx),
                         mesh_instances: HashMap::new(),
@@ -152,12 +152,12 @@ impl MeshExplorer {
                         light_manager: LightManager::new(&self.ctx),
                         environment: self.environment.clone(),
                     };
-                    let mesh_entity = scene.entity_manager.new_entity();
+                    let mesh_entity = scene.entity_registry.new_entity();
                     scene.scene_graph.add(mesh_entity, None);
                     let instance = mesh.new_instance(mesh_entity);
                     scene.mesh_instances.insert(instance.id(), instance);
 
-                    let camera_entity = scene.entity_manager.new_entity();
+                    let camera_entity = scene.entity_registry.new_entity();
                     scene.scene_graph.add_with_transform(
                         camera_entity,
                         None,

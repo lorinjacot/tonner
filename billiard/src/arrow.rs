@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 use tonner::{
     Context,
-    entity_component::EntityManager,
+    ecs::EntityRegistry,
     geometry::CylinderBuilder,
     mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
     scene_graph::{NodeHandle, SceneGraph},
@@ -21,11 +21,11 @@ pub struct Arrow {
 impl Arrow {
     pub fn new(
         py: Python,
-        entity_manager: &mut EntityManager,
+        entity_registry: &mut EntityRegistry,
         scene_graph: Arc<Mutex<SceneGraph>>,
         ctx: &Context,
     ) -> Arrow {
-        let entity = entity_manager.new_entity();
+        let entity = entity_registry.create();
         scene_graph.lock().unwrap().add(entity, None);
 
         let radius = 0.005;

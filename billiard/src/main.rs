@@ -6,7 +6,7 @@ use glam::{Quat, Vec3};
 use pollster::block_on;
 use pyo3::prelude::*;
 use tonner::Context;
-use tonner::entity_component::EntityManager;
+use tonner::ecs::EntityRegistry;
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::SphereBuilder;
 use tonner::geometry::skin::SkinManager;
@@ -94,10 +94,10 @@ impl State {
             surface_format.add_srgb_suffix(),
             &ctx,
         );
-        let mut entity_manager = EntityManager::new();
+        let mut entity_registry = EntityRegistry::new();
         let mut scene_graph = SceneGraph::new(&ctx);
 
-        let camera_entity = entity_manager.new_entity();
+        let camera_entity = entity_registry.create();
         scene_graph.add_with_transform(camera_entity, None, Vec3::X, Quat::IDENTITY, Vec3::ONE);
         let camera = Camera::new(camera_entity);
 
@@ -108,7 +108,7 @@ impl State {
             .radius(0.025)
             .build(&ctx);
 
-        mesh_instances.push(table(&mut entity_manager, &mut scene_graph, &ctx));
+        mesh_instances.push(table(&mut entity_registry, &mut scene_graph, &ctx));
 
         let mut encoder = ctx
             .device()
@@ -147,7 +147,7 @@ impl State {
                             *color,
                             *position,
                             *velocity,
-                            &mut entity_manager,
+                            &mut entity_registry,
                             scene_graph.clone(),
                             &ctx,
                         );
@@ -160,7 +160,7 @@ impl State {
 
                 let arrow = Py::new(
                     py,
-                    Arrow::new(py, &mut entity_manager, scene_graph.clone(), &ctx),
+                    Arrow::new(py, &mut entity_registry, scene_graph.clone(), &ctx),
                 )?;
 
                 Ok((camera_node, force_manager, constraint_manager, arrow))

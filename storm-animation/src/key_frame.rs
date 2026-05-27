@@ -1,6 +1,6 @@
 use approx::abs_diff_eq;
 use glam::{Quat, Vec3, Vec4};
-use tonner::{entity_component::EntityId, mesh::MeshInstanceId};
+use tonner::{ecs::EntityId, mesh::MeshInstanceId};
 
 use crate::AnimationChannel;
 

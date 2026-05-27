@@ -4,7 +4,7 @@ use std::iter::repeat_with;
 use crate::renderer::billboard_label::BillboardLabel;
 use crate::{
     Context,
-    entity_component::{ComponentsView, EntityId},
+    ecs::EntityId,
     environment::Environment,
     geometry::skin::{SkinError, SkinId, SkinManager},
     mesh::{MeshInstance, MeshInstanceId, PrimitiveRenderer},
@@ -1095,7 +1095,7 @@ impl RendererContext {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        
+
         #[cfg(feature = "egui")]
         let billboard_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

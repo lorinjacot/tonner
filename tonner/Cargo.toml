@@ -23,13 +23,14 @@ mikktspace = { version = "0.3.0", features = ["glam"], default-features = false 
 numpy = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
 pyo3 = { workspace = true, optional = true, features = ["uuid"] }
+sparse-keyed.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 wasm-bindgen = { workspace = true, optional = true }
 wgpu.workspace = true
 
 [features]
-pyo3 = ["dep:pyo3", "dep:numpy", "dep:pollster"]
+pyo3 = ["dep:pyo3", "dep:numpy", "dep:pollster", "sparse-keyed/pyo3"]
 java-script = ["dep:wasm-bindgen"]
 egui = ["dep:egui"]
 

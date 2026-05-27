@@ -9,11 +9,7 @@ use glam::Mat4;
 use thiserror::Error;
 use uuid::{NonNilUuid, Uuid};
 
-use crate::{
-    Context,
-    entity_component::{ComponentsView, EntityId},
-    scene_graph::SceneGraph,
-};
+use crate::{Context, ecs::EntityId, scene_graph::SceneGraph};
 
 /// A unique id for a skin. A skin can only have one id.
 #[repr(transparent)]

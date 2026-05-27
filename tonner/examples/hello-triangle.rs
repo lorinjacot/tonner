@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use glam::{vec3, vec4};
 use tonner::Context;
-use tonner::entity_component::EntityManager;
+use tonner::ecs::EntityRegistry;
 use tonner::environment::{Environment, EnvironmentBuilder};
 use tonner::geometry::GeometryBuilder;
 use tonner::geometry::skin::SkinManager;
@@ -76,7 +76,7 @@ impl State {
         let surface_format = cap.formats[0];
 
         let context = Context::from_device(device, queue);
-        let mut entity_manager = EntityManager::new();
+        let mut entity_registry = EntityRegistry::new();
 
         let mut encoder =
             context
@@ -115,11 +115,11 @@ impl State {
             .build(&context)
             .unwrap();
 
-        let triangle = entity_manager.new_entity();
+        let triangle = entity_registry.create();
         scene_graph.add(triangle, None);
         let triangle = red_triangle.new_instance(triangle);
 
-        let camera = entity_manager.new_entity();
+        let camera = entity_registry.create();
         scene_graph.add(camera, None);
         let camera = Camera::new(camera);
 

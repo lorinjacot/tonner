@@ -4032,6 +4032,9 @@ dependencies = [
 [[package]]
 name = "sparse-keyed"
 version = "0.1.0"
+dependencies = [
+ "pyo3",
+]
 
 [[package]]
 name = "spirv"
@@ -4283,6 +4286,7 @@ dependencies = [
  "numpy",
  "pollster",
  "pyo3",
+ "sparse-keyed",
  "thiserror 2.0.18",
  "uuid",
  "wasm-bindgen",

@@ -5,11 +5,7 @@ use glam::Vec3;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    Context,
-    entity_component::{ComponentsView, EntityId},
-    scene_graph::SceneGraph,
-};
+use crate::{Context, ecs::EntityId, scene_graph::SceneGraph};
 
 /// A unique id for a point light. A point light has one and only one id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,7 +61,7 @@ impl PointLightBuilder {
         light_manager: &mut LightManager,
     ) -> Result<PointLightId, PointLightBuilderError> {
         let name = self.name.unwrap_or_default();
-        if !scene_graph.has(self.entity) {
+        if !scene_graph.contains(self.entity) {
             scene_graph.add(self.entity, None);
         }
 

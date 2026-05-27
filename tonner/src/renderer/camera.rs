@@ -1,10 +1,7 @@
 use glam::{Mat4, Quat, Vec3};
 use thiserror::Error;
 
-use crate::{
-    entity_component::{ComponentsView, EntityId},
-    scene_graph::SceneGraph,
-};
+use crate::{ecs::EntityId, scene_graph::SceneGraph};
 
 /// A builder for camera.
 #[must_use]
@@ -54,7 +51,7 @@ impl CameraBuilder {
 
     /// Build the camera.
     pub fn build(self, scene_graph: &mut SceneGraph) -> Camera {
-        if !scene_graph.has(self.entity) {
+        if !scene_graph.contains(self.entity) {
             scene_graph.add(self.entity, None);
         }
 

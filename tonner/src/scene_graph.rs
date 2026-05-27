@@ -1,5 +1,6 @@
+use std::iter::FusedIterator;
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
-use std::{iter::FusedIterator, ops::Index};
 
 use glam::{Mat4, Quat, Vec3};
 
@@ -8,20 +9,15 @@ use numpy::{AllowTypeChange, PyArray1, PyArray2, PyArrayLike1};
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
-use crate::{
-    Context,
-    entity_component::{
-        ComponentStorage, ComponentsView, EntityId,
-        component::sparse_array::{Iter, SparseArray},
-    },
-};
+use crate::Context;
+use crate::ecs::{ComponentStorage, EntityId};
 
 /// A Scene Graph works as a tree-like structure establishing parent-child relationships between scene elements,
 /// creating logical groupings where transformations (position, rotation, scale) applied to parent nodes automatically
 /// affect all their children - simplifying complex object manipulation and animation.
 #[derive(Debug)]
 pub struct SceneGraph {
-    nodes: SparseArray<Node>,
+    nodes: ComponentStorage<Node>,
     first_root: Option<EntityId>,
     root_count: usize,
 }
@@ -32,7 +28,7 @@ impl SceneGraph {
     /// The scene graph will not allocate until nodes are added.
     pub fn new(_ctx: &Context) -> Self {
         Self {
-            nodes: SparseArray::new(),
+            nodes: ComponentStorage::new(),
             first_root: None,
             root_count: 0,
         }
@@ -89,7 +85,7 @@ impl SceneGraph {
 
         let (previous_sibling, next_sibling) = match *next_sibling {
             Some(next_sibling) => {
-                // parent already has another child -> patch double linked list
+                // parent already contains another child -> patch double linked list
                 let next = &mut self.nodes[next_sibling];
                 let previous_sibling = next.previous_sibling;
                 next.previous_sibling = entity;
@@ -116,7 +112,7 @@ impl SceneGraph {
             local_scale,
             global_transformation,
         };
-        self.nodes.add(entity, node);
+        self.nodes.insert(entity, node);
 
         previous
     }
@@ -315,53 +311,13 @@ impl SceneGraph {
     }
 }
 
-impl ComponentsView<Node> for SceneGraph {
-    type Iter<'a>
-        = Iter<'a, Node>
-    where
-        Self: 'a,
-        Node: 'a;
+impl Deref for SceneGraph {
+    type Target = ComponentStorage<Node>;
 
-    fn has(&self, entity: EntityId) -> bool {
-        self.nodes.has(entity)
-    }
-
-    fn get(&self, entity: EntityId) -> Option<&Node> {
-        self.nodes.get(entity)
-    }
-
-    fn iter<'a>(&'a self) -> Self::Iter<'a> {
-        self.nodes.iter()
+    fn deref(&self) -> &Self::Target {
+        &self.nodes
     }
 }
-
-impl Index<EntityId> for SceneGraph {
-    type Output = Node;
-
-    fn index(&self, index: EntityId) -> &Self::Output {
-        &self.nodes[index]
-    }
-}
-
-// #[cfg(feature = "python")]
-// #[pymethods]
-// impl SceneGraph {
-//     fn nodes(slf: &Bound<'_, Self>) -> Vec<PyNode> {
-//         slf.borrow()
-//             .nodes
-//             .iter()
-//             .map(|(&id, _)| PyNode {
-//                 id,
-//                 scene_graph: slf.clone().into(),
-//             })
-//             .collect()
-//     }
-
-//     /// Returns `true` if the scene graph contains the specified node.
-//     pub fn has(&self, node: EntityId) -> bool {
-//         self.has(node)
-//     }
-// }
 
 /// A Scene Graph's node. See [SceneGraph] for more informations.
 #[derive(Debug)]
@@ -410,7 +366,7 @@ impl Node {
     /// the [local translation (`T`)][Self::local_translation], the [local rotation (`R`)][Self::local_rotation]
     /// and the [local scale (`S`)][Self::local_scale] in the `T * R * S` order (first the scale is applied to the point,
     /// then the rotation, and then the translation).
-    /// When the node has no parent, the local transformation is identical to the global transformation.
+    /// When the node contains no parent, the local transformation is identical to the global transformation.
     pub fn local_transformation(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(
             self.local_scale,
@@ -422,7 +378,7 @@ impl Node {
     /// Returns the global transformation of the node. The returns matrix can be used transform points
     /// from local space to the global space. The global transformation of a node is the product of the
     /// global transformation matrix of its parent and its own [local transformation matrix][Self::local_transformation].
-    /// When the node has no parent, the global transformation is identical to the local transformation.
+    /// When the node contains no parent, the global transformation is identical to the local transformation.
     pub fn global_transformation(&self) -> Mat4 {
         self.global_transformation
     }
@@ -986,7 +942,7 @@ impl NodeHandle {
 
 #[cfg(test)]
 mod tests {
-    use crate::entity_component::EntityManager;
+    use crate::ecs::EntityRegistry;
 
     use super::*;
 
@@ -1005,18 +961,18 @@ mod tests {
     impl Setup {
         fn new() -> Setup {
             let ctx = pollster::block_on(Context::new());
-            let mut entity_manager = EntityManager::new();
+            let mut entity_registry = EntityRegistry::new();
             let mut scene_graph = SceneGraph::new(&ctx);
 
-            let root_0 = entity_manager.new_entity();
-            let child_0_0 = entity_manager.new_entity();
-            let child_0_0_0 = entity_manager.new_entity();
+            let root_0 = entity_registry.create();
+            let child_0_0 = entity_registry.create();
+            let child_0_0_0 = entity_registry.create();
 
-            let root_1 = entity_manager.new_entity();
-            let child_1_0 = entity_manager.new_entity();
-            let child_1_0_0 = entity_manager.new_entity();
-            let child_1_0_1 = entity_manager.new_entity();
-            let child_1_1 = entity_manager.new_entity();
+            let root_1 = entity_registry.create();
+            let child_1_0 = entity_registry.create();
+            let child_1_0_0 = entity_registry.create();
+            let child_1_0_1 = entity_registry.create();
+            let child_1_1 = entity_registry.create();
 
             scene_graph.add(root_0, None);
             scene_graph.add(child_0_0, root_0);
@@ -1045,10 +1001,10 @@ mod tests {
     #[test]
     fn test_scene_graph_roots() {
         let ctx = pollster::block_on(Context::new());
-        let mut entity_manager = EntityManager::new();
+        let mut entity_registry = EntityRegistry::new();
         let mut scene_graph = SceneGraph::new(&ctx);
 
-        let root_0 = entity_manager.new_entity();
+        let root_0 = entity_registry.create();
 
         let previous = scene_graph.add(root_0, None);
         assert!(previous.is_none());
@@ -1057,7 +1013,7 @@ mod tests {
         assert_eq!(root_0, scene_graph[root_0].previous_sibling);
         assert_eq!(root_0, scene_graph[root_0].next_sibling);
 
-        let root_1 = entity_manager.new_entity();
+        let root_1 = entity_registry.create();
 
         let previous = scene_graph.add(root_1, None);
         assert!(previous.is_none());
@@ -1068,7 +1024,7 @@ mod tests {
         assert_eq!(root_1, scene_graph[root_0].next_sibling);
         assert_eq!(root_0, scene_graph[root_1].next_sibling);
 
-        let root_2 = entity_manager.new_entity();
+        let root_2 = entity_registry.create();
 
         let previous = scene_graph.add(root_2, None);
         assert!(previous.is_none());
@@ -1106,16 +1062,16 @@ mod tests {
     #[test]
     fn test_scene_graph_children() {
         let ctx = pollster::block_on(Context::new());
-        let mut entity_manager = EntityManager::new();
+        let mut entity_registry = EntityRegistry::new();
         let mut scene_graph = SceneGraph::new(&ctx);
 
-        let root = entity_manager.new_entity();
+        let root = entity_registry.create();
         scene_graph.add(root, None);
 
         assert_eq!(0, scene_graph[root].children_count);
         assert_eq!(None, scene_graph[root].first_child);
 
-        let child_0 = entity_manager.new_entity();
+        let child_0 = entity_registry.create();
 
         let previous = scene_graph.add(child_0, root);
         assert!(previous.is_none());
@@ -1124,7 +1080,7 @@ mod tests {
         assert_eq!(child_0, scene_graph[child_0].previous_sibling);
         assert_eq!(child_0, scene_graph[child_0].next_sibling);
 
-        let child_1 = entity_manager.new_entity();
+        let child_1 = entity_registry.create();
 
         let previous = scene_graph.add(child_1, root);
         assert!(previous.is_none());
@@ -1135,7 +1091,7 @@ mod tests {
         assert_eq!(child_1, scene_graph[child_0].next_sibling);
         assert_eq!(child_0, scene_graph[child_1].next_sibling);
 
-        let child_2 = entity_manager.new_entity();
+        let child_2 = entity_registry.create();
 
         let previous = scene_graph.add(child_2, root);
         assert!(previous.is_none());
@@ -1242,20 +1198,20 @@ mod tests {
         let mut s = Setup::new();
 
         s.scene_graph.remove(s.child_1_0);
-        assert!(!s.scene_graph.has(s.child_1_0));
-        assert!(!s.scene_graph.has(s.child_1_0_0));
-        assert!(!s.scene_graph.has(s.child_1_0_1));
+        assert!(!s.scene_graph.contains(s.child_1_0));
+        assert!(!s.scene_graph.contains(s.child_1_0_0));
+        assert!(!s.scene_graph.contains(s.child_1_0_1));
         assert_eq!(5, s.scene_graph.iter().len());
 
         s.scene_graph.remove(s.root_1);
-        assert!(!s.scene_graph.has(s.root_1));
-        assert!(!s.scene_graph.has(s.child_1_1));
+        assert!(!s.scene_graph.contains(s.root_1));
+        assert!(!s.scene_graph.contains(s.child_1_1));
         assert_eq!(3, s.scene_graph.iter().len());
 
         s.scene_graph.remove(s.root_0);
-        assert!(!s.scene_graph.has(s.root_0));
-        assert!(!s.scene_graph.has(s.child_0_0));
-        assert!(!s.scene_graph.has(s.child_0_0_0));
+        assert!(!s.scene_graph.contains(s.root_0));
+        assert!(!s.scene_graph.contains(s.child_0_0));
+        assert!(!s.scene_graph.contains(s.child_0_0_0));
         assert_eq!(0, s.scene_graph.iter().len());
     }
 

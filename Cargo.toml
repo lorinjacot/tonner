@@ -59,6 +59,7 @@ web-sys = "0.3.81"
 winit = "0.30.13"
 wgpu = "29.0.1"
 
+sparse-keyed = { path = "sparse-keyed" }
 entropie = { path = "entropie" }
 tonner = { path = "tonner" }
 storm-animation = { path = "storm-animation" }

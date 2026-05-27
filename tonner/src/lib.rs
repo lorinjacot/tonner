@@ -7,7 +7,7 @@ use crate::mesh::material::MaterialContext;
 use crate::renderer::RendererContext;
 use crate::texture::TextureContex;
 
-pub mod entity_component;
+pub mod ecs;
 pub mod environment;
 pub mod geometry;
 pub mod math;

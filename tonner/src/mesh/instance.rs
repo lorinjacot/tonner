@@ -6,7 +6,7 @@ use uuid::{NonNilUuid, Uuid};
 
 use crate::{
     Context,
-    entity_component::{ComponentsView, EntityId},
+    ecs::EntityId,
     geometry::{
         GeometryIndices, MAX_MORPH_TARGET_COUNT,
         skin::{PreparedSkins, SkinId},

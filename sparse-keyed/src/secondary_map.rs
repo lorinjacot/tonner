@@ -180,6 +180,31 @@ impl<T> SecondaryMap<T> {
         }
     }
 
+    /// Removes all entries from the map.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::{KeyRegistry, SecondaryMap};
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key_0 = registry.create();
+    /// let key_1 = registry.create();
+    /// map.insert(key_0, "value 0");
+    /// map.insert(key_1, "value 1");
+    ///
+    /// map.clear();
+    /// assert!(map.is_empty());
+    /// assert!(!map.contains(key_0));
+    /// assert!(!map.contains(key_1));
+    /// ```
+    pub fn clear(&mut self) {
+        self.dense.clear();
+        self.sparse.fill(SparseEntry {
+            dense_index: u32::MAX,
+            version: None,
+        });
+    }
+
     /// Returns the index of the value associated with a key in the dense vector, or `None` if the key does not have a value in the map. The returned index is only valid until the next map modification. The index of one `SecondaryMap` is in general different from the index of another `SecondaryMap` for the same key. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method. This method can be used to manually index into the dense vector of the map for advanced use cases.
     ///
     /// ```
@@ -411,6 +436,54 @@ impl<T, I: SliceIndex<[(Key, T)]>> Index<I> for SecondaryMap<T> {
 
     fn index(&self, index: I) -> &Self::Output {
         &self.dense[index]
+    }
+}
+
+impl<T> FromIterator<(Key, T)> for SecondaryMap<T> {
+    fn from_iter<I: IntoIterator<Item = (Key, T)>>(iter: I) -> Self {
+        let mut dense: Vec<_> = iter.into_iter().collect();
+        let sparse_capacity = dense
+            .iter()
+            .map(|(key, _)| key.index())
+            .max()
+            .map_or(0, |count| count as usize + 1);
+        let mut sparse: Vec<SparseEntry> = Vec::with_capacity(sparse_capacity);
+        let mut i = 0;
+        while i < dense.len() {
+            let key = dense[i].0;
+            let sparse_index = key.index() as usize;
+            match sparse.get_mut(sparse_index) {
+                Some(entry) => {
+                    if entry.version.is_none() {
+                        entry.dense_index = i as u32;
+                        entry.version = Some(key.version());
+                        i += 1;
+                    } else {
+                        entry.version = Some(key.version());
+                        dense.swap(i, entry.dense_index as usize);
+                        dense.swap_remove(i);
+                    }
+                }
+                None => {
+                    sparse.extend(
+                        repeat_n(
+                            SparseEntry {
+                                dense_index: u32::MAX,
+                                version: None,
+                            },
+                            sparse_index - sparse.len(),
+                        )
+                        .chain(once(SparseEntry {
+                            dense_index: i as u32,
+                            version: Some(key.version()),
+                        })),
+                    );
+                    i += 1;
+                }
+            }
+        }
+
+        SecondaryMap { sparse, dense }
     }
 }
 
@@ -835,5 +908,43 @@ mod tests {
         assert_eq!("1 v2", map[key_1_v2]);
         assert_eq!("2 v1", map[key_2_v1]);
         assert_eq!("3 v1", map[key_3_v1]);
+    }
+
+    #[test]
+    fn test_from_iterator() {
+        let mut registry = KeyRegistry::new();
+        let key_0 = registry.create();
+        let key_1 = registry.create();
+
+        let map: SecondaryMap<_> = vec![(key_0, "value 0"), (key_1, "value 1")]
+            .into_iter()
+            .collect();
+        assert_eq!(map[key_0], "value 0");
+        assert_eq!(map[key_1], "value 1");
+
+        registry.delete(key_0);
+        let key_0_v2 = registry.create();
+
+        let map: SecondaryMap<_> = vec![
+            (key_0, "value 0"),
+            (key_0_v2, "value 0 v2"),
+            (key_1, "value 1"),
+        ]
+        .into_iter()
+        .collect();
+        assert!(!map.contains(key_0));
+        assert_eq!(map[key_0_v2], "value 0 v2");
+        assert_eq!(map[key_1], "value 1");
+
+        let map: SecondaryMap<_> = vec![
+            (key_1, "value 1"),
+            (key_0_v2, "value 0 v2"),
+            (key_0, "value 0"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(map[key_1], "value 1");
+        assert!(!map.contains(key_0_v2));
+        assert_eq!(map[key_0], "value 0");
     }
 }

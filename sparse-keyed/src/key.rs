@@ -4,6 +4,9 @@ use std::{
     ops::Deref,
 };
 
+#[cfg(feature = "pyo3")]
+use pyo3::prelude::*;
+
 const INDEX_BITES: u64 = 0xFFFF_FFFF_0000_0000;
 const INDEX_OFFSET: u64 = 32;
 const VERSION_BITES: u64 = 0x0000_0000_FFFF_FFFF;
@@ -14,6 +17,7 @@ const FIRST_VERSION: NonZeroU32 = NonZeroU32::new(1).unwrap();
 /// A key is composed of an index and a version. The index is used to access the sparse vector of the registry and the `SecondaryMap`. The version is used to check if the key is still valid, i.e. if it has not been deleted and the index reused for another key. The combination of the index and the version is garanteed to be unique for each key created by the registry, even if the index is reused after deletion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, from_py_object))]
 pub struct Key(NonZeroU64);
 
 impl Key {

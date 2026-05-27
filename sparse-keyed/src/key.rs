@@ -15,7 +15,8 @@ pub struct Key(NonZeroU64);
 
 impl Key {
     #[inline]
-    fn new(index: u32, version: NonZeroU32) -> Key {
+    #[must_use]
+    pub(crate) fn new(index: u32, version: NonZeroU32) -> Key {
         let index = (index as u64) << INDEX_OFFSET;
         let version = version.get() as u64;
         // SAFETY: cannot be zero because `version` is non-zero
@@ -23,13 +24,13 @@ impl Key {
     }
 
     #[inline]
-    fn index(&self) -> u32 {
+    pub(crate) fn index(&self) -> u32 {
         let index = (self.0.get() & INDEX_BITES) >> INDEX_OFFSET;
         index as u32
     }
 
     #[inline]
-    fn version(&self) -> NonZeroU32 {
+    pub(crate) fn version(&self) -> NonZeroU32 {
         let version = (self.0.get() & VERSION_BITES) as u32;
         // SAFETY: cannot be zero because the VERSION BITES cannot be all zero
         unsafe { NonZeroU32::new_unchecked(version) }

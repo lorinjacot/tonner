@@ -31,19 +31,17 @@ impl<T> SecondaryMap<T> {
         let sparse_index = key.index() as usize;
         match self.sparse.get_mut(sparse_index) {
             Some(sparse_entry) => match self.dense.get_mut(sparse_entry.dense_index as usize) {
-                Some(dense_entry) if dense_entry.0.index() == key.index() => {
-                    if dense_entry.0.version() == key.version() {
-                        // there is already a value for the key
-                        Some(std::mem::replace(&mut dense_entry.1, value))
-                    } else {
-                        // a deleted entity with the same `sparse` had the component
-                        sparse_entry.version = Some(key.version());
-                        dense_entry.0 = key;
-                        dense_entry.1 = value;
-                        None
-                    }
+                Some(dense_entry) if dense_entry.0 == key => {
+                    // there is already a value for the key
+                    Some(std::mem::replace(&mut dense_entry.1, value))
                 }
-                _ => {
+                Some(dense_entry) => {
+                    // a deleted entity with the same `sparse` had the component
+                    sparse_entry.version = Some(key.version());
+                    *dense_entry = (key, value);
+                    None
+                }
+                None => {
                     sparse_entry.dense_index = self.dense.len() as u32;
                     sparse_entry.version = Some(key.version());
                     self.dense.push((key, value));

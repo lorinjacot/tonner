@@ -1,5 +1,7 @@
+//! A map from [`Key`]s to arbitrary values. The keys are created and managed by a [`KeyRegistry`].
+
 use std::{
-    iter::{once, repeat_n},
+    iter::{FusedIterator, once, repeat_n},
     num::NonZeroU32,
     ops::{Deref, Index, IndexMut},
 };
@@ -187,13 +189,13 @@ impl<T> SecondaryMap<T> {
     /// let mut map = SecondaryMap::new();
     /// let key = registry.create();
     /// assert!(!map.contains(key));
-    /// 
+    ///
     /// map.insert(key, "value");
     /// assert!(map.contains(key));
-    /// 
+    ///
     /// registry.delete(key);
     /// assert!(map.contains(key));
-    /// 
+    ///
     /// map.remove_deleted(&registry);
     /// assert!(!map.contains(key));
     /// ```
@@ -205,7 +207,7 @@ impl<T> SecondaryMap<T> {
     }
 
     /// Returns a reference to the value associated with a key in the map, or `None` if the key does not have a value in the map. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::KeyRegistry;
@@ -214,13 +216,13 @@ impl<T> SecondaryMap<T> {
     /// let mut map = SecondaryMap::new();
     /// let key = registry.create();
     /// assert!(map.get(key).is_none());
-    /// 
+    ///
     /// map.insert(key, "value");
     /// assert_eq!(map.get(key), Some(&"value"));
-    /// 
+    ///
     /// registry.delete(key);
     /// assert_eq!(map.get(key), Some(&"value"));
-    /// 
+    ///
     /// map.remove_deleted(&registry);
     /// assert!(map.get(key).is_none());
     /// ```
@@ -234,7 +236,7 @@ impl<T> SecondaryMap<T> {
     }
 
     /// Returns a mutable reference to the value associated with a key in the map, or `None` if the key does not have a value in the map. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::KeyRegistry;
@@ -243,10 +245,10 @@ impl<T> SecondaryMap<T> {
     /// let mut map = SecondaryMap::new();
     /// let key = registry.create();
     /// assert!(map.get_mut(key).is_none());
-    /// 
+    ///
     /// map.insert(key, "value");
     /// assert!(map.get_mut(key).is_some());
-    /// 
+    ///
     /// map.get_mut(key).map(|v| *v = "new value");
     /// assert_eq!(map.get(key), Some(&"new value"));
     /// ```
@@ -256,6 +258,106 @@ impl<T> SecondaryMap<T> {
                 Some(&mut self.dense[sparse_entry.dense_index as usize].1)
             }
             _ => None,
+        }
+    }
+
+    /// Returns an iterator visiting all entries in arbitrary order with mutable references to their values. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// # use sparse_keyed::SecondaryMap;
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key_0 = registry.create();
+    /// let key_1 = registry.create();
+    /// map.insert(key_0, "value 0");
+    /// map.insert(key_1, "value 1");
+    ///
+    /// for (key, value) in map.iter_mut() {
+    ///     *value = "new value";
+    /// }
+    ///
+    /// assert_eq!(map[key_0], "new value");
+    /// assert_eq!(map[key_1], "new value");
+    /// ```
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut {
+            inner: self.dense.iter_mut(),
+        }
+    }
+
+    /// Returns an iterator visiting all keys in arbitrary order. Note that this does not check if the keys are present in the registry, so it may return keys for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// # use sparse_keyed::SecondaryMap;
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key_0 = registry.create();
+    /// let key_1 = registry.create();
+    /// map.insert(key_0, "value 0");
+    /// map.insert(key_1, "value 1");
+    ///
+    /// let mut keys = map.keys();
+    /// assert_eq!(keys.next(), Some(&key_0));
+    /// assert_eq!(keys.next(), Some(&key_1));
+    /// assert_eq!(keys.next(), None);
+    /// ```
+    pub fn keys(&self) -> Keys<'_, T> {
+        Keys {
+            inner: self.dense.iter(),
+        }
+    }
+
+    /// Returns an iterator visiting all values in arbitrary order. Note that this does not check if the keys associated with the values are present in the registry, so it may return values for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// # use sparse_keyed::SecondaryMap;
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key_0 = registry.create();
+    /// let key_1 = registry.create();
+    /// map.insert(key_0, "value 0");
+    /// map.insert(key_1, "value 1");
+    ///
+    /// let mut values = map.values();
+    /// assert_eq!(values.next(), Some(&"value 0"));
+    /// assert_eq!(values.next(), Some(&"value 1"));
+    /// assert_eq!(values.next(), None);
+    /// ```
+    pub fn values(&self) -> Values<'_, T> {
+        Values {
+            inner: self.dense.iter(),
+        }
+    }
+
+    /// Returns a mutable iterator visiting all values in arbitrary order. Note that this does not check if the keys associated with the values are present in the registry, so it may return values for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// # use sparse_keyed::SecondaryMap;
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key_0 = registry.create();
+    /// let key_1 = registry.create();
+    /// map.insert(key_0, "value 0");
+    /// map.insert(key_1, "value 1");
+    ///
+    /// for value in map.values_mut() {
+    ///     *value = "new value";
+    /// }
+    ///
+    /// assert_eq!(map[key_0], "new value");
+    /// assert_eq!(map[key_1], "new value");
+    /// ```
+    pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
+        ValuesMut {
+            inner: self.dense.iter_mut(),
         }
     }
 }
@@ -287,6 +389,313 @@ impl<T> Deref for SecondaryMap<T> {
         &self.dense
     }
 }
+
+/// An iterator visiting all entries in arbitrary order with mutable references to their values. Created by [`SecondaryMap::iter_mut()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::{KeyRegistry, SecondaryMap};
+/// let mut registry = KeyRegistry::new();
+/// let mut map = SecondaryMap::new();
+/// let key_0 = registry.create();
+/// let key_1 = registry.create();
+/// map.insert(key_0, "value 0");
+/// map.insert(key_1, "value 1");
+/// 
+/// for (key, value) in map.iter_mut() {
+///    *value = "new value";
+/// }
+/// ```
+pub struct IterMut<'a, T> {
+    inner: std::slice::IterMut<'a, (Key, T)>,
+}
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = (&'a Key, &'a mut T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| (&entry.0, &mut entry.1))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| (&entry.0, &mut entry.1))
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.inner.last().map(|entry| (&entry.0, &mut entry.1))
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |b, entry| f(b, (&entry.0, &mut entry.1)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for IterMut<'a, T> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| (&entry.0, &mut entry.1))
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth_back(n).map(|entry| (&entry.0, &mut entry.1))
+    }
+}
+
+impl<'a, T> FusedIterator for IterMut<'a, T> {}
+
+/// An iterator visiting all keys in arbitrary order. Created by [`SecondaryMap::keys()`]. Note that this does not check if the keys are present in the registry, so it may return keys for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::{KeyRegistry, SecondaryMap};
+/// let mut registry = KeyRegistry::new();
+/// let mut map = SecondaryMap::new();
+/// let key_0 = registry.create();
+/// let key_1 = registry.create();
+/// map.insert(key_0, "value 0");
+/// map.insert(key_1, "value 1");
+///  
+/// let mut keys = map.keys();
+/// assert_eq!(keys.next(), Some(&key_0));
+/// assert_eq!(keys.next(), Some(&key_1));
+/// assert_eq!(keys.next(), None);
+/// ```
+pub struct Keys<'a, T> {
+    inner: std::slice::Iter<'a, (Key, T)>,
+}
+
+impl<'a, T> Iterator for Keys<'a, T> {
+    type Item = &'a Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| &entry.0)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| &entry.0)
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.inner.last().map(|entry| &entry.0)
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner.fold(init, |b, entry| f(b, &entry.0))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Keys<'a, T> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Keys<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| &entry.0)
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth_back(n).map(|entry| &entry.0)
+    }
+}
+
+impl<'a, T> FusedIterator for Keys<'a, T> {}
+
+/// An iterator visiting all values in arbitrary order. Created by [`SecondaryMap::values()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return values for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::{KeyRegistry, SecondaryMap};
+/// let mut registry = KeyRegistry::new();
+/// let mut map = SecondaryMap::new();
+/// let key_0 = registry.create();
+/// let key_1 = registry.create();
+/// map.insert(key_0, "value 0");
+/// map.insert(key_1, "value 1");
+/// 
+/// let mut values = map.values();
+/// assert_eq!(values.next(), Some(&"value 0"));
+/// assert_eq!(values.next(), Some(&"value 1"));
+/// assert_eq!(values.next(), None);
+/// ```
+pub struct Values<'a, T> {
+    inner: std::slice::Iter<'a, (Key, T)>,
+}
+
+impl<'a, T> Iterator for Values<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| &entry.1)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| &entry.1)
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.inner.last().map(|entry| &entry.1)
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner.fold(init, |b, entry| f(b, &entry.1))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Values<'a, T> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Values<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| &entry.1)
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth_back(n).map(|entry| &entry.1)
+    }
+}
+
+impl<'a, T> FusedIterator for Values<'a, T> {}
+
+/// An iterator visiting all values in arbitrary order with mutable references to their values. Created by [`SecondaryMap::values_mut()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return values for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::{KeyRegistry, SecondaryMap};
+/// let mut registry = KeyRegistry::new();
+/// let mut map = SecondaryMap::new();
+/// let key_0 = registry.create();
+/// let key_1 = registry.create();
+/// map.insert(key_0, "value 0");
+/// map.insert(key_1, "value 1");
+/// 
+/// for value in map.values_mut() {
+///   *value = "new value";
+/// }
+/// ```
+pub struct ValuesMut<'a, T> {
+    inner: std::slice::IterMut<'a, (Key, T)>,
+}
+
+impl<'a, T> Iterator for ValuesMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| &mut entry.1)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| &mut entry.1)
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        self.inner.last().map(|entry| &mut entry.1)
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner.fold(init, |b, entry| f(b, &mut entry.1))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ValuesMut<'a, T> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for ValuesMut<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| &mut entry.1)
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth_back(n).map(|entry| &mut entry.1)
+    }
+}
+
+impl<'a, T> FusedIterator for ValuesMut<'a, T> {}
 
 #[cfg(test)]
 mod tests {

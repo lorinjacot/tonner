@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "sparse-keyed",
     "entropie",
     "tonner",
     "storm-animation",

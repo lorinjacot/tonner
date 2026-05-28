@@ -9,13 +9,14 @@ use std::{
     io::{BufReader, Read, Seek},
     path::{Path, PathBuf},
 };
-use storm::{
+use storm_animation::AnimationManager;
+use thiserror::Error;
+use tonner::{
+    ecs::EntityRegistry,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
     scene_graph::SceneGraph,
 };
-use storm_animation::AnimationManager;
-use thiserror::Error;
 
 use accessor::{Accessor, AccessorComponentType, AccessorType};
 use animation::Animation;
@@ -88,7 +89,7 @@ pub enum GlbError {
 pub struct GltfAsset {
     base_path: PathBuf,
     json: Gltf,
-    default_material: Option<storm::mesh::material::Material>,
+    default_material: Option<tonner::mesh::material::Material>,
 }
 
 impl GltfAsset {
@@ -174,9 +175,9 @@ impl GltfAsset {
 
     pub fn load_meshes(
         &mut self,
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Vec<storm::mesh::Mesh>> {
+    ) -> anyhow::Result<Vec<tonner::mesh::Mesh>> {
         let mut meshes = Vec::with_capacity(self.json.meshes.len());
 
         for mesh in self.json.meshes.iter_mut() {
@@ -209,14 +210,15 @@ impl GltfAsset {
     pub fn load_scene_into(
         &mut self,
         scene_index: usize,
-        base_node: Option<storm::scene_graph::NodeId>,
+        base_node: Option<tonner::ecs::EntityId>,
+        entity_registry: &mut EntityRegistry,
         scene_graph: &mut SceneGraph,
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
         animation_manager: &mut AnimationManager,
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<storm::scene_graph::NodeId>> {
+    ) -> Result<Vec<tonner::ecs::EntityId>> {
         let root_nodes_idx = self
             .json
             .scenes
@@ -230,8 +232,14 @@ impl GltfAsset {
         let mut root_nodes_ids = Vec::with_capacity(root_nodes_idx.len());
         for &node_index in root_nodes_idx.iter() {
             root_nodes_ids.push(
-                Node::load(node_index, &mut self.json.nodes, base_node, scene_graph)
-                    .with_context(scene_ctx)?,
+                Node::load(
+                    node_index,
+                    &mut self.json.nodes,
+                    base_node,
+                    entity_registry,
+                    scene_graph,
+                )
+                .with_context(scene_ctx)?,
             );
         }
 

@@ -5,7 +5,7 @@ use bytemuck::cast_slice;
 use glam::{UVec4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use storm::{geometry::GeometryBuilder, mesh::MeshBuilder};
+use tonner::{geometry::GeometryBuilder, mesh::MeshBuilder};
 
 use super::accessor::IteratorConsumer;
 use crate::{
@@ -18,7 +18,7 @@ use crate::{
 pub(super) struct Mesh {
     /// [Some] if already loaded.
     #[serde(skip)]
-    loaded: Option<storm::mesh::Mesh>,
+    loaded: Option<tonner::mesh::Mesh>,
 
     /// An array of primitives, each defining geometry to be rendered.
     primitives: Vec<MeshPrimitive>,
@@ -49,15 +49,15 @@ impl Mesh {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<storm::mesh::material::Material>,
+        default_material: &mut Option<tonner::mesh::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
         buffer_views: &[super::BufferView],
         buffers: &[super::Buffer],
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<storm::mesh::Mesh> {
+    ) -> anyhow::Result<tonner::mesh::Mesh> {
         if let Some(mesh) = self.loaded.clone() {
             return Ok(mesh);
         }

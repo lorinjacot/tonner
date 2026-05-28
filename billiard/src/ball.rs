@@ -1,11 +1,10 @@
-use glam::{U8Vec4, Vec3, vec3};
+use std::sync::{Arc, Mutex};
+
+use glam::{Quat, U8Vec4, Vec3, vec3};
 use numpy::{PyArray1, ToPyArray, ndarray::arr1};
 use pyo3::prelude::*;
-use storm::{
-    Context,
-    geometry::Geometry,
-    mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
-    scene_graph::{NodeBuilder, PyNode, SceneGraph},
+use tonner::{
+    Context, ecs::EntityRegistry, geometry::Geometry, mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder}, scene_graph::{NodeHandle, SceneGraph}
 };
 
 const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
@@ -16,11 +15,11 @@ pub struct Ball {
     #[pyo3(get)]
     number: u8,
     #[pyo3(get)]
-    node: Py<PyNode>,
+    node: Py<NodeHandle>,
     #[pyo3(get)]
-    radius: f64,
+    pub radius: f64,
     #[pyo3(get, set)]
-    velocity: Py<PyArray1<f64>>,
+    pub velocity: Py<PyArray1<f64>>,
     #[pyo3(get, set)]
     pub out: bool,
     mesh_instance: MeshInstance,
@@ -72,14 +71,12 @@ impl Ball {
         color: impl Into<U8Vec4>,
         position: impl Into<Vec3>,
         velocity: impl Into<Vec3>,
-        scene_graph: Py<SceneGraph>,
+        entity_registry: &mut EntityRegistry,
+        scene_graph: Arc<Mutex<SceneGraph>>,
         ctx: &Context,
     ) -> Bound<'py, Ball> {
-        let node_id = NodeBuilder::default()
-            .name(name.clone())
-            .local_translation(position)
-            .build(&mut scene_graph.borrow_mut(py))
-            .unwrap();
+        let entity = entity_registry.create();
+        scene_graph.lock().unwrap().add_with_transform(entity, None, position.into(), Quat::IDENTITY, Vec3::ONE);
 
         let velocity = arr1(&velocity.into().to_array().map(|f| f as f64)).to_pyarray(py);
 
@@ -94,11 +91,11 @@ impl Ball {
             .primitive(geometry, material)
             .build(ctx)
             .unwrap()
-            .new_instance(node_id);
+            .new_instance(entity);
 
         let ball = Ball {
             number,
-            node: Py::new(py, PyNode::new(node_id, scene_graph)).unwrap(),
+            node: Py::new(py, NodeHandle::new(entity, scene_graph)).unwrap(),
             radius: BALL_RADIUS,
             velocity: velocity.into(),
             out: false,
@@ -106,6 +103,10 @@ impl Ball {
         };
 
         Bound::new(py, ball).unwrap()
+    }
+
+    pub fn node(&self) -> &Py<NodeHandle> {
+        &self.node
     }
 
     pub fn mesh_instance(&self) -> &MeshInstance {

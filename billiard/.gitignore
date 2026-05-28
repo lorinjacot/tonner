@@ -1,0 +1,6 @@
+python.exe
+python314/*
+python314._pth
+python314.dll
+Lib/site-packages
+scripts/*.exe

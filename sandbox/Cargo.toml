@@ -1,0 +1,19 @@
+[package]
+name = "sandbox"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+entropie.workspace = true
+env_logger.workspace = true
+glam.workspace = true
+image.workspace = true
+log.workspace = true
+pollster.workspace = true
+storm-controls = { workspace = true, features = ["egui"] }
+tonner = { workspace = true, features = ["egui"] }
+wgpu.workspace = true
+winit.workspace = true

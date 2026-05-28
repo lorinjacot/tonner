@@ -6,6 +6,5 @@ edition = "2024"
 [dependencies]
 approx.workspace = true
 glam.workspace = true
-storm.workspace = true
-thiserror.workspace = true
+tonner.workspace = true
 uuid.workspace = true

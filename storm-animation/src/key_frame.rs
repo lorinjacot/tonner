@@ -1,8 +1,8 @@
 use approx::abs_diff_eq;
 use glam::{Quat, Vec3, Vec4};
-use storm::{mesh::MeshInstanceId, scene_graph::NodeId};
+use tonner::{ecs::EntityId, mesh::MeshInstanceId};
 
-use crate::{AnimationChannel, AnimationError};
+use crate::AnimationChannel;
 
 /// Node animation base on `input`/`output` pairs.
 /// The `output` contains the value the node should take
@@ -20,7 +20,7 @@ pub enum KeyFrameChannel {
 #[derive(Debug)]
 pub struct NodeChannel {
     /// The node modified by this channel.
-    pub node: NodeId,
+    pub node: EntityId,
     /// Linear time in seconds.
     pub inputs: Vec<f32>,
     /// Sets the interpolation method between two `input`/`output`
@@ -50,7 +50,7 @@ impl AnimationChannel for KeyFrameChannel {
         progress: std::time::Duration,
         _duration: std::time::Duration,
         animatable: &mut crate::Animatable,
-    ) -> Result<(), AnimationError> {
+    ) {
         let progress = progress.as_secs_f32();
         match self {
             KeyFrameChannel::Node(NodeChannel {
@@ -65,7 +65,7 @@ impl AnimationChannel for KeyFrameChannel {
                         interpolate_vec3(progress, inputs, *interpolation, slice),
                         None,
                         None,
-                    )?;
+                    );
                 }
                 NodeOutputs::Rotations(slice) => {
                     animatable.scene_graph.set_local_transformation(
@@ -73,7 +73,7 @@ impl AnimationChannel for KeyFrameChannel {
                         None,
                         interpolate_quat(progress, inputs, *interpolation, slice),
                         None,
-                    )?;
+                    );
                 }
                 NodeOutputs::Scales(slice) => {
                     animatable.scene_graph.set_local_transformation(
@@ -81,7 +81,7 @@ impl AnimationChannel for KeyFrameChannel {
                         None,
                         None,
                         interpolate_vec3(progress, inputs, *interpolation, slice),
-                    )?;
+                    );
                 }
             },
             KeyFrameChannel::MeshInstance(MeshInstanceChannel {
@@ -104,7 +104,6 @@ impl AnimationChannel for KeyFrameChannel {
                     ));
             }
         }
-        Ok(())
     }
 }
 

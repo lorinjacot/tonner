@@ -8,7 +8,7 @@ bitflags.workspace = true
 egui = { workspace = true, optional = true }
 glam.workspace = true
 log.workspace = true
-storm.workspace = true
+tonner.workspace = true
 
 [features]
 default = ["orbit"]

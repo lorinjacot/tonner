@@ -1,0 +1,10 @@
+[package]
+name = "sparse-keyed"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pyo3 = { workspace = true, optional = true }
+
+[features]
+pyo3 = ["dep:pyo3"]

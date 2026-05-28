@@ -4,8 +4,8 @@ import importlib, sys
 import numpy as np
 import quaternion
 
-import debugpy
-debugpy.listen(5678, in_process_debug_adapter=True)
+# import debugpy
+# debugpy.listen(5678, in_process_debug_adapter=True)
 
 if "physics" in sys.modules:
     importlib.reload(sys.modules["physics"])
@@ -16,9 +16,10 @@ if "ray" in sys.modules:
 if "interpolation" in sys.modules:
     importlib.reload(sys.modules["interpolation"])
 
-from physics import simulate
+import physics
 from ray import Ray
 from interpolation import cubic_hermite_spline, Point
+import constraints
 
 mouse_action: Literal["Rotate", "Zoom", "Throw"] | None = None
 mouse_over_ball = False
@@ -41,7 +42,8 @@ camera_interpolation_fraction: float = 0.0
 camera_interpolation_duration = 1.0
 camera_interpolation_speed = 0.1
 
-reset = False
+reset: bool = False
+register_constraints: bool = True
 
 
 def mouse_input(
@@ -158,13 +160,38 @@ def mouse_wheel(dx: float, dy: float):
 
 def update(
         delta_time: float,
-        scene_graph, camera_node,
-        balls: list
+        camera_node,
+        balls: list,
+        force_manager,
+        constraint_manager,
     ):
-    global camera_state, reset, white_ball_impulse
+    global camera_state, reset, register_constraints, white_ball_impulse
     global camera_interpolation_start, camera_interpolation_end, camera_interpolation_fraction
+
+    if register_constraints:
+        force_manager.clear()
+        force_manager.push(
+            "gravity",
+            [ball.node.entity for ball in balls],
+            physics.gravity,
+        )
+        force_manager.push(
+            "drag",
+            [ball.node.entity for ball in balls],
+            physics.drag,
+        )
+
+        constraint_manager.clear()
+        for i in range(16):
+            constraints.register_table_surface_constraint(balls[i], constraint_manager)
+            constraints.register_table_short_side_constraint(balls[i], constraint_manager)
+            constraints.register_table_long_side_constraint(balls[i], constraint_manager)
+        for i in range(15):
+            for j in range(i + 1, 16):
+                constraints.register_distance_constraint(balls[i], balls[j], constraint_manager)
+        register_constraints = False
     
-    simulate(delta_time, balls, reset, white_ball_impulse)
+    physics.simulate(delta_time, balls, reset, white_ball_impulse)
     if reset:
         camera_state = "Interpolating"
         reset = False

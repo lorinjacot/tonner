@@ -5,28 +5,43 @@ let
     libxkbcommon
     vulkan-loader
   ];
+  myPython = pkgs.python3.withPackages (python-pkgs: with python-pkgs; [
+    debugpy
+    numpy
+    quaternion
+    uv
+  ]);
 in
-pkgs.mkShell {
-  strictDeps = true;
-  nativeBuildInputs = with pkgs; [
-    cargo
-    rustc
-    rustfmt
-    rust-analyzer
-    pkg-config
-  ];
-  LD_LIBRARY_PATH = libPath;
-  RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+pkgs.callPackage (
+  {
+    stdenv,
+    mkShell,
+    rustup,
+    rustPlatform,
+  }:
+  mkShell {
+    strictDeps = true;
+    nativeBuildInputs = with pkgs; [
+      rustup
+      rustPlatform.bindgenHook
+      nodejs_24
+    ];
+    LD_LIBRARY_PATH = libPath;
 
-  packages = with pkgs; [
-    (python3.withPackages (python-pkgs: with python-pkgs; [
-      debugpy
-      numpy
-      quaternion
-    ]))
-  ];
+    packages = [
+      myPython
+    ];
 
-  shellHook = ''
-    export TMPDIR=/tmp
-  '';
-}
+    PYO3_PYTHON="${myPython}/bin/python3";
+
+    shellHook = ''
+      export PATH="''${CARGO_HOME:-~/.cargo}/bin":"$PATH"
+
+      export TMPDIR=/tmp
+
+      export PYO3_PYTHON=${myPython}/bin/python3
+
+      export PATH="$HOME/.local/bin:$PATH"
+    '';
+  }
+) { }

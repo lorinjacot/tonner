@@ -5,9 +5,9 @@ use std::{
 };
 
 use eframe::egui_wgpu;
-use storm::{Context, renderer::camera::Camera};
 use storm_animation::Animatable;
 use storm_controls::{EguiControls, orbit::OrbitControls};
+use tonner::{Context, renderer::camera::Camera};
 
 use crate::Scene;
 
@@ -17,7 +17,7 @@ pub struct SceneView {
     texture_view: TextureView,
     sized_texture: egui::load::SizedTexture,
     egui_renderer: Arc<egui::mutex::RwLock<egui_wgpu::Renderer>>,
-    storm_renderer: storm::renderer::Renderer,
+    storm_renderer: tonner::renderer::Renderer,
 }
 
 impl SceneView {
@@ -38,8 +38,12 @@ impl SceneView {
         );
         let sized_texture = egui::load::SizedTexture::new(id, [width as f32, height as f32]);
 
-        let storm_renderer =
-            storm::renderer::Renderer::new(width, height, wgpu::TextureFormat::Rgba8UnormSrgb, ctx);
+        let storm_renderer = tonner::renderer::Renderer::new(
+            width,
+            height,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            ctx,
+        );
 
         let controls = OrbitControls::new(camera);
 
@@ -61,16 +65,13 @@ impl SceneView {
             delta_time,
             self.sized_texture.size.x / self.sized_texture.size.y,
         );
-        scene
-            .animation_manager
-            .update(
-                delta_time,
-                &mut Animatable {
-                    scene_graph: &mut scene.scene_graph,
-                    mesh_instance: &mut scene.mesh_instances,
-                },
-            )
-            .unwrap();
+        scene.animation_manager.update(
+            delta_time,
+            &mut Animatable {
+                scene_graph: &mut scene.scene_graph,
+                mesh_instance: &mut scene.mesh_instances,
+            },
+        );
     }
 
     pub fn render(&mut self, ui: &mut egui::Ui, ctx: &Context, encoder: &mut wgpu::CommandEncoder) {

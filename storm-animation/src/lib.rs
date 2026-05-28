@@ -4,11 +4,10 @@ use std::{
     time::Duration,
 };
 
-use storm::{
+use tonner::{
     mesh::{MeshInstance, MeshInstanceId},
-    scene_graph::{NodeNotFoundError, SceneGraph},
+    scene_graph::SceneGraph,
 };
-use thiserror::Error;
 use uuid::Uuid;
 
 pub mod key_frame;
@@ -41,12 +40,7 @@ impl AnimationManager {
     /// This function advance all running animations by `delta_time`. An animation
     /// can modify any field of `animatable`. This function should be called once per
     /// frame.
-    pub fn update(
-        &mut self,
-        delta_time: Duration,
-        animatable: &mut Animatable,
-    ) -> Result<(), Vec<(AnimationId, AnimationError)>> {
-        let mut errors = Vec::new();
+    pub fn update(&mut self, delta_time: Duration, animatable: &mut Animatable) {
         let mut animations_to_stop = Vec::new();
         for (&id, animation) in &mut self.running_animations {
             animation.progress += delta_time;
@@ -63,22 +57,13 @@ impl AnimationManager {
                 }
             }
             for channel in &mut animation.channels {
-                if let Err(error) =
-                    channel.update(animation.progress, animation.duration, animatable)
-                {
-                    errors.push((id, error));
-                }
+                channel.update(animation.progress, animation.duration, animatable);
             }
         }
         animations_to_stop.into_iter().for_each(|id| {
             self.stopped_animations
                 .insert(id, self.running_animations.remove(&id).unwrap());
         });
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
     }
 
     /// Starts the animation if not currently running.
@@ -229,18 +214,5 @@ pub struct Animatable<'a> {
 }
 
 pub trait AnimationChannel: Debug + Send + Sync {
-    fn update(
-        &mut self,
-        progress: Duration,
-        duration: Duration,
-        animatable: &mut Animatable,
-    ) -> Result<(), AnimationError>;
-}
-
-/// Error when [`AnimationChannel::update()`] fails.
-#[non_exhaustive]
-#[derive(Debug, Error)]
-pub enum AnimationError {
-    #[error(transparent)]
-    NodeNotFound(#[from] NodeNotFoundError),
+    fn update(&mut self, progress: Duration, duration: Duration, animatable: &mut Animatable);
 }

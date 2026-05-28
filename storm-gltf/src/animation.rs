@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display, time::Duration};
 use anyhow::{Context, Result};
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
-use storm::mesh::{MeshInstance, MeshInstanceId};
+use tonner::mesh::{MeshInstance, MeshInstanceId};
 use storm_animation::key_frame::{
     Interpolation, KeyFrameChannel, MeshInstanceChannel, NodeChannel, NodeOutputs,
 };
@@ -200,7 +200,7 @@ impl Animation {
                     AnimationTargetPath::Weights => {
                         let (id, instance) = match mesh_instaces
                             .iter()
-                            .find(|(_, instance)| instance.node == node)
+                            .find(|(_, instance)| instance.entity == node)
                         {
                             Some((&id, instance)) => (id, instance),
                             None => continue,

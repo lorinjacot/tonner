@@ -1,12 +1,13 @@
 use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result, anyhow};
-use glam::{Mat4, Quat};
+use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
-use storm::{
+use tonner::{
+    ecs::EntityRegistry,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
-    scene_graph::{NodeBuilder, SceneGraph},
+    scene_graph::SceneGraph,
 };
 
 use crate::{Mesh, skin::Skin};
@@ -26,7 +27,7 @@ use crate::{Mesh, skin::Skin};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    pub(super) id: Option<storm::scene_graph::NodeId>,
+    pub(super) id: Option<tonner::ecs::EntityId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -90,49 +91,40 @@ impl Node {
     pub(super) fn load(
         index: usize,
         nodes: &mut [Node],
-        parent: Option<storm::scene_graph::NodeId>,
+        parent: Option<tonner::ecs::EntityId>,
+        entity_registry: &mut EntityRegistry,
         scene_graph: &mut SceneGraph,
-    ) -> Result<storm::scene_graph::NodeId> {
+    ) -> Result<tonner::ecs::EntityId> {
         let node = nodes
             .get_mut(index)
             .with_context(|| format!("node {index} is out of range."))?;
 
         let node_ctx = || format!("failed to load node {index}.");
 
-        let name = node.name.clone().unwrap_or_default();
-        let mut builder = NodeBuilder::default().name(name);
-        if let Some(parent) = parent {
-            builder = builder.parent(parent);
-        }
-        match &node.matrix {
-            Some(matrix) => {
-                let (scale, rotation, translation) =
-                    Mat4::from_cols_array(matrix).to_scale_rotation_translation();
-                builder = builder
-                    .local_scale(scale)
-                    .local_rotation(rotation)
-                    .local_translation(translation)
-            }
-            None => {
-                if let Some(scale) = node.scale {
-                    builder = builder.local_scale(scale);
-                }
-                if let Some(rotation) = node.rotation {
-                    builder = builder.local_rotation(Quat::from_array(rotation));
-                }
-                if let Some(translation) = node.translation {
-                    builder = builder.local_translation(translation);
-                }
-            }
+        let entity = entity_registry.create();
+        let (scale, rotation, translation) = match &node.matrix {
+            Some(matrix) => Mat4::from_cols_array(matrix).to_scale_rotation_translation(),
+            None => (
+                node.scale.map_or(Vec3::ONE, Vec3::from_array),
+                node.rotation.map_or(Quat::IDENTITY, Quat::from_array),
+                node.translation.map_or(Vec3::ZERO, Vec3::from_array),
+            ),
         };
-        let id = builder.build(scene_graph)?;
-        node.id = Some(id);
+        scene_graph.add_with_transform(entity, parent, translation, rotation, scale);
+        node.id = Some(entity);
 
         for child_index in node.children.clone() {
-            Self::load(child_index, nodes, Some(id), scene_graph).with_context(node_ctx)?;
+            Self::load(
+                child_index,
+                nodes,
+                Some(entity),
+                entity_registry,
+                scene_graph,
+            )
+            .with_context(node_ctx)?;
         }
 
-        Ok(id)
+        Ok(entity)
     }
 
     pub(super) fn load_mesh(
@@ -143,7 +135,7 @@ impl Node {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<storm::mesh::material::Material>,
+        default_material: &mut Option<tonner::mesh::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
@@ -151,7 +143,7 @@ impl Node {
         buffers: &[super::Buffer],
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
-        ctx: &storm::Context,
+        ctx: &tonner::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<()> {
         let node = &nodes[index];

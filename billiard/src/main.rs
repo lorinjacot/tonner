@@ -1,19 +1,20 @@
 use std::io::Cursor;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use pollster::block_on;
 use pyo3::prelude::*;
-use storm::Context;
-use storm::environment::{Environment, EnvironmentBuilder};
-use storm::geometry::SphereBuilder;
-use storm::geometry::skin::SkinManager;
-use storm::mesh::MeshInstance;
-use storm::renderer::Renderer;
-use storm::renderer::camera::Camera;
-use storm::renderer::light::LightManager;
-use storm::scene_graph::{NodeBuilder, PyNode, SceneGraph};
+use tonner::Context;
+use tonner::ecs::EntityRegistry;
+use tonner::environment::{Environment, EnvironmentBuilder};
+use tonner::geometry::SphereBuilder;
+use tonner::geometry::skin::SkinManager;
+use tonner::mesh::MeshInstance;
+use tonner::renderer::Renderer;
+use tonner::renderer::camera::Camera;
+use tonner::renderer::light::LightManager;
+use tonner::scene_graph::{NodeHandle, SceneGraph};
 use wgpu::Instance;
 use winit::dpi::PhysicalSize;
 use winit::event::{DeviceEvent, MouseScrollDelta};
@@ -26,17 +27,17 @@ use winit::{
 
 use crate::arrow::Arrow;
 use crate::ball::Ball;
+use crate::python::{ConstraintManager, ForceManager};
 use crate::table::table;
 
 mod arrow;
 mod ball;
+mod physics;
 mod python;
 mod table;
 
-const MAX_DELTA_TIME: f32 = 1.0 / 30.0;
-const MIN_DELTA_TIME: f32 = 0.001;
-
 struct State {
+    instance: wgpu::Instance,
     ctx: Context,
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -44,13 +45,15 @@ struct State {
     size: PhysicalSize<u32>,
     renderer: Renderer,
     camera: Camera,
-    scene_graph: Py<SceneGraph>,
+    scene_graph: Arc<Mutex<SceneGraph>>,
     skin_manager: SkinManager,
     light_manager: LightManager,
     environment: Environment,
     scripts: python::PyScripts,
-    camera_node: Py<PyNode>,
+    camera_node: Py<NodeHandle>,
     balls: Vec<Py<Ball>>,
+    force_manager: Py<ForceManager>,
+    constraint_manager: Py<ConstraintManager>,
     arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
     last_render: Instant,
@@ -58,12 +61,9 @@ struct State {
 
 impl State {
     async fn new(window: Arc<Window>) -> Self {
-        let instance = Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
-            flags: wgpu::InstanceFlags::from_env_or_default(),
-            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-        });
+        let instance = Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            window.clone(),
+        )));
 
         let surface = instance
             .create_surface(window.clone())
@@ -94,13 +94,12 @@ impl State {
             surface_format.add_srgb_suffix(),
             &ctx,
         );
+        let mut entity_registry = EntityRegistry::new();
         let mut scene_graph = SceneGraph::new(&ctx);
-        let camera_node = NodeBuilder::default()
-            .name("Camera node")
-            .local_translation(Vec3::X)
-            .build(&mut scene_graph)
-            .unwrap();
-        let camera = Camera::new(camera_node);
+
+        let camera_entity = entity_registry.create();
+        scene_graph.add_with_transform(camera_entity, None, Vec3::X, Quat::IDENTITY, Vec3::ONE);
+        let camera = Camera::new(camera_entity);
 
         let mut balls = Vec::new();
         let mut mesh_instances = Vec::new();
@@ -109,7 +108,7 @@ impl State {
             .radius(0.025)
             .build(&ctx);
 
-        mesh_instances.push(table(&mut scene_graph, &ctx));
+        mesh_instances.push(table(&mut entity_registry, &mut scene_graph, &ctx));
 
         let mut encoder = ctx
             .device()
@@ -126,10 +125,16 @@ impl State {
             .equirectangular_map(radiance_image)
             .build(&ctx, &mut encoder);
 
-        let (scene_graph, camera_node, arrow) =
-            Python::attach(|py| -> PyResult<(Py<SceneGraph>, Py<PyNode>, Py<Arrow>)> {
-                let scene_graph = Py::new(py, scene_graph)?;
-                let camera_node = Py::new(py, PyNode::new(camera_node, scene_graph.clone_ref(py)))?;
+        let scene_graph = Arc::new(Mutex::new(scene_graph));
+
+        let (camera_node, force_manager, constraint_manager, arrow) = Python::attach(
+            |py| -> PyResult<(
+                Py<NodeHandle>,
+                Py<ForceManager>,
+                Py<ConstraintManager>,
+                Py<Arrow>,
+            )> {
+                let camera_node = Py::new(py, NodeHandle::new(camera_entity, scene_graph.clone()))?;
 
                 Ball::settings()
                     .iter()
@@ -142,23 +147,33 @@ impl State {
                             *color,
                             *position,
                             *velocity,
-                            scene_graph.clone_ref(py),
+                            &mut entity_registry,
+                            scene_graph.clone(),
                             &ctx,
                         );
                         balls.push(ball.into());
                     });
 
-                let arrow = Py::new(py, Arrow::new(py, scene_graph.clone_ref(py), &ctx))?;
+                let force_manager = Py::new(py, ForceManager::new())?;
 
-                Ok((scene_graph, camera_node, arrow))
-            })
-            .unwrap();
+                let constraint_manager = Py::new(py, ConstraintManager::new())?;
+
+                let arrow = Py::new(
+                    py,
+                    Arrow::new(py, &mut entity_registry, scene_graph.clone(), &ctx),
+                )?;
+
+                Ok((camera_node, force_manager, constraint_manager, arrow))
+            },
+        )
+        .unwrap();
 
         let scripts = python::PyScripts::new();
 
         ctx.queue().submit([encoder.finish()]);
 
         let state = State {
+            instance,
             window,
             surface,
             surface_format,
@@ -173,6 +188,8 @@ impl State {
             scripts,
             camera_node,
             balls,
+            force_manager,
+            constraint_manager,
             arrow,
             mesh_instances,
             last_render: Instant::now(),
@@ -203,16 +220,30 @@ impl State {
     }
 
     fn render(&mut self) {
+        let min_delta_time = Duration::from_secs_f32(1.0 / 60.0);
+        let max_delta_time = Duration::from_secs_f32(1.0 / 60.0);
+
         let now = Instant::now();
-        let delta_time = (now - self.last_render)
-            .as_secs_f32()
-            .clamp(MIN_DELTA_TIME, MAX_DELTA_TIME);
+        let delta_time = (now - self.last_render).clamp(min_delta_time, max_delta_time);
         self.last_render = now;
 
-        let surface_texture = self
-            .surface
-            .get_current_texture()
-            .expect("failed to get next swapchain texture");
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+            wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => return,
+            wgpu::CurrentSurfaceTexture::Suboptimal(_) | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.configure_surface();
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                unreachable!("No error scope registered, so validation errors will panic")
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                self.surface = self.instance.create_surface(self.window.clone()).unwrap();
+                self.configure_surface();
+                return;
+            }
+        };
+
         let texture_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
@@ -231,23 +262,35 @@ impl State {
         Python::attach(|py| -> PyResult<()> {
             self.scripts.update(
                 py,
-                delta_time,
-                &self.scene_graph,
+                delta_time.as_secs_f32(),
                 &self.camera_node,
                 &self.balls,
+                &self.force_manager,
+                &self.constraint_manager,
             );
-            let balls: Vec<_> = self
+            let mut balls: Vec<_> = self
                 .balls
                 .iter()
-                .map(|ball| ball.borrow(py))
+                .map(|ball| ball.borrow_mut(py))
                 .filter(|ball| !ball.out)
                 .collect();
+
+            let mut scene_graph = self.scene_graph.lock().unwrap();
+
+            physics::update(
+                py,
+                delta_time,
+                &mut scene_graph,
+                balls.iter_mut().map(|ball| &mut **ball),
+                self.force_manager.borrow(py).forces(),
+                self.constraint_manager.borrow(py).constraints(),
+            );
 
             self.renderer
                 .render(
                     &self.camera,
                     &texture_view,
-                    &self.scene_graph.borrow(py),
+                    &mut scene_graph,
                     &mut self.skin_manager,
                     self.mesh_instances
                         .iter()

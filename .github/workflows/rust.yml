@@ -15,10 +15,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Install Lavapipe (software-based Vulkan implementation)
-      run: sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
     - uses: actions/checkout@v4
+    
     - name: Build
       run: cargo build --verbose
+      
+    - name: Install Rust
+      run: rustup toolchain install stable --profile minimal
+      
+    - name: Caching
+      uses: Swatinem/rust-cache@v2
+      
+    - name: Install Lavapipe (software-based Vulkan implementation)
+      run: sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      
     - name: Run tests
       run: cargo test --verbose

@@ -8,35 +8,59 @@
 //! on the positions of objects) or angular (enforcing conditions on the orientations
 //! of objects).
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 
-use crate::Transform;
+use crate::body::BodyId;
 
+/// A constraint is a condition that must be satisfied by the positions and orientations of a set of bodies in the physics engine. `PositionalConstraint`s enforce conditions by moving the bodies.
+///
+/// Constraints are used to enforce certain conditions on the motion of objects, such as keeping them at a fixed distance from each other (e.g., for a rope or a rod) or preventing them from penetrating each other (e.g., for collision response).
+///
+/// Note that despite the name, `PositionalConstraint`s can also result in changes to the orientations of the bodies if the application points are not located at the center of mass of the body.
 pub trait PositionalConstraint {
-    fn delta(&self, transform0: &Transform, transform1: &Transform) -> PositionalCorrection;
+    /// Returns the bodies involved in the constraint.
+    fn bodies(&self) -> &[BodyId];
+
+    /// Evaluates the constraint for the given `positions` and `orientations` of the bodies and returns the value of the constraint violation. The value is `0.0` iff the constraint is satisfied. The gradient of the constraint violation with respect to the positions of the bodies should be stored in `position_gradient`, and the positions (in world space) where the constraint forces should be applied should be stored in `application_points`.
+    ///
+    /// Note that for particles, the orientation will always be `Quat::IDENTITY`.
+    fn value(
+        &self,
+        positions: &[Vec3],
+        orientations: &[Quat],
+        position_gradient: &mut [Vec3],
+        application_points: &mut [Vec3],
+    ) -> f32;
 
     /// Compliance (inverse of stiffness) of the constraint. Expressed in meters per Newton. Should always be non-negative.
-    /// 
+    ///
     /// A compliance of 0 means that the constraint is perfectly rigid, while a higher compliance means that the constraint is more flexible.
     /// Constraints with a strictly positive compliance will act like a physical spring, applying a force proportional to the violation of the constraint.
     /// The higher the compliance, the weaker the spring.
     fn compliance(&self) -> f32;
 }
 
-/// Information about how to correct the positions of two objects to satisfy a positional constraint.
-pub struct PositionalCorrection {
-    /// The direction in which to apply the correction. This is a unit vector pointing from the first object to the second object.
-    /// Expressed in world space.
-    pub direction: Vec3,
-    /// The magnitude of the correction to apply.
-    pub magnitude: f32,
-    /// The positions (in local space) where the correction should be applied on the first and second object, respectively.
-    /// Expressed in the local space of each object, i.e. without the object's transform applied.
-    pub positions: [Vec3; 2],
-}
-
+/// A constraint is a condition that must be satisfied by the positions and orientations of a set of bodies in the physics engine. `AngularConstraint`s enforce conditions by rotating the bodies. An `AngularConstraint` will never cause any movement of the center of mass of the bodies.
+///
+/// Constraints are used to enforce certain conditions on the motion of objects, such as keeping them at a fixed distance from each other (e.g., for a rope or a rod) or preventing them from penetrating each other (e.g., for collision response).
+///
+/// Note that `AngularConstraint`s will have no effect on particles, as they have no orientation.
 pub trait AngularConstraint {
-    fn delta(&self, transform0: &Transform, transform1: &Transform) -> (Vec3, f32);
+    /// Returns the bodies involved in the constraint.
+    fn bodies(&self) -> &[BodyId];
 
+    /// Evaluates the constraint for the given `positions` and `orientations` of the bodies and returns the value of the constraint violation. The value is `0.0` iff the constraint is satisfied. The gradient of the constraint violation with respect to the orientations of the bodies should be stored in `orientation_gradient`.
+    fn value(
+        &self,
+        positions: &[Vec3],
+        orientations: &[Quat],
+        orientation_gradient: &mut [Vec3],
+    ) -> f32;
+
+    /// Compliance (inverse of stiffness) of the constraint. Expressed in meters per Newton. Should always be non-negative.
+    ///
+    /// A compliance of 0 means that the constraint is perfectly rigid, while a higher compliance means that the constraint is more flexible.
+    /// Constraints with a strictly positive compliance will act like a physical spring, applying a force proportional to the violation of the constraint.
+    /// The higher the compliance, the weaker the spring.
     fn compliance(&self) -> f32;
 }

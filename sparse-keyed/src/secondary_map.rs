@@ -3,8 +3,7 @@
 use std::{
     iter::{FusedIterator, once, repeat_n},
     num::NonZeroU32,
-    ops::{Deref, Index, IndexMut},
-    slice::SliceIndex,
+    ops::{Index, IndexMut},
 };
 
 use crate::{Key, KeyRegistry};
@@ -18,7 +17,7 @@ struct SparseEntry {
 /// A map from [`Key`]s to arbitrary values. The keys are created and managed by a [`KeyRegistry`].
 ///
 /// `SecondaryMap` is designed to provide efficient operations for (in order of importance):
-/// 1. **Iteration**: Iterating over all entries of the map is O(n), where n is the number of entries in the map. This is achieved by storing the entries in a dense vector. The map provides a read-only slice of its entries via [`SecondaryMap::deref`]. However, no guarantee is made on their order, as it may change after any insertion or deletion of entries.
+/// 1. **Iteration**: Iterating over all entries of the map is O(n), where n is the number of entries in the map. This is achieved by storing the entries in a dense vector. The map provides a read-only slice of its entries via [`SecondaryMap::as_slice`]. The position of an entry in the slice can be obtained by calling [`SecondaryMap::index`] with the key. However, the order of the entries in the slice is arbitrary and may change after any insertion or deletion of entries. Therefore, the index of an entry is only valid until the next map modification. The index of one `SecondaryMap` is in general different from the index of another `SecondaryMap` for the same key. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
 /// 2. **Random access**: Accessing the value associated with a key in the map is O(1). This is achieved by storing a sparse vector of indices pointing to the dense vector. The tradeoff is the memory usage of the sparse vector (up to O(m), where m is the number of keys in the registry) and an extra level of indirection when accessing entries. Random access is therefore slower than a vector but still O(1).
 /// 3. **Insertion and deletion**: Insertion and deletion of entries in the map are O(1) in the average case, but insertion can be O(n), O(m) or O(m+n) if the sparse vector, the dense vector or both need to be resized. Deletion is always O(1). Deleting entries from the map allows their indices to be reused for new entries, keeping `m` low and ensuring fast operations of both the `KeyRegistry` and the `SecondaryMap`s over time. Deleted entries are not automatically deleted from the map. However, deleted entries can be removed by calling [`SecondaryMap::remove_deleted`] with the registry.
 ///
@@ -205,6 +204,27 @@ impl<T> SecondaryMap<T> {
         });
     }
 
+    /// Returns a slice of all entries in the map. The order of the entries is arbitrary and may change after any insertion or deletion of entries. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::{KeyRegistry, SecondaryMap};
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// let key_0 = registry.create();
+    /// let key_1 = registry.create();
+    /// map.insert(key_0, "value 0");
+    /// map.insert(key_1, "value 1");
+    ///
+    /// let entries = map.as_slice();
+    /// assert_eq!(entries.len(), 2);
+    /// assert_eq!(entries.contains(&(key_0, "value 0")), true);
+    /// assert_eq!(entries.contains(&(key_1, "value 1")), true);
+    /// ```
+    pub fn as_slice(&self) -> &[(Key, T)] {
+        &self.dense
+    }
+
     /// Returns the index of the value associated with a key in the dense vector, or `None` if the key does not have a value in the map. The returned index is only valid until the next map modification. The index of one `SecondaryMap` is in general different from the index of another `SecondaryMap` for the same key. Note that this does not check if the key is present in the registry, so it may return `Some` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this method. This method can be used to manually index into the dense vector of the map for advanced use cases.
     ///
     /// ```
@@ -219,18 +239,39 @@ impl<T> SecondaryMap<T> {
     /// assert!(map.index(key).is_some());
     ///
     /// let index = map.index(key).unwrap();
-    /// assert_eq!(map[index].0, key);
-    /// assert_eq!(map[index].1, "value");
+    /// assert_eq!(map.as_slice()[index].0, key);
+    /// assert_eq!(map.as_slice()[index].1, "value");
     ///
     /// let key_2 = registry.create();
     /// map.insert(key_2, "value 2");
-    /// // assert_eq!(map[index].0, key); // might panic
+    /// // assert_eq!(map.as_slice()[index].0, key); // might panic
     /// ```
     pub fn index(&self, key: Key) -> Option<usize> {
         match self.sparse.get(key.index() as usize) {
             Some(entry) if entry.version == Some(key.version()) => Some(entry.dense_index as usize),
             _ => None,
         }
+    }
+
+    /// Returns `true` if the map contains no entries, or `false` otherwise.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// # use sparse_keyed::SecondaryMap;
+    /// let mut registry = KeyRegistry::new();
+    /// let mut map = SecondaryMap::new();
+    /// assert!(map.is_empty());
+    ///
+    /// let key = registry.create();
+    /// map.insert(key, "value");
+    /// assert!(!map.is_empty());
+    ///
+    /// map.remove(key);
+    /// assert!(map.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.dense.is_empty()
     }
 
     /// Returns `true` if the map contains a value for the given key, or `false` if the key does not have a value in the map. Note that this does not check if the key is present in the registry, so it may return `true` for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`].
@@ -420,22 +461,6 @@ impl<T> Index<Key> for SecondaryMap<T> {
 impl<T> IndexMut<Key> for SecondaryMap<T> {
     fn index_mut(&mut self, index: Key) -> &mut Self::Output {
         self.get_mut(index).expect("no entry found for key")
-    }
-}
-
-impl<T> Deref for SecondaryMap<T> {
-    type Target = [(Key, T)];
-
-    fn deref(&self) -> &Self::Target {
-        &self.dense
-    }
-}
-
-impl<T, I: SliceIndex<[(Key, T)]>> Index<I> for SecondaryMap<T> {
-    type Output = I::Output;
-
-    fn index(&self, index: I) -> &Self::Output {
-        &self.dense[index]
     }
 }
 

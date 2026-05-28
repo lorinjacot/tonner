@@ -1,7 +1,6 @@
 use std::{
     fmt::Display,
     num::{NonZeroU32, NonZeroU64},
-    ops::Deref,
 };
 
 #[cfg(feature = "pyo3")]
@@ -59,7 +58,7 @@ struct SparseEntry {
 /// A key registry is responsible of creating and managing [`Key`]s. It can also delete keys, which makes them invalid and allows their index to be reused for new keys. The registry also provides a method to check if a key is still valid.
 ///
 /// `KeyRegistry` is designed to provide efficient operations for (in order of importance):
-/// 1. **Iteration**: Iterating over all entries of the registry is O(n), where n is the number keys in the registry. This is achieved by storing all the keys in a dense vector. The registry provides a read-only slice of its keys via [`KeyRegistry::deref`]. However, no guarantee is made on their order, as it may change after any creation or deletion of keys.
+/// 1. **Iteration**: Iterating over all entries of the registry is O(n), where n is the number keys in the registry. This is achieved by storing all the keys in a dense vector. The registry provides a read-only slice of its keys via [`KeyRegistry::as_slice`]. However, no guarantee is made on their order, as it may change after any creation or deletion of keys.
 /// 2. **Random access**: Checking for the presence of a key in the registry is O(1). This is achieved by storing a sparse vector of indices pointing to the dense vector. The tradeoff is the memory usage of the sparse vector (up to O(m), where m is the largest number of simultaneous keys). Random access is therefore slower than a vector but still O(1).
 /// 3. **Insertion and deletion**: Insertion and deletion of keys in the registry are O(1) in the average case, but insertion can be O(n), O(m) or O(m+n) if the sparse vector, the dense vector or both need to be resized. Deletion is always O(1). Deletion unused keys from the registry allows their indices to be reused for new keys, keeping `m` low and ensuring fast operations of both the `KeyRegistry` and the [`SecondaryMap`][crate::SecondaryMap]s over time. Deleted keys are not automatically deleted from the `SecondaryMap`s. However, deleted keys can be removed by calling [`SecondaryMap::remove_deleted`][crate::SecondaryMap::remove_deleted] with the registry.
 ///
@@ -177,6 +176,61 @@ impl KeyRegistry {
         }
     }
 
+    /// Returns a slice with all the keys in the registry. The order of the keys is not guaranteed to be the same as the order of their creation, and may change after any creation or deletion of keys.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// let mut registry = KeyRegistry::new();
+    /// let key_a = registry.create();
+    /// let key_b = registry.create();
+    /// assert!(registry.as_slice().contains(&key_a));
+    /// assert!(registry.as_slice().contains(&key_b));
+    /// assert_eq!(2, registry.as_slice().len());
+    /// ```
+    pub fn as_slice(&self) -> &[Key] {
+        &self.dense
+    }
+
+    /// Returns the number of keys in the registry. This is equal to the length of the dense vector.
+    ///
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// let mut registry = KeyRegistry::new();
+    /// assert_eq!(0, registry.len());
+    ///
+    /// let key_a = registry.create();
+    /// assert_eq!(1, registry.len());
+    ///
+    /// let key_b = registry.create();
+    /// assert_eq!(2, registry.len());
+    ///
+    /// registry.delete(key_a);
+    /// assert_eq!(1, registry.len());
+    /// ```
+    pub fn len(&self) -> usize {
+        self.dense.len()
+    }
+
+    /// Returns `true` if the registry contains no keys.
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_keyed::KeyRegistry;
+    /// let mut registry = KeyRegistry::new();
+    /// assert!(registry.is_empty());
+    ///
+    /// let key_a = registry.create();
+    /// assert!(!registry.is_empty());
+    ///
+    /// registry.delete(key_a);
+    /// assert!(registry.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.dense.is_empty()
+    }
+
     /// Returns `true` if the registry contains the key. Returns `false` if the key has been deleted or was never created by the registry.
     ///
     /// # Examples
@@ -204,14 +258,6 @@ impl KeyRegistry {
 impl Default for KeyRegistry {
     fn default() -> Self {
         KeyRegistry::new()
-    }
-}
-
-impl Deref for KeyRegistry {
-    type Target = [Key];
-
-    fn deref(&self) -> &Self::Target {
-        &self.dense
     }
 }
 

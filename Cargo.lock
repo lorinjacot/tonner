@@ -1226,6 +1226,7 @@ name = "entropie"
 version = "0.1.0"
 dependencies = [
  "glam 0.32.1",
+ "sparse-keyed",
 ]
 
 [[package]]

@@ -101,7 +101,7 @@ impl Node {
 
         let node_ctx = || format!("failed to load node {index}.");
 
-        let entity = entity_registry.new_entity();
+        let entity = entity_registry.create();
         let (scale, rotation, translation) = match &node.matrix {
             Some(matrix) => Mat4::from_cols_array(matrix).to_scale_rotation_translation(),
             None => (

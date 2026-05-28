@@ -122,7 +122,7 @@ impl App {
             environment: environment.clone(),
         };
         let camera =
-            CameraBuilder::new(scene.entity_registry.new_entity()).build(&mut scene.scene_graph);
+            CameraBuilder::new(scene.entity_registry.create()).build(&mut scene.scene_graph);
 
         let current_scene = Arc::new(Mutex::new(scene));
         let current_scene_view = SceneView::new(
@@ -323,7 +323,7 @@ impl eframe::App for App {
                             {
                                 let camera = {
                                     let mut scene = scene.lock().unwrap();
-                                    let camera_entity = scene.entity_registry.new_entity();
+                                    let camera_entity = scene.entity_registry.create();
                                     scene.scene_graph.add_with_transform(
                                         camera_entity,
                                         None,

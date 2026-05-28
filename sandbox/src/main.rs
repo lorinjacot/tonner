@@ -360,25 +360,25 @@ impl Scene {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if self.steps != self.rendered_steps {
-            self.labels.keys().for_each(|&entity| {
+            self.labels.keys().for_each(|entity| {
                 self.scene_graph.remove(entity);
                 self.entity_registry.delete(entity);
             });
             self.labels.clear();
 
-            self.points.keys().for_each(|&entity| {
+            self.points.keys().for_each(|entity| {
                 self.scene_graph.remove(entity);
                 self.entity_registry.delete(entity);
             });
             self.points.clear();
 
-            self.faces.keys().for_each(|&entity| {
+            self.faces.keys().for_each(|entity| {
                 self.scene_graph.remove(entity);
                 self.entity_registry.delete(entity);
             });
             self.faces.clear();
 
-            self.normals.keys().for_each(|&entity| {
+            self.normals.keys().for_each(|entity| {
                 self.scene_graph.remove(entity);
                 self.entity_registry.delete(entity);
             });
@@ -446,7 +446,7 @@ impl Scene {
                 &self.controls.camera,
                 texture_view,
                 &self.scene_graph,
-                self.labels.iter().map(|(entity, label)| (*entity, label)),
+                &self.labels,
                 egui_ctx,
                 &self.context,
                 encoder,

@@ -152,12 +152,12 @@ impl MeshExplorer {
                         light_manager: LightManager::new(&self.ctx),
                         environment: self.environment.clone(),
                     };
-                    let mesh_entity = scene.entity_registry.new_entity();
+                    let mesh_entity = scene.entity_registry.create();
                     scene.scene_graph.add(mesh_entity, None);
                     let instance = mesh.new_instance(mesh_entity);
                     scene.mesh_instances.insert(instance.id(), instance);
 
-                    let camera_entity = scene.entity_registry.new_entity();
+                    let camera_entity = scene.entity_registry.create();
                     scene.scene_graph.add_with_transform(
                         camera_entity,
                         None,

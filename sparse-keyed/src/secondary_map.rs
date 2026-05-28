@@ -548,6 +548,33 @@ impl<T> FromIterator<(Key, T)> for SecondaryMap<T> {
     }
 }
 
+impl<T> IntoIterator for SecondaryMap<T> {
+    type Item = (Key, T);
+    type IntoIter = std::vec::IntoIter<(Key, T)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.dense.into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a SecondaryMap<T> {
+    type Item = (Key, &'a T);
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut SecondaryMap<T> {
+    type Item = (Key, &'a mut T);
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 /// An iterator visiting all entries in arbitrary order. Created by [`SecondaryMap::iter()`]. Note that this does not check if the keys associated with the values are present in the registry, so it may return entries for deleted keys. To check if a key is present in the registry, use [`KeyRegistry::contains`] before calling this iterator.
 ///
 /// # Examples

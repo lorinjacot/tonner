@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use glam::Vec3;
 
-use crate::body::BodyId;
+use crate::BodyId;
 
 /// An external force applied to bodies in the physics engine. `Force`s will always be applied at the center of mass of the body, and will not cause any rotation of the body.
 ///

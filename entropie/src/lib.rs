@@ -1,19 +1,15 @@
 use std::{fmt::Debug, time::Duration};
 
 use glam::Vec3;
-use log::error;
 use sparse_keyed::{Key, KeyRegistry, SecondaryMap};
 
 pub use aabb::AABB;
 pub use particle::ParticleBuilder;
 pub use transform::Transform;
 
-use crate::force::{Force, ForceId};
-
 mod aabb;
 pub mod collision;
 pub mod constraint;
-pub mod force;
 mod particle;
 pub mod shape;
 mod transform;
@@ -21,29 +17,27 @@ mod transform;
 #[derive(Debug, Clone)]
 struct LinearData {
     position: Vec3,
+    previous_position: Vec3,
     velocity: Vec3,
     inverse_mass: f32,
+    force: Vec3,
 }
 
-#[derive(Clone)]
-pub struct State<'a> {
+#[derive(Debug, Clone)]
+pub struct State {
     bodies: KeyRegistry,
     particles: SecondaryMap<()>,
     linear_data: SecondaryMap<LinearData>,
     time: Duration,
-    force_registry: KeyRegistry,
-    forces: SecondaryMap<&'a dyn Force>,
 }
 
-impl<'a> State<'a> {
+impl State {
     pub fn new() -> Self {
         State {
             bodies: KeyRegistry::new(),
             particles: SecondaryMap::new(),
             linear_data: SecondaryMap::new(),
             time: Duration::ZERO,
-            force_registry: KeyRegistry::new(),
-            forces: SecondaryMap::new(),
         }
     }
 
@@ -87,16 +81,16 @@ impl<'a> State<'a> {
             .map(|data| &mut data.inverse_mass)
     }
 
-    pub fn add_force<F: Force>(&mut self, force: &'a F) -> ForceId {
-        let id = self.force_registry.create();
+    pub fn force(&mut self, body: BodyId) -> Option<Vec3> {
+        self.linear_data.get(body.0).map(|data| data.force)
+    }
 
-        self.forces.insert(id, force);
-
-        ForceId(id)
+    pub fn force_mut(&mut self, body: BodyId) -> Option<&mut Vec3> {
+        self.linear_data.get_mut(body.0).map(|data| &mut data.force)
     }
 }
 
-impl<'a> Default for State<'a> {
+impl Default for State {
     fn default() -> Self {
         State::new()
     }
@@ -116,33 +110,17 @@ impl Solver {
         let h = substep_duration.as_secs_f32();
         for _ in 0..self.substep_count {
             state.time += substep_duration;
-            let previous_pvm = state.linear_data.clone();
-
-            for (force_id, force) in &state.forces {
-                let f_ext = force.value(state.time);
-                for body in force.bodies() {
-                    match state.linear_data.get_mut(body.0) {
-                        Some(pvm) => {
-                            pvm.velocity += h * f_ext * pvm.inverse_mass;
-                        }
-                        None => {
-                            error!(
-                                "Failed to apply force {force_id:?} to body {body:?}: body not found in state"
-                            );
-                        }
-                    }
-                }
-            }
-
-            for pvm in state.linear_data.values_mut() {
-                pvm.position += h * pvm.velocity;
+            for d in state.linear_data.values_mut() {
+                d.previous_position = d.position;
+                d.velocity += h * d.force * d.inverse_mass;
+                d.position += h * d.velocity;
             }
 
             // solve positions
             // ...
 
-            for (new, old) in state.linear_data.values_mut().zip(previous_pvm.values()) {
-                new.velocity = (new.position - old.position) / h;
+            for d in state.linear_data.values_mut() {
+                d.velocity = (d.position - d.previous_position) / h;
             }
 
             // solve velocities

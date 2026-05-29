@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use glam::Vec3;
+use sparse_keyed::Key;
 
 use crate::BodyId;
 
@@ -14,6 +15,9 @@ pub trait Force {
     /// Returns the value of the force at a given time. The value is expressed in world space.
     fn value(&self, time: Duration) -> Vec3;
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ForceId(pub(crate) Key);
 
 /// An external torque applied to bodies in the physics engine. `Torque`s will always be applied at the center of mass of the body and will not cause any movement of the center of mass.
 ///

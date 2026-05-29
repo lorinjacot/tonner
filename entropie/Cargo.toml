@@ -5,4 +5,8 @@ edition = "2024"
 
 [dependencies]
 glam.workspace = true
+log.workspace = true
 sparse-keyed.workspace = true
+
+[dev-dependencies]
+env_logger.workspace = true

@@ -1,19 +1,19 @@
 use glam::Vec3;
 
-use crate::{BodyId, State};
+use crate::{BodyId, LinearData, State};
 
 /// A particle is a point mass with no orientation. It is defined by its position, velocity and mass. Infinite mass particles are supported, and cannot be influenced by any force or constraint. Particles cannot collide with each other.
-/// 
+///
 /// Particles are the simplest type of body in the physics engine, and can be used to represent small objects or to create more complex bodies by connecting multiple particles together with constraints.
-/// 
+///
 /// Note that particles do not have an orientation, and therefore cannot be affected by torques or angular constraints. Only particles with a finite mass are affected by forces and positional constraints.
-/// 
+///
 /// # Examples
 /// ```
 /// # use glam::Vec3;
 /// # use entropie::{State, ParticleBuilder};
 /// let mut state = State::new();
-/// 
+///
 /// let pos = Vec3::new(1.0, 2.0, 3.0);
 /// let a = ParticleBuilder::default().position(pos).build(&mut state);
 /// assert!(state.is_particle(a));
@@ -127,9 +127,14 @@ impl ParticleBuilder {
         let id = state.bodies.create();
 
         state.particles.insert(id, ());
-        state.positions.insert(id, self.position);
-        state.velocities.insert(id, self.velocity);
-        state.inverse_masses.insert(id, self.inverse_mass);
+        state.linear_data.insert(
+            id,
+            LinearData {
+                position: self.position,
+                velocity: self.velocity,
+                inverse_mass: self.inverse_mass,
+            },
+        );
 
         BodyId(id)
     }

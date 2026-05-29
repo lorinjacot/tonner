@@ -131,8 +131,10 @@ impl ParticleBuilder {
             id,
             LinearData {
                 position: self.position,
+                previous_position: self.position,
                 velocity: self.velocity,
                 inverse_mass: self.inverse_mass,
+                force: Vec3::ZERO,
             },
         );
 

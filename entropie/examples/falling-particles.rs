@@ -1,22 +1,7 @@
 use std::time::Duration;
 
-use entropie::{BodyId, ParticleBuilder, Solver, State, force::Force};
+use entropie::{ParticleBuilder, Solver, State};
 use glam::Vec3;
-
-struct Gravity {
-    bodies: [BodyId; 2],
-    value: Vec3,
-}
-
-impl Force for Gravity {
-    fn bodies(&self) -> &[BodyId] {
-        &self.bodies
-    }
-
-    fn value(&self, _time: std::time::Duration) -> Vec3 {
-        self.value
-    }
-}
 
 fn main() {
     env_logger::init();
@@ -29,14 +14,12 @@ fn main() {
         .velocity(10.0 * Vec3::Z)
         .build(&mut state);
 
-    let gravity = Gravity {
-        bodies: [a, b],
-        value: 10.0 * Vec3::NEG_Z,
-    };
-    state.add_force(&gravity);
-
     let mut solver = Solver::default();
     let dt = Duration::from_secs(1);
+
+    for body in [a, b] {
+        *state.force_mut(body).unwrap() += 10.0 * Vec3::NEG_Z;
+    }
 
     for _ in 0..10 {
         solver.simulate(&mut state, dt);

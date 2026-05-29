@@ -1,16 +1,6 @@
-//! Constraints for the physics engine.
-//!
-//! This module defines different types of constraints that can be applied to objects
-//! in the physics engine. Constraints are used to enforce certain conditions on the
-//! motion of objects, such as keeping them at a fixed distance from each other (e.g.,
-//! for a rope or a rod) or preventing them from penetrating each other (e.g., for
-//! collision response). Constraints can be either positional (enforcing conditions
-//! on the positions of objects) or angular (enforcing conditions on the orientations
-//! of objects).
-
 use glam::{Quat, Vec3};
 
-use crate::body::BodyId;
+use crate::BodyId;
 
 /// A constraint is a condition that must be satisfied by the positions and orientations of a set of bodies in the physics engine. `PositionalConstraint`s enforce conditions by moving the bodies.
 ///
@@ -23,7 +13,7 @@ pub trait PositionalConstraint {
 
     /// Evaluates the constraint for the given `positions` and `orientations` of the bodies and returns the value of the constraint violation. The value is `0.0` iff the constraint is satisfied. The gradient of the constraint violation with respect to the positions of the bodies should be stored in `position_gradient`, and the positions (in world space) where the constraint forces should be applied should be stored in `application_points`.
     ///
-    /// Note that for particles, the orientation will always be `Quat::IDENTITY`.
+    /// Note that for particles, the orientation will always be `Quat::IDENTITY` and `application_points` will not be used, as no torque can be applied to a particle.
     fn value(
         &self,
         positions: &[Vec3],

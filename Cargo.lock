@@ -1228,6 +1228,8 @@ dependencies = [
  "env_logger",
  "glam 0.32.1",
  "log",
+ "numpy",
+ "pyo3",
  "sparse-keyed",
 ]
 

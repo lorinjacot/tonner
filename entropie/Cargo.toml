@@ -3,10 +3,19 @@ name = "entropie"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["lib", "cdylib"]
+
 [dependencies]
 glam.workspace = true
 log.workspace = true
+numpy = { workspace = true, optional = true }
+pyo3 = { workspace = true, optional = true }
 sparse-keyed.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true
+
+[features]
+default = ["pyo3"]
+pyo3 = ["dep:pyo3", "dep:numpy"]

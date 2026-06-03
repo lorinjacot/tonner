@@ -1,6 +1,8 @@
 use std::{fmt::Debug, time::Duration};
 
 use glam::Vec3;
+#[cfg(feature = "pyo3")]
+use pyo3::{exceptions::PyValueError, prelude::*};
 use sparse_keyed::{Key, KeyRegistry, SecondaryMap};
 
 pub use aabb::AABB;
@@ -24,11 +26,11 @@ struct LinearData {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct State {
     bodies: KeyRegistry,
     particles: SecondaryMap<()>,
     linear_data: SecondaryMap<LinearData>,
-    time: Duration,
 }
 
 impl State {
@@ -37,7 +39,6 @@ impl State {
             bodies: KeyRegistry::new(),
             particles: SecondaryMap::new(),
             linear_data: SecondaryMap::new(),
-            time: Duration::ZERO,
         }
     }
 
@@ -90,6 +91,39 @@ impl State {
     }
 }
 
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl State {
+    #[new]
+    fn py_new() -> Self {
+        State::new()
+    }
+
+    #[pyo3(signature = (position=[0.0; 3], velocity=[0.0; 3], mass=f32::INFINITY))]
+    fn add_particle(&mut self, position: [f32; 3], velocity: [f32; 3], mass: f32) -> BodyId {
+        ParticleBuilder::default()
+            .position(position)
+            .velocity(velocity)
+            .mass(mass)
+            .build(self)
+    }
+
+    fn add_force(&mut self, body: BodyId, force: [f32; 3]) -> PyResult<()> {
+        let f = self
+            .force_mut(body)
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))?;
+        *f += Vec3::from_array(force);
+        Ok(())
+    }
+
+    #[pyo3(name = "position")]
+    fn py_position(&self, body: BodyId) -> PyResult<[f32; 3]> {
+        self.position(body)
+            .map(|p| p.to_array())
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
+    }
+}
+
 impl Default for State {
     fn default() -> Self {
         State::new()
@@ -97,9 +131,11 @@ impl Default for State {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, from_py_object))]
 pub struct BodyId(Key);
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct Solver {
     substep_count: u32,
 }
@@ -109,7 +145,6 @@ impl Solver {
         let substep_duration = delta_time / self.substep_count;
         let h = substep_duration.as_secs_f32();
         for _ in 0..self.substep_count {
-            state.time += substep_duration;
             for d in state.linear_data.values_mut() {
                 d.previous_position = d.position;
                 d.velocity += h * d.force * d.inverse_mass;
@@ -133,4 +168,25 @@ impl Default for Solver {
     fn default() -> Self {
         Solver { substep_count: 10 }
     }
+}
+
+#[cfg(feature = "pyo3")]
+#[pymethods]
+impl Solver {
+    #[new]
+    fn py_new() -> Self {
+        Solver::default()
+    }
+
+    #[pyo3(name = "simulate")]
+    fn py_simulate(&mut self, state: &mut State, delta_time: Duration) {
+        self.simulate(state, delta_time);
+    }
+}
+
+#[cfg(feature = "pyo3")]
+#[pymodule(name = "entropie")]
+mod py_entropie {
+    #[pymodule_export]
+    use super::{BodyId, Solver, State};
 }

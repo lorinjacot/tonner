@@ -17,5 +17,4 @@ sparse-keyed.workspace = true
 env_logger.workspace = true
 
 [features]
-default = ["pyo3"]
 pyo3 = ["dep:pyo3", "dep:numpy"]

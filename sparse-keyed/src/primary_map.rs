@@ -673,6 +673,10 @@ impl<'a, T> DoubleEndedIterator for Keys<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back().map(|entry| entry.key)
     }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth_back(n).map(|entry| entry.key)
+    }
 }
 
 impl<'a, T> FusedIterator for Keys<'a, T> {}

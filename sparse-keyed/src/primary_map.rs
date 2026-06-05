@@ -610,6 +610,12 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
             .next_back()
             .map(|entry| (entry.key, &mut entry.value))
     }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner
+            .nth_back(n)
+            .map(|entry| (entry.key, &mut entry.value))
+    }
 }
 
 impl<'a, T> FusedIterator for IterMut<'a, T> {}

@@ -1,6 +1,6 @@
 //! A map from [`Key`]s to arbitrary values. The keys are created and managed by the map itself.
 
-use std::num::NonZeroU32;
+use std::{iter::FusedIterator, num::NonZeroU32};
 
 use crate::{DenseEntry, Key};
 
@@ -262,7 +262,504 @@ impl<T> PrimaryMap<T> {
             _ => None,
         }
     }
+
+    /// Returns a mutable reference to the value associated with the given key, or `None` if the key is not present in the map.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::PrimaryMap;
+    /// let mut map = PrimaryMap::new();
+    /// let a = map.add("a");
+    /// 
+    /// if let Some(value) = map.get_mut(a) {
+    ///   *value = "modified a";
+    /// }
+    /// 
+    /// assert_eq!(map.get(a), Some(&"modified a"));
+    /// ```
+    pub fn get_mut(&mut self, key: Key) -> Option<&mut T> {
+        let sparse_index = key.index() as usize;
+        match self.sparse.get(sparse_index) {
+            Some(sparse_entry) if sparse_entry.version == key.version() => {
+                match self.dense.get_mut(sparse_entry.dense_index as usize) {
+                    Some(dense_entry) if dense_entry.key.index() == key.index() => {
+                        Some(&mut dense_entry.value)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns an iterator visiting all entries in arbitrary order. The order of the entries is not guaranteed and may change after insertions and deletions.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::PrimaryMap;
+    /// let mut map = PrimaryMap::new();
+    /// let a = map.add("a");
+    /// 
+    /// let mut iter = map.iter();
+    /// assert_eq!(iter.next(), Some((a, &"a")));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            inner: self.dense.iter(),
+        }
+    }
+
+    /// Returns an iterator visiting all entries in arbitrary order with mutable references to their values. The order of the entries is not guaranteed and may change after insertions and deletions.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::PrimaryMap;
+    /// let mut map = PrimaryMap::new();
+    /// let a = map.add("a");
+    /// let b = map.add("b");
+    /// 
+    /// for (key, value) in map.iter_mut() {
+    ///   if key == a {
+    ///     *value = "modified a";
+    ///   }
+    /// }
+    /// 
+    /// assert_eq!(map.get(a), Some(&"modified a"));
+    /// assert_eq!(map.get(b), Some(&"b"));
+    /// ```
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut {
+            inner: self.dense.iter_mut(),
+        }
+    }
+
+    /// Returns an iterator visiting all keys in arbitrary order. The order of the keys is not guaranteed and may change after insertions and deletions.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::PrimaryMap;
+    /// let mut map = PrimaryMap::new();
+    /// let a = map.add("a");
+    /// 
+    /// let mut iter = map.keys();
+    /// assert_eq!(iter.next(), Some(a));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    pub fn keys(&self) -> Keys<'_, T> {
+        Keys {
+            inner: self.dense.iter(),
+        }
+    }
+
+    /// Returns an iterator visiting all values in arbitrary order. The order of the values is not guaranteed and may change after insertions and deletions.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::PrimaryMap;
+    /// let mut map = PrimaryMap::new();
+    /// let a = map.add("a");
+    /// 
+    /// let mut iter = map.values();
+    /// assert_eq!(iter.next(), Some(&"a"));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    pub fn values(&self) -> Values<'_, T> {
+        Values {
+            inner: self.dense.iter(),
+        }
+    }
+
+    /// Returns an iterator visiting all values in arbitrary order with mutable references to their values. The order of the values is not guaranteed and may change after insertions and deletions.
+    /// 
+    /// # Examples
+    /// ```
+    /// # use sparse_keyed::PrimaryMap;
+    /// let mut map = PrimaryMap::new();
+    /// let a = map.add("a");
+    /// 
+    /// for value in map.values_mut() {
+    ///   *value = "modified a";
+    /// }
+    /// 
+    /// assert_eq!(map.get(a), Some(&"modified a"));
+    /// ```
+    pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
+        ValuesMut {
+            inner: self.dense.iter_mut(),
+        }
+    }
 }
+
+impl<T> IntoIterator for PrimaryMap<T> {
+    type Item = (Key, T);
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            inner: self.dense.into_iter(),
+        }
+    }
+}
+
+/// An iterator visiting all entries in arbitrary order. Created by calling `into_iter()` on a `PrimaryMap`. The order of the entries is not guaranteed and may change after insertions and deletions.
+///
+/// # Examples
+/// ```
+/// # use sparse_keyed::PrimaryMap;
+/// let mut map = PrimaryMap::new();
+///
+/// let a = map.add("a");
+///
+/// let mut iter = map.into_iter();
+/// assert_eq!(iter.next(), Some((a, "a")));
+/// assert_eq!(iter.next(), None);
+/// ```
+pub struct IntoIter<T> {
+    inner: std::vec::IntoIter<DenseEntry<T>>,
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = (Key, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| (entry.key, entry.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| (entry.key, entry.value))
+    }
+
+    fn last(self) -> Option<Self::Item> {
+        self.inner.last().map(|entry| (entry.key, entry.value))
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |acc, entry| f(acc, (entry.key, entry.value)))
+    }
+}
+
+impl<T> ExactSizeIterator for IntoIter<T> {}
+
+impl<T> DoubleEndedIterator for IntoIter<T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| (entry.key, entry.value))
+    }
+}
+
+impl<T> FusedIterator for IntoIter<T> {}
+
+/// An iterator visiting all entries in arbitrary order. Created by [`PrimaryMap::iter()`]. The order of the entries is not guaranteed and may change after insertions and deletions.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::PrimaryMap;
+/// let mut map = PrimaryMap::new();
+/// let a = map.add("a");
+/// 
+/// let mut iter = map.iter();
+/// assert_eq!(iter.next(), Some((a, &"a")));
+/// assert_eq!(iter.next(), None);
+/// ```
+pub struct Iter<'a, T> {
+    inner: std::slice::Iter<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = (Key, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| (entry.key, &entry.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| (entry.key, &entry.value))
+    }
+
+    fn last(self) -> Option<Self::Item> {
+        self.inner.last().map(|entry| (entry.key, &entry.value))
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |acc, entry| f(acc, (entry.key, &entry.value)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
+
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next_back()
+            .map(|entry| (entry.key, &entry.value))
+    }
+}
+
+impl<'a, T> FusedIterator for Iter<'a, T> {}
+
+/// An iterator visiting all entries in arbitrary order with mutable references to their values. Created by [`PrimaryMap::iter_mut()`]. The order of the entries is not guaranteed and may change after insertions and deletions.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::PrimaryMap;
+/// let mut map = PrimaryMap::new();
+/// let a = map.add("a");
+/// let b = map.add("b");
+/// 
+/// for (key, value) in map.iter_mut() {
+///     if key == a {
+///         *value = "modified a";
+///     }
+/// }
+/// assert_eq!(map.get(a), Some(&"modified a"));
+/// assert_eq!(map.get(b), Some(&"b"));
+/// ```
+pub struct IterMut<'a, T> {
+    inner: std::slice::IterMut<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = (Key, &'a mut T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| (entry.key, &mut entry.value))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| (entry.key, &mut entry.value))
+    }
+
+    fn last(self) -> Option<Self::Item> {
+        self.inner.last().map(|entry| (entry.key, &mut entry.value))
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |acc, entry| f(acc, (entry.key, &mut entry.value)))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for IterMut<'a, T> {}
+
+impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner
+            .next_back()
+            .map(|entry| (entry.key, &mut entry.value))
+    }
+}
+
+impl<'a, T> FusedIterator for IterMut<'a, T> {}
+
+/// An iterator visiting all keys in arbitrary order. Created by [`PrimaryMap::keys()`]. The order of the keys is not guaranteed and may change after insertions and deletions.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::PrimaryMap;
+/// let mut map = PrimaryMap::new();
+/// let a = map.add("a");
+/// 
+/// let mut iter = map.keys();
+/// assert_eq!(iter.next(), Some(a));
+/// assert_eq!(iter.next(), None);
+/// ```
+pub struct Keys<'a, T> {
+    inner: std::slice::Iter<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for Keys<'a, T> {
+    type Item = Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| entry.key)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| entry.key)
+    }
+
+    fn last(self) -> Option<Self::Item> {
+        self.inner.last().map(|entry| entry.key)
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner.fold(init, |acc, entry| f(acc, entry.key))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Keys<'a, T> {}
+
+impl<'a, T> DoubleEndedIterator for Keys<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| entry.key)
+    }
+}
+
+impl<'a, T> FusedIterator for Keys<'a, T> {}
+
+/// An iterator visiting all values in arbitrary order. Created by [`PrimaryMap::values()`]. The order of the values is not guaranteed and may change after insertions and deletions.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::PrimaryMap;
+/// let mut map = PrimaryMap::new();
+/// let a = map.add("a");
+/// 
+/// let mut iter = map.values();
+/// assert_eq!(iter.next(), Some(&"a"));
+/// assert_eq!(iter.next(), None);
+/// ```
+pub struct Values<'a, T> {
+    inner: std::slice::Iter<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for Values<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| &entry.value)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| &entry.value)
+    }
+
+    fn last(self) -> Option<Self::Item> {
+        self.inner.last().map(|entry| &entry.value)
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |acc, entry| f(acc, &entry.value))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for Values<'a, T> {}
+
+impl<'a, T> DoubleEndedIterator for Values<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| &entry.value)
+    }
+}
+
+impl<'a, T> FusedIterator for Values<'a, T> {}
+
+/// An iterator visiting all values in arbitrary order with mutable references to their values. Created by [`PrimaryMap::values_mut()`]. The order of the values is not guaranteed and may change after insertions and deletions.
+/// 
+/// # Examples
+/// ```
+/// # use sparse_keyed::PrimaryMap;
+/// let mut map = PrimaryMap::new();
+/// let a = map.add("a");
+/// 
+/// for value in map.values_mut() {
+///  *value = "modified a";
+/// }
+/// 
+/// assert_eq!(map.get(a), Some(&"modified a"));
+/// ```
+pub struct ValuesMut<'a, T> {
+    inner: std::slice::IterMut<'a, DenseEntry<T>>,
+}
+
+impl<'a, T> Iterator for ValuesMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| &mut entry.value)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+
+    fn count(self) -> usize {
+        self.inner.count()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth(n).map(|entry| &mut entry.value)
+    }
+
+    fn last(self) -> Option<Self::Item> {
+        self.inner.last().map(|entry| &mut entry.value)
+    }
+
+    fn fold<B, F>(self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        self.inner
+            .fold(init, |acc, entry| f(acc, &mut entry.value))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ValuesMut<'a, T> {}
+
+impl<'a, T> DoubleEndedIterator for ValuesMut<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| &mut entry.value)
+    }
+}
+
+impl<'a, T> FusedIterator for ValuesMut<'a, T> {}
 
 #[cfg(test)]
 mod tests {

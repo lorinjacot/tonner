@@ -60,7 +60,7 @@ struct SparseEntry {
 /// `KeyRegistry` is designed to provide efficient operations for (in order of importance):
 /// 1. **Iteration**: Iterating over all entries of the registry is O(n), where n is the number keys in the registry. This is achieved by storing all the keys in a dense vector. The registry provides a read-only slice of its keys via [`KeyRegistry::as_slice`]. However, no guarantee is made on their order, as it may change after any creation or deletion of keys.
 /// 2. **Random access**: Checking for the presence of a key in the registry is O(1). This is achieved by storing a sparse vector of indices pointing to the dense vector. The tradeoff is the memory usage of the sparse vector (up to O(m), where m is the largest number of simultaneous keys). Random access is therefore slower than a vector but still O(1).
-/// 3. **Insertion and deletion**: Insertion and deletion of keys in the registry are O(1) in the average case, but insertion can be O(n), O(m) or O(m+n) if the sparse vector, the dense vector or both need to be resized. Deletion is always O(1). Deletion unused keys from the registry allows their indices to be reused for new keys, keeping `m` low and ensuring fast operations of both the `KeyRegistry` and the [`SecondaryMap`][crate::SecondaryMap]s over time. Deleted keys are not automatically deleted from the `SecondaryMap`s. However, deleted keys can be removed by calling [`SecondaryMap::remove_deleted`][crate::SecondaryMap::remove_deleted] with the registry.
+/// 3. **Insertion and deletion**: Insertion and deletion of keys in the registry are O(1) in the average case, but insertion can be O(n), O(m) or O(m+n) if the sparse vector, the dense vector or both need to be resized. Deletion is always O(1). Deletion unused keys from the registry allows their indices to be reused for new keys, keeping `m` low and ensuring fast operations of both the `KeyRegistry` and the [`SecondaryMap`][crate::SecondaryMap]s over time. Deleted keys are not automatically deleted from the `SecondaryMap`s. However, deleted keys can be removed by calling [`SecondaryMap::remove_deleted_from_registry`][crate::SecondaryMap::remove_deleted_from_registry] with the registry.
 ///
 /// # Examples
 /// ```
@@ -97,7 +97,7 @@ impl KeyRegistry {
     /// assert!(registry.is_empty());
     /// ```
     #[must_use]
-    pub fn new() -> KeyRegistry {
+    pub fn new() -> Self {
         KeyRegistry {
             dense: Vec::new(),
             sparse: Vec::new(),
@@ -144,7 +144,7 @@ impl KeyRegistry {
         }
     }
 
-    /// Deletes a key. No future key created by the registry will be equal to the deleted key. Keys deleted from the registry are not automatically deleted from the [`SecondaryMap`][crate::SecondaryMap]s. However, deleted keys can be removed by calling [`SecondaryMap::remove_deleted`][crate::SecondaryMap::remove_deleted] with the registry.
+    /// Deletes a key. No future key created by the registry will be equal to the deleted key. Keys deleted from the registry are not automatically deleted from the [`SecondaryMap`][crate::SecondaryMap]s. However, deleted keys can be removed by calling [`SecondaryMap::remove_deleted_from_registry`][crate::SecondaryMap::remove_deleted_from_registry] with the registry.
     ///
     /// # Examples
     /// ```

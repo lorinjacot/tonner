@@ -402,6 +402,24 @@ impl<T> IntoIterator for PrimaryMap<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a PrimaryMap<T> {
+    type Item = (Key, &'a T);
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut PrimaryMap<T> {
+    type Item = (Key, &'a mut T);
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 /// An iterator visiting all entries in arbitrary order. Created by calling `into_iter()` on a `PrimaryMap`. The order of the entries is not guaranteed and may change after insertions and deletions.
 ///
 /// # Examples

@@ -539,6 +539,12 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
             .next_back()
             .map(|entry| (entry.key, &entry.value))
     }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner
+            .nth_back(n)
+            .map(|entry| (entry.key, &entry.value))
+    }
 }
 
 impl<'a, T> FusedIterator for Iter<'a, T> {}

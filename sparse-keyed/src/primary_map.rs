@@ -735,6 +735,10 @@ impl<'a, T> DoubleEndedIterator for Values<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back().map(|entry| &entry.value)
     }
+
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.inner.nth_back(n).map(|entry| &entry.value)
+    }
 }
 
 impl<'a, T> FusedIterator for Values<'a, T> {}

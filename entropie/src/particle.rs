@@ -1,6 +1,6 @@
 use glam::Vec3;
 
-use crate::{BodyId, LinearData, State};
+use crate::{BodyId, PositionalData, State};
 
 /// A particle is a point mass with no orientation. It is defined by its position, velocity and mass. Infinite mass particles are supported, and cannot be influenced by any force or constraint. Particles cannot collide with each other.
 ///
@@ -127,9 +127,9 @@ impl ParticleBuilder {
         let id = state.bodies.create();
 
         state.particles.insert(id, ());
-        state.linear_data.insert(
+        state.positional_data.insert(
             id,
-            LinearData {
+            PositionalData {
                 position: self.position,
                 previous_position: self.position,
                 velocity: self.velocity,

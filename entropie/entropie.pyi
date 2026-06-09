@@ -7,6 +7,9 @@ Vec3 = npt.ArrayLike
 class BodyId:
     pass
 
+class PositionalConstraintId:
+    pass
+
 class State:
     def __init__(self):
         pass
@@ -19,6 +22,15 @@ class State:
     ) -> BodyId:
         pass
 
+    def add_distance_constraint(
+        self,
+        bodies: list[BodyId],
+        distance: float,
+        compliance: float = 0.0,
+        application_points: npt.ArrayLike = [[0, 0, 0], [0, 0, 0]],
+    ) -> PositionalConstraintId:
+        pass
+
     def position(self, body: BodyId) -> list[float]:
         pass
 
@@ -26,6 +38,8 @@ class State:
         pass
 
 class Solver:
+    substep_count: int = 10
+
     def __init__(self):
         pass
 

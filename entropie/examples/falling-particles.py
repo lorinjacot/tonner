@@ -1,13 +1,13 @@
 import datetime
-import entropie as etp
+import entropie as ent
 import matplotlib.pyplot as plt
 
-state = etp.State()
+state = ent.State()
 
 a = state.add_particle(mass=1.0)
 b = state.add_particle(mass=1.0, velocity=[0, 0, 10])
 
-solver = etp.Solver()
+solver = ent.Solver()
 dt = datetime.timedelta(milliseconds=10)
 
 for body in [a, b]:

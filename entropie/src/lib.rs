@@ -198,6 +198,10 @@ pub struct Solver {
 
 impl Solver {
     pub fn simulate(&mut self, state: &mut State, delta_time: Duration) {
+        assert!(self.substep_count > 0, "substep_count must be > 0");
+        if delta_time.is_zero() {
+            return;
+        }
         let substep_duration = delta_time / self.substep_count;
         let h = substep_duration.as_secs_f64();
         let h_squared = h * h;

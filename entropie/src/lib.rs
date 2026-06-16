@@ -105,9 +105,9 @@ impl State {
             .map(|data| &mut data.inverse_mass)
     }
 
-pub fn force(&self, body: BodyId) -> Option<DVec3> {
-    self.positional_data.get(body.0).map(|data| data.force)
-}
+    pub fn force(&self, body: BodyId) -> Option<DVec3> {
+        self.positional_data.get(body.0).map(|data| data.force)
+    }
 
     pub fn force_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
         self.positional_data
@@ -231,12 +231,21 @@ impl Solver {
         h_squared: f64,
     ) {
         'outer: for (key, c) in positional_constraints.iter() {
+            self.inverse_masses.clear();
+            self.positions.clear();
+            self.orientations.clear();
+            self.position_gradient.clear();
+            self.application_points.clear();
+
             let bodies = c.bodies();
             let n = bodies.len();
 
             self.inverse_masses.reserve(n);
             self.positions.reserve(n);
             self.orientations.reserve(n);
+            self.position_gradient.resize(n, DVec3::ZERO);
+            self.application_points.resize(n, DVec3::ZERO);
+
             for &body in bodies {
                 let Some(data) = positional_data.get(body.0) else {
                     error!(
@@ -249,9 +258,6 @@ impl Solver {
                 self.positions.push(data.position);
                 self.orientations.push(DQuat::IDENTITY);
             }
-
-            self.position_gradient.resize(n, DVec3::ZERO);
-            self.application_points.resize(n, DVec3::ZERO);
 
             let value = c.value(
                 &self.positions,
@@ -276,12 +282,6 @@ impl Solver {
             {
                 positional_data[body.0].position += inverse_mass * grad * delta_lambda;
             }
-
-            self.inverse_masses.clear();
-            self.positions.clear();
-            self.orientations.clear();
-            self.position_gradient.clear();
-            self.application_points.clear();
         }
     }
 }

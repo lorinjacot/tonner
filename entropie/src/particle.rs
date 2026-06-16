@@ -68,7 +68,7 @@ impl ParticleBuilder {
         self
     }
 
-    /// Sets the mass of the particle. The default mass is `f64::INFINITY`, which means that the particle is immovable. The mass must be positive strictly positive.
+/// Sets the mass of the particle. The default mass is `f64::INFINITY`, which means that the particle is immovable. The mass must be strictly positive.
     ///
     /// # Examples
     /// ```

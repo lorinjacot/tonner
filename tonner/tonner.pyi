@@ -11,7 +11,7 @@ class PositionalConstraintId:
     pass
 
 class State:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def add_particle(
@@ -34,14 +34,14 @@ class State:
     def position(self, body: BodyId) -> list[float]:
         pass
 
-    def add_force(self, body: BodyId, force: Vec3):
+    def add_force(self, body: BodyId, force: Vec3) -> None:
         pass
 
 class Solver:
     substep_count: int = 10
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def simulate(self, state: State, delta_time: datetime.timedelta):
+    def simulate(self, state: State, delta_time: datetime.timedelta) -> None:
         pass

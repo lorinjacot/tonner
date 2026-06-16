@@ -1,4 +1,4 @@
-# Entropie
+# Tonner
 
 Entropie is a 3D physics engine written in Rust. It is designed to be fast, flexible, and easy to use. It is currently in early development.
 

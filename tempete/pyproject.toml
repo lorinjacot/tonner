@@ -1,5 +1,5 @@
 [project]
-name = "tonner"
+name = "tempete"
 dynamic = [
     "version",
     "description",
@@ -16,5 +16,5 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
-features = ["python"]
+features = ["pyo3"]
 no-default-features = true

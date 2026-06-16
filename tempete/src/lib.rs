@@ -17,7 +17,7 @@ pub mod scene_graph;
 pub mod texture;
 
 /// Contains everything long-lived and shared by the engine.
-/// This is the first thing you need when using storm.
+/// This is the first thing you need when using tempete.
 ///
 /// [Context] can be cloned, and any clone refers to the same data.
 /// In general, two objects created with different contexts cannot be used together.

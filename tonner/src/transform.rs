@@ -13,7 +13,7 @@ impl Transform {
     /// ## Example
     /// ```
     /// # use glam::{Vec3, Quat};
-    /// # use entropie::Transform;
+    /// # use tonner::Transform;
     /// assert_eq!(Transform::IDENTITY.translation, Vec3::ZERO);
     /// assert_eq!(Transform::IDENTITY.rotation, Quat::IDENTITY);
     /// ```
@@ -28,7 +28,7 @@ impl Transform {
     ///
     /// ```
     /// # use glam::{vec3, Quat};
-    /// # use entropie::Transform;
+    /// # use tonner::Transform;
     /// let translation = vec3(1.0, 2.0, 3.0);
     /// let transform = Transform::from_translation(translation);
     /// assert_eq!(transform.translation, translation);
@@ -46,7 +46,7 @@ impl Transform {
     /// ## Example
     /// ```
     /// # use glam::{Vec3, Quat};
-    /// # use entropie::Transform;
+    /// # use tonner::Transform;
     /// let rotation = Quat::from_rotation_y(1.0);
     /// let transform = Transform::from_rotation(rotation);
     /// assert_eq!(transform.translation, Vec3::ZERO);  

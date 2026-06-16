@@ -1,20 +1,47 @@
-from typing import Type
-from uuid import UUID
-from abc import ABC, abstractmethod
+import math
+import datetime
+import numpy.typing as npt
 
-class Context(WorldField):
-    @classmethod
-    def id(cls) -> UUID: ...
+Vec3 = npt.ArrayLike
 
-class World:
-    def __init__(self, ctx: Context) -> None: ...
+class BodyId:
+    pass
 
-    def get[T: WorldField](self, type_: Type[T]) -> T | None: ...
+class PositionalConstraintId:
+    pass
 
-class WorldField(ABC):
-    @classmethod
-    @abstractmethod
-    def id(cls) -> UUID: ...
+class State:
+    def __init__(self) -> None:
+        pass
 
-class Entity:
-    def __init__(self, world: World) -> None: ...
+    def add_particle(
+        self,
+        position: Vec3 = [0, 0, 0],
+        velocity: Vec3 = [0, 0, 0],
+        mass: float = math.inf
+    ) -> BodyId:
+        pass
+
+    def add_distance_constraint(
+        self,
+        bodies: list[BodyId] | tuple[BodyId, BodyId],
+        distance: float,
+        compliance: float = 0.0,
+        application_points: npt.ArrayLike = [[0, 0, 0], [0, 0, 0]],
+    ) -> PositionalConstraintId:
+        pass
+
+    def position(self, body: BodyId) -> list[float]:
+        pass
+
+    def add_force(self, body: BodyId, force: Vec3) -> None:
+        pass
+
+class Solver:
+    substep_count: int = 10
+
+    def __init__(self) -> None:
+        pass
+
+    def simulate(self, state: State, delta_time: datetime.timedelta) -> None:
+        pass

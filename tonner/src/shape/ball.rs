@@ -17,7 +17,7 @@ impl Ball {
     ///
     /// # Example
     /// ```
-    /// # use entropie::shape::Ball;
+    /// # use tonner::shape::Ball;
     /// let ball = Ball::UNIT;
     /// assert_eq!(ball.radius(), 1.0);
     /// ```
@@ -27,7 +27,7 @@ impl Ball {
     ///
     /// # Example
     /// ```
-    /// # use entropie::shape::Ball;
+    /// # use tonner::shape::Ball;
     /// let ball = Ball::from_radius(2.5);
     /// assert_eq!(ball.radius(), 2.5);
     /// ```
@@ -39,7 +39,7 @@ impl Ball {
     ///
     /// # Example
     /// ```
-    /// # use entropie::shape::Ball;
+    /// # use tonner::shape::Ball;
     /// let ball = Ball::from_radius(2.5);
     /// assert_eq!(ball.radius(), 2.5);
     /// ```
@@ -74,7 +74,7 @@ impl ConvexShape3D for Ball {
 ///
 /// ```
 /// # use glam::vec3;
-/// # use entropie::{Transform, shape::Ball, shape::collides_2balls};
+/// # use tonner::{Transform, shape::Ball, shape::collides_2balls};
 /// let ball = Ball::UNIT;
 ///
 /// let transform1 = Transform::IDENTITY;
@@ -100,7 +100,7 @@ pub fn collides_2balls(
 /// # Examples
 /// ```
 /// # use glam::vec3;
-/// # use entropie::{Transform, shape::Ball, shape::distance_2balls};
+/// # use tonner::{Transform, shape::Ball, shape::distance_2balls};
 /// let ball = Ball::UNIT;
 /// let transform1 = Transform::IDENTITY;
 /// let transform2 = Transform::from_translation(vec3(3.0, 0.0, 0.0));
@@ -120,7 +120,7 @@ pub fn distance_2balls(
 /// # Examples
 /// ```
 /// # use glam::vec3;
-/// # use entropie::{Transform, shape::Ball, shape::collision_info_2balls};
+/// # use tonner::{Transform, shape::Ball, shape::collision_info_2balls};
 /// let ball = Ball::UNIT;
 /// let transform1 = Transform::IDENTITY;
 /// let transform2 = Transform::from_translation(vec3(1.5, 0.0, 0.0));

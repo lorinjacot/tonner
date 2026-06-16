@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
-use tonner::{
+use tempete::{
     Context,
     ecs::EntityRegistry,
     geometry::CylinderBuilder,

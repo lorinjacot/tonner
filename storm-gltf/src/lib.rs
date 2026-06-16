@@ -11,7 +11,7 @@ use std::{
 };
 use storm_animation::AnimationManager;
 use thiserror::Error;
-use tonner::{
+use tempete::{
     ecs::EntityRegistry,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
@@ -89,7 +89,7 @@ pub enum GlbError {
 pub struct GltfAsset {
     base_path: PathBuf,
     json: Gltf,
-    default_material: Option<tonner::mesh::material::Material>,
+    default_material: Option<tempete::mesh::material::Material>,
 }
 
 impl GltfAsset {
@@ -175,9 +175,9 @@ impl GltfAsset {
 
     pub fn load_meshes(
         &mut self,
-        ctx: &tonner::Context,
+        ctx: &tempete::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> anyhow::Result<Vec<tonner::mesh::Mesh>> {
+    ) -> anyhow::Result<Vec<tempete::mesh::Mesh>> {
         let mut meshes = Vec::with_capacity(self.json.meshes.len());
 
         for mesh in self.json.meshes.iter_mut() {
@@ -210,15 +210,15 @@ impl GltfAsset {
     pub fn load_scene_into(
         &mut self,
         scene_index: usize,
-        base_node: Option<tonner::ecs::EntityId>,
+        base_node: Option<tempete::ecs::EntityId>,
         entity_registry: &mut EntityRegistry,
         scene_graph: &mut SceneGraph,
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
         animation_manager: &mut AnimationManager,
-        ctx: &tonner::Context,
+        ctx: &tempete::Context,
         encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<Vec<tonner::ecs::EntityId>> {
+    ) -> Result<Vec<tempete::ecs::EntityId>> {
         let root_nodes_idx = self
             .json
             .scenes

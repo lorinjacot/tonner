@@ -619,7 +619,6 @@ dependencies = [
 name = "billiard"
 version = "0.1.0"
 dependencies = [
- "entropie",
  "env_logger",
  "glam 0.32.1",
  "image",
@@ -629,6 +628,7 @@ dependencies = [
  "pollster",
  "pyo3",
  "pyo3-ffi",
+ "tempete",
  "tonner",
  "wgpu",
  "winit",
@@ -1230,18 +1230,6 @@ name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
-
-[[package]]
-name = "entropie"
-version = "0.1.0"
-dependencies = [
- "env_logger",
- "glam 0.32.1",
- "log",
- "numpy",
- "pyo3",
- "sparse-keyed",
-]
 
 [[package]]
 name = "enumflags2"
@@ -2302,7 +2290,7 @@ dependencies = [
  "storm-animation",
  "storm-controls",
  "storm-gltf",
- "tonner",
+ "tempete",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
@@ -3769,13 +3757,13 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "entropie",
  "env_logger",
  "glam 0.32.1",
  "image",
  "log",
  "pollster",
  "storm-controls",
+ "tempete",
  "tonner",
  "wgpu",
  "winit",
@@ -4065,7 +4053,7 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "glam 0.32.1",
- "tonner",
+ "tempete",
  "uuid",
 ]
 
@@ -4077,7 +4065,7 @@ dependencies = [
  "egui",
  "glam 0.32.1",
  "log",
- "tonner",
+ "tempete",
 ]
 
 [[package]]
@@ -4093,8 +4081,8 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "storm-animation",
+ "tempete",
  "thiserror 2.0.18",
- "tonner",
  "wgpu",
 ]
 
@@ -4131,6 +4119,29 @@ name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
+name = "tempete"
+version = "0.0.1"
+dependencies = [
+ "bitflags 2.12.1",
+ "bytemuck",
+ "dashmap",
+ "egui",
+ "glam 0.32.1",
+ "image",
+ "log",
+ "mikktspace",
+ "numpy",
+ "pollster",
+ "pyo3",
+ "sparse-keyed",
+ "thiserror 2.0.18",
+ "uuid",
+ "wasm-bindgen",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "tempfile"
@@ -4275,25 +4286,14 @@ dependencies = [
 
 [[package]]
 name = "tonner"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
- "bitflags 2.12.1",
- "bytemuck",
- "dashmap",
- "egui",
+ "env_logger",
  "glam 0.32.1",
- "image",
  "log",
- "mikktspace",
  "numpy",
- "pollster",
  "pyo3",
  "sparse-keyed",
- "thiserror 2.0.18",
- "uuid",
- "wasm-bindgen",
- "wgpu",
- "winit",
 ]
 
 [[package]]

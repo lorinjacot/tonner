@@ -1,5 +1,5 @@
 use glam::{Vec3, vec3};
-use tonner::{
+use tempete::{
     Context,
     ecs::EntityRegistry,
     geometry::BoxBuilder,

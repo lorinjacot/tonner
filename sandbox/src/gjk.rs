@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use entropie::{Transform, shape::ConvexShape3D};
 use glam::Vec3;
+use tonner::{Transform, shape::ConvexShape3D};
 
 pub(crate) fn gjk<S1: ConvexShape3D + ?Sized, S2: ConvexShape3D + ?Sized>(
     shape1: &S1,
@@ -171,7 +171,7 @@ impl SupportPoint {
 
 #[cfg(test)]
 mod tests {
-    use entropie::shape::{Ball, Box3D};
+    use tonner::shape::{Ball, Box3D};
     use glam::vec3;
 
     use super::*;

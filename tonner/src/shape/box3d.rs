@@ -16,7 +16,7 @@ impl Box3D {
     ///
     /// ## Example
     /// ```
-    /// # use entropie::shape::Box3D;
+    /// # use tonner::shape::Box3D;
     /// let box_ = Box3D::from_dimensions(2.0, 4.0, 6.0);
     /// assert_eq!(box_.x(), 2.0);
     /// assert_eq!(box_.y(), 4.0);
@@ -32,7 +32,7 @@ impl Box3D {
     ///
     /// ## Example
     /// ```
-    /// # use entropie::shape::Box3D;
+    /// # use tonner::shape::Box3D;
     /// let box_ = Box3D::from_dimensions(2.0, 4.0, 6.0);
     /// assert_eq!(box_.x(), 2.0);
     /// ```
@@ -44,7 +44,7 @@ impl Box3D {
     ///
     /// ## Example
     /// ```
-    /// # use entropie::shape::Box3D;
+    /// # use tonner::shape::Box3D;
     /// let box_ = Box3D::from_dimensions(2.0, 4.0, 6.0);
     /// assert_eq!(box_.y(), 4.0);
     /// ```
@@ -56,7 +56,7 @@ impl Box3D {
     ///
     /// ## Example
     /// ```
-    /// # use entropie::shape::Box3D;
+    /// # use tonner::shape::Box3D;
     /// let box_ = Box3D::from_dimensions(2.0, 4.0, 6.0);
     /// assert_eq!(box_.z(), 6.0);
     /// ```

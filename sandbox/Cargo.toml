@@ -14,6 +14,6 @@ image.workspace = true
 log.workspace = true
 pollster.workspace = true
 storm-controls = { workspace = true, features = ["egui"] }
-tonner = { workspace = true, features = ["egui"] }
+tempete = { workspace = true, features = ["egui"] }
 wgpu.workspace = true
 winit.workspace = true

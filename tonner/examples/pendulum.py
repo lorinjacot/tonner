@@ -1,6 +1,6 @@
 import math
 import datetime
-import entropie as ent
+import tonner
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
@@ -8,8 +8,8 @@ g = 9.81
 L = 1.0
 t = 0.0
 
-state = ent.State()
-solver = ent.Solver()
+state = tonner.State()
+solver = tonner.Solver()
 solver.substep_count = 10
 TIME_STEP = datetime.timedelta(milliseconds=10)
 

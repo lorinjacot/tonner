@@ -349,8 +349,8 @@ impl Solver {
 }
 
 #[cfg(feature = "pyo3")]
-#[pymodule(name = "entropie")]
-mod py_entropie {
+#[pymodule(name = "tonner")]
+mod py_tonner {
     #[pymodule_export]
     use super::{BodyId, Solver, State};
 }

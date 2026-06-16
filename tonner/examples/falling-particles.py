@@ -1,13 +1,13 @@
 import datetime
-import entropie as ent
+import tonner
 import matplotlib.pyplot as plt
 
-state = ent.State()
+state = tonner.State()
 
 a = state.add_particle(mass=1.0)
 b = state.add_particle(mass=1.0, velocity=[0, 0, 10])
 
-solver = ent.Solver()
+solver = tonner.Solver()
 dt = datetime.timedelta(milliseconds=10)
 
 for body in [a, b]:

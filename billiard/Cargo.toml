@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-entropie.workspace = true
 env_logger.workspace = true
 glam.workspace = true
 image.workspace = true
@@ -15,5 +14,6 @@ pollster.workspace = true
 pyo3 = { workspace = true, features = ["auto-initialize"] }
 pyo3-ffi.workspace = true
 tempete = { workspace = true, features = ["pyo3"] }
+tonner.workspace = true
 wgpu.workspace = true
 winit.workspace = true

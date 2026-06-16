@@ -3,8 +3,6 @@ use std::iter::once;
 use std::sync::Arc;
 use std::time::Instant;
 
-use entropie::Transform;
-use entropie::shape::{Ball, Box3D};
 use glam::{Quat, Vec3, vec3};
 use image::DynamicImage;
 use image::codecs::hdr::HdrDecoder;
@@ -22,6 +20,8 @@ use tempete::renderer::billboard_label::BillboardLabel;
 use tempete::renderer::camera::Camera;
 use tempete::renderer::light::LightManager;
 use tempete::scene_graph::SceneGraph;
+use tonner::Transform;
+use tonner::shape::{Ball, Box3D};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};

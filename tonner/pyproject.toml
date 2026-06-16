@@ -1,5 +1,5 @@
 [project]
-name = "entropie"
+name = "tonner"
 dynamic = ["version"]
 dependencies = ["numpy"]
 

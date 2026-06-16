@@ -2,9 +2,9 @@
 
 use std::{cmp::Reverse, collections::BinaryHeap, f32::consts::FRAC_PI_3};
 
-use entropie::{Transform, shape::ConvexShape3D};
 use glam::{Mat3, Vec3};
 use log::debug;
+use tonner::{Transform, shape::ConvexShape3D};
 
 use crate::gjk::SupportPoint;
 
@@ -449,7 +449,7 @@ impl Ord for Entry {
 
 #[cfg(test)]
 mod tests {
-    use entropie::shape::{Ball, Box3D};
+    use tonner::shape::{Ball, Box3D};
     use glam::vec3;
 
     use crate::gjk::gjk_tetrahedron;

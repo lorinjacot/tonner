@@ -1,10 +1,10 @@
 use std::{collections::HashMap, ops::Deref, time::Duration};
 
-use entropie::{Transform, collision::CollisionInfo, shape};
 use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 use tempete::{ecs::EntityId, scene_graph::SceneGraph};
+use tonner::{Transform, collision::CollisionInfo, shape};
 
 const SUBSTEP_COUNT: usize = 10;
 

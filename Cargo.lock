@@ -619,7 +619,6 @@ dependencies = [
 name = "billiard"
 version = "0.1.0"
 dependencies = [
- "entropie",
  "env_logger",
  "glam 0.32.1",
  "image",
@@ -630,6 +629,7 @@ dependencies = [
  "pyo3",
  "pyo3-ffi",
  "tempete",
+ "tonner",
  "wgpu",
  "winit",
 ]
@@ -1230,18 +1230,6 @@ name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
-
-[[package]]
-name = "entropie"
-version = "0.1.0"
-dependencies = [
- "env_logger",
- "glam 0.32.1",
- "log",
- "numpy",
- "pyo3",
- "sparse-keyed",
-]
 
 [[package]]
 name = "enumflags2"
@@ -3769,7 +3757,6 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
- "entropie",
  "env_logger",
  "glam 0.32.1",
  "image",
@@ -3777,6 +3764,7 @@ dependencies = [
  "pollster",
  "storm-controls",
  "tempete",
+ "tonner",
  "wgpu",
  "winit",
 ]
@@ -4294,6 +4282,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow",
+]
+
+[[package]]
+name = "tonner"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "glam 0.32.1",
+ "log",
+ "numpy",
+ "pyo3",
+ "sparse-keyed",
 ]
 
 [[package]]

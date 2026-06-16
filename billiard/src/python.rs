@@ -10,7 +10,7 @@ use log::{error, info};
 use notify::Watcher;
 use numpy::{AllowTypeChange, PyArray2, PyArrayLike2, ndarray::aview2};
 use pyo3::{prelude::*, types::PyList};
-use tonner::{ecs::EntityId, scene_graph::NodeHandle};
+use tempete::{ecs::EntityId, scene_graph::NodeHandle};
 
 use crate::{
     arrow::Arrow,

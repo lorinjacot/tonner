@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use glam::{Quat, U8Vec4, Vec3, vec3};
 use numpy::{PyArray1, ToPyArray, ndarray::arr1};
 use pyo3::prelude::*;
-use tonner::{
+use tempete::{
     Context, ecs::EntityRegistry, geometry::Geometry, mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder}, scene_graph::{NodeHandle, SceneGraph}
 };
 

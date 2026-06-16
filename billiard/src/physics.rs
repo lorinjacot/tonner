@@ -4,7 +4,7 @@ use entropie::{Transform, collision::CollisionInfo, shape};
 use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
-use tonner::{ecs::EntityId, scene_graph::SceneGraph};
+use tempete::{ecs::EntityId, scene_graph::SceneGraph};
 
 const SUBSTEP_COUNT: usize = 10;
 

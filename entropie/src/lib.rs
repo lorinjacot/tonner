@@ -105,9 +105,9 @@ impl State {
             .map(|data| &mut data.inverse_mass)
     }
 
-    pub fn force(&mut self, body: BodyId) -> Option<DVec3> {
-        self.positional_data.get(body.0).map(|data| data.force)
-    }
+pub fn force(&self, body: BodyId) -> Option<DVec3> {
+    self.positional_data.get(body.0).map(|data| data.force)
+}
 
     pub fn force_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
         self.positional_data

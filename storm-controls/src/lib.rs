@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 #[cfg(feature = "egui")]
-use tonner::scene_graph::SceneGraph;
+use tempete::scene_graph::SceneGraph;
 
 #[cfg(feature = "orbit")]
 pub mod orbit;

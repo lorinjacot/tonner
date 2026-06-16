@@ -10,7 +10,7 @@ use image::{DynamicImage, codecs::hdr::HdrDecoder};
 pub use scene_view::SceneView;
 use storm_animation::AnimationManager;
 use storm_gltf::GltfAsset;
-use tonner::{
+use tempete::{
     Context,
     ecs::EntityRegistry,
     environment::{Environment, EnvironmentBuilder},

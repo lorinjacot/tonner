@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display, time::Duration};
 use anyhow::{Context, Result};
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
-use tonner::mesh::{MeshInstance, MeshInstanceId};
+use tempete::mesh::{MeshInstance, MeshInstanceId};
 use storm_animation::key_frame::{
     Interpolation, KeyFrameChannel, MeshInstanceChannel, NodeChannel, NodeOutputs,
 };

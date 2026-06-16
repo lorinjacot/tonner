@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
 use glam::Mat4;
 use serde::{Deserialize, Serialize};
-use tonner::geometry::skin::{SkinBuilder, SkinId, SkinManager};
+use tempete::geometry::skin::{SkinBuilder, SkinId, SkinManager};
 
 use crate::{Accessor, Buffer, BufferView, accessor::IteratorConsumer, node::Node};
 
 // Joints and matrices defining a skin.
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct Skin {
-    /// [SkinId][tonner::skin::SkinId], if the resource has been loaded. Cleared once the scene has been loaded.
+    /// [SkinId][tempete::geometry::skin::SkinId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    id: Option<tonner::geometry::skin::SkinId>,
+    id: Option<tempete::geometry::skin::SkinId>,
 
     /// The index of the accessor containing the floating-point 4x4 inverse-bind matrices.
     /// Its [accessor.count](Accessor::count) property **MUST** be greater than or equal to

@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use anyhow::{Context, Result, anyhow};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
-use tonner::{
+use tempete::{
     ecs::EntityRegistry,
     geometry::skin::SkinManager,
     mesh::{MeshInstance, MeshInstanceId},
@@ -27,7 +27,7 @@ use crate::{Mesh, skin::Skin};
 pub(super) struct Node {
     /// [NodeId][crate::node::NodeId], if the resource has been loaded. Cleared once the scene has been loaded.
     #[serde(skip)]
-    pub(super) id: Option<tonner::ecs::EntityId>,
+    pub(super) id: Option<tempete::ecs::EntityId>,
 
     /// The index of the camera referenced by this node.
     #[serde(default)]
@@ -91,10 +91,10 @@ impl Node {
     pub(super) fn load(
         index: usize,
         nodes: &mut [Node],
-        parent: Option<tonner::ecs::EntityId>,
+        parent: Option<tempete::ecs::EntityId>,
         entity_registry: &mut EntityRegistry,
         scene_graph: &mut SceneGraph,
-    ) -> Result<tonner::ecs::EntityId> {
+    ) -> Result<tempete::ecs::EntityId> {
         let node = nodes
             .get_mut(index)
             .with_context(|| format!("node {index} is out of range."))?;
@@ -135,7 +135,7 @@ impl Node {
         base_path: &Path,
         accessors: &[super::Accessor],
         materials: &mut [super::Material],
-        default_material: &mut Option<tonner::mesh::material::Material>,
+        default_material: &mut Option<tempete::mesh::material::Material>,
         textures: &mut [super::Texture],
         samplers: &mut [super::Sampler],
         images: &mut [super::Image],
@@ -143,7 +143,7 @@ impl Node {
         buffers: &[super::Buffer],
         mesh_instances: &mut HashMap<MeshInstanceId, MeshInstance>,
         skin_manager: &mut SkinManager,
-        ctx: &tonner::Context,
+        ctx: &tempete::Context,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<()> {
         let node = &nodes[index];

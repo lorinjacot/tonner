@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use tonner::{
+use tempete::{
     mesh::{MeshInstance, MeshInstanceId},
     scene_graph::SceneGraph,
 };

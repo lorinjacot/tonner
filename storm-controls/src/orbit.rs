@@ -6,7 +6,7 @@ use std::{
 
 use glam::{Mat4, Vec2, Vec3, vec2, vec3};
 use log::warn;
-use tonner::{
+use tempete::{
     math::{Plane, Ray, Spherical},
     renderer::camera::Camera,
     scene_graph::SceneGraph,

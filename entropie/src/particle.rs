@@ -68,7 +68,11 @@ impl ParticleBuilder {
         self
     }
 
-/// Sets the mass of the particle. The default mass is `f64::INFINITY`, which means that the particle is immovable. The mass must be strictly positive.
+    /// Sets the mass of the particle. The default mass is `f64::INFINITY`, which means that the particle is immovable. The mass must be strictly positive.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mass is not strictly positive.
     ///
     /// # Examples
     /// ```
@@ -85,11 +89,16 @@ impl ParticleBuilder {
     /// assert_eq!(state.inverse_mass(b).unwrap(), 0.5);
     /// ```
     pub fn mass(mut self, mass: f64) -> Self {
+        assert!(mass > 0.0, "Mass must be strictly positive.");
         self.inverse_mass = mass.recip();
         self
     }
 
     /// Sets the inverse mass of the particle. The default inverse mass is `0.0`, which means that the particle is immovable. The inverse mass must be non-negative.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the inverse mass is negative.
     ///
     /// # Examples
     /// ```
@@ -106,6 +115,7 @@ impl ParticleBuilder {
     /// assert_eq!(state.inverse_mass(b).unwrap(), 0.5);
     /// ```
     pub fn inverse_mass(mut self, inverse_mass: f64) -> Self {
+        assert!(inverse_mass >= 0.0, "Inverse mass must be non-negative.");
         self.inverse_mass = inverse_mass;
         self
     }

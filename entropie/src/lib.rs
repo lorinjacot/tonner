@@ -133,12 +133,20 @@ impl State {
     }
 
     #[pyo3(signature = (position=[0.0; 3], velocity=[0.0; 3], mass=f64::INFINITY))]
-    fn add_particle(&mut self, position: [f64; 3], velocity: [f64; 3], mass: f64) -> BodyId {
-        ParticleBuilder::default()
+    fn add_particle(
+        &mut self,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        mass: f64,
+    ) -> PyResult<BodyId> {
+        if mass <= 0.0 {
+            return Err(PyValueError::new_err("Mass must be strictly positive."));
+        }
+        Ok(ParticleBuilder::default()
             .position(position)
             .velocity(velocity)
             .mass(mass)
-            .build(self)
+            .build(self))
     }
 
     fn add_force(&mut self, body: BodyId, force: [f64; 3]) -> PyResult<()> {

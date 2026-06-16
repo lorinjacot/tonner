@@ -10,9 +10,9 @@ pub use aabb::AABB;
 pub use particle::ParticleBuilder;
 pub use transform::Transform;
 
-use crate::constraint::PositionalConstraint;
 #[cfg(feature = "pyo3")]
-use crate::constraint::{DistanceConstraint, PositionalConstraintId};
+use crate::constraint::DistanceConstraint;
+use crate::constraint::{PositionalConstraint, PositionalConstraintId};
 
 mod aabb;
 pub mod collision;
@@ -113,6 +113,14 @@ impl State {
         self.positional_data
             .get_mut(body.0)
             .map(|data| &mut data.force)
+    }
+
+    pub fn add_positional_constraint(
+        &mut self,
+        constraint: Arc<dyn PositionalConstraint + Sync + Send>,
+    ) -> PositionalConstraintId {
+        let key = self.positional_constraints.add(constraint);
+        PositionalConstraintId(key)
     }
 }
 
@@ -326,6 +334,8 @@ mod py_entropie {
 mod tests {
     use glam::dvec3;
 
+    use crate::constraint::DistanceConstraint;
+
     use super::*;
 
     #[test]
@@ -370,6 +380,118 @@ mod tests {
                 i,
                 expected_pos,
                 actual_pos
+            );
+        }
+    }
+
+    mod pendulum {
+        pub const L1: f64 = 1.0;
+        pub const L2: f64 = 1.0;
+        pub const M0: f64 = f64::INFINITY;
+        pub const M1: f64 = 1.0;
+        pub const M2: f64 = 1.0;
+        pub const G: f64 = 9.81;
+
+        pub fn theta1_ddot(theta1: f64, theta1_dot: f64, theta2: f64, theta2_dot: f64) -> f64 {
+            let num = -G * (2.0 * M1 + M2) * theta1.sin()
+                - M2 * G * (theta1 - 2.0 * theta2).sin()
+                - 2.0
+                    * (theta1 - theta2).sin()
+                    * M2
+                    * (theta2_dot.powi(2) * L2 + theta1_dot.powi(2) * L1 * (theta1 - theta2).cos());
+            let den = L1 * (2.0 * M1 + M2 - M2 * (2.0 * theta1 - 2.0 * theta2).cos());
+            num / den
+        }
+
+        pub fn theta2_ddot(theta1: f64, theta1_dot: f64, theta2: f64, theta2_dot: f64) -> f64 {
+            let num = 2.0
+                * (theta1 - theta2).sin()
+                * (theta1_dot.powi(2) * L1 * (M1 + M2)
+                    + G * (M1 + M2) * theta1.cos()
+                    + theta2_dot.powi(2) * L2 * M2 * (theta1 - theta2).cos());
+            let den = L2 * (2.0 * M1 + M2 - M2 * (2.0 * theta1 - 2.0 * theta2).cos());
+            num / den
+        }
+    }
+
+    #[test]
+    fn test_double_pendulum() {
+        let mut state = State::new();
+        let a = ParticleBuilder::default()
+            .mass(pendulum::M0)
+            .position([0.0, 0.0, 0.0])
+            .build(&mut state);
+        let b = ParticleBuilder::default()
+            .mass(pendulum::M1)
+            .position([pendulum::L1, 0.0, 0.0])
+            .build(&mut state);
+        let c = ParticleBuilder::default()
+            .mass(pendulum::M2)
+            .position([pendulum::L1 + pendulum::L2, 0.0, 0.0])
+            .build(&mut state);
+
+        state.add_positional_constraint(Arc::new(DistanceConstraint {
+            bodies: [a, b],
+            distance: pendulum::L1,
+            compliance: 0.0,
+            application_points: [DVec3::ZERO; 2],
+        }));
+        state.add_positional_constraint(Arc::new(DistanceConstraint {
+            bodies: [b, c],
+            distance: pendulum::L2,
+            compliance: 0.0,
+            application_points: [DVec3::ZERO; 2],
+        }));
+        state.force_mut(b).unwrap().y -= pendulum::M1 * pendulum::G;
+        state.force_mut(c).unwrap().y -= pendulum::M2 * pendulum::G;
+
+        let time_step = Duration::from_millis(10);
+        let mut solver = Solver::default();
+
+        let mut theta1 = std::f64::consts::FRAC_PI_2;
+        let mut theta1_dot = 0.0;
+        let mut theta2 = std::f64::consts::FRAC_PI_2;
+        let mut theta2_dot = 0.0;
+
+        for iteration in 0..100 {
+            solver.simulate(&mut state, time_step);
+
+            theta1_dot += pendulum::theta1_ddot(theta1, theta1_dot, theta2, theta2_dot)
+                * time_step.as_secs_f64();
+            theta2_dot += pendulum::theta2_ddot(theta1, theta1_dot, theta2, theta2_dot)
+                * time_step.as_secs_f64();
+
+            theta1 += theta1_dot * time_step.as_secs_f64();
+            theta2 += theta2_dot * time_step.as_secs_f64();
+
+            let expected_b_pos = DVec3::new(
+                pendulum::L1 * theta1.sin(),
+                -pendulum::L1 * theta1.cos(),
+                0.0,
+            );
+            let expected_c_pos = expected_b_pos
+                + DVec3::new(
+                    pendulum::L2 * theta2.sin(),
+                    -pendulum::L2 * theta2.cos(),
+                    0.0,
+                );
+            let actual_b_pos = state.position(b).unwrap();
+            let actual_c_pos = state.position(c).unwrap();
+
+            let max_abs_diff = 1e-2 + iteration as f64 * 1e-3;
+            assert!(
+                actual_b_pos.abs_diff_eq(expected_b_pos, max_abs_diff),
+                "particle b: expected b at {:?}, got {:?} at iteration {}",
+                expected_b_pos,
+                actual_b_pos,
+                iteration
+            );
+            assert!(
+                actual_c_pos.abs_diff_eq(expected_c_pos, max_abs_diff),
+                "particle c: expected c at {:?}, got {:?} at iteration {}",
+                expected_c_pos,
+                actual_c_pos,
+                iteration
             );
         }
     }

@@ -10,7 +10,7 @@ t = 0.0
 
 state = ent.State()
 solver = ent.Solver()
-solver.substep_count = 10000
+solver.substep_count = 10
 TIME_STEP = datetime.timedelta(milliseconds=10)
 
 def theta1_ddot(m1, L1, theta1, theta1_dot, m2, L2, theta2, theta2_dot):

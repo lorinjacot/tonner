@@ -1,6 +1,6 @@
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
-use glam::{Quat, Vec3};
+use glam::{DQuat, DVec3};
 use log::error;
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, prelude::*};
@@ -23,11 +23,11 @@ mod transform;
 
 #[derive(Debug, Clone)]
 struct PositionalData {
-    position: Vec3,
-    previous_position: Vec3,
-    velocity: Vec3,
-    inverse_mass: f32,
-    force: Vec3,
+    position: DVec3,
+    previous_position: DVec3,
+    velocity: DVec3,
+    inverse_mass: f64,
+    force: DVec3,
 }
 
 #[derive(Clone)]
@@ -67,49 +67,49 @@ impl State {
         self.particles.contains(body.0)
     }
 
-    pub fn position(&self, body: BodyId) -> Option<Vec3> {
+    pub fn position(&self, body: BodyId) -> Option<DVec3> {
         self.positional_data.get(body.0).map(|data| data.position)
     }
 
-    pub fn position_mut(&mut self, body: BodyId) -> Option<&mut Vec3> {
+    pub fn position_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
         self.positional_data
             .get_mut(body.0)
             .map(|data| &mut data.position)
     }
 
-    pub fn velocity(&self, body: BodyId) -> Option<Vec3> {
+    pub fn velocity(&self, body: BodyId) -> Option<DVec3> {
         self.positional_data.get(body.0).map(|data| data.velocity)
     }
 
-    pub fn velocity_mut(&mut self, body: BodyId) -> Option<&mut Vec3> {
+    pub fn velocity_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
         self.positional_data
             .get_mut(body.0)
             .map(|data| &mut data.velocity)
     }
 
-    pub fn mass(&self, body: BodyId) -> Option<f32> {
+    pub fn mass(&self, body: BodyId) -> Option<f64> {
         self.positional_data
             .get(body.0)
             .map(|data| data.inverse_mass.recip())
     }
 
-    pub fn inverse_mass(&self, body: BodyId) -> Option<f32> {
+    pub fn inverse_mass(&self, body: BodyId) -> Option<f64> {
         self.positional_data
             .get(body.0)
             .map(|data| data.inverse_mass)
     }
 
-    pub fn inverse_mass_mut(&mut self, body: BodyId) -> Option<&mut f32> {
+    pub fn inverse_mass_mut(&mut self, body: BodyId) -> Option<&mut f64> {
         self.positional_data
             .get_mut(body.0)
             .map(|data| &mut data.inverse_mass)
     }
 
-    pub fn force(&mut self, body: BodyId) -> Option<Vec3> {
+    pub fn force(&mut self, body: BodyId) -> Option<DVec3> {
         self.positional_data.get(body.0).map(|data| data.force)
     }
 
-    pub fn force_mut(&mut self, body: BodyId) -> Option<&mut Vec3> {
+    pub fn force_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
         self.positional_data
             .get_mut(body.0)
             .map(|data| &mut data.force)
@@ -124,8 +124,8 @@ impl State {
         State::new()
     }
 
-    #[pyo3(signature = (position=[0.0; 3], velocity=[0.0; 3], mass=f32::INFINITY))]
-    fn add_particle(&mut self, position: [f32; 3], velocity: [f32; 3], mass: f32) -> BodyId {
+    #[pyo3(signature = (position=[0.0; 3], velocity=[0.0; 3], mass=f64::INFINITY))]
+    fn add_particle(&mut self, position: [f64; 3], velocity: [f64; 3], mass: f64) -> BodyId {
         ParticleBuilder::default()
             .position(position)
             .velocity(velocity)
@@ -133,11 +133,11 @@ impl State {
             .build(self)
     }
 
-    fn add_force(&mut self, body: BodyId, force: [f32; 3]) -> PyResult<()> {
+    fn add_force(&mut self, body: BodyId, force: [f64; 3]) -> PyResult<()> {
         let f = self
             .force_mut(body)
             .ok_or_else(|| PyValueError::new_err("Invalid body ID"))?;
-        *f += Vec3::from_array(force);
+        *f += DVec3::from_array(force);
         Ok(())
     }
 
@@ -145,22 +145,22 @@ impl State {
     fn add_distance_constraint(
         &mut self,
         bodies: [BodyId; 2],
-        distance: f32,
-        compliance: f32,
-        application_points: [[f32; 3]; 2],
+        distance: f64,
+        compliance: f64,
+        application_points: [[f64; 3]; 2],
     ) -> PositionalConstraintId {
         let c = DistanceConstraint {
             bodies,
             distance,
             compliance,
-            application_points: application_points.map(|v| Vec3::from_array(v)),
+            application_points: application_points.map(|v| DVec3::from_array(v)),
         };
         let key = self.positional_constraints.add(Arc::new(c));
         PositionalConstraintId(key)
     }
 
     #[pyo3(name = "position")]
-    fn py_position(&self, body: BodyId) -> PyResult<[f32; 3]> {
+    fn py_position(&self, body: BodyId) -> PyResult<[f64; 3]> {
         self.position(body)
             .map(|p| p.to_array())
             .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
@@ -181,17 +181,17 @@ pub struct BodyId(Key);
 #[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct Solver {
     substep_count: u32,
-    inverse_masses: Vec<f32>,
-    positions: Vec<Vec3>,
-    orientations: Vec<Quat>,
-    position_gradient: Vec<Vec3>,
-    application_points: Vec<Vec3>,
+    inverse_masses: Vec<f64>,
+    positions: Vec<DVec3>,
+    orientations: Vec<DQuat>,
+    position_gradient: Vec<DVec3>,
+    application_points: Vec<DVec3>,
 }
 
 impl Solver {
     pub fn simulate(&mut self, state: &mut State, delta_time: Duration) {
         let substep_duration = delta_time / self.substep_count;
-        let h = substep_duration.as_secs_f32();
+        let h = substep_duration.as_secs_f64();
         let h_squared = h * h;
         for _ in 0..self.substep_count {
             for d in state.positional_data.values_mut() {
@@ -220,7 +220,7 @@ impl Solver {
         &mut self,
         positional_data: &mut SecondaryMap<PositionalData>,
         positional_constraints: &PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
-        h_squared: f32,
+        h_squared: f64,
     ) {
         'outer: for (key, c) in positional_constraints.iter() {
             let bodies = c.bodies();
@@ -239,11 +239,11 @@ impl Solver {
                 };
                 self.inverse_masses.push(data.inverse_mass);
                 self.positions.push(data.position);
-                self.orientations.push(Quat::IDENTITY);
+                self.orientations.push(DQuat::IDENTITY);
             }
 
-            self.position_gradient.resize(n, Vec3::ZERO);
-            self.application_points.resize(n, Vec3::ZERO);
+            self.position_gradient.resize(n, DVec3::ZERO);
+            self.application_points.resize(n, DVec3::ZERO);
 
             let value = c.value(
                 &self.positions,
@@ -253,7 +253,7 @@ impl Solver {
             );
             let alpha_tilde = c.compliance() / h_squared;
 
-            let w_tot: f32 = self
+            let w_tot: f64 = self
                 .inverse_masses
                 .iter()
                 .zip(self.position_gradient.iter())
@@ -324,7 +324,7 @@ mod py_entropie {
 
 #[cfg(test)]
 mod tests {
-    use glam::vec3;
+    use glam::dvec3;
 
     use super::*;
 
@@ -332,11 +332,11 @@ mod tests {
     fn test_implicit_euler() {
         const ITERATOR_COUNT: usize = 10;
         const DELTA_TIME: Duration = Duration::from_millis(1);
-        const DT: f32 = DELTA_TIME.as_secs_f32();
+        const DT: f64 = DELTA_TIME.as_secs_f64();
 
-        let p0 = vec3(1.0, 2.0, 3.0);
-        let v0 = vec3(10.0, 20.0, 30.0);
-        let f = vec3(100.0, 200.0, 300.0);
+        let p0 = dvec3(1.0, 2.0, 3.0);
+        let v0 = dvec3(10.0, 20.0, 30.0);
+        let f = dvec3(100.0, 200.0, 300.0);
         let expected: Vec<_> = (0..ITERATOR_COUNT)
             .scan((p0, v0), |(p, v), _| {
                 let a = f; // mass = 1.0

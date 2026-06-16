@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::DVec3;
 
 use crate::{BodyId, PositionalData, State};
 
@@ -10,11 +10,11 @@ use crate::{BodyId, PositionalData, State};
 ///
 /// # Examples
 /// ```
-/// # use glam::Vec3;
+/// # use glam::DVec3;
 /// # use entropie::{State, ParticleBuilder};
 /// let mut state = State::new();
 ///
-/// let pos = Vec3::new(1.0, 2.0, 3.0);
+/// let pos = DVec3::new(1.0, 2.0, 3.0);
 /// let a = ParticleBuilder::default().position(pos).build(&mut state);
 /// assert!(state.is_particle(a));
 /// assert_eq!(state.position(a).unwrap(), pos);
@@ -22,69 +22,69 @@ use crate::{BodyId, PositionalData, State};
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct ParticleBuilder {
-    position: Vec3,
-    velocity: Vec3,
-    inverse_mass: f32,
+    position: DVec3,
+    velocity: DVec3,
+    inverse_mass: f64,
 }
 
 impl ParticleBuilder {
-    /// Sets the initial position of the particle. The default position is `Vec3::ZERO`.
+    /// Sets the initial position of the particle. The default position is `DVec3::ZERO`.
     ///
     /// # Examples
     /// ```
-    /// # use glam::Vec3;
+    /// # use glam::DVec3;
     /// # use entropie::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.position(a).unwrap(), Vec3::ZERO);
+    /// assert_eq!(state.position(a).unwrap(), DVec3::ZERO);
     ///
-    /// let pos = Vec3::new(1.0, 2.0, 3.0);
+    /// let pos = DVec3::new(1.0, 2.0, 3.0);
     /// let b = ParticleBuilder::default().position(pos).build(&mut state);
     /// assert_eq!(state.position(b).unwrap(), pos);
     /// ```
-    pub fn position(mut self, position: impl Into<Vec3>) -> Self {
+    pub fn position(mut self, position: impl Into<DVec3>) -> Self {
         self.position = position.into();
         self
     }
 
-    /// Sets the initial velocity of the particle. The default velocity is `Vec3::ZERO`.
+    /// Sets the initial velocity of the particle. The default velocity is `DVec3::ZERO`.
     ///
     /// # Examples
     /// ```
-    /// # use glam::Vec3;
+    /// # use glam::DVec3;
     /// # use entropie::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.velocity(a).unwrap(), Vec3::ZERO);
+    /// assert_eq!(state.velocity(a).unwrap(), DVec3::ZERO);
     ///
-    /// let vel = Vec3::new(1.0, 2.0, 3.0);
+    /// let vel = DVec3::new(1.0, 2.0, 3.0);
     /// let b = ParticleBuilder::default().velocity(vel).build(&mut state);
     /// assert_eq!(state.velocity(b).unwrap(), vel);
     /// ```
-    pub fn velocity(mut self, velocity: impl Into<Vec3>) -> Self {
+    pub fn velocity(mut self, velocity: impl Into<DVec3>) -> Self {
         self.velocity = velocity.into();
         self
     }
 
-    /// Sets the mass of the particle. The default mass is `f32::INFINITY`, which means that the particle is immovable. The mass must be positive strictly positive.
+    /// Sets the mass of the particle. The default mass is `f64::INFINITY`, which means that the particle is immovable. The mass must be positive strictly positive.
     ///
     /// # Examples
     /// ```
-    /// # use glam::Vec3;
+    /// # use glam::DVec3;
     /// # use entropie::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.mass(a).unwrap(), f32::INFINITY);
+    /// assert_eq!(state.mass(a).unwrap(), f64::INFINITY);
     /// assert_eq!(state.inverse_mass(a).unwrap(), 0.0);
     ///
     /// let b = ParticleBuilder::default().mass(2.0).build(&mut state);
     /// assert_eq!(state.mass(b).unwrap(), 2.0);
     /// assert_eq!(state.inverse_mass(b).unwrap(), 0.5);
     /// ```
-    pub fn mass(mut self, mass: f32) -> Self {
+    pub fn mass(mut self, mass: f64) -> Self {
         self.inverse_mass = mass.recip();
         self
     }
@@ -93,19 +93,19 @@ impl ParticleBuilder {
     ///
     /// # Examples
     /// ```
-    /// # use glam::Vec3;
+    /// # use glam::DVec3;
     /// # use entropie::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.mass(a).unwrap(), f32::INFINITY);
+    /// assert_eq!(state.mass(a).unwrap(), f64::INFINITY);
     /// assert_eq!(state.inverse_mass(a).unwrap(), 0.0);
     ///
     /// let b = ParticleBuilder::default().inverse_mass(0.5).build(&mut state);
     /// assert_eq!(state.mass(b).unwrap(), 2.0);
     /// assert_eq!(state.inverse_mass(b).unwrap(), 0.5);
     /// ```
-    pub fn inverse_mass(mut self, inverse_mass: f32) -> Self {
+    pub fn inverse_mass(mut self, inverse_mass: f64) -> Self {
         self.inverse_mass = inverse_mass;
         self
     }
@@ -114,11 +114,11 @@ impl ParticleBuilder {
     ///
     /// # Examples
     /// ```
-    /// # use glam::Vec3;
+    /// # use glam::DVec3;
     /// # use entropie::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
-    /// let pos = Vec3::new(1.0, 2.0, 3.0);
+    /// let pos = DVec3::new(1.0, 2.0, 3.0);
     /// let a = ParticleBuilder::default().position(pos).build(&mut state);
     /// assert!(state.is_particle(a));
     /// assert_eq!(state.position(a).unwrap(), pos);
@@ -134,7 +134,7 @@ impl ParticleBuilder {
                 previous_position: self.position,
                 velocity: self.velocity,
                 inverse_mass: self.inverse_mass,
-                force: Vec3::ZERO,
+                force: DVec3::ZERO,
             },
         );
 
@@ -145,8 +145,8 @@ impl ParticleBuilder {
 impl Default for ParticleBuilder {
     fn default() -> Self {
         ParticleBuilder {
-            position: Vec3::ZERO,
-            velocity: Vec3::ZERO,
+            position: DVec3::ZERO,
+            velocity: DVec3::ZERO,
             inverse_mass: 0.0,
         }
     }

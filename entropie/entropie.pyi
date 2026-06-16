@@ -24,7 +24,7 @@ class State:
 
     def add_distance_constraint(
         self,
-        bodies: list[BodyId],
+        bodies: list[BodyId] | tuple[BodyId, BodyId],
         distance: float,
         compliance: float = 0.0,
         application_points: npt.ArrayLike = [[0, 0, 0], [0, 0, 0]],

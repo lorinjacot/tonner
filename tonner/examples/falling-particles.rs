@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use entropie::{ParticleBuilder, Solver, State};
+use tonner::{ParticleBuilder, Solver, State};
 use glam::DVec3;
 
 fn main() {

@@ -11,7 +11,7 @@ use crate::{BodyId, PositionalData, State};
 /// # Examples
 /// ```
 /// # use glam::DVec3;
-/// # use entropie::{State, ParticleBuilder};
+/// # use tonner::{State, ParticleBuilder};
 /// let mut state = State::new();
 ///
 /// let pos = DVec3::new(1.0, 2.0, 3.0);
@@ -33,7 +33,7 @@ impl ParticleBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use entropie::{State, ParticleBuilder};
+    /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
@@ -53,7 +53,7 @@ impl ParticleBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use entropie::{State, ParticleBuilder};
+    /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
@@ -77,7 +77,7 @@ impl ParticleBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use entropie::{State, ParticleBuilder};
+    /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
@@ -103,7 +103,7 @@ impl ParticleBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use entropie::{State, ParticleBuilder};
+    /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let a = ParticleBuilder::default().build(&mut state);
@@ -125,7 +125,7 @@ impl ParticleBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use entropie::{State, ParticleBuilder};
+    /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
     /// let pos = DVec3::new(1.0, 2.0, 3.0);

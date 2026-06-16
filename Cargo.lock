@@ -629,7 +629,7 @@ dependencies = [
  "pollster",
  "pyo3",
  "pyo3-ffi",
- "tonner",
+ "tempete",
  "wgpu",
  "winit",
 ]
@@ -2302,7 +2302,7 @@ dependencies = [
  "storm-animation",
  "storm-controls",
  "storm-gltf",
- "tonner",
+ "tempete",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
@@ -3776,7 +3776,7 @@ dependencies = [
  "log",
  "pollster",
  "storm-controls",
- "tonner",
+ "tempete",
  "wgpu",
  "winit",
 ]
@@ -4065,7 +4065,7 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "glam 0.32.1",
- "tonner",
+ "tempete",
  "uuid",
 ]
 
@@ -4077,7 +4077,7 @@ dependencies = [
  "egui",
  "glam 0.32.1",
  "log",
- "tonner",
+ "tempete",
 ]
 
 [[package]]
@@ -4093,8 +4093,8 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "storm-animation",
+ "tempete",
  "thiserror 2.0.18",
- "tonner",
  "wgpu",
 ]
 
@@ -4131,6 +4131,29 @@ name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
+
+[[package]]
+name = "tempete"
+version = "0.0.1"
+dependencies = [
+ "bitflags 2.12.1",
+ "bytemuck",
+ "dashmap",
+ "egui",
+ "glam 0.32.1",
+ "image",
+ "log",
+ "mikktspace",
+ "numpy",
+ "pollster",
+ "pyo3",
+ "sparse-keyed",
+ "thiserror 2.0.18",
+ "uuid",
+ "wasm-bindgen",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "tempfile"
@@ -4271,29 +4294,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow",
-]
-
-[[package]]
-name = "tonner"
-version = "0.0.1"
-dependencies = [
- "bitflags 2.12.1",
- "bytemuck",
- "dashmap",
- "egui",
- "glam 0.32.1",
- "image",
- "log",
- "mikktspace",
- "numpy",
- "pollster",
- "pyo3",
- "sparse-keyed",
- "thiserror 2.0.18",
- "uuid",
- "wasm-bindgen",
- "wgpu",
- "winit",
 ]
 
 [[package]]

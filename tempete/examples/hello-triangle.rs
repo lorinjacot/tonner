@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use glam::{vec3, vec4};
-use tonner::Context;
-use tonner::ecs::EntityRegistry;
-use tonner::environment::{Environment, EnvironmentBuilder};
-use tonner::geometry::GeometryBuilder;
-use tonner::geometry::skin::SkinManager;
-use tonner::mesh::material::MaterialBuilder;
-use tonner::mesh::{MeshBuilder, MeshInstance};
-use tonner::renderer::Renderer;
-use tonner::renderer::camera::Camera;
-use tonner::renderer::light::LightManager;
-use tonner::scene_graph::SceneGraph;
+use tempete::Context;
+use tempete::ecs::EntityRegistry;
+use tempete::environment::{Environment, EnvironmentBuilder};
+use tempete::geometry::GeometryBuilder;
+use tempete::geometry::skin::SkinManager;
+use tempete::mesh::material::MaterialBuilder;
+use tempete::mesh::{MeshBuilder, MeshInstance};
+use tempete::renderer::Renderer;
+use tempete::renderer::camera::Camera;
+use tempete::renderer::light::LightManager;
+use tempete::scene_graph::SceneGraph;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};

@@ -2,7 +2,7 @@
 members = [
     "sparse-keyed",
     "entropie",
-    "tonner",
+    "tempete",
     "storm-animation",
     "storm-controls",
     "storm-gltf",
@@ -61,7 +61,7 @@ wgpu = "29.0.1"
 
 sparse-keyed = { path = "sparse-keyed" }
 entropie = { path = "entropie" }
-tonner = { path = "tonner" }
+tempete = { path = "tempete" }
 storm-animation = { path = "storm-animation" }
 storm-controls = { path = "storm-controls" }
 glam-js = { path = "glam-js" }

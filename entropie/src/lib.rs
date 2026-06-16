@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use glam::{DQuat, DVec3};
-use log::error;
+use log::{error, warn};
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, prelude::*};
 use sparse_keyed::{Key, KeyRegistry, PrimaryMap, SecondaryMap};
@@ -277,7 +277,16 @@ impl Solver {
                 .zip(self.position_gradient.iter())
                 .map(|(inverse_mass, grad)| inverse_mass * grad.length_squared())
                 .sum();
-            let delta_lambda = -value / (w_tot + alpha_tilde);
+            let denominator = w_tot + alpha_tilde;
+            let delta_lambda = if denominator != 0.0 {
+                -value / denominator
+            } else {
+                warn!(
+                    "Constraint {:?} is unsolvable. This is likely due to a zero gradient or infinite mass. Skipping constraint.",
+                    key
+                );
+                0.0
+            };
 
             for ((body, inverse_mass), grad) in bodies
                 .iter()
@@ -322,7 +331,11 @@ impl Solver {
     }
 
     #[setter]
-    fn set_substep_count(&mut self, value: u32) {
+    fn set_substep_count(&mut self, mut value: u32) {
+        if value < 1 {
+            warn!("substep_count must be > 0, got {}. Setting to 1.", value);
+            value = 1;
+        }
         self.substep_count = value;
     }
 }

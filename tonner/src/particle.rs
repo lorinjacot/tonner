@@ -36,12 +36,12 @@ impl ParticleBuilder {
     /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
-    /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.position(a).unwrap(), DVec3::ZERO);
-    ///
     /// let pos = DVec3::new(1.0, 2.0, 3.0);
-    /// let b = ParticleBuilder::default().position(pos).build(&mut state);
-    /// assert_eq!(state.position(b).unwrap(), pos);
+    /// let a = ParticleBuilder::default().position(pos).build(&mut state);
+    /// assert_eq!(state.position(a).unwrap(), pos);
+    ///
+    /// let b = ParticleBuilder::default().build(&mut state);
+    /// assert_eq!(state.position(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn position(mut self, position: impl Into<DVec3>) -> Self {
         self.position = position.into();
@@ -56,12 +56,12 @@ impl ParticleBuilder {
     /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
-    /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.velocity(a).unwrap(), DVec3::ZERO);
-    ///
     /// let vel = DVec3::new(1.0, 2.0, 3.0);
-    /// let b = ParticleBuilder::default().velocity(vel).build(&mut state);
-    /// assert_eq!(state.velocity(b).unwrap(), vel);
+    /// let a = ParticleBuilder::default().velocity(vel).build(&mut state);
+    /// assert_eq!(state.velocity(a).unwrap(), vel);
+    ///
+    /// let b = ParticleBuilder::default().build(&mut state);
+    /// assert_eq!(state.velocity(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn velocity(mut self, velocity: impl Into<DVec3>) -> Self {
         self.velocity = velocity.into();
@@ -80,13 +80,13 @@ impl ParticleBuilder {
     /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
-    /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.mass(a).unwrap(), f64::INFINITY);
-    /// assert_eq!(state.inverse_mass(a).unwrap(), 0.0);
+    /// let a = ParticleBuilder::default().mass(2.0).build(&mut state);
+    /// assert_eq!(state.mass(a).unwrap(), 2.0);
+    /// assert_eq!(state.inverse_mass(a).unwrap(), 0.5);
     ///
-    /// let b = ParticleBuilder::default().mass(2.0).build(&mut state);
-    /// assert_eq!(state.mass(b).unwrap(), 2.0);
-    /// assert_eq!(state.inverse_mass(b).unwrap(), 0.5);
+    /// let b = ParticleBuilder::default().build(&mut state);
+    /// assert_eq!(state.mass(b).unwrap(), f64::INFINITY);
+    /// assert_eq!(state.inverse_mass(b).unwrap(), 0.0);
     /// ```
     pub fn mass(mut self, mass: f64) -> Self {
         assert!(mass > 0.0, "Mass must be strictly positive.");
@@ -106,13 +106,13 @@ impl ParticleBuilder {
     /// # use tonner::{State, ParticleBuilder};
     /// let mut state = State::new();
     ///
-    /// let a = ParticleBuilder::default().build(&mut state);
-    /// assert_eq!(state.mass(a).unwrap(), f64::INFINITY);
-    /// assert_eq!(state.inverse_mass(a).unwrap(), 0.0);
+    /// let a = ParticleBuilder::default().inverse_mass(0.5).build(&mut state);
+    /// assert_eq!(state.mass(a).unwrap(), 2.0);
+    /// assert_eq!(state.inverse_mass(a).unwrap(), 0.5);
     ///
-    /// let b = ParticleBuilder::default().inverse_mass(0.5).build(&mut state);
-    /// assert_eq!(state.mass(b).unwrap(), 2.0);
-    /// assert_eq!(state.inverse_mass(b).unwrap(), 0.5);
+    /// let b = ParticleBuilder::default().build(&mut state);
+    /// assert_eq!(state.mass(b).unwrap(), f64::INFINITY);
+    /// assert_eq!(state.inverse_mass(b).unwrap(), 0.0);
     /// ```
     pub fn inverse_mass(mut self, inverse_mass: f64) -> Self {
         assert!(inverse_mass >= 0.0, "Inverse mass must be non-negative.");

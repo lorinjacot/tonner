@@ -1,6 +1,6 @@
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
-use glam::{DQuat, DVec3};
+use glam::{DMat3, DQuat, DVec3};
 use log::{error, warn};
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, prelude::*};
@@ -8,16 +8,21 @@ use sparse_keyed::{Key, KeyRegistry, PrimaryMap, SecondaryMap};
 
 pub use aabb::AABB;
 pub use particle::ParticleBuilder;
+pub use rigid_body::RigidBodyBuilder;
 pub use transform::Transform;
 
 #[cfg(feature = "pyo3")]
 use crate::constraint::DistanceConstraint;
-use crate::constraint::{PositionalConstraint, PositionalConstraintId};
+use crate::{
+    constraint::{AngularConstraint, PositionalConstraint, PositionalConstraintId},
+    rigid_body::RigidBodies,
+};
 
 mod aabb;
 pub mod collision;
 pub mod constraint;
 mod particle;
+mod rigid_body;
 pub mod shape;
 mod transform;
 
@@ -30,13 +35,26 @@ struct PositionalData {
     force: DVec3,
 }
 
+#[derive(Debug, Clone)]
+struct AngularData {
+    orientation: DQuat,
+    previous_orientation: DQuat,
+    velocity: DVec3,
+    inertia: DMat3,
+    inverse_inertia: DMat3,
+    torque: DVec3,
+}
+
 #[derive(Clone)]
 #[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct State {
     bodies: KeyRegistry,
     particles: SecondaryMap<()>,
+    rigid_bodies: RigidBodies,
     positional_data: SecondaryMap<PositionalData>,
+    angular_data: SecondaryMap<AngularData>,
     positional_constraints: PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
+    angular_constraints: PrimaryMap<Arc<dyn AngularConstraint + Sync + Send>>,
 }
 
 impl Debug for State {
@@ -44,10 +62,16 @@ impl Debug for State {
         f.debug_struct("State")
             .field("bodies", &self.bodies)
             .field("particles", &self.particles.keys().collect::<Vec<_>>())
+            .field("rigid_bodies", &self.rigid_bodies)
             .field("positional_data", &self.positional_data)
+            .field("angular_data", &self.angular_data)
             .field(
                 "positional_constraints",
                 &self.positional_constraints.keys().collect::<Vec<_>>(),
+            )
+            .field(
+                "angular_constraints",
+                &self.angular_constraints.keys().collect::<Vec<_>>(),
             )
             .finish()
     }
@@ -58,13 +82,20 @@ impl State {
         State {
             bodies: KeyRegistry::new(),
             particles: SecondaryMap::new(),
+            rigid_bodies: RigidBodies::new(),
             positional_data: SecondaryMap::new(),
+            angular_data: SecondaryMap::new(),
             positional_constraints: PrimaryMap::new(),
+            angular_constraints: PrimaryMap::new(),
         }
     }
 
     pub fn is_particle(&self, body: BodyId) -> bool {
         self.particles.contains(body.0)
+    }
+
+    pub fn is_rigid_body(&self, body: BodyId) -> bool {
+        self.rigid_bodies.is_rigid_body(body)
     }
 
     pub fn position(&self, body: BodyId) -> Option<DVec3> {
@@ -115,6 +146,46 @@ impl State {
             .map(|data| &mut data.force)
     }
 
+    pub fn orientation(&self, body: BodyId) -> Option<DQuat> {
+        self.angular_data.get(body.0).map(|data| data.orientation)
+    }
+
+    pub fn orientation_mut(&mut self, body: BodyId) -> Option<&mut DQuat> {
+        self.angular_data
+            .get_mut(body.0)
+            .map(|data| &mut data.orientation)
+    }
+
+    pub fn angular_velocity(&self, body: BodyId) -> Option<DVec3> {
+        self.angular_data.get(body.0).map(|data| data.velocity)
+    }
+
+    pub fn angular_velocity_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
+        self.angular_data
+            .get_mut(body.0)
+            .map(|data| &mut data.velocity)
+    }
+
+    pub fn inertia(&self, body: BodyId) -> Option<DMat3> {
+        self.angular_data.get(body.0).map(|data| data.inertia)
+    }
+
+    pub fn inverse_inertia(&self, body: BodyId) -> Option<DMat3> {
+        self.angular_data
+            .get(body.0)
+            .map(|data| data.inverse_inertia)
+    }
+
+    pub fn torque(&self, body: BodyId) -> Option<DVec3> {
+        self.angular_data.get(body.0).map(|data| data.torque)
+    }
+
+    pub fn torque_mut(&mut self, body: BodyId) -> Option<&mut DVec3> {
+        self.angular_data
+            .get_mut(body.0)
+            .map(|data| &mut data.torque)
+    }
+
     pub fn add_positional_constraint(
         &mut self,
         constraint: Arc<dyn PositionalConstraint + Sync + Send>,
@@ -132,7 +203,11 @@ impl State {
         State::new()
     }
 
-    #[pyo3(signature = (position=[0.0; 3], velocity=[0.0; 3], mass=f64::INFINITY))]
+    #[pyo3(signature = (
+        position=[0.0; 3],
+        velocity=[0.0; 3],
+        mass=f64::INFINITY
+    ))]
     fn add_particle(
         &mut self,
         position: [f64; 3],
@@ -146,6 +221,86 @@ impl State {
             .position(position)
             .velocity(velocity)
             .mass(mass)
+            .build(self))
+    }
+
+    #[pyo3(signature = (
+        position=[0.0; 3],
+        velocity=[0.0; 3],
+        mass=f64::INFINITY,
+        orientation=[0.0, 0.0, 0.0, 1.0],
+        angular_velocity=[0.0; 3],
+        inertia=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        radius=1.0
+    ))]
+    fn add_rigid_ball(
+        &mut self,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        mass: f64,
+        orientation: [f64; 4],
+        angular_velocity: [f64; 3],
+        inertia: [[f64; 3]; 3],
+        radius: f32,
+    ) -> PyResult<BodyId> {
+        if mass <= 0.0 {
+            return Err(PyValueError::new_err("Mass must be strictly positive."));
+        }
+        let inertia = DMat3::from_cols_array_2d(&inertia);
+        if inertia.determinant() <= 0.0 {
+            return Err(PyValueError::new_err("Inertia must be positive definite."));
+        }
+        let orientation = DQuat::from_array(orientation);
+        let ball = shape::Ball::from_radius(radius);
+
+        Ok(RigidBodyBuilder::default()
+            .position(position)
+            .velocity(velocity)
+            .mass(mass)
+            .orientation(orientation)
+            .angular_velocity(angular_velocity)
+            .inertia(inertia)
+            .ball(ball)
+            .build(self))
+    }
+
+    #[pyo3(signature = (
+        position=[0.0; 3],
+        velocity=[0.0; 3],
+        mass=f64::INFINITY,
+        orientation=[0.0, 0.0, 0.0, 1.0],
+        angular_velocity=[0.0; 3],
+        inertia=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        dimensions=[1.0; 3]
+    ))]
+    fn add_rigid_box(
+        &mut self,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        mass: f64,
+        orientation: [f64; 4],
+        angular_velocity: [f64; 3],
+        inertia: [[f64; 3]; 3],
+        dimensions: [f32; 3],
+    ) -> PyResult<BodyId> {
+        if mass <= 0.0 {
+            return Err(PyValueError::new_err("Mass must be strictly positive."));
+        }
+        let inertia = DMat3::from_cols_array_2d(&inertia);
+        if inertia.determinant() <= 0.0 {
+            return Err(PyValueError::new_err("Inertia must be positive definite."));
+        }
+        let orientation = DQuat::from_array(orientation);
+        let box_ = shape::Box3D::from_dimensions(dimensions[0], dimensions[1], dimensions[2]);
+
+        Ok(RigidBodyBuilder::default()
+            .position(position)
+            .velocity(velocity)
+            .mass(mass)
+            .orientation(orientation)
+            .angular_velocity(angular_velocity)
+            .inertia(inertia)
+            .box3d(box_)
             .build(self))
     }
 
@@ -179,6 +334,40 @@ impl State {
     fn py_position(&self, body: BodyId) -> PyResult<[f64; 3]> {
         self.position(body)
             .map(|p| p.to_array())
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
+    }
+
+    #[pyo3(name = "velocity")]
+    fn py_velocity(&self, body: BodyId) -> PyResult<[f64; 3]> {
+        self.velocity(body)
+            .map(|v| v.to_array())
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
+    }
+
+    #[pyo3(name = "mass")]
+    fn py_mass(&self, body: BodyId) -> PyResult<f64> {
+        self.mass(body)
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
+    }
+
+    #[pyo3(name = "orientation")]
+    fn py_orientation(&self, body: BodyId) -> PyResult<[f64; 4]> {
+        self.orientation(body)
+            .map(|o| o.to_array())
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
+    }
+
+    #[pyo3(name = "angular_velocity")]
+    fn py_angular_velocity(&self, body: BodyId) -> PyResult<[f64; 3]> {
+        self.angular_velocity(body)
+            .map(|v| v.to_array())
+            .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
+    }
+
+    #[pyo3(name = "inertia")]
+    fn py_inertia(&self, body: BodyId) -> PyResult<[[f64; 3]; 3]> {
+        self.inertia(body)
+            .map(|i| i.to_cols_array_2d())
             .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
     }
 }
@@ -220,6 +409,18 @@ impl Solver {
                 d.position += h * d.velocity;
             }
 
+            for d in state.angular_data.values_mut() {
+                d.previous_orientation = d.orientation;
+                d.velocity +=
+                    h * d.inverse_inertia * (d.torque - d.velocity.cross(d.inertia * d.velocity));
+                d.orientation = d.orientation
+                    + DQuat::from_xyzw(d.velocity.x, d.velocity.y, d.velocity.z, 0.0)
+                        * d.orientation
+                        * h
+                        * 0.5;
+                d.orientation = d.orientation.normalize();
+            }
+
             // solve positions
             self.solve_constraints(
                 &mut state.positional_data,
@@ -229,6 +430,14 @@ impl Solver {
 
             for d in state.positional_data.values_mut() {
                 d.velocity = (d.position - d.previous_position) / h;
+            }
+
+            for d in state.angular_data.values_mut() {
+                let delta_orientation = d.orientation * d.previous_orientation.conjugate();
+                d.velocity = 2.0 * delta_orientation.xyz() / h;
+                if delta_orientation.w < 0.0 {
+                    d.velocity = -d.velocity;
+                }
             }
 
             // solve velocities

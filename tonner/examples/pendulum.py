@@ -34,8 +34,8 @@ def theta2_ddot(m1, L1, theta1, theta1_dot, m2, L2, theta2, theta2_dot):
 a = state.add_particle()
 b = state.add_particle(mass=1.0, position=[1, 0, 0])
 c = state.add_particle(mass=1.0, position=[2, 0, 0])
-state.add_distance_constraint([a, b], 1)
-state.add_distance_constraint([b, c], 1)
+state.add_particle_distance_constraint([a, b], 1)
+state.add_particle_distance_constraint([b, c], 1)
 
 m1 = 1.0
 L1 = L

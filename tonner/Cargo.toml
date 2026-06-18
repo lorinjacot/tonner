@@ -17,6 +17,7 @@ log.workspace = true
 numpy = { workspace = true, optional = true }
 pyo3 = { workspace = true, optional = true }
 sparse-keyed.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true

@@ -7,7 +7,7 @@ Vec3 = npt.ArrayLike
 class BodyId:
     pass
 
-class PositionalConstraintId:
+class ParticleDistanceConstraintId:
     pass
 
 class State:
@@ -45,16 +45,13 @@ class State:
         dimensions: Vec3 = [1, 1, 1]
     ) -> BodyId:
         pass
-
-    def add_distance_constraint(
+    
+    def add_particle_distance_constraint(
         self,
-        bodies: list[BodyId] | tuple[BodyId, BodyId],
-        distance: float,
+        particles: list[BodyId],
+        distance: float = 0.0,
         compliance: float = 0.0,
-        linear_damping: float = 0.0,
-        angular_damping: float = 0.0,
-        application_points: npt.ArrayLike = [[0, 0, 0], [0, 0, 0]],
-    ) -> PositionalConstraintId:
+    ) -> ParticleDistanceConstraintId:
         pass
 
     def position(self, body: BodyId) -> list[float]:

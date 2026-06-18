@@ -4294,6 +4294,7 @@ dependencies = [
  "numpy",
  "pyo3",
  "sparse-keyed",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

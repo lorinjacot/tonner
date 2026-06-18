@@ -1,26 +1,22 @@
-use std::{fmt::Debug, sync::Arc, time::Duration};
+use std::time::Duration;
 
 use glam::{DMat3, DQuat, DVec3};
-use log::{error, warn};
+#[cfg(feature = "pyo3")]
+use log::warn;
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, prelude::*};
-use sparse_keyed::{Key, KeyRegistry, PrimaryMap, SecondaryMap};
+use sparse_keyed::{Key, KeyRegistry, SecondaryMap};
 
+use crate::constraint::particle::{ParticleDistanceConstraint, ParticleDistanceConstraintId};
+use crate::{constraint::particle::ParticleConstraintManager, rigid_body::RigidBodies};
 pub use aabb::AABB;
 pub use particle::ParticleBuilder;
 pub use rigid_body::RigidBodyBuilder;
 pub use transform::Transform;
 
-#[cfg(feature = "pyo3")]
-use crate::constraint::DistanceConstraint;
-use crate::{
-    constraint::{AngularConstraint, PositionalConstraint, PositionalConstraintId},
-    rigid_body::RigidBodies,
-};
-
 mod aabb;
 pub mod collision;
-pub mod constraint;
+mod constraint;
 mod particle;
 mod rigid_body;
 pub mod shape;
@@ -45,7 +41,7 @@ struct AngularData {
     torque: DVec3,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct State {
     bodies: KeyRegistry,
@@ -53,28 +49,7 @@ pub struct State {
     rigid_bodies: RigidBodies,
     positional_data: SecondaryMap<PositionalData>,
     angular_data: SecondaryMap<AngularData>,
-    positional_constraints: PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
-    angular_constraints: PrimaryMap<Arc<dyn AngularConstraint + Sync + Send>>,
-}
-
-impl Debug for State {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("State")
-            .field("bodies", &self.bodies)
-            .field("particles", &self.particles.keys().collect::<Vec<_>>())
-            .field("rigid_bodies", &self.rigid_bodies)
-            .field("positional_data", &self.positional_data)
-            .field("angular_data", &self.angular_data)
-            .field(
-                "positional_constraints",
-                &self.positional_constraints.keys().collect::<Vec<_>>(),
-            )
-            .field(
-                "angular_constraints",
-                &self.angular_constraints.keys().collect::<Vec<_>>(),
-            )
-            .finish()
-    }
+    particle_constraints: ParticleConstraintManager,
 }
 
 impl State {
@@ -85,8 +60,7 @@ impl State {
             rigid_bodies: RigidBodies::new(),
             positional_data: SecondaryMap::new(),
             angular_data: SecondaryMap::new(),
-            positional_constraints: PrimaryMap::new(),
-            angular_constraints: PrimaryMap::new(),
+            particle_constraints: ParticleConstraintManager::new(),
         }
     }
 
@@ -186,12 +160,12 @@ impl State {
             .map(|data| &mut data.torque)
     }
 
-    pub fn add_positional_constraint(
+    pub fn add_particle_distance_constraint(
         &mut self,
-        constraint: Arc<dyn PositionalConstraint + Sync + Send>,
-    ) -> PositionalConstraintId {
-        let key = self.positional_constraints.add(constraint);
-        PositionalConstraintId(key)
+        constraint: ParticleDistanceConstraint,
+    ) -> ParticleDistanceConstraintId {
+        self.particle_constraints
+            .add_distance_constraint(constraint)
     }
 }
 
@@ -312,33 +286,31 @@ impl State {
         Ok(())
     }
 
-    #[pyo3(signature = (
-        bodies,
-        distance,
-        compliance = 0.0,
-        linear_damping = 0.0,
-        angular_damping = 0.0,
-        application_points = [[0.0; 3]; 2]
+    #[pyo3(name = "add_particle_distance_constraint", signature = (
+        particles,
+        distance = 0.0,
+        compliance = 0.0
     ))]
-    fn add_distance_constraint(
+    fn py_add_particle_distance_constraint(
         &mut self,
-        bodies: [BodyId; 2],
+        particles: [BodyId; 2],
         distance: f64,
         compliance: f64,
-        linear_damping: f64,
-        angular_damping: f64,
-        application_points: [[f64; 3]; 2],
-    ) -> PositionalConstraintId {
-        let c = DistanceConstraint {
-            bodies,
+    ) -> PyResult<ParticleDistanceConstraintId> {
+        for &body in &particles {
+            if !self.is_particle(body) {
+                return Err(PyValueError::new_err(format!(
+                    "Body {:?} is not a particle",
+                    body
+                )));
+            }
+        }
+        let constraint = ParticleDistanceConstraint {
+            particles,
             distance,
             compliance,
-            linear_damping,
-            angular_damping,
-            application_points: application_points.map(|v| DVec3::from_array(v)),
         };
-        let key = self.positional_constraints.add(Arc::new(c));
-        PositionalConstraintId(key)
+        Ok(self.add_particle_distance_constraint(constraint))
     }
 
     #[pyo3(name = "position")]
@@ -397,14 +369,6 @@ pub struct BodyId(Key);
 #[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
 pub struct Solver {
     substep_count: u32,
-    inverse_masses: Vec<f64>,
-    inverse_inertias: Vec<DMat3>,
-    positions: Vec<DVec3>,
-    orientations: Vec<DQuat>,
-    position_gradient: Vec<DVec3>,
-    application_points: Vec<DVec3>,
-    rotation_axis: Vec<DVec3>,
-    rotation: Vec<DVec3>,
 }
 
 impl Solver {
@@ -435,12 +399,16 @@ impl Solver {
                 d.orientation = d.orientation.normalize();
             }
 
-            self.solve_constraints(
-                &mut state.positional_data,
-                &mut state.angular_data,
-                &state.positional_constraints,
-                h_squared,
-            );
+            state
+                .particle_constraints
+                .solve_positions(&mut state.positional_data, 1.0 / h_squared);
+
+            // self.solve_constraints(
+            //     &mut state.positional_data,
+            //     &mut state.angular_data,
+            //     &state.positional_constraints,
+            //     h_squared,
+            // );
 
             for d in state.positional_data.values_mut() {
                 d.velocity = (d.position - d.previous_position) / h;
@@ -459,137 +427,124 @@ impl Solver {
         }
     }
 
-    fn solve_constraints(
-        &mut self,
-        positional_data: &mut SecondaryMap<PositionalData>,
-        angular_data: &mut SecondaryMap<AngularData>,
-        positional_constraints: &PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
-        h_squared: f64,
-    ) {
-        'outer: for (key, c) in positional_constraints.iter() {
-            self.inverse_masses.clear();
-            self.inverse_inertias.clear();
-            self.positions.clear();
-            self.orientations.clear();
-            self.position_gradient.clear();
-            self.application_points.clear();
-            self.rotation_axis.clear();
-            self.rotation.clear();
+    // fn solve_constraints(
+    //     &mut self,
+    //     positional_data: &mut SecondaryMap<PositionalData>,
+    //     angular_data: &mut SecondaryMap<AngularData>,
+    //     positional_constraints: &PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
+    //     h_squared: f64,
+    // ) {
+    //     'outer: for (key, c) in positional_constraints.iter() {
+    //         self.inverse_masses.clear();
+    //         self.inverse_inertias.clear();
+    //         self.positions.clear();
+    //         self.orientations.clear();
+    //         self.position_gradient.clear();
+    //         self.application_points.clear();
+    //         self.rotation_axis.clear();
+    //         self.rotation.clear();
 
-            let bodies = c.bodies();
-            let n = bodies.len();
+    //         let bodies = c.bodies();
+    //         let n = bodies.len();
 
-            self.position_gradient.resize(n, DVec3::ZERO);
-            self.application_points.resize(n, DVec3::ZERO);
+    //         self.position_gradient.resize(n, DVec3::ZERO);
+    //         self.application_points.resize(n, DVec3::ZERO);
 
-            for &body in bodies {
-                let Some(data) = positional_data.get(body.0) else {
-                    error!(
-                        "Body {:?} involved in constraint {:?} does not exist",
-                        body, key
-                    );
-                    continue 'outer;
-                };
-                self.inverse_masses.push(data.inverse_mass);
-                self.positions.push(data.position);
+    //         for &body in bodies {
+    //             let Some(data) = positional_data.get(body.0) else {
+    //                 error!(
+    //                     "Body {:?} involved in constraint {:?} does not exist",
+    //                     body, key
+    //                 );
+    //                 continue 'outer;
+    //             };
+    //             self.inverse_masses.push(data.inverse_mass);
+    //             self.positions.push(data.position);
 
-                match angular_data.get(body.0) {
-                    Some(angular_data) => {
-                        self.inverse_inertias.push(angular_data.inverse_inertia);
-                        self.orientations.push(angular_data.orientation);
-                    }
-                    None => {
-                        self.inverse_inertias.push(DMat3::ZERO);
-                        self.orientations.push(DQuat::IDENTITY);
-                    }
-                }
-            }
+    //             match angular_data.get(body.0) {
+    //                 Some(angular_data) => {
+    //                     self.inverse_inertias.push(angular_data.inverse_inertia);
+    //                     self.orientations.push(angular_data.orientation);
+    //                 }
+    //                 None => {
+    //                     self.inverse_inertias.push(DMat3::ZERO);
+    //                     self.orientations.push(DQuat::IDENTITY);
+    //                 }
+    //             }
+    //         }
 
-            let value = c.value(
-                &self.positions,
-                &self.orientations,
-                &mut self.position_gradient,
-                &mut self.application_points,
-            );
-            let alpha_tilde = c.compliance() / h_squared;
-            for (((orientation, grad), application_point), inverse_inertia) in self
-                .orientations
-                .iter()
-                .zip(&self.position_gradient)
-                .zip(&self.application_points)
-                .zip(&self.inverse_inertias)
-            {
-                let local_grad = orientation.conjugate() * grad;
-                let rotation_axis = application_point.cross(local_grad);
-                self.rotation_axis.push(rotation_axis);
-                self.rotation
-                    .push(inverse_inertia * rotation_axis);
-            }
+    //         let value = c.value(
+    //             &self.positions,
+    //             &self.orientations,
+    //             &mut self.position_gradient,
+    //             &mut self.application_points,
+    //         );
+    //         let alpha_tilde = c.compliance() / h_squared;
+    //         for (((orientation, grad), application_point), inverse_inertia) in self
+    //             .orientations
+    //             .iter()
+    //             .zip(&self.position_gradient)
+    //             .zip(&self.application_points)
+    //             .zip(&self.inverse_inertias)
+    //         {
+    //             let local_grad = orientation.conjugate() * grad;
+    //             let rotation_axis = application_point.cross(local_grad);
+    //             self.rotation_axis.push(rotation_axis);
+    //             self.rotation.push(inverse_inertia * rotation_axis);
+    //         }
 
-            let weighted_inverse_mass: f64 = self
-                .inverse_masses
-                .iter()
-                .zip(self.position_gradient.iter())
-                .map(|(inverse_mass, grad)| inverse_mass * grad.length_squared())
-                .sum();
+    //         let weighted_inverse_mass: f64 = self
+    //             .inverse_masses
+    //             .iter()
+    //             .zip(self.position_gradient.iter())
+    //             .map(|(inverse_mass, grad)| inverse_mass * grad.length_squared())
+    //             .sum();
 
-            let weighted_inverse_inertial: f64 = self
-                .rotation_axis
-                .iter()
-                .zip(&self.rotation)
-                .map(|(axis, multiplied)| axis.dot(*multiplied))
-                .sum();
+    //         let weighted_inverse_inertial: f64 = self
+    //             .rotation_axis
+    //             .iter()
+    //             .zip(&self.rotation)
+    //             .map(|(axis, multiplied)| axis.dot(*multiplied))
+    //             .sum();
 
-            let w_tot = weighted_inverse_mass + weighted_inverse_inertial;
+    //         let w_tot = weighted_inverse_mass + weighted_inverse_inertial;
 
-            let denominator = w_tot + alpha_tilde;
-            let delta_lambda = if denominator != 0.0 {
-                -value / denominator
-            } else {
-                warn!(
-                    "Constraint {:?} is unsolvable. This is likely due to a zero gradient or infinite mass. Skipping constraint.",
-                    key
-                );
-                0.0
-            };
+    //         let denominator = w_tot + alpha_tilde;
+    //         let delta_lambda = if denominator != 0.0 {
+    //             -value / denominator
+    //         } else {
+    //             warn!(
+    //                 "Constraint {:?} is unsolvable. This is likely due to a zero gradient or infinite mass. Skipping constraint.",
+    //                 key
+    //             );
+    //             0.0
+    //         };
 
-            for ((body, inverse_mass), grad) in bodies
-                .iter()
-                .zip(&self.inverse_masses)
-                .zip(&self.position_gradient)
-            {
-                positional_data[body.0].position += inverse_mass * grad * delta_lambda;
-            }
+    //         for ((body, inverse_mass), grad) in bodies
+    //             .iter()
+    //             .zip(&self.inverse_masses)
+    //             .zip(&self.position_gradient)
+    //         {
+    //             positional_data[body.0].position += inverse_mass * grad * delta_lambda;
+    //         }
 
-            for (body, rotation) in
-                bodies.iter().zip(&self.rotation)
-            {
-                if let Some(angular_data) = angular_data.get_mut(body.0) {
-                    let q = angular_data.orientation;
-                    let axis = delta_lambda * rotation;
-                    let q = q + q * DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0) * 0.5;
-                    angular_data.orientation = q.normalize();
-                }
-            }
-        }
-    }
+    //         for (body, rotation) in bodies.iter().zip(&self.rotation) {
+    //             if let Some(angular_data) = angular_data.get_mut(body.0) {
+    //                 let q = angular_data.orientation;
+    //                 let axis = delta_lambda * rotation;
+    //                 let q = q + q * DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0) * 0.5;
+    //                 angular_data.orientation = q.normalize();
+    //             }
+    //         }
+    //     }
+    // }
 
     fn solve_velocities(&mut self) {}
 }
 
 impl Default for Solver {
     fn default() -> Self {
-        Solver {
-            substep_count: 10,
-            inverse_masses: Vec::with_capacity(2),
-            inverse_inertias: Vec::with_capacity(2),
-            positions: Vec::with_capacity(2),
-            orientations: Vec::with_capacity(2),
-            position_gradient: Vec::with_capacity(2),
-            application_points: Vec::with_capacity(2),
-            rotation_axis: Vec::with_capacity(2),
-            rotation: Vec::with_capacity(2),
-        }
+        Solver { substep_count: 10 }
     }
 }
 
@@ -631,8 +586,6 @@ mod py_tonner {
 #[cfg(test)]
 mod tests {
     use glam::dvec3;
-
-    use crate::constraint::DistanceConstraint;
 
     use super::*;
 
@@ -728,22 +681,17 @@ mod tests {
             .position([pendulum::L1 + pendulum::L2, 0.0, 0.0])
             .build(&mut state);
 
-        state.add_positional_constraint(Arc::new(DistanceConstraint {
-            bodies: [a, b],
+        state.add_particle_distance_constraint(ParticleDistanceConstraint {
+            particles: [a, b],
             distance: pendulum::L1,
             compliance: 0.0,
-            linear_damping: 0.0,
-            angular_damping: 0.0,
-            application_points: [DVec3::ZERO; 2],
-        }));
-        state.add_positional_constraint(Arc::new(DistanceConstraint {
-            bodies: [b, c],
+        });
+        state.add_particle_distance_constraint(ParticleDistanceConstraint {
+            particles: [b, c],
             distance: pendulum::L2,
             compliance: 0.0,
-            linear_damping: 0.0,
-            angular_damping: 0.0,
-            application_points: [DVec3::ZERO; 2],
-        }));
+        });
+
         state.force_mut(b).unwrap().y -= pendulum::M1 * pendulum::G;
         state.force_mut(c).unwrap().y -= pendulum::M2 * pendulum::G;
 

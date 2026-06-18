@@ -387,10 +387,13 @@ pub struct BodyId(Key);
 pub struct Solver {
     substep_count: u32,
     inverse_masses: Vec<f64>,
+    inverse_inertias: Vec<DMat3>,
     positions: Vec<DVec3>,
     orientations: Vec<DQuat>,
     position_gradient: Vec<DVec3>,
     application_points: Vec<DVec3>,
+    rotation_axis: Vec<DVec3>,
+    multiplied_rotation_axis: Vec<DVec3>,
 }
 
 impl Solver {
@@ -424,6 +427,7 @@ impl Solver {
             // solve positions
             self.solve_constraints(
                 &mut state.positional_data,
+                &mut state.angular_data,
                 &state.positional_constraints,
                 h_squared,
             );
@@ -448,22 +452,23 @@ impl Solver {
     fn solve_constraints(
         &mut self,
         positional_data: &mut SecondaryMap<PositionalData>,
+        angular_data: &mut SecondaryMap<AngularData>,
         positional_constraints: &PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
         h_squared: f64,
     ) {
         'outer: for (key, c) in positional_constraints.iter() {
             self.inverse_masses.clear();
+            self.inverse_inertias.clear();
             self.positions.clear();
             self.orientations.clear();
             self.position_gradient.clear();
             self.application_points.clear();
+            self.rotation_axis.clear();
+            self.multiplied_rotation_axis.clear();
 
             let bodies = c.bodies();
             let n = bodies.len();
 
-            self.inverse_masses.reserve(n);
-            self.positions.reserve(n);
-            self.orientations.reserve(n);
             self.position_gradient.resize(n, DVec3::ZERO);
             self.application_points.resize(n, DVec3::ZERO);
 
@@ -477,7 +482,17 @@ impl Solver {
                 };
                 self.inverse_masses.push(data.inverse_mass);
                 self.positions.push(data.position);
-                self.orientations.push(DQuat::IDENTITY);
+
+                match angular_data.get(body.0) {
+                    Some(angular_data) => {
+                        self.inverse_inertias.push(angular_data.inverse_inertia);
+                        self.orientations.push(angular_data.orientation);
+                    }
+                    None => {
+                        self.inverse_inertias.push(DMat3::ZERO);
+                        self.orientations.push(DQuat::IDENTITY);
+                    }
+                }
             }
 
             let value = c.value(
@@ -487,13 +502,37 @@ impl Solver {
                 &mut self.application_points,
             );
             let alpha_tilde = c.compliance() / h_squared;
+            for (((orientation, grad), application_point), inverse_inertia) in self
+                .orientations
+                .iter()
+                .zip(&self.position_gradient)
+                .zip(&self.application_points)
+                .zip(&self.inverse_inertias)
+            {
+                let local_grad = orientation.conjugate() * grad;
+                let rotation_axis = application_point.cross(local_grad);
+                self.rotation_axis.push(rotation_axis);
+                self.multiplied_rotation_axis
+                    .push(inverse_inertia * rotation_axis);
+            }
 
-            let w_tot: f64 = self
+            let weighted_inverse_mass: f64 = self
                 .inverse_masses
                 .iter()
                 .zip(self.position_gradient.iter())
                 .map(|(inverse_mass, grad)| inverse_mass * grad.length_squared())
                 .sum();
+
+            let weighted_inverse_inertial: f64 = self
+                .rotation_axis
+                .iter()
+                .zip(&self.multiplied_rotation_axis)
+                .map(|(axis, multiplied)| axis.dot(*multiplied))
+                // .map(|(axis, _multiplied)| axis.length_squared())
+                .sum();
+
+            let w_tot = weighted_inverse_mass + weighted_inverse_inertial;
+
             let denominator = w_tot + alpha_tilde;
             let delta_lambda = if denominator != 0.0 {
                 -value / denominator
@@ -512,6 +551,17 @@ impl Solver {
             {
                 positional_data[body.0].position += inverse_mass * grad * delta_lambda;
             }
+
+            for (body, multiplied_rotation_axis) in
+                bodies.iter().zip(&self.multiplied_rotation_axis)
+            {
+                if let Some(angular_data) = angular_data.get_mut(body.0) {
+                    let q = angular_data.orientation;
+                    let axis = delta_lambda * multiplied_rotation_axis;
+                    let q = q + DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0) * q * 0.5;
+                    angular_data.orientation = q.normalize();
+                }
+            }
         }
     }
 }
@@ -521,10 +571,13 @@ impl Default for Solver {
         Solver {
             substep_count: 10,
             inverse_masses: Vec::with_capacity(2),
+            inverse_inertias: Vec::with_capacity(2),
             positions: Vec::with_capacity(2),
             orientations: Vec::with_capacity(2),
             position_gradient: Vec::with_capacity(2),
             application_points: Vec::with_capacity(2),
+            rotation_axis: Vec::with_capacity(2),
+            multiplied_rotation_axis: Vec::with_capacity(2),
         }
     }
 }

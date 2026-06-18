@@ -77,11 +77,13 @@ impl PositionalConstraint for DistanceConstraint {
     fn value(
         &self,
         positions: &[DVec3],
-        _orientations: &[DQuat],
+        orientations: &[DQuat],
         position_gradient: &mut [DVec3],
         application_points: &mut [DVec3],
     ) -> f64 {
-        let delta_pos = positions[0] - positions[1];
+        let r0 = positions[0] + orientations[0] * self.application_points[0];
+        let r1 = positions[1] + orientations[1] * self.application_points[1];
+        let delta_pos = r0 - r1;
         let (dir, dist) = delta_pos.normalize_and_length();
         position_gradient[0] = dir;
         position_gradient[1] = -dir;

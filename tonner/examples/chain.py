@@ -8,12 +8,14 @@ from scipy.spatial.transform import Rotation
 
 state = tonner.State()
 solver = tonner.Solver()
-solver.substep_count = 100
+solver.substep_count = 1000
 dt = datetime.timedelta(milliseconds=10)
 
 COMPLIANCE = 0.01
-DISTANCE = 1.5
-LOCAL_POINT_A = [0, 0, -0.5]
+LINEAR_DAMPING = 0
+ANGULAR_DAMPING = 0
+DISTANCE = 1
+LOCAL_POINT_A = [0, 0, 0]
 LOCAL_POINT_B = [0.5, 0, 0.5]
 
 a = state.add_rigid_box(
@@ -37,6 +39,8 @@ state.add_distance_constraint(
     bodies=[a, b],
     distance=DISTANCE,
     compliance=COMPLIANCE,
+    linear_damping=LINEAR_DAMPING,
+    angular_damping=ANGULAR_DAMPING,
     application_points=[LOCAL_POINT_A, LOCAL_POINT_B],
 )
 
@@ -44,6 +48,8 @@ state.add_distance_constraint(
     bodies=[b, c],
     distance=DISTANCE,
     compliance=COMPLIANCE,
+    linear_damping=LINEAR_DAMPING,
+    angular_damping=ANGULAR_DAMPING,
     application_points=[LOCAL_POINT_A, LOCAL_POINT_B],
 )
 

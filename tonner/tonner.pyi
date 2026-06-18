@@ -51,6 +51,8 @@ class State:
         bodies: list[BodyId] | tuple[BodyId, BodyId],
         distance: float,
         compliance: float = 0.0,
+        linear_damping: float = 0.0,
+        angular_damping: float = 0.0,
         application_points: npt.ArrayLike = [[0, 0, 0], [0, 0, 0]],
     ) -> PositionalConstraintId:
         pass

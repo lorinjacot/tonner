@@ -312,18 +312,29 @@ impl State {
         Ok(())
     }
 
-    #[pyo3(signature = (bodies, distance, compliance = 0.0, application_points = [[0.0; 3]; 2]))]
+    #[pyo3(signature = (
+        bodies,
+        distance,
+        compliance = 0.0,
+        linear_damping = 0.0,
+        angular_damping = 0.0,
+        application_points = [[0.0; 3]; 2]
+    ))]
     fn add_distance_constraint(
         &mut self,
         bodies: [BodyId; 2],
         distance: f64,
         compliance: f64,
+        linear_damping: f64,
+        angular_damping: f64,
         application_points: [[f64; 3]; 2],
     ) -> PositionalConstraintId {
         let c = DistanceConstraint {
             bodies,
             distance,
             compliance,
+            linear_damping,
+            angular_damping,
             application_points: application_points.map(|v| DVec3::from_array(v)),
         };
         let key = self.positional_constraints.add(Arc::new(c));
@@ -393,7 +404,7 @@ pub struct Solver {
     position_gradient: Vec<DVec3>,
     application_points: Vec<DVec3>,
     rotation_axis: Vec<DVec3>,
-    multiplied_rotation_axis: Vec<DVec3>,
+    rotation: Vec<DVec3>,
 }
 
 impl Solver {
@@ -424,7 +435,6 @@ impl Solver {
                 d.orientation = d.orientation.normalize();
             }
 
-            // solve positions
             self.solve_constraints(
                 &mut state.positional_data,
                 &mut state.angular_data,
@@ -445,7 +455,7 @@ impl Solver {
             }
 
             // solve velocities
-            // ...
+            self.solve_velocities();
         }
     }
 
@@ -464,7 +474,7 @@ impl Solver {
             self.position_gradient.clear();
             self.application_points.clear();
             self.rotation_axis.clear();
-            self.multiplied_rotation_axis.clear();
+            self.rotation.clear();
 
             let bodies = c.bodies();
             let n = bodies.len();
@@ -512,7 +522,7 @@ impl Solver {
                 let local_grad = orientation.conjugate() * grad;
                 let rotation_axis = application_point.cross(local_grad);
                 self.rotation_axis.push(rotation_axis);
-                self.multiplied_rotation_axis
+                self.rotation
                     .push(inverse_inertia * rotation_axis);
             }
 
@@ -526,9 +536,8 @@ impl Solver {
             let weighted_inverse_inertial: f64 = self
                 .rotation_axis
                 .iter()
-                .zip(&self.multiplied_rotation_axis)
+                .zip(&self.rotation)
                 .map(|(axis, multiplied)| axis.dot(*multiplied))
-                // .map(|(axis, _multiplied)| axis.length_squared())
                 .sum();
 
             let w_tot = weighted_inverse_mass + weighted_inverse_inertial;
@@ -552,18 +561,20 @@ impl Solver {
                 positional_data[body.0].position += inverse_mass * grad * delta_lambda;
             }
 
-            for (body, multiplied_rotation_axis) in
-                bodies.iter().zip(&self.multiplied_rotation_axis)
+            for (body, rotation) in
+                bodies.iter().zip(&self.rotation)
             {
                 if let Some(angular_data) = angular_data.get_mut(body.0) {
                     let q = angular_data.orientation;
-                    let axis = delta_lambda * multiplied_rotation_axis;
-                    let q = q + DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0) * q * 0.5;
+                    let axis = delta_lambda * rotation;
+                    let q = q + q * DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0) * 0.5;
                     angular_data.orientation = q.normalize();
                 }
             }
         }
     }
+
+    fn solve_velocities(&mut self) {}
 }
 
 impl Default for Solver {
@@ -577,7 +588,7 @@ impl Default for Solver {
             position_gradient: Vec::with_capacity(2),
             application_points: Vec::with_capacity(2),
             rotation_axis: Vec::with_capacity(2),
-            multiplied_rotation_axis: Vec::with_capacity(2),
+            rotation: Vec::with_capacity(2),
         }
     }
 }
@@ -721,12 +732,16 @@ mod tests {
             bodies: [a, b],
             distance: pendulum::L1,
             compliance: 0.0,
+            linear_damping: 0.0,
+            angular_damping: 0.0,
             application_points: [DVec3::ZERO; 2],
         }));
         state.add_positional_constraint(Arc::new(DistanceConstraint {
             bodies: [b, c],
             distance: pendulum::L2,
             compliance: 0.0,
+            linear_damping: 0.0,
+            angular_damping: 0.0,
             application_points: [DVec3::ZERO; 2],
         }));
         state.force_mut(b).unwrap().y -= pendulum::M1 * pendulum::G;

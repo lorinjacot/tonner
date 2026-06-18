@@ -35,6 +35,12 @@ pub trait PositionalConstraint {
     /// Constraints with a strictly positive compliance will act like a physical spring, applying a force proportional to the violation of the constraint.
     /// The higher the compliance, the weaker the spring.
     fn compliance(&self) -> f64;
+
+    /// Linear damping of the constraint. Expressed in 1/seconds. Should always be non-negative. `0.0` means no damping, while a higher value means more damping.
+    fn linear_damping(&self) -> f64;
+
+    /// Angular damping of the constraint. Expressed in 1/seconds. Should always be non-negative. `0.0` means no damping, while a higher value means more damping.
+    fn angular_damping(&self) -> f64;
 }
 
 /// A constraint is a condition that must be satisfied by the positions and orientations of a set of bodies in the physics engine. `AngularConstraint`s enforce conditions by rotating the bodies. An `AngularConstraint` will never cause any movement of the center of mass of the bodies.
@@ -60,12 +66,17 @@ pub trait AngularConstraint {
     /// Constraints with a strictly positive compliance will act like a physical spring, applying a force proportional to the violation of the constraint.
     /// The higher the compliance, the weaker the spring.
     fn compliance(&self) -> f64;
+
+    /// Angular damping of the constraint. Expressed in 1/seconds. Should always be non-negative. `0.0` means no damping, while a higher value means more damping.
+    fn angular_damping(&self) -> f64;
 }
 
 pub struct DistanceConstraint {
     pub bodies: [BodyId; 2],
     pub distance: f64,
     pub compliance: f64,
+    pub linear_damping: f64,
+    pub angular_damping: f64,
     pub application_points: [DVec3; 2],
 }
 
@@ -95,5 +106,13 @@ impl PositionalConstraint for DistanceConstraint {
 
     fn compliance(&self) -> f64 {
         self.compliance
+    }
+
+    fn linear_damping(&self) -> f64 {
+        self.linear_damping
+    }
+
+    fn angular_damping(&self) -> f64 {
+        self.angular_damping
     }
 }

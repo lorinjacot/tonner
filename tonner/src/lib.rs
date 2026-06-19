@@ -8,6 +8,7 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 use sparse_keyed::{Key, KeyRegistry, SecondaryMap};
 
 use crate::constraint::particle::{ParticleDistanceConstraint, ParticleDistanceConstraintId};
+use crate::joint::JointManager;
 use crate::{constraint::particle::ParticleConstraintManager, rigid_body::RigidBodies};
 pub use aabb::AABB;
 pub use particle::ParticleBuilder;
@@ -16,7 +17,8 @@ pub use transform::Transform;
 
 mod aabb;
 pub mod collision;
-mod constraint;
+pub mod constraint;
+pub mod joint;
 mod particle;
 mod rigid_body;
 pub mod shape;
@@ -50,6 +52,7 @@ pub struct State {
     positional_data: SecondaryMap<PositionalData>,
     angular_data: SecondaryMap<AngularData>,
     particle_constraints: ParticleConstraintManager,
+    joints: JointManager,
 }
 
 impl State {
@@ -61,6 +64,7 @@ impl State {
             positional_data: SecondaryMap::new(),
             angular_data: SecondaryMap::new(),
             particle_constraints: ParticleConstraintManager::new(),
+            joints: JointManager::new(),
         }
     }
 
@@ -313,6 +317,39 @@ impl State {
         Ok(self.add_particle_distance_constraint(constraint))
     }
 
+    #[pyo3(name = "add_attach_joint", signature = (
+        bodies,
+        rest_distance = 0.0,
+        attachment_points = [[0.0; 3]; 2],
+        compliance = 0.0
+    ))]
+    fn py_add_attach_joint(
+        &mut self,
+        bodies: [BodyId; 2],
+        rest_distance: f64,
+        attachment_points: [[f64; 3]; 2],
+        compliance: f64,
+    ) -> PyResult<joint::AttachJointId> {
+        for &body in &bodies {
+            if !self.is_rigid_body(body) {
+                return Err(PyValueError::new_err(format!(
+                    "Body {:?} is not a rigid body",
+                    body
+                )));
+            }
+        }
+        let attachment_points = [
+            DVec3::from_array(attachment_points[0]),
+            DVec3::from_array(attachment_points[1]),
+        ];
+        let joint = joint::AttachJointBuilder::new(bodies[0], bodies[1])
+            .rest_distance(rest_distance)
+            .attachment_points(attachment_points)
+            .compliance(compliance)
+            .build_and_add(self);
+        Ok(joint)
+    }
+
     #[pyo3(name = "position")]
     fn py_position(&self, body: BodyId) -> PyResult<[f64; 3]> {
         self.position(body)
@@ -399,9 +436,17 @@ impl Solver {
                 d.orientation = d.orientation.normalize();
             }
 
+            let inverse_h_squared = 1.0 / h_squared;
+
             state
                 .particle_constraints
-                .solve_positions(&mut state.positional_data, 1.0 / h_squared);
+                .solve_positions(&mut state.positional_data, inverse_h_squared);
+
+            state.joints.solve_positions(
+                &mut state.positional_data,
+                &mut state.angular_data,
+                inverse_h_squared,
+            );
 
             // self.solve_constraints(
             //     &mut state.positional_data,
@@ -580,7 +625,7 @@ impl Solver {
 #[pymodule(name = "tonner")]
 mod py_tonner {
     #[pymodule_export]
-    use super::{BodyId, Solver, State};
+    use super::{BodyId, Solver, State, joint::AttachJointId};
 }
 
 #[cfg(test)]

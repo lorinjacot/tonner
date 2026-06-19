@@ -8,15 +8,15 @@ from scipy.spatial.transform import Rotation
 
 state = tonner.State()
 solver = tonner.Solver()
-solver.substep_count = 1000
+solver.substep_count = 10
 dt = datetime.timedelta(milliseconds=10)
 
-COMPLIANCE = 0.01
+COMPLIANCE = 0
 LINEAR_DAMPING = 0
 ANGULAR_DAMPING = 0
 DISTANCE = 1
-LOCAL_POINT_A = [0, 0, 0]
-LOCAL_POINT_B = [0.5, 0, 0.5]
+LOCAL_POINT_A = [0, 0, 0.5]
+LOCAL_POINT_B = [0.001, 0, -0.5]
 
 a = state.add_rigid_box(
     position=[0, 0, 0],
@@ -35,22 +35,18 @@ c = state.add_rigid_box(
 )
 state.add_force(c, [0, 0, -9.81])
 
-state.add_distance_constraint(
+state.add_attach_joint(
     bodies=[a, b],
-    distance=DISTANCE,
+    rest_distance=DISTANCE,
+    attachment_points=[LOCAL_POINT_A, LOCAL_POINT_B],
     compliance=COMPLIANCE,
-    linear_damping=LINEAR_DAMPING,
-    angular_damping=ANGULAR_DAMPING,
-    application_points=[LOCAL_POINT_A, LOCAL_POINT_B],
 )
 
-state.add_distance_constraint(
+state.add_attach_joint(
     bodies=[b, c],
-    distance=DISTANCE,
+    rest_distance=DISTANCE,
+    attachment_points=[LOCAL_POINT_A, LOCAL_POINT_B],
     compliance=COMPLIANCE,
-    linear_damping=LINEAR_DAMPING,
-    angular_damping=ANGULAR_DAMPING,
-    application_points=[LOCAL_POINT_A, LOCAL_POINT_B],
 )
 
 fig, ax = plt.subplots()

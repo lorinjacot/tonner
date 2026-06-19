@@ -1,4 +1,5 @@
 pub mod particle;
+pub mod rigid_body;
 
 // #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 // #[cfg_attr(feature = "pyo3", pyclass(frozen, from_py_object))]

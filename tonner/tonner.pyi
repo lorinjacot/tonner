@@ -10,6 +10,9 @@ class BodyId:
 class ParticleDistanceConstraintId:
     pass
 
+class AttachJointId:
+    pass
+
 class State:
     def __init__(self) -> None:
         pass
@@ -52,6 +55,15 @@ class State:
         distance: float = 0.0,
         compliance: float = 0.0,
     ) -> ParticleDistanceConstraintId:
+        pass
+
+    def add_attach_joint(
+        self,
+        bodies: list[BodyId] | tuple[BodyId, BodyId],
+        rest_distance: float = 0.0,
+        attachment_points: list[Vec3] | tuple[Vec3, Vec3] = [[0, 0, 0], [0, 0, 0]],
+        compliance: float = 0.0,
+    ) -> AttachJointId:
         pass
 
     def position(self, body: BodyId) -> list[float]:

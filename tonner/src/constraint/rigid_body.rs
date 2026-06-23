@@ -26,19 +26,25 @@ impl PositionalCorrection {
         orientations: [DQuat; 2],
         inverse_timestep_squared: f64,
     ) -> Result<PositionalLagrangeMultiplier, ()> {
+        let local_directions = orientations.map(|o| o.conjugate() * self.direction);
+
         // r x n in the paper
-        let local_rotation_axis = [0, 1].map(|i| {
-            let local_dir = orientations[i].conjugate() * self.direction;
-            self.application_points[i].cross(local_dir)
-        });
+        let local_rotation_axis = [
+            self.application_points[0].cross(local_directions[0]),
+            self.application_points[1].cross(local_directions[1]),
+        ];
 
         // I^-1 * (r x n) in the paper
-        let local_angular_corrections =
-            [0, 1].map(|i| inverse_inertias[i] * local_rotation_axis[i]);
+        let local_angular_corrections = [
+            inverse_inertias[0] * local_rotation_axis[0],
+            inverse_inertias[1] * local_rotation_axis[1],
+        ];
 
         // w = 1/m + (r x n)^T * I^-1 * (r x n) in the paper
-        let w = [0, 1]
-            .map(|i| inverse_masses[i] + local_rotation_axis[i].dot(local_angular_corrections[i]));
+        let w = [
+            inverse_masses[0] + local_rotation_axis[0].dot(local_angular_corrections[0]),
+            inverse_masses[1] + local_rotation_axis[1].dot(local_angular_corrections[1]),
+        ];
 
         // w1 + w2 + alpha_hat = w1 + w2 + compliance / (h^2) in the paper
         let denominator = w[0] + w[1] + self.compliance * inverse_timestep_squared;
@@ -67,15 +73,20 @@ pub(crate) struct PositionalLagrangeMultiplier {
 impl PositionalLagrangeMultiplier {
     pub fn linear_correction(&self) -> [DVec3; 2] {
         // p / m = delta_lambda * n / m in the paper
-        [0, 1].map(|i| self.value * self.correction.direction * self.inverse_masses[i])
+        [
+            self.value * self.correction.direction * self.inverse_masses[0],
+            -self.value * self.correction.direction * self.inverse_masses[1],
+        ]
     }
 
     pub fn angular_correction(&self) -> [DQuat; 2] {
-        // 1/2 * [I^-1 * (r x p), 0] * q = 1/2 * [delta_lambda * I^-1 * (r x r), 0] * q in the paper
-        [0, 1].map(|i| {
-            let q = self.orientations[i];
-            let angle = q * self.local_angular_corrections[i] * self.value;
-            DQuat::from_xyzw(angle.x, angle.y, angle.z, 0.0) * q * 0.5
-        })
+        // 1/2 * [I^-1 * (r x p), 0] * q = 1/2 * [delta_lambda * I^-1 * (r x r), 0] * q in the pape
+        let local_correction_angle = self.local_angular_corrections.map(|a| a * self.value);
+        let local_correction_quat =
+            local_correction_angle.map(|a| DQuat::from_xyzw(a.x, a.y, a.z, 0.0));
+        [
+            self.orientations[0] * local_correction_quat[0] * 0.5,
+            -self.orientations[1] * local_correction_quat[1] * 0.5,
+        ]
     }
 }

@@ -1,6 +1,6 @@
-use std::fmt::Debug;
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
+use std::fmt::Debug;
 
 use glam::DVec3;
 use log::error;
@@ -121,19 +121,28 @@ fn solve_position<C: PositionalConstraint + Debug>(
     'outer: for joint in joints {
         let bodies = joint.bodies();
 
-        let Some((p0, m0)) = get_position_inverse_mass(&joint, positional_data, bodies[0]) else {
-            continue 'outer;
+        let d0 = match positional_data.get(bodies[0].0) {
+            Some(data) => data,
+            None => {
+                invalid_joint_error(joint, bodies[0]);
+                continue 'outer;
+            }
         };
-        let Some((p1, m1)) = get_position_inverse_mass(&joint, positional_data, bodies[1]) else {
-            continue 'outer;
+        let d1 = match positional_data.get(bodies[1].0) {
+            Some(data) => data,
+            None => {
+                invalid_joint_error(joint, bodies[1]);
+                continue 'outer;
+            }
         };
-        let positions = [p0, p1];
-        let inverse_masses = [m0, m1];
 
-        let (q0, i1) = get_orientation_inverse_inertia(angular_data, bodies[0]);
-        let (q1, i2) = get_orientation_inverse_inertia(angular_data, bodies[1]);
-        let orientations = [q0, q1];
-        let inverse_inertias = [i1, i2];
+        let inverse_masses = [d0.inverse_mass, d1.inverse_mass];
+        let positions = [d0.position, d1.position];
+
+        let d0 = &angular_data[bodies[0].0];
+        let d1 = &angular_data[bodies[1].0];
+        let orientations = [d0.orientation, d1.orientation];
+        let inverse_inertias = [d0.inverse_inertia, d1.inverse_inertia];
 
         let correction = joint.correction(&positions, &orientations);
         let Some(lagrange_multiplier) = correction
@@ -145,43 +154,21 @@ fn solve_position<C: PositionalConstraint + Debug>(
             )
             .ok()
         else {
-            error!("Constraint {joint:?} is unsolveable. Skipping.");
+            unsolveable_joint_error(joint);
             continue 'outer;
         };
 
         let linear_correction = lagrange_multiplier.linear_correction();
         positional_data[bodies[0].0].position += linear_correction[0];
-        positional_data[bodies[1].0].position -= linear_correction[1];
+        positional_data[bodies[1].0].position += linear_correction[1];
 
         let angular_correction = lagrange_multiplier.angular_correction();
         let q0 = &mut angular_data[bodies[0].0].orientation;
         *q0 = (*q0 + angular_correction[0]).normalize();
 
         let q1 = &mut angular_data[bodies[1].0].orientation;
-        *q1 = (*q1 - angular_correction[1]).normalize();
+        *q1 = (*q1 + angular_correction[1]).normalize();
     }
-}
-
-fn get_position_inverse_mass(
-    joint: &impl Debug,
-    positional_data: &SecondaryMap<PositionalData>,
-    body_id: BodyId,
-) -> Option<(DVec3, f64)> {
-    match positional_data.get(body_id.0) {
-        Some(data) => Some((data.position, data.inverse_mass)),
-        None => {
-            error!("Body {body_id:?} from joint {joint:?} not found. Skipping constraint.");
-            None
-        }
-    }
-}
-
-fn get_orientation_inverse_inertia(
-    angular_data: &SecondaryMap<AngularData>,
-    body_id: BodyId,
-) -> (glam::DQuat, glam::DMat3) {
-    let d = &angular_data[body_id.0];
-    (d.orientation, d.inverse_inertia)
 }
 
 impl State {
@@ -189,4 +176,14 @@ impl State {
         let id = self.joints.attaches.add(joint);
         AttachJointId(id)
     }
+}
+
+fn invalid_joint_error(joint: &impl Debug, body_id: BodyId) {
+    error!("Body {body_id:?} from joint {joint:?} not found. Skipping constraint.");
+}
+
+fn unsolveable_joint_error(joint: &impl Debug) {
+    error!(
+        "Constraint {joint:?} is unsolveable. This is likely due to a zero gradient or infinite masses. Skipping constraint."
+    );
 }

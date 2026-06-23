@@ -7,6 +7,7 @@ import matplotlib.patches as patches
 from matplotlib.animation import FuncAnimation
 from scipy.spatial.transform import Rotation
 
+
 state = tonner.State()
 solver = tonner.Solver()
 solver.substep_count = 10

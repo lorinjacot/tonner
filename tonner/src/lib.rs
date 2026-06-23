@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use glam::{DMat3, DQuat, DVec3};
+use log::info;
 #[cfg(feature = "pyo3")]
 use log::warn;
 #[cfg(feature = "pyo3")]
@@ -414,6 +415,7 @@ impl Solver {
         if delta_time.is_zero() {
             return;
         }
+        info!("Simulating for {:?} with {} substeps", delta_time, self.substep_count);
         let substep_duration = delta_time / self.substep_count;
         let h = substep_duration.as_secs_f64();
         let h_squared = h * h;
@@ -624,6 +626,14 @@ impl Solver {
 #[cfg(feature = "pyo3")]
 #[pymodule(name = "tonner")]
 mod py_tonner {
+    use pyo3::prelude::*;
+
+    #[pymodule_init]
+    fn init(_: &Bound<'_, PyModule>) -> PyResult<()> {
+        pyo3_log::init();
+        Ok(())
+    }
+
     #[pymodule_export]
     use super::{BodyId, Solver, State, joint::AttachJointId};
 }

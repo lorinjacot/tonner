@@ -1,6 +1,7 @@
 import datetime
 import tonner
 import math
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.animation import FuncAnimation
@@ -9,12 +10,12 @@ from scipy.spatial.transform import Rotation
 state = tonner.State()
 solver = tonner.Solver()
 solver.substep_count = 10
-dt = datetime.timedelta(milliseconds=10)
+dt = datetime.timedelta(milliseconds=20)
 
 COMPLIANCE = 0
 LINEAR_DAMPING = 0
 ANGULAR_DAMPING = 0
-DISTANCE = 1
+DISTANCE = 3
 LOCAL_POINT_A = [0, 0, 0.5]
 LOCAL_POINT_B = [0.001, 0, -0.5]
 
@@ -49,30 +50,38 @@ state.add_attach_joint(
     compliance=COMPLIANCE,
 )
 
-fig, ax = plt.subplots()
-ax.set_aspect("equal")
-ax.set_xlim(-2, 2)
-ax.set_ylim(-10, 2)
-ax.set_xlabel("x")
-ax.set_ylabel("z")
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 6))
+ax1.set_aspect("equal")
+ax1.set_xlim(-2, 2)
+ax1.set_ylim(-10, 2)
+ax1.set_xlabel("x")
+ax1.set_ylabel("z")
+
+ax2.set_xlim(0, 500)
+ax2.set_ylim(0, 50)
+ax2.set_xlabel("Time")
+ax2.set_ylabel("Energy")
 
 a_box = patches.Rectangle(
     (0, 0), 1, 1, rotation_point="center", color="blue"
 )
-ax.add_patch(a_box)
+ax1.add_patch(a_box)
 
 b_box = patches.Rectangle(
     (0, 0), 1, 1, rotation_point="center", color="orange"
 )
-ax.add_patch(b_box)
+ax1.add_patch(b_box)
 
 c_box = patches.Rectangle(
     (0, 0), 1, 1, rotation_point="center", color="green"
 )
-ax.add_patch(c_box)
+ax1.add_patch(c_box)
 
-line_ab, = ax.plot([], [], color="black", linewidth=1)
-line_bc, = ax.plot([], [], color="black", linewidth=1)
+line_ab, = ax1.plot([], [], color="black", linewidth=1)
+line_bc, = ax1.plot([], [], color="black", linewidth=1)
+
+energy_history = []
+energy_line, = ax2.plot([], [], color="red", linewidth=1)
 
 def draw_box(body, rect_patch: patches.Rectangle):
     pos = state.position(body)
@@ -97,8 +106,32 @@ def draw_line(body1, body2, line):
 
     line.set_data([dot1[0], dot2[0]], [dot1[2], dot2[2]])
 
+def total_energy():
+    kinetic = 0
+    potential = 0
+
+    for body in [a, b, c]:
+        m = state.mass(body)
+        if m == math.inf:
+            m = 0
+        v = np.array(state.velocity(body))
+        kinetic += 0.5 * m * (v @ v)
+
+        I = np.array(state.inertia(body))
+        q = state.orientation(body)
+        r = Rotation.from_quat(q)
+
+        angular_velocity = r.apply(np.array(state.angular_velocity(body)))
+        kinetic += 0.5 * (angular_velocity @ I @ angular_velocity)
+
+        z = state.position(body)[2]
+        potential += m * 9.81 * z
+
+    return 100 + kinetic + potential
+
 def update(frame):
     solver.simulate(state, dt)
+    energy_history.append(total_energy())
 
     draw_box(a, a_box)
     draw_box(b, b_box)
@@ -107,8 +140,14 @@ def update(frame):
     draw_line(a, b, line_ab)
     draw_line(b, c, line_bc)
 
-    # return a_box, b_box, line_ab
-    return a_box, b_box, c_box, line_ab, line_bc
+    energy_line.set_data(range(len(energy_history)), energy_history)
+    total_frames = len(energy_history)
+    if total_frames % 500 == 0:
+        ax2.set_xlim(0, total_frames + 500)
+        ax2.figure.canvas.draw_idle()
 
-ani = FuncAnimation(fig, update, cache_frame_data=False, interval=10, blit=True)
+    # return a_box, b_box, line_ab
+    return a_box, b_box, c_box, line_ab, line_bc, energy_line
+
+ani = FuncAnimation(fig, update, cache_frame_data=False, interval=dt.microseconds // 1000, blit=True)
 plt.show()

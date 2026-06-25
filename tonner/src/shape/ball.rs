@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::DVec3;
 
 use crate::{
     AABB, Transform,
@@ -9,7 +9,7 @@ use crate::{
 /// A 3d ball of radius `radius` centered at the origin.
 #[derive(Debug, Clone, Copy)]
 pub struct Ball {
-    radius: f32,
+    radius: f64,
 }
 
 impl Ball {
@@ -31,7 +31,7 @@ impl Ball {
     /// let ball = Ball::from_radius(2.5);
     /// assert_eq!(ball.radius(), 2.5);
     /// ```
-    pub fn from_radius(radius: f32) -> Ball {
+    pub fn from_radius(radius: f64) -> Ball {
         Ball { radius }
     }
 
@@ -43,7 +43,7 @@ impl Ball {
     /// let ball = Ball::from_radius(2.5);
     /// assert_eq!(ball.radius(), 2.5);
     /// ```
-    pub fn radius(&self) -> f32 {
+    pub fn radius(&self) -> f64 {
         self.radius
     }
 }
@@ -56,14 +56,14 @@ impl Shape3D for Ball {
         )
     }
 
-    fn centroid(&self, transform: &Transform) -> Vec3 {
+    fn centroid(&self, transform: &Transform) -> DVec3 {
         transform.translation
     }
 }
 
 impl ConvexShape3D for Ball {
-    fn support_point(&self, transform: &Transform, direction: Vec3) -> Vec3 {
-        transform.translation + self.radius * direction.normalize_or(Vec3::X)
+    fn support_point(&self, transform: &Transform, direction: DVec3) -> DVec3 {
+        transform.translation + self.radius * direction.normalize_or(DVec3::X)
     }
 }
 
@@ -73,13 +73,13 @@ impl ConvexShape3D for Ball {
 /// # Examples
 ///
 /// ```
-/// # use glam::vec3;
+/// # use glam::dvec3;
 /// # use tonner::{Transform, shape::Ball, shape::collides_2balls};
 /// let ball = Ball::UNIT;
 ///
 /// let transform1 = Transform::IDENTITY;
-/// let transform2 = Transform::from_translation(vec3(1.0, 0.0, 0.0));
-/// let transform3 = Transform::from_translation(vec3(2.0, 0.0, 0.0));
+/// let transform2 = Transform::from_translation(dvec3(1.0, 0.0, 0.0));
+/// let transform3 = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
 ///
 /// assert!(collides_2balls((&ball, &transform1), (&ball, &transform1)));
 /// assert!(collides_2balls((&ball, &transform1), (&ball, &transform2)));
@@ -99,42 +99,42 @@ pub fn collides_2balls(
 ///
 /// # Examples
 /// ```
-/// # use glam::vec3;
+/// # use glam::dvec3;
 /// # use tonner::{Transform, shape::Ball, shape::distance_2balls};
 /// let ball = Ball::UNIT;
 /// let transform1 = Transform::IDENTITY;
-/// let transform2 = Transform::from_translation(vec3(3.0, 0.0, 0.0));
+/// let transform2 = Transform::from_translation(dvec3(3.0, 0.0, 0.0));
 /// assert_eq!(distance_2balls((&ball, &transform1), (&ball, &transform2)), 1.0);
 /// ```
 pub fn distance_2balls(
     (ball1, transform1): (&Ball, &Transform),
     (ball2, transform2): (&Ball, &Transform),
-) -> f32 {
+) -> f64 {
     let center_distance = transform1.translation - transform2.translation;
     let radii_sum = ball1.radius + ball2.radius;
-    0.0f32.max(center_distance.length() - radii_sum)
+    0.0f64.max(center_distance.length() - radii_sum)
 }
 
 /// Returns information about the collision between the two balls when applying the given transforms.
 ///
 /// # Examples
 /// ```
-/// # use glam::vec3;
+/// # use glam::dvec3;
 /// # use tonner::{Transform, shape::Ball, shape::collision_info_2balls};
 /// let ball = Ball::UNIT;
 /// let transform1 = Transform::IDENTITY;
-/// let transform2 = Transform::from_translation(vec3(1.5, 0.0, 0.0));
+/// let transform2 = Transform::from_translation(dvec3(1.5, 0.0, 0.0));
 /// let collision_info = collision_info_2balls((&ball, &transform1), (&ball, &transform2));
-/// assert_eq!(collision_info.separating_vector, vec3(0.5, 0.0, 0.0));
-/// assert_eq!(collision_info.contact_point_1, vec3(1.0, 0.0, 0.0));
-/// assert_eq!(collision_info.contact_point_2, vec3(0.5, 0.0, 0.0));
+/// assert_eq!(collision_info.separating_vector, dvec3(0.5, 0.0, 0.0));
+/// assert_eq!(collision_info.contact_point_1, dvec3(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.contact_point_2, dvec3(0.5, 0.0, 0.0));
 /// ```
 pub fn collision_info_2balls(
     (ball1, transform1): (&Ball, &Transform),
     (ball2, transform2): (&Ball, &Transform),
 ) -> CollisionInfo {
     let center_distance = transform1.translation - transform2.translation;
-    let separating_dir = center_distance.normalize_or(Vec3::X);
+    let separating_dir = center_distance.normalize_or(DVec3::X);
     let contact_point_1 = transform1.translation - ball1.radius * separating_dir;
     let contact_point_2 = transform2.translation + ball2.radius * separating_dir;
     let separating_vector = contact_point_1 - contact_point_2;

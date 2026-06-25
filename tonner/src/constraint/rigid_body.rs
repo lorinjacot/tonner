@@ -62,6 +62,7 @@ impl PositionalCorrection {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct PositionalLagrangeMultiplier {
     correction: PositionalCorrection,
     value: f64,
@@ -71,7 +72,11 @@ pub(crate) struct PositionalLagrangeMultiplier {
 }
 
 impl PositionalLagrangeMultiplier {
-    pub fn linear_correction(&self) -> [DVec3; 2] {
+    pub fn value(&self) -> f64 {
+        self.value
+    }
+
+    pub fn linear_corrections(&self) -> [DVec3; 2] {
         // p / m = delta_lambda * n / m in the paper
         [
             self.value * self.correction.direction * self.inverse_masses[0],
@@ -79,7 +84,7 @@ impl PositionalLagrangeMultiplier {
         ]
     }
 
-    pub fn angular_correction(&self) -> [DQuat; 2] {
+    pub fn angular_corrections(&self) -> [DQuat; 2] {
         // 1/2 * [I^-1 * (r x p), 0] * q = 1/2 * [delta_lambda * I^-1 * (r x r), 0] * q in the pape
         let local_correction_angle = self.local_angular_corrections.map(|a| a * self.value);
         let local_correction_quat =

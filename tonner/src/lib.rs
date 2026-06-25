@@ -220,7 +220,7 @@ impl State {
         orientation: [f64; 4],
         angular_velocity: [f64; 3],
         inertia: [[f64; 3]; 3],
-        radius: f32,
+        radius: f64,
     ) -> PyResult<BodyId> {
         if mass <= 0.0 {
             return Err(PyValueError::new_err("Mass must be strictly positive."));
@@ -260,7 +260,7 @@ impl State {
         orientation: [f64; 4],
         angular_velocity: [f64; 3],
         inertia: [[f64; 3]; 3],
-        dimensions: [f32; 3],
+        dimensions: [f64; 3],
     ) -> PyResult<BodyId> {
         if mass <= 0.0 {
             return Err(PyValueError::new_err("Mass must be strictly positive."));
@@ -415,7 +415,10 @@ impl Solver {
         if delta_time.is_zero() {
             return;
         }
-        info!("Simulating for {:?} with {} substeps", delta_time, self.substep_count);
+        info!(
+            "Simulating for {:?} with {} substeps",
+            delta_time, self.substep_count
+        );
         let substep_duration = delta_time / self.substep_count;
         let h = substep_duration.as_secs_f64();
         let h_squared = h * h;
@@ -439,6 +442,12 @@ impl Solver {
             }
 
             let inverse_h_squared = 1.0 / h_squared;
+
+            state.rigid_bodies.solve_contacts(
+                inverse_h_squared,
+                &mut state.positional_data,
+                &mut state.angular_data,
+            );
 
             state
                 .particle_constraints

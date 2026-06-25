@@ -145,29 +145,26 @@ fn solve_position<C: PositionalConstraint + Debug>(
         let inverse_inertias = [d0.inverse_inertia, d1.inverse_inertia];
 
         let correction = joint.correction(&positions, &orientations);
-        let Some(lagrange_multiplier) = correction
-            .lagrange_multiplier(
-                inverse_masses,
-                inverse_inertias,
-                orientations,
-                inverse_h_squared,
-            )
-            .ok()
-        else {
+        let Ok(lagrange_multiplier) = correction.lagrange_multiplier(
+            inverse_masses,
+            inverse_inertias,
+            orientations,
+            inverse_h_squared,
+        ) else {
             unsolveable_joint_error(joint);
             continue 'outer;
         };
 
-        let linear_correction = lagrange_multiplier.linear_correction();
-        positional_data[bodies[0].0].position += linear_correction[0];
-        positional_data[bodies[1].0].position += linear_correction[1];
+        let linear_correctionss = lagrange_multiplier.linear_corrections();
+        positional_data[bodies[0].0].position += linear_correctionss[0];
+        positional_data[bodies[1].0].position += linear_correctionss[1];
 
-        let angular_correction = lagrange_multiplier.angular_correction();
+        let angular_corrections = lagrange_multiplier.angular_corrections();
         let q0 = &mut angular_data[bodies[0].0].orientation;
-        *q0 = (*q0 + angular_correction[0]).normalize();
+        *q0 = (*q0 + angular_corrections[0]).normalize();
 
         let q1 = &mut angular_data[bodies[1].0].orientation;
-        *q1 = (*q1 + angular_correction[1]).normalize();
+        *q1 = (*q1 + angular_corrections[1]).normalize();
     }
 }
 

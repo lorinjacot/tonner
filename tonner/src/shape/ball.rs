@@ -126,8 +126,8 @@ pub fn distance_2balls(
 /// let transform2 = Transform::from_translation(dvec3(1.5, 0.0, 0.0));
 /// let collision_info = collision_info_2balls((&ball, &transform1), (&ball, &transform2));
 /// assert_eq!(collision_info.separating_vector, dvec3(0.5, 0.0, 0.0));
-/// assert_eq!(collision_info.contact_point_1, dvec3(1.0, 0.0, 0.0));
-/// assert_eq!(collision_info.contact_point_2, dvec3(0.5, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[0], dvec3(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[1], dvec3(0.5, 0.0, 0.0));
 /// ```
 pub fn collision_info_2balls(
     (ball1, transform1): (&Ball, &Transform),
@@ -135,12 +135,14 @@ pub fn collision_info_2balls(
 ) -> CollisionInfo {
     let center_distance = transform1.translation - transform2.translation;
     let separating_dir = center_distance.normalize_or(DVec3::X);
-    let contact_point_1 = transform1.translation - ball1.radius * separating_dir;
-    let contact_point_2 = transform2.translation + ball2.radius * separating_dir;
-    let separating_vector = contact_point_1 - contact_point_2;
+    let local_contact_points = [
+        -ball1.radius * separating_dir,
+        ball2.radius * separating_dir,
+    ];
+    let separating_vector = transform1.translation + local_contact_points[0]
+        - (transform2.translation + local_contact_points[1]);
     CollisionInfo {
         separating_vector,
-        contact_point_1,
-        contact_point_2,
+        local_contact_points,
     }
 }

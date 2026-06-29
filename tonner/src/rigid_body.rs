@@ -6,6 +6,7 @@ use crate::{
     rigid_body::contact::Contact,
     shape::{Ball, Box3D, collides_2balls, collision_info_2balls},
 };
+pub(crate) use positional_correction::{PositionalConstraint, PositionalCorrection};
 
 mod contact;
 mod positional_correction;
@@ -363,7 +364,7 @@ impl RigidBodies {
     }
 }
 
-fn generalized_inverse_mass(
+pub(crate) fn generalized_inverse_mass(
     inverse_mass: f64,
     inverse_inertia: DMat3,
     local_application_point: DVec3,

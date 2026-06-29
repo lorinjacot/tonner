@@ -2,6 +2,12 @@ use glam::{DMat3, DQuat, DVec3};
 use sparse_keyed::SecondaryMap;
 
 use crate::{BodyId, PositionalData};
+pub(crate) trait PositionalConstraint {
+    fn bodies(&self) -> &[BodyId; 2];
+
+    fn correction(&self, positions: &[DVec3; 2], orientations: &[DQuat; 2])
+    -> PositionalCorrection;
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PositionalCorrection {

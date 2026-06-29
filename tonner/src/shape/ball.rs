@@ -127,7 +127,7 @@ pub fn distance_2balls(
 /// let collision_info = collision_info_2balls((&ball, &transform1), (&ball, &transform2));
 /// assert_eq!(collision_info.separating_vector, dvec3(0.5, 0.0, 0.0));
 /// assert_eq!(collision_info.local_contact_points[0], dvec3(1.0, 0.0, 0.0));
-/// assert_eq!(collision_info.local_contact_points[1], dvec3(0.5, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[1], dvec3(-1.0, 0.0, 0.0));
 /// ```
 pub fn collision_info_2balls(
     (ball1, transform1): (&Ball, &Transform),

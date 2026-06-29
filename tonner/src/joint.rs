@@ -8,7 +8,7 @@ use sparse_keyed::{Key, PrimaryMap, SecondaryMap, primary_map::Values};
 
 use crate::{
     AngularData, BodyId, PositionalData, State,
-    constraint::rigid_body::{PositionalConstraint, PositionalCorrection},
+    rigid_body::{PositionalConstraint, PositionalCorrection, generalized_inverse_mass},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,14 +121,14 @@ fn solve_position<C: PositionalConstraint + Debug>(
     'outer: for joint in joints {
         let bodies = joint.bodies();
 
-        let d0 = match positional_data.get(bodies[0].0) {
+        let p0 = match positional_data.get(bodies[0].0) {
             Some(data) => data,
             None => {
                 invalid_joint_error(joint, bodies[0]);
                 continue 'outer;
             }
         };
-        let d1 = match positional_data.get(bodies[1].0) {
+        let p1 = match positional_data.get(bodies[1].0) {
             Some(data) => data,
             None => {
                 invalid_joint_error(joint, bodies[1]);
@@ -136,35 +136,47 @@ fn solve_position<C: PositionalConstraint + Debug>(
             }
         };
 
-        let inverse_masses = [d0.inverse_mass, d1.inverse_mass];
-        let positions = [d0.position, d1.position];
+        let inverse_masses = [p0.inverse_mass, p1.inverse_mass];
+        let positions = [p0.position, p1.position];
+        let a0 = &angular_data[bodies[0].0];
+        let a1 = &angular_data[bodies[1].0];
 
-        let d0 = &angular_data[bodies[0].0];
-        let d1 = &angular_data[bodies[1].0];
-        let orientations = [d0.orientation, d1.orientation];
-        let inverse_inertias = [d0.inverse_inertia, d1.inverse_inertia];
+        let orientations = [a0.orientation, a1.orientation];
+        let inverse_inertias = [a0.inverse_inertia, a1.inverse_inertia];
 
         let correction = joint.correction(&positions, &orientations);
-        let Ok(lagrange_multiplier) = correction.lagrange_multiplier(
-            inverse_masses,
-            inverse_inertias,
-            orientations,
-            inverse_h_squared,
-        ) else {
-            unsolveable_joint_error(joint);
-            continue 'outer;
-        };
 
-        let linear_correctionss = lagrange_multiplier.linear_corrections();
-        positional_data[bodies[0].0].position += linear_correctionss[0];
-        positional_data[bodies[1].0].position += linear_correctionss[1];
+        let generalized_inverse_masses = [
+            generalized_inverse_mass(
+                inverse_masses[0],
+                inverse_inertias[0],
+                correction.application_points[0],
+                orientations[0].conjugate() * correction.direction,
+            ),
+            generalized_inverse_mass(
+                inverse_masses[1],
+                inverse_inertias[1],
+                correction.application_points[1],
+                orientations[1].conjugate() * correction.direction,
+            ),
+        ];
 
-        let angular_corrections = lagrange_multiplier.angular_corrections();
-        let q0 = &mut angular_data[bodies[0].0].orientation;
-        *q0 = (*q0 + angular_corrections[0]).normalize();
-
-        let q1 = &mut angular_data[bodies[1].0].orientation;
-        *q1 = (*q1 + angular_corrections[1]).normalize();
+        match correction.lagrange_multiplier(generalized_inverse_masses, inverse_h_squared) {
+            Ok(lagrange_multiplier) => {
+                correction.apply(
+                    lagrange_multiplier,
+                    inverse_masses,
+                    inverse_inertias,
+                    orientations,
+                    *bodies,
+                    positional_data,
+                    angular_data,
+                );
+            }
+            Err(_) => {
+                unsolveable_joint_error(joint);
+            }
+        }
     }
 }
 

@@ -1,12 +1,14 @@
 use glam::{DMat3, DQuat, DVec3};
-use log::error;
 use sparse_keyed::SecondaryMap;
 
 use crate::{
     AngularData, BodyId, PositionalData, State, Transform,
-    constraint::rigid_body::{PositionalCorrection, PositionalLagrangeMultiplier},
+    rigid_body::contact::Contact,
     shape::{Ball, Box3D, collides_2balls, collision_info_2balls},
 };
+
+mod contact;
+mod positional_correction;
 
 #[derive(Debug, Clone)]
 #[must_use]
@@ -323,11 +325,7 @@ impl RigidBodies {
         self.detect_contacts(positional_data, angular_data);
 
         for contact in self.contacts.drain(..) {
-            if let Some(solved_contact) =
-                contact.solve(positional_data, angular_data, inverse_timestep_squared)
-            {
-                solved_contact.solve_positions(positional_data, angular_data);
-            }
+            contact.solve_positions(positional_data, angular_data, inverse_timestep_squared);
         }
     }
 
@@ -365,128 +363,12 @@ impl RigidBodies {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Contact {
-    bodies: [BodyId; 2],
-    world_normal: DVec3,
-    local_contact_points: [DVec3; 2],
-    static_friction_coefficient: f64,
-}
-
-impl Contact {
-    fn solve(
-        self,
-        positional_data: &mut SecondaryMap<PositionalData>,
-        angular_data: &mut SecondaryMap<AngularData>,
-        inverse_h_squared: f64,
-    ) -> Option<SolvedContact> {
-        let d_pos0 = &positional_data[self.bodies[0].0];
-        let d_pos1 = &positional_data[self.bodies[1].0];
-        let inverse_masses = [d_pos0.inverse_mass, d_pos1.inverse_mass];
-
-        let d_ang0 = &angular_data[self.bodies[0].0];
-        let d_ang1 = &angular_data[self.bodies[1].0];
-        let inverse_inertias = [d_ang0.inverse_inertia, d_ang1.inverse_inertia];
-        let orientations = [d_ang0.orientation, d_ang1.orientation];
-
-        // let positions = [d_pos0.position, d_pos1.position];
-
-        let pos = [
-            d_pos0.position + d_ang0.orientation * self.local_contact_points[0],
-            d_pos1.position + d_ang1.orientation * self.local_contact_points[1],
-        ];
-        let old_pos = [
-            d_pos0.previous_position + d_ang0.previous_orientation * self.local_contact_points[0],
-            d_pos1.previous_position + d_ang1.previous_orientation * self.local_contact_points[1],
-        ];
-
-        let penetration_depth = (pos[0] - pos[1]).dot(self.world_normal);
-        if penetration_depth <= 0.0 {
-            return None;
-        }
-
-        let normal_correction = PositionalCorrection {
-            direction: self.world_normal,
-            magnitude: penetration_depth,
-            application_points: self.local_contact_points,
-            compliance: 0.0,
-        };
-
-        let Ok(normal_multiplier) = normal_correction.lagrange_multiplier(
-            inverse_masses,
-            inverse_inertias,
-            orientations,
-            inverse_h_squared,
-        ) else {
-            error!(
-                "Contact between {:?} and {:?} is unsolveable. This is likely due to infinite masses. Skipping.",
-                self.bodies[0], self.bodies[1]
-            );
-            return None;
-        };
-
-        let delta_position = (pos[0] - old_pos[0]) - (pos[1] - old_pos[1]);
-        let delta_tangial =
-            delta_position - delta_position.dot(self.world_normal) * self.world_normal;
-
-        let (direction, magnitude) = delta_tangial.normalize_and_length();
-        let tangential_correction = PositionalCorrection {
-            direction,
-            magnitude,
-            application_points: self.local_contact_points,
-            compliance: 0.0,
-        };
-
-        let Ok(tangential_multiplier) = tangential_correction.lagrange_multiplier(
-            inverse_masses,
-            inverse_inertias,
-            orientations,
-            inverse_h_squared,
-        ) else {
-            error!(
-                "Contact between {:?} and {:?} is unsolveable. This is likely due to infinite masses. Skipping.",
-                self.bodies[0], self.bodies[1]
-            );
-            return None;
-        };
-
-        Some(SolvedContact {
-            contact: self,
-            normal_multiplier,
-            tangential_multiplier,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-struct SolvedContact {
-    contact: Contact,
-    normal_multiplier: PositionalLagrangeMultiplier,
-    tangential_multiplier: PositionalLagrangeMultiplier,
-}
-
-impl SolvedContact {
-    fn solve_positions(
-        &self,
-        positional_data: &mut SecondaryMap<PositionalData>,
-        angular_data: &mut SecondaryMap<AngularData>,
-    ) {
-        let static_friction = self.tangential_multiplier.value()
-            < self.contact.static_friction_coefficient * self.normal_multiplier.value();
-
-        let linear_corrections = self.normal_multiplier.linear_corrections();
-        positional_data[self.contact.bodies[0].0].position += linear_corrections[0];
-        positional_data[self.contact.bodies[1].0].position += linear_corrections[1];
-        if static_friction {
-            let linear_corrections = self.tangential_multiplier.linear_corrections();
-            positional_data[self.contact.bodies[0].0].position += linear_corrections[0];
-            positional_data[self.contact.bodies[1].0].position += linear_corrections[1];
-        }
-
-        let angular_corrections = self.normal_multiplier.angular_corrections();
-        let q0 = &mut angular_data[self.contact.bodies[0].0].orientation;
-        *q0 = (*q0 + angular_corrections[0]).normalize();
-        let q1 = &mut angular_data[self.contact.bodies[1].0].orientation;
-        *q1 = (*q1 + angular_corrections[1]).normalize();
-    }
+fn generalized_inverse_mass(
+    inverse_mass: f64,
+    inverse_inertia: DMat3,
+    local_application_point: DVec3,
+    local_direction: DVec3,
+) -> f64 {
+    let rotation = local_application_point.cross(local_direction);
+    inverse_mass + rotation.dot(inverse_inertia * rotation)
 }

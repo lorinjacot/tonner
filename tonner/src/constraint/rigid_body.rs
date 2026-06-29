@@ -72,10 +72,6 @@ pub(crate) struct PositionalLagrangeMultiplier {
 }
 
 impl PositionalLagrangeMultiplier {
-    pub fn value(&self) -> f64 {
-        self.value
-    }
-
     pub fn linear_corrections(&self) -> [DVec3; 2] {
         // p / m = delta_lambda * n / m in the paper
         [

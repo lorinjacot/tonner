@@ -8,7 +8,7 @@ use sparse_keyed::{Key, PrimaryMap, SecondaryMap, primary_map::Values};
 
 use crate::{
     AngularData, BodyId, PositionalData, State,
-    rigid_body::{PositionalConstraint, PositionalCorrection, generalized_inverse_mass},
+    rigid_body::{PositionalConstraint, PositionalCorrection},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,13 +101,13 @@ impl JointManager {
         &self,
         positional_data: &mut SecondaryMap<PositionalData>,
         angular_data: &mut SecondaryMap<AngularData>,
-        inverse_h_squared: f64,
+        inverse_timestep_squared: f64,
     ) {
         solve_position(
             self.attaches.values(),
             positional_data,
             angular_data,
-            inverse_h_squared,
+            inverse_timestep_squared,
         );
     }
 }
@@ -116,7 +116,7 @@ fn solve_position<C: PositionalConstraint + Debug>(
     joints: Values<'_, C>,
     positional_data: &mut SecondaryMap<PositionalData>,
     angular_data: &mut SecondaryMap<AngularData>,
-    inverse_h_squared: f64,
+    inverse_timestep_squared: f64,
 ) {
     'outer: for joint in joints {
         let bodies = joint.bodies();
@@ -146,32 +146,14 @@ fn solve_position<C: PositionalConstraint + Debug>(
 
         let correction = joint.correction(&positions, &orientations);
 
-        let generalized_inverse_masses = [
-            generalized_inverse_mass(
-                inverse_masses[0],
-                inverse_inertias[0],
-                correction.application_points[0],
-                orientations[0].conjugate() * correction.direction,
-            ),
-            generalized_inverse_mass(
-                inverse_masses[1],
-                inverse_inertias[1],
-                correction.application_points[1],
-                orientations[1].conjugate() * correction.direction,
-            ),
-        ];
-
-        match correction.lagrange_multiplier(generalized_inverse_masses, inverse_h_squared) {
-            Ok(lagrange_multiplier) => {
-                correction.apply(
-                    lagrange_multiplier,
-                    inverse_masses,
-                    inverse_inertias,
-                    orientations,
-                    *bodies,
-                    positional_data,
-                    angular_data,
-                );
+        match correction.prepare(
+            inverse_masses,
+            orientations,
+            inverse_inertias,
+            inverse_timestep_squared,
+        ) {
+            Ok(prepared_correction) => {
+                prepared_correction.solve_positions(*bodies, positional_data, angular_data);
             }
             Err(_) => {
                 unsolveable_joint_error(joint);

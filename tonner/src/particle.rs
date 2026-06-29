@@ -143,6 +143,7 @@ impl ParticleBuilder {
                 position: self.position,
                 previous_position: self.position,
                 velocity: self.velocity,
+                previous_velocity: self.velocity,
                 inverse_mass: self.inverse_mass,
                 force: DVec3::ZERO,
             },

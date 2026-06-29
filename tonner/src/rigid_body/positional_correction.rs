@@ -1,7 +1,7 @@
 use glam::{DMat3, DQuat, DVec3};
 use sparse_keyed::SecondaryMap;
 
-use crate::{BodyId, PositionalData};
+use crate::{AngularData, BodyId, PositionalData, rigid_body::generalized_inverse_mass};
 pub(crate) trait PositionalConstraint {
     fn bodies(&self) -> &[BodyId; 2];
 
@@ -11,6 +11,7 @@ pub(crate) trait PositionalConstraint {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PositionalCorrection {
+    /// Expressed in world frame
     pub direction: DVec3,
     pub magnitude: f64,
     /// Expressed in local frame (body space)
@@ -19,8 +20,46 @@ pub(crate) struct PositionalCorrection {
 }
 
 impl PositionalCorrection {
+    pub fn prepare(
+        &self,
+        inverse_masses: [f64; 2],
+        orientations: [DQuat; 2],
+        inverse_inertias: [DMat3; 2],
+        inverse_timestep_squared: f64,
+    ) -> Result<PreparedPositionalCorrection, ()> {
+        let local_directions = orientations.map(|o| o.conjugate() * self.direction);
+
+        let w = [
+            generalized_inverse_mass(
+                inverse_masses[0],
+                inverse_inertias[0],
+                self.application_points[0],
+                local_directions[0],
+            ),
+            generalized_inverse_mass(
+                inverse_masses[1],
+                inverse_inertias[1],
+                self.application_points[1],
+                local_directions[1],
+            ),
+        ];
+
+        match self.lagrange_multiplier(w, inverse_timestep_squared) {
+            Ok(lagrange_multiplier) => Ok(PreparedPositionalCorrection {
+                lagrange_multiplier,
+                world_direction: self.direction,
+                local_directions,
+                local_application_points: self.application_points,
+                inverse_masses,
+                inverse_inertias,
+                orientations,
+            }),
+            Err(_) => Err(()),
+        }
+    }
+
     /// Delta_lambda = -c / (w1 + w2 + alpha_hat) in the paper
-    pub fn lagrange_multiplier(
+    fn lagrange_multiplier(
         &self,
         generalized_inverse_masses: [f64; 2],
         inverse_timestep_squared: f64,
@@ -35,83 +74,64 @@ impl PositionalCorrection {
 
         Ok(-self.magnitude / denominator)
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedPositionalCorrection {
+    /// Delta_lambda = -c / (w1 + w2 + alpha_hat) in the paper
+    lagrange_multiplier: f64,
+    world_direction: DVec3,
+    local_directions: [DVec3; 2],
+    local_application_points: [DVec3; 2],
+    inverse_masses: [f64; 2],
+    inverse_inertias: [DMat3; 2],
+    orientations: [DQuat; 2],
+}
+
+impl PreparedPositionalCorrection {
+    /// Delta_lambda = -c / (w1 + w2 + alpha_hat) in the paper
+    pub fn lagrange_multiplier(&self) -> f64 {
+        self.lagrange_multiplier
+    }
 
     /// Delta_x = p / m in the paper
-    fn linear_corrections(&self, lagrange_multiplier: f64, inverse_masses: [f64; 2]) -> [DVec3; 2] {
-        let p = lagrange_multiplier * self.direction;
-        [p * inverse_masses[0], -p * inverse_masses[1]]
+    fn linear_corrections(&self) -> [DVec3; 2] {
+        let p = self.lagrange_multiplier * self.world_direction;
+        [p * self.inverse_masses[0], -p * self.inverse_masses[1]]
     }
 
     /// Delta_q = 1/2 * [I^-1 * (r x p), 0] * q in the paper
-    fn angular_corrections(
-        &self,
-        lagrange_multiplier: f64,
-        inverse_inertias: [DMat3; 2],
-        orientations: [DQuat; 2],
-    ) -> [DQuat; 2] {
-        let p = lagrange_multiplier * self.direction;
-        let local_p = orientations.map(|o| o.conjugate() * p);
+    fn angular_corrections(&self) -> [DQuat; 2] {
+        let local_p = self.local_directions.map(|d| self.lagrange_multiplier * d);
         let r_cross_p = [
-            self.application_points[0].cross(local_p[0]),
-            self.application_points[1].cross(local_p[1]),
+            self.local_application_points[0].cross(local_p[0]),
+            self.local_application_points[1].cross(local_p[1]),
         ];
         let angles = [
-            inverse_inertias[0] * r_cross_p[0],
-            inverse_inertias[1] * r_cross_p[1],
+            self.inverse_inertias[0] * r_cross_p[0],
+            self.inverse_inertias[1] * r_cross_p[1],
         ];
         let corrections = angles.map(|a| DQuat::from_xyzw(a.x, a.y, a.z, 0.0) * 0.5);
         [
-            orientations[0] * corrections[0],
-            -orientations[1] * corrections[1],
+            self.orientations[0] * corrections[0],
+            -self.orientations[1] * corrections[1],
         ]
     }
 
-    fn apply_linear(
+    pub fn solve_positions(
         &self,
-        lagrange_multiplier: f64,
-        inverse_masses: [f64; 2],
         bodies: [BodyId; 2],
         positional_data: &mut SecondaryMap<PositionalData>,
+        angular_data: &mut SecondaryMap<AngularData>,
     ) {
-        let linear_corrections = self.linear_corrections(lagrange_multiplier, inverse_masses);
-        for i in 0..2 {
-            positional_data[bodies[i].0].position += linear_corrections[i];
-        }
-    }
+        let linear_corrections = self.linear_corrections();
+        positional_data[bodies[0].0].position += linear_corrections[0];
+        positional_data[bodies[1].0].position += linear_corrections[1];
 
-    fn apply_angular(
-        &self,
-        lagrange_multiplier: f64,
-        inverse_inertias: [DMat3; 2],
-        orientations: [DQuat; 2],
-        bodies: [BodyId; 2],
-        angular_data: &mut SecondaryMap<crate::AngularData>,
-    ) {
-        let angular_corrections =
-            self.angular_corrections(lagrange_multiplier, inverse_inertias, orientations);
-        for i in 0..2 {
-            let q = &mut angular_data[bodies[i].0].orientation;
-            *q = (*q + angular_corrections[i]).normalize();
-        }
-    }
-
-    pub fn apply(
-        &self,
-        lagrange_multiplier: f64,
-        inverse_masses: [f64; 2],
-        inverse_inertias: [DMat3; 2],
-        orientations: [DQuat; 2],
-        bodies: [BodyId; 2],
-        positional_data: &mut SecondaryMap<PositionalData>,
-        angular_data: &mut SecondaryMap<crate::AngularData>,
-    ) {
-        self.apply_linear(lagrange_multiplier, inverse_masses, bodies, positional_data);
-        self.apply_angular(
-            lagrange_multiplier,
-            inverse_inertias,
-            orientations,
-            bodies,
-            angular_data,
-        );
+        let angular_corrections = self.angular_corrections();
+        let q0 = &mut angular_data[bodies[0].0].orientation;
+        *q0 = (*q0 + angular_corrections[0]).normalize();
+        let q1 = &mut angular_data[bodies[1].0].orientation;
+        *q1 = (*q1 + angular_corrections[1]).normalize();
     }
 }

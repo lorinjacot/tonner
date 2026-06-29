@@ -30,6 +30,7 @@ struct PositionalData {
     position: DVec3,
     previous_position: DVec3,
     velocity: DVec3,
+    previous_velocity: DVec3,
     inverse_mass: f64,
     force: DVec3,
 }
@@ -39,6 +40,7 @@ struct AngularData {
     orientation: DQuat,
     previous_orientation: DQuat,
     velocity: DVec3,
+    previous_velocity: DVec3,
     inertia: DMat3,
     inverse_inertia: DMat3,
     torque: DVec3,
@@ -425,12 +427,14 @@ impl Solver {
         for _ in 0..self.substep_count {
             for d in state.positional_data.values_mut() {
                 d.previous_position = d.position;
+                d.previous_velocity = d.velocity;
                 d.velocity += h * d.force * d.inverse_mass;
                 d.position += h * d.velocity;
             }
 
             for d in state.angular_data.values_mut() {
                 d.previous_orientation = d.orientation;
+                d.previous_velocity = d.velocity;
                 d.velocity +=
                     h * d.inverse_inertia * (d.torque - d.velocity.cross(d.inertia * d.velocity));
                 d.orientation = d.orientation
@@ -443,7 +447,7 @@ impl Solver {
 
             let inverse_h_squared = 1.0 / h_squared;
 
-            state.rigid_bodies.solve_contacts(
+            state.rigid_bodies.solve_positions(
                 inverse_h_squared,
                 &mut state.positional_data,
                 &mut state.angular_data,
@@ -459,13 +463,6 @@ impl Solver {
                 inverse_h_squared,
             );
 
-            // self.solve_constraints(
-            //     &mut state.positional_data,
-            //     &mut state.angular_data,
-            //     &state.positional_constraints,
-            //     h_squared,
-            // );
-
             for d in state.positional_data.values_mut() {
                 d.velocity = (d.position - d.previous_position) / h;
             }
@@ -479,123 +476,13 @@ impl Solver {
             }
 
             // solve velocities
-            self.solve_velocities();
+            state.rigid_bodies.solve_velocities(
+                &mut state.positional_data,
+                &mut state.angular_data,
+                h,
+            );
         }
     }
-
-    // fn solve_constraints(
-    //     &mut self,
-    //     positional_data: &mut SecondaryMap<PositionalData>,
-    //     angular_data: &mut SecondaryMap<AngularData>,
-    //     positional_constraints: &PrimaryMap<Arc<dyn PositionalConstraint + Sync + Send>>,
-    //     h_squared: f64,
-    // ) {
-    //     'outer: for (key, c) in positional_constraints.iter() {
-    //         self.inverse_masses.clear();
-    //         self.inverse_inertias.clear();
-    //         self.positions.clear();
-    //         self.orientations.clear();
-    //         self.position_gradient.clear();
-    //         self.application_points.clear();
-    //         self.rotation_axis.clear();
-    //         self.rotation.clear();
-
-    //         let bodies = c.bodies();
-    //         let n = bodies.len();
-
-    //         self.position_gradient.resize(n, DVec3::ZERO);
-    //         self.application_points.resize(n, DVec3::ZERO);
-
-    //         for &body in bodies {
-    //             let Some(data) = positional_data.get(body.0) else {
-    //                 error!(
-    //                     "Body {:?} involved in constraint {:?} does not exist",
-    //                     body, key
-    //                 );
-    //                 continue 'outer;
-    //             };
-    //             self.inverse_masses.push(data.inverse_mass);
-    //             self.positions.push(data.position);
-
-    //             match angular_data.get(body.0) {
-    //                 Some(angular_data) => {
-    //                     self.inverse_inertias.push(angular_data.inverse_inertia);
-    //                     self.orientations.push(angular_data.orientation);
-    //                 }
-    //                 None => {
-    //                     self.inverse_inertias.push(DMat3::ZERO);
-    //                     self.orientations.push(DQuat::IDENTITY);
-    //                 }
-    //             }
-    //         }
-
-    //         let value = c.value(
-    //             &self.positions,
-    //             &self.orientations,
-    //             &mut self.position_gradient,
-    //             &mut self.application_points,
-    //         );
-    //         let alpha_tilde = c.compliance() / h_squared;
-    //         for (((orientation, grad), application_point), inverse_inertia) in self
-    //             .orientations
-    //             .iter()
-    //             .zip(&self.position_gradient)
-    //             .zip(&self.application_points)
-    //             .zip(&self.inverse_inertias)
-    //         {
-    //             let local_grad = orientation.conjugate() * grad;
-    //             let rotation_axis = application_point.cross(local_grad);
-    //             self.rotation_axis.push(rotation_axis);
-    //             self.rotation.push(inverse_inertia * rotation_axis);
-    //         }
-
-    //         let weighted_inverse_mass: f64 = self
-    //             .inverse_masses
-    //             .iter()
-    //             .zip(self.position_gradient.iter())
-    //             .map(|(inverse_mass, grad)| inverse_mass * grad.length_squared())
-    //             .sum();
-
-    //         let weighted_inverse_inertial: f64 = self
-    //             .rotation_axis
-    //             .iter()
-    //             .zip(&self.rotation)
-    //             .map(|(axis, multiplied)| axis.dot(*multiplied))
-    //             .sum();
-
-    //         let w_tot = weighted_inverse_mass + weighted_inverse_inertial;
-
-    //         let denominator = w_tot + alpha_tilde;
-    //         let delta_lambda = if denominator != 0.0 {
-    //             -value / denominator
-    //         } else {
-    //             warn!(
-    //                 "Constraint {:?} is unsolvable. This is likely due to a zero gradient or infinite mass. Skipping constraint.",
-    //                 key
-    //             );
-    //             0.0
-    //         };
-
-    //         for ((body, inverse_mass), grad) in bodies
-    //             .iter()
-    //             .zip(&self.inverse_masses)
-    //             .zip(&self.position_gradient)
-    //         {
-    //             positional_data[body.0].position += inverse_mass * grad * delta_lambda;
-    //         }
-
-    //         for (body, rotation) in bodies.iter().zip(&self.rotation) {
-    //             if let Some(angular_data) = angular_data.get_mut(body.0) {
-    //                 let q = angular_data.orientation;
-    //                 let axis = delta_lambda * rotation;
-    //                 let q = q + q * DQuat::from_xyzw(axis.x, axis.y, axis.z, 0.0) * 0.5;
-    //                 angular_data.orientation = q.normalize();
-    //             }
-    //         }
-    //     }
-    // }
-
-    fn solve_velocities(&mut self) {}
 }
 
 impl Default for Solver {
@@ -680,6 +567,7 @@ mod tests {
                 position: p0,
                 previous_position: p0,
                 velocity: v0,
+                previous_velocity: v0,
                 inverse_mass: 1.0,
                 force: f,
             },

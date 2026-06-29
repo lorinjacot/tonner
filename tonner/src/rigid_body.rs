@@ -3,13 +3,14 @@ use sparse_keyed::SecondaryMap;
 
 use crate::{
     AngularData, BodyId, PositionalData, State, Transform,
-    rigid_body::contact::Contact,
+    rigid_body::contact::{Contact, SolvedContact},
     shape::{Ball, Box3D, collides_2balls, collision_info_2balls},
 };
 pub(crate) use positional_correction::{PositionalConstraint, PositionalCorrection};
 
 mod contact;
 mod positional_correction;
+mod velocity_correction;
 
 #[derive(Debug, Clone)]
 #[must_use]
@@ -245,6 +246,7 @@ impl RigidBodyBuilder {
                 position: self.position,
                 previous_position: self.position,
                 velocity: self.velocity,
+                previous_velocity: self.velocity,
                 inverse_mass: self.inverse_mass,
                 force: DVec3::ZERO,
             },
@@ -255,6 +257,7 @@ impl RigidBodyBuilder {
                 orientation: self.orientation,
                 previous_orientation: self.orientation,
                 velocity: self.angular_velocity,
+                previous_velocity: self.angular_velocity,
                 inertia: self.inertia,
                 inverse_inertia: self.inverse_inertia,
                 torque: DVec3::ZERO,
@@ -299,7 +302,8 @@ pub(crate) struct RigidBodies {
     rigid_bodies: SecondaryMap<()>,
     boxes: SecondaryMap<Box3D>,
     balls: SecondaryMap<Ball>,
-    contacts: Vec<Contact>,
+    detected_contacts: Vec<Contact>,
+    solved_contacts: Vec<SolvedContact>,
 }
 
 impl RigidBodies {
@@ -309,7 +313,8 @@ impl RigidBodies {
             rigid_bodies: SecondaryMap::new(),
             boxes: SecondaryMap::new(),
             balls: SecondaryMap::new(),
-            contacts: Vec::new(),
+            detected_contacts: Vec::new(),
+            solved_contacts: Vec::new(),
         }
     }
 
@@ -317,7 +322,7 @@ impl RigidBodies {
         self.rigid_bodies.contains(id.0)
     }
 
-    pub fn solve_contacts(
+    pub fn solve_positions(
         &mut self,
         inverse_timestep_squared: f64,
         positional_data: &mut SecondaryMap<PositionalData>,
@@ -325,8 +330,12 @@ impl RigidBodies {
     ) {
         self.detect_contacts(positional_data, angular_data);
 
-        for contact in self.contacts.drain(..) {
-            contact.solve_positions(positional_data, angular_data, inverse_timestep_squared);
+        for contact in self.detected_contacts.drain(..) {
+            if let Some(solved_contact) =
+                contact.solve_positions(positional_data, angular_data, inverse_timestep_squared)
+            {
+                self.solved_contacts.push(solved_contact);
+            }
         }
     }
 
@@ -355,11 +364,24 @@ impl RigidBodies {
                             world_normal: info.separating_vector.normalize_or(DVec3::X),
                             local_contact_points: info.local_contact_points,
                             static_friction_coefficient: 0.5,
+                            dynamic_friction_coefficient: 0.3,
+                            restitution_coefficient: 0.5,
                         };
-                        self.contacts.push(contact);
+                        self.detected_contacts.push(contact);
                     }
                 }
             }
+        }
+    }
+
+    pub fn solve_velocities(
+        &mut self,
+        positional_data: &mut SecondaryMap<PositionalData>,
+        angular_data: &mut SecondaryMap<AngularData>,
+        timestep: f64,
+    ) {
+        for contact in self.solved_contacts.drain(..) {
+            contact.solve_velocities(positional_data, angular_data, timestep);
         }
     }
 }

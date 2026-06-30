@@ -200,32 +200,29 @@ pub fn collides_box_box(
     let rot0_t = rot0.transpose();
     let rot1_t = rot1.transpose();
 
-    let halves0 = rot0 * box0.halves();
-    let halves1 = rot1 * box1.halves();
-
     let mut min_penetration_depth = f64::INFINITY;
     let mut collision_normal = DVec3::X;
+    let mut local_contact_points = [DVec3::ZERO, DVec3::ZERO];
     for axis in [
-        rot0_t.x_axis,
-        rot0_t.y_axis,
-        rot0_t.z_axis,
-        rot1_t.x_axis,
-        rot1_t.y_axis,
-        rot1_t.z_axis,
-        rot0_t.x_axis.cross(rot1_t.x_axis),
-        rot0_t.x_axis.cross(rot1_t.y_axis),
-        rot0_t.x_axis.cross(rot1_t.z_axis),
-        rot1_t.y_axis.cross(rot0_t.x_axis),
-        rot1_t.y_axis.cross(rot0_t.y_axis),
-        rot1_t.y_axis.cross(rot0_t.z_axis),
-        rot1_t.z_axis.cross(rot0_t.x_axis),
-        rot1_t.z_axis.cross(rot0_t.y_axis),
-        rot1_t.z_axis.cross(rot0_t.z_axis),
+        rot0.x_axis,
+        rot0.y_axis,
+        rot0.z_axis,
+        rot1.x_axis,
+        rot1.y_axis,
+        rot1.z_axis,
+        rot0.x_axis.cross(rot1.x_axis),
+        rot0.x_axis.cross(rot1.y_axis),
+        rot0.x_axis.cross(rot1.z_axis),
+        rot1.y_axis.cross(rot0.x_axis),
+        rot1.y_axis.cross(rot0.y_axis),
+        rot1.y_axis.cross(rot0.z_axis),
+        rot1.z_axis.cross(rot0.x_axis),
+        rot1.z_axis.cross(rot0.y_axis),
+        rot1.z_axis.cross(rot0.z_axis),
     ] {
         if axis.length_squared() < 0.1 {
             continue;
         }
-        dbg!(axis);
         let center0 = transform0.translation.dot(axis);
         let center1 = transform1.translation.dot(axis);
         let mut distance = center1 - center0;
@@ -236,9 +233,8 @@ pub fn collides_box_box(
             axis
         };
 
-        let axis_abs = axis.abs();
-        let radius0 = halves0.dot(axis_abs).abs();
-        let radius1 = halves1.dot(axis_abs).abs();
+        let radius0 = (rot0_t * axis).abs().dot(box0.halves());
+        let radius1 = (rot1_t * axis).abs().dot(box1.halves());
 
         if distance >= radius0 + radius1 {
             return None;
@@ -248,13 +244,14 @@ pub fn collides_box_box(
         if penetration_depth < min_penetration_depth {
             min_penetration_depth = penetration_depth;
             collision_normal = normal;
+            local_contact_points = [rot0_t * normal * radius0, rot1_t * -normal * radius1];
         }
     }
 
     Some(CollisionInfo {
         penetration_depth: min_penetration_depth,
         world_normal: collision_normal,
-        local_contact_points: [DVec3::ZERO, DVec3::ZERO],
+        local_contact_points,
     })
 }
 
@@ -285,10 +282,14 @@ mod tests {
             collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
         assert_eq!(collision_info.penetration_depth, 0.5);
         assert_eq!(collision_info.world_normal, DVec3::new(-1.0, 0.0, 0.0));
-        #[rustfmt::skip]
-        assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
-        #[rustfmt::skip]
-        assert_eq!(collision_info.local_contact_points[1], DVec3::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            collision_info.local_contact_points[0],
+            DVec3::new(-1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            collision_info.local_contact_points[1],
+            DVec3::new(1.0, 0.0, 0.0)
+        );
 
         // colliding, ball center inside box
         let ball_transform = Transform::from_translation(DVec3::new(0.5, 0.0, 0.0));
@@ -296,10 +297,14 @@ mod tests {
             collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
         assert_eq!(collision_info.penetration_depth, 1.5);
         assert_eq!(collision_info.world_normal, DVec3::new(-1.0, 0.0, 0.0));
-        #[rustfmt::skip]
-        assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
-        #[rustfmt::skip]
-        assert_eq!(collision_info.local_contact_points[1], DVec3::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            collision_info.local_contact_points[0],
+            DVec3::new(-1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            collision_info.local_contact_points[1],
+            DVec3::new(1.0, 0.0, 0.0)
+        );
 
         // with translation and rotation
         let box_transform = Transform {
@@ -313,12 +318,19 @@ mod tests {
         let collision_info =
             collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
         assert_eq!(collision_info.penetration_depth, 1.5);
-        #[rustfmt::skip]
-        assert!(collision_info.world_normal.abs_diff_eq(DVec3::new(-1.0, 0.0, 0.0), 1e-6));
-        #[rustfmt::skip]
-        assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
-        #[rustfmt::skip]
-        assert_eq!(collision_info.local_contact_points[1], DVec3::new(0.0, 0.0, 1.0));
+        assert!(
+            collision_info
+                .world_normal
+                .abs_diff_eq(DVec3::new(-1.0, 0.0, 0.0), 1e-6)
+        );
+        assert_eq!(
+            collision_info.local_contact_points[0],
+            DVec3::new(-1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            collision_info.local_contact_points[1],
+            DVec3::new(0.0, 0.0, 1.0)
+        );
     }
 
     #[test]
@@ -332,13 +344,27 @@ mod tests {
         let collision_info = collides_box_box((&box0, &transform0), (&box1, &transform1)).unwrap();
         assert_eq!(collision_info.penetration_depth, 0.5);
         assert_eq!(collision_info.world_normal, DVec3::new(1.0, 0.0, 0.0));
+        assert_eq!(
+            collision_info.local_contact_points[0],
+            DVec3::new(1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            collision_info.local_contact_points[1],
+            DVec3::new(-1.0, 0.0, 0.0)
+        );
 
         let transform0 =
             Transform::from_rotation(DQuat::from_rotation_y(std::f64::consts::FRAC_PI_4));
 
         let collision_info = collides_box_box((&box0, &transform0), (&box1, &transform1)).unwrap();
-        #[rustfmt::skip]
         assert!((collision_info.penetration_depth - (std::f64::consts::SQRT_2 - 0.5)).abs() < 1e-6);
         assert_eq!(collision_info.world_normal, DVec3::new(1.0, 0.0, 0.0));
+        assert!(
+            collision_info.local_contact_points[0].abs_diff_eq(DVec3::new(1.0, 0.0, 1.0), 1e-6)
+        );
+        assert_eq!(
+            collision_info.local_contact_points[1],
+            DVec3::new(-1.0, 0.0, 0.0)
+        );
     }
 }

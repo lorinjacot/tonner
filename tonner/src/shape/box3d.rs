@@ -93,8 +93,9 @@ impl Shape3D for Box3D {
 
 impl ConvexShape3D for Box3D {
     fn support_point(&self, transform: &Transform, direction: DVec3) -> DVec3 {
-        let halves = (transform.rotation * self.halves).abs();
-        transform.translation + direction.signum() * halves
+        let local_direction = transform.rotation.inverse() * direction;
+        let local_support_point = local_direction.signum() * self.halves;
+        transform.translation + transform.rotation * local_support_point
     }
 }
 

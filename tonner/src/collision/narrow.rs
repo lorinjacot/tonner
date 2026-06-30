@@ -22,7 +22,7 @@ pub struct CollisionInfo {
 ///
 /// # Examples
 ///
-/// Two balls that are colliding:
+/// Colliding balls:
 /// ```
 /// # use glam::dvec3;
 /// # use tonner::{Transform, shape::Ball, collision::narrow::collides_ball_ball};
@@ -36,7 +36,7 @@ pub struct CollisionInfo {
 /// assert_eq!(collision_info.local_contact_points[1], dvec3(-1.0, 0.0, 0.0));
 /// ```
 ///
-/// Two balls that are touching:
+/// Touching balls:
 /// ```
 /// # use glam::dvec3;
 /// # use tonner::{Transform, shape::Ball, collision::narrow::collides_ball_ball};
@@ -46,7 +46,7 @@ pub struct CollisionInfo {
 /// assert!(collides_ball_ball((&ball, &a), (&ball, &b)).is_none());
 /// ```
 ///
-/// Two balls that are not colliding:
+/// Non-colliding balls:
 /// ```
 /// # use glam::dvec3;
 /// # use tonner::{Transform, shape::Ball, collision::narrow::collides_ball_ball};
@@ -87,7 +87,7 @@ pub fn collides_ball_ball(
 ///
 /// # Examples
 ///
-/// Ball and box that are colliding:
+/// Colliding ball and box:
 /// ```
 /// # use glam::dvec3;
 /// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
@@ -102,7 +102,7 @@ pub fn collides_ball_ball(
 /// assert_eq!(collision_info.local_contact_points[1], dvec3(-1.0, 0.0, 0.0));
 /// ```
 ///
-/// Ball and box that are touching:
+/// Touching ball and box:
 /// ```
 /// # use glam::dvec3;
 /// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
@@ -113,7 +113,7 @@ pub fn collides_ball_ball(
 /// assert!(collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).is_none());
 /// ```
 ///
-/// Ball and box that are not colliding:
+/// Non-colliding ball and box:
 /// ```
 /// # use glam::dvec3;
 /// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
@@ -190,6 +190,46 @@ pub fn collides_ball_box(
     })
 }
 
+/// Returns `Some(CollisionInfo)` if the two boxes collide when applying the given transforms, and `None` otherwise. If the two boxes are exactly touching, this function returns `None`.
+///
+/// # Examples
+///
+/// Colliding boxes:
+/// ```
+/// # use glam::DVec3;
+/// # use tonner::{Transform, shape::Box3D, collision::narrow::collides_box_box};
+/// let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let transform0 = Transform::IDENTITY;
+/// let transform1 = Transform::from_translation(DVec3::new(1.5, 0.0, 0.0));
+/// let collision_info = collides_box_box((&box0, &transform0), (&box1, &transform1)).unwrap();
+/// assert_eq!(collision_info.penetration_depth, 0.5);
+/// assert_eq!(collision_info.world_normal, DVec3::new(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[0], DVec3::new(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[1], DVec3::new(-1.0, 0.0, 0.0));
+/// ```
+///
+/// Touching boxes:
+/// ```
+/// # use glam::DVec3;
+/// # use tonner::{Transform, shape::Box3D, collision::narrow::collides_box_box};
+/// let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let transform0 = Transform::IDENTITY;
+/// let transform1 = Transform::from_translation(DVec3::new(2.0, 0.0, 0.0));
+/// assert!(collides_box_box((&box0, &transform0), (&box1, &transform1)).is_none());
+/// ```
+///
+/// Non-colliding boxes:
+/// ```
+/// # use glam::DVec3;
+/// # use tonner::{Transform, shape::Box3D, collision::narrow::collides_box_box};
+/// let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let transform0 = Transform::IDENTITY;
+/// let transform1 = Transform::from_translation(DVec3::new(3.0, 0.0, 0.0));
+/// assert!(collides_box_box((&box0, &transform0), (&box1, &transform1)).is_none());
+/// ```
 pub fn collides_box_box(
     (box0, transform0): (&Box3D, &Transform),
     (box1, transform1): (&Box3D, &Transform),

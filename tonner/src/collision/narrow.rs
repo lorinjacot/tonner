@@ -1,4 +1,4 @@
-use glam::DVec3;
+use glam::{DMat3, DVec3};
 
 use crate::{
     Transform,
@@ -190,8 +190,78 @@ pub fn collides_ball_box(
     })
 }
 
+pub fn collides_box_box(
+    (box0, transform0): (&Box3D, &Transform),
+    (box1, transform1): (&Box3D, &Transform),
+) -> Option<CollisionInfo> {
+    let rot0 = DMat3::from_quat(transform0.rotation);
+    let rot1 = DMat3::from_quat(transform1.rotation);
+
+    let rot0_t = rot0.transpose();
+    let rot1_t = rot1.transpose();
+
+    let halves0 = rot0 * box0.halves();
+    let halves1 = rot1 * box1.halves();
+
+    let mut min_penetration_depth = f64::INFINITY;
+    let mut collision_normal = DVec3::X;
+    for axis in [
+        rot0_t.x_axis,
+        rot0_t.y_axis,
+        rot0_t.z_axis,
+        rot1_t.x_axis,
+        rot1_t.y_axis,
+        rot1_t.z_axis,
+        rot0_t.x_axis.cross(rot1_t.x_axis),
+        rot0_t.x_axis.cross(rot1_t.y_axis),
+        rot0_t.x_axis.cross(rot1_t.z_axis),
+        rot1_t.y_axis.cross(rot0_t.x_axis),
+        rot1_t.y_axis.cross(rot0_t.y_axis),
+        rot1_t.y_axis.cross(rot0_t.z_axis),
+        rot1_t.z_axis.cross(rot0_t.x_axis),
+        rot1_t.z_axis.cross(rot0_t.y_axis),
+        rot1_t.z_axis.cross(rot0_t.z_axis),
+    ] {
+        if axis.length_squared() < 0.1 {
+            continue;
+        }
+        dbg!(axis);
+        let center0 = transform0.translation.dot(axis);
+        let center1 = transform1.translation.dot(axis);
+        let mut distance = center1 - center0;
+        let normal = if distance < 0.0 {
+            distance = -distance;
+            -axis
+        } else {
+            axis
+        };
+
+        let axis_abs = axis.abs();
+        let radius0 = halves0.dot(axis_abs).abs();
+        let radius1 = halves1.dot(axis_abs).abs();
+
+        if distance >= radius0 + radius1 {
+            return None;
+        }
+
+        let penetration_depth = radius0 + radius1 - distance;
+        if penetration_depth < min_penetration_depth {
+            min_penetration_depth = penetration_depth;
+            collision_normal = normal;
+        }
+    }
+
+    Some(CollisionInfo {
+        penetration_depth: min_penetration_depth,
+        world_normal: collision_normal,
+        local_contact_points: [DVec3::ZERO, DVec3::ZERO],
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use glam::DQuat;
+
     use super::*;
 
     #[test]
@@ -249,5 +319,26 @@ mod tests {
         assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
         #[rustfmt::skip]
         assert_eq!(collision_info.local_contact_points[1], DVec3::new(0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn test_collides_box_box() {
+        let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+        let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
+
+        let transform0 = Transform::IDENTITY;
+        let transform1 = Transform::from_translation(DVec3::new(1.5, 0.0, 0.0));
+
+        let collision_info = collides_box_box((&box0, &transform0), (&box1, &transform1)).unwrap();
+        assert_eq!(collision_info.penetration_depth, 0.5);
+        assert_eq!(collision_info.world_normal, DVec3::new(1.0, 0.0, 0.0));
+
+        let transform0 =
+            Transform::from_rotation(DQuat::from_rotation_y(std::f64::consts::FRAC_PI_4));
+
+        let collision_info = collides_box_box((&box0, &transform0), (&box1, &transform1)).unwrap();
+        #[rustfmt::skip]
+        assert!((collision_info.penetration_depth - (std::f64::consts::SQRT_2 - 0.5)).abs() < 1e-6);
+        assert_eq!(collision_info.world_normal, DVec3::new(1.0, 0.0, 0.0));
     }
 }

@@ -65,7 +65,7 @@ impl Box3D {
     }
 
     /// Returns the half side lengths of the Box3D in the `x`, `y` and `z` directions.
-    /// 
+    ///
     /// ## Example
     /// ```
     /// # use tonner::shape::Box3D;

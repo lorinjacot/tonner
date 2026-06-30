@@ -11,7 +11,7 @@ pub(crate) trait PositionalConstraint {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PositionalCorrection {
-    /// Expressed in world frame
+    /// Expressed in world frame. Unit vector pointing from the first body to the second body.
     pub direction: DVec3,
     pub magnitude: f64,
     /// Expressed in local frame (body space)

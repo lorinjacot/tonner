@@ -63,6 +63,18 @@ impl Box3D {
     pub fn z(&self) -> f64 {
         self.halves.z * 2.0
     }
+
+    /// Returns the half side lengths of the Box3D in the `x`, `y` and `z` directions.
+    /// 
+    /// ## Example
+    /// ```
+    /// # use tonner::shape::Box3D;
+    /// let box_ = Box3D::from_dimensions(2.0, 4.0, 6.0);
+    /// assert_eq!(box_.halves(), glam::dvec3(1.0, 2.0, 3.0));
+    /// ```
+    pub fn halves(&self) -> DVec3 {
+        self.halves
+    }
 }
 
 impl Shape3D for Box3D {

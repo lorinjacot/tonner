@@ -1,6 +1,9 @@
 use glam::DVec3;
 
-use crate::{Transform, shape::Ball};
+use crate::{
+    Transform,
+    shape::{Ball, Box3D},
+};
 
 /// Information about a collision between two objects. This is returned by the narrow phase of the collision detection process.
 #[derive(Debug, Clone)]
@@ -76,4 +79,175 @@ pub fn collides_ball_ball(
         world_normal,
         local_contact_points,
     })
+}
+
+/// Returns `Some(CollisionInfo)` if the ball and box collide when applying the given transforms, and `None` otherwise. If the ball and box are exactly touching, this function returns `None`.
+///
+/// Based on the algorithm described in "Collision Detection in Interactive 3D Environments" by Gino van den Bergen, 2004, Section 3.2.2 "Sphere-Box Test".
+///
+/// # Examples
+///
+/// Ball and box that are colliding:
+/// ```
+/// # use glam::dvec3;
+/// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
+/// let ball = Ball::UNIT;
+/// let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let ball_transform = Transform::IDENTITY;
+/// let box_transform = Transform::from_translation(dvec3(1.0, 0.0, 0.0));
+/// let collision_info = collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
+/// assert_eq!(collision_info.penetration_depth, 1.0);
+/// assert_eq!(collision_info.world_normal, dvec3(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[0], dvec3(1.0, 0.0, 0.0));
+/// assert_eq!(collision_info.local_contact_points[1], dvec3(-1.0, 0.0, 0.0));
+/// ```
+///
+/// Ball and box that are touching:
+/// ```
+/// # use glam::dvec3;
+/// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
+/// let ball = Ball::UNIT;
+/// let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let ball_transform = Transform::IDENTITY;
+/// let box_transform = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
+/// assert!(collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).is_none());
+/// ```
+///
+/// Ball and box that are not colliding:
+/// ```
+/// # use glam::dvec3;
+/// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
+/// let ball = Ball::UNIT;
+/// let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
+/// let ball_transform = Transform::IDENTITY;
+/// let box_transform = Transform::from_translation(dvec3(3.0, 0.0, 0.0));
+/// assert!(collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).is_none());
+/// ```
+pub fn collides_ball_box(
+    (ball, ball_transform): (&Ball, &Transform),
+    (box3d, box_transform): (&Box3D, &Transform),
+) -> Option<CollisionInfo> {
+    let relative_ball_center = box_transform.rotation.conjugate()
+        * (ball_transform.translation - box_transform.translation);
+
+    let closest_point_on_box = relative_ball_center.clamp(-box3d.halves(), box3d.halves());
+
+    let v = closest_point_on_box - relative_ball_center;
+    if v.length_squared() >= ball.radius() * ball.radius() {
+        return None;
+    }
+
+    let (normal, distance) = v.normalize_and_length();
+    let (ball_witness_point, box_witness_point, penetration_depth, local_normal) =
+        if distance == 0.0 {
+            // center of the ball is inside the box
+            let delta = box3d.halves() - relative_ball_center.abs();
+
+            let mut smallest_component = delta.x;
+            let mut smallest_dir = relative_ball_center.x.signum() * DVec3::NEG_X;
+            if delta.y < smallest_component {
+                smallest_component = delta.y;
+                smallest_dir = relative_ball_center.y.signum() * DVec3::NEG_Y;
+            }
+            if delta.z < smallest_component {
+                smallest_component = delta.z;
+                smallest_dir = relative_ball_center.z.signum() * DVec3::NEG_Z;
+            }
+
+            let box_witness_point = relative_ball_center - smallest_component * smallest_dir;
+            let ball_witness_point = relative_ball_center + ball.radius() * smallest_dir;
+            let penetration_depth = smallest_component + ball.radius();
+
+            (
+                ball_witness_point,
+                box_witness_point,
+                penetration_depth,
+                smallest_dir,
+            )
+        } else {
+            // center of the ball is outside the box
+            let ball_witness_point = relative_ball_center + ball.radius() * normal;
+            let penetration_depth = ball.radius() - distance;
+
+            (
+                ball_witness_point,
+                closest_point_on_box,
+                penetration_depth,
+                normal,
+            )
+        };
+
+    let world_normal = box_transform.rotation * local_normal;
+    let ball_witness_point_world =
+        box_transform.rotation * ball_witness_point + box_transform.translation;
+    let ball_witness_point_local = ball_transform.rotation.conjugate()
+        * (ball_witness_point_world - ball_transform.translation);
+
+    Some(CollisionInfo {
+        penetration_depth,
+        world_normal,
+        local_contact_points: [ball_witness_point_local, box_witness_point],
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_collides_ball_box() {
+        let ball = Ball::UNIT;
+        let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
+
+        let box_transform = Transform::IDENTITY;
+
+        // no collision
+        let ball_transform = Transform::from_translation(DVec3::new(3.0, 0.0, 0.0));
+        assert!(collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).is_none());
+
+        // touching
+        let ball_transform = Transform::from_translation(DVec3::new(2.0, 0.0, 0.0));
+        assert!(collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).is_none());
+
+        // colliding, ball center outside box
+        let ball_transform = Transform::from_translation(DVec3::new(1.5, 0.0, 0.0));
+        let collision_info =
+            collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
+        assert_eq!(collision_info.penetration_depth, 0.5);
+        assert_eq!(collision_info.world_normal, DVec3::new(-1.0, 0.0, 0.0));
+        #[rustfmt::skip]
+        assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
+        #[rustfmt::skip]
+        assert_eq!(collision_info.local_contact_points[1], DVec3::new(1.0, 0.0, 0.0));
+
+        // colliding, ball center inside box
+        let ball_transform = Transform::from_translation(DVec3::new(0.5, 0.0, 0.0));
+        let collision_info =
+            collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
+        assert_eq!(collision_info.penetration_depth, 1.5);
+        assert_eq!(collision_info.world_normal, DVec3::new(-1.0, 0.0, 0.0));
+        #[rustfmt::skip]
+        assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
+        #[rustfmt::skip]
+        assert_eq!(collision_info.local_contact_points[1], DVec3::new(1.0, 0.0, 0.0));
+
+        // with translation and rotation
+        let box_transform = Transform {
+            translation: DVec3::new(1.0, 2.0, 3.0),
+            rotation: glam::DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2),
+        };
+        let ball_transform = Transform {
+            translation: DVec3::new(1.5, 2.0, 3.0),
+            rotation: glam::DQuat::IDENTITY,
+        };
+        let collision_info =
+            collides_ball_box((&ball, &ball_transform), (&box_, &box_transform)).unwrap();
+        assert_eq!(collision_info.penetration_depth, 1.5);
+        #[rustfmt::skip]
+        assert!(collision_info.world_normal.abs_diff_eq(DVec3::new(-1.0, 0.0, 0.0), 1e-6));
+        #[rustfmt::skip]
+        assert_eq!(collision_info.local_contact_points[0], DVec3::new(-1.0, 0.0, 0.0));
+        #[rustfmt::skip]
+        assert_eq!(collision_info.local_contact_points[1], DVec3::new(0.0, 0.0, 1.0));
+    }
 }

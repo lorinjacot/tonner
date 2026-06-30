@@ -2,7 +2,7 @@ use glam::DVec3;
 
 use crate::{
     AABB, Transform,
-    collision::CollisionInfo,
+    collision::narrow::{CollisionInfo, collides_ball_ball},
     shape::{ConvexShape3D, Shape3D},
 };
 
@@ -125,7 +125,8 @@ pub fn distance_2balls(
 /// let transform1 = Transform::IDENTITY;
 /// let transform2 = Transform::from_translation(dvec3(1.5, 0.0, 0.0));
 /// let collision_info = collision_info_2balls((&ball, &transform1), (&ball, &transform2));
-/// assert_eq!(collision_info.separating_vector, dvec3(0.5, 0.0, 0.0));
+/// assert_eq!(collision_info.penetration_depth, 0.5);
+/// assert_eq!(collision_info.world_normal, dvec3(1.0, 0.0, 0.0));
 /// assert_eq!(collision_info.local_contact_points[0], dvec3(1.0, 0.0, 0.0));
 /// assert_eq!(collision_info.local_contact_points[1], dvec3(-1.0, 0.0, 0.0));
 /// ```
@@ -133,16 +134,6 @@ pub fn collision_info_2balls(
     (ball1, transform1): (&Ball, &Transform),
     (ball2, transform2): (&Ball, &Transform),
 ) -> CollisionInfo {
-    let center_distance = transform1.translation - transform2.translation;
-    let separating_dir = center_distance.normalize_or(DVec3::X);
-    let local_contact_points = [
-        -ball1.radius * separating_dir,
-        ball2.radius * separating_dir,
-    ];
-    let separating_vector = transform1.translation + local_contact_points[0]
-        - (transform2.translation + local_contact_points[1]);
-    CollisionInfo {
-        separating_vector,
-        local_contact_points,
-    }
+    collides_ball_ball((ball1, transform1), (ball2, transform2))
+        .expect("The two balls are not colliding")
 }

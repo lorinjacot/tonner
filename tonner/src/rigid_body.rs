@@ -361,7 +361,7 @@ impl RigidBodies {
                             collision_info_2balls((ball0, &transform0), (ball1, &transform1));
                         let contact = Contact {
                             bodies: [BodyId(body0), BodyId(body1)],
-                            world_normal: info.separating_vector.normalize_or(DVec3::X),
+                            world_normal: info.world_normal,
                             local_contact_points: info.local_contact_points,
                             static_friction_coefficient: 0.5,
                             dynamic_friction_coefficient: 0.3,

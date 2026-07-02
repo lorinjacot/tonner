@@ -37,6 +37,19 @@ struct PositionalData {
     force: DVec3,
 }
 
+impl Default for PositionalData {
+    fn default() -> Self {
+        Self {
+            position: DVec3::ZERO,
+            previous_position: DVec3::ZERO,
+            velocity: DVec3::ZERO,
+            previous_velocity: DVec3::ZERO,
+            inverse_mass: 0.0,
+            force: DVec3::ZERO,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct AngularData {
     orientation: DQuat,
@@ -46,6 +59,20 @@ struct AngularData {
     inertia: DMat3,
     inverse_inertia: DMat3,
     torque: DVec3,
+}
+
+impl Default for AngularData {
+    fn default() -> Self {
+        Self {
+            orientation: DQuat::IDENTITY,
+            previous_orientation: DQuat::IDENTITY,
+            velocity: DVec3::ZERO,
+            previous_velocity: DVec3::ZERO,
+            inertia: DMat3::IDENTITY,
+            inverse_inertia: DMat3::IDENTITY,
+            torque: DVec3::ZERO,
+        }
+    }
 }
 
 #[derive(Debug)]

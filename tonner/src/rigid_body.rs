@@ -16,13 +16,8 @@ mod velocity_correction;
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct RigidBodyBuilder {
-    position: DVec3,
-    velocity: DVec3,
-    inverse_mass: f64,
-    orientation: DQuat,
-    angular_velocity: DVec3,
-    inertia: DMat3,
-    inverse_inertia: DMat3,
+    positional_data: PositionalData,
+    angular_data: AngularData,
     shape: Shape,
 }
 
@@ -43,7 +38,7 @@ impl RigidBodyBuilder {
     /// assert_eq!(engine.position(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn position(mut self, position: impl Into<DVec3>) -> Self {
-        self.position = position.into();
+        self.positional_data.position = position.into();
         self
     }
 
@@ -63,7 +58,7 @@ impl RigidBodyBuilder {
     /// assert_eq!(engine.velocity(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn velocity(mut self, velocity: impl Into<DVec3>) -> Self {
-        self.velocity = velocity.into();
+        self.positional_data.velocity = velocity.into();
         self
     }
 
@@ -88,7 +83,7 @@ impl RigidBodyBuilder {
     /// ```
     pub fn mass(mut self, mass: f64) -> Self {
         assert!(mass > 0.0, "Mass must be positive");
-        self.inverse_mass = 1.0 / mass;
+        self.positional_data.inverse_mass = 1.0 / mass;
         self
     }
 
@@ -115,7 +110,7 @@ impl RigidBodyBuilder {
     /// ```
     pub fn inverse_mass(mut self, inverse_mass: f64) -> Self {
         assert!(inverse_mass >= 0.0, "Inverse mass must be non-negative");
-        self.inverse_mass = inverse_mass;
+        self.positional_data.inverse_mass = inverse_mass;
         self
     }
 
@@ -136,7 +131,7 @@ impl RigidBodyBuilder {
     /// assert_eq!(engine.orientation(b).unwrap(), DQuat::IDENTITY);
     /// ```
     pub fn orientation(mut self, orientation: impl Into<DQuat>) -> Self {
-        self.orientation = orientation.into();
+        self.angular_data.orientation = orientation.into();
         self
     }
 
@@ -157,7 +152,7 @@ impl RigidBodyBuilder {
     /// assert_eq!(engine.angular_velocity(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn angular_velocity(mut self, angular_velocity: impl Into<DVec3>) -> Self {
-        self.angular_velocity = angular_velocity.into();
+        self.angular_data.velocity = angular_velocity.into();
         self
     }
 
@@ -189,8 +184,8 @@ impl RigidBodyBuilder {
             inertia.determinant() > 0.0,
             "Inertia must be positive definite"
         );
-        self.inertia = inertia;
-        self.inverse_inertia = inertia.inverse();
+        self.angular_data.inertia = inertia;
+        self.angular_data.inverse_inertia = inertia.inverse();
         self
     }
 
@@ -222,8 +217,8 @@ impl RigidBodyBuilder {
             inverse_inertia.determinant() > 0.0,
             "Inverse inertia must be positive definite"
         );
-        self.inverse_inertia = inverse_inertia;
-        self.inertia = inverse_inertia.inverse();
+        self.angular_data.inverse_inertia = inverse_inertia;
+        self.angular_data.inertia = inverse_inertia.inverse();
         self
     }
 
@@ -241,29 +236,8 @@ impl RigidBodyBuilder {
         let id = engine.bodies.create();
 
         engine.rigid_bodies.rigid_bodies.insert(id, ());
-        engine.positional_data.insert(
-            id,
-            PositionalData {
-                position: self.position,
-                previous_position: self.position,
-                velocity: self.velocity,
-                previous_velocity: self.velocity,
-                inverse_mass: self.inverse_mass,
-                force: DVec3::ZERO,
-            },
-        );
-        engine.angular_data.insert(
-            id,
-            AngularData {
-                orientation: self.orientation,
-                previous_orientation: self.orientation,
-                velocity: self.angular_velocity,
-                previous_velocity: self.angular_velocity,
-                inertia: self.inertia,
-                inverse_inertia: self.inverse_inertia,
-                torque: DVec3::ZERO,
-            },
-        );
+        engine.positional_data.insert(id, self.positional_data);
+        engine.angular_data.insert(id, self.angular_data);
         match self.shape {
             Shape::Box(box_) => {
                 engine.rigid_bodies.boxes.insert(id, box_);
@@ -280,13 +254,8 @@ impl RigidBodyBuilder {
 impl Default for RigidBodyBuilder {
     fn default() -> Self {
         RigidBodyBuilder {
-            position: DVec3::ZERO,
-            velocity: DVec3::ZERO,
-            inverse_mass: 0.0,
-            orientation: DQuat::IDENTITY,
-            angular_velocity: DVec3::ZERO,
-            inertia: DMat3::IDENTITY,
-            inverse_inertia: DMat3::IDENTITY,
+            positional_data: PositionalData::default(),
+            angular_data: AngularData::default(),
             shape: Shape::Ball(Ball::UNIT),
         }
     }

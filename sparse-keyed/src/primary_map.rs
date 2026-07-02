@@ -264,17 +264,17 @@ impl<T> PrimaryMap<T> {
     }
 
     /// Returns a mutable reference to the value associated with the given key, or `None` if the key is not present in the map.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::PrimaryMap;
     /// let mut map = PrimaryMap::new();
     /// let a = map.add("a");
-    /// 
+    ///
     /// if let Some(value) = map.get_mut(a) {
     ///   *value = "modified a";
     /// }
-    /// 
+    ///
     /// assert_eq!(map.get(a), Some(&"modified a"));
     /// ```
     pub fn get_mut(&mut self, key: Key) -> Option<&mut T> {
@@ -293,13 +293,13 @@ impl<T> PrimaryMap<T> {
     }
 
     /// Returns an iterator visiting all entries in arbitrary order. The order of the entries is not guaranteed and may change after insertions and deletions.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::PrimaryMap;
     /// let mut map = PrimaryMap::new();
     /// let a = map.add("a");
-    /// 
+    ///
     /// let mut iter = map.iter();
     /// assert_eq!(iter.next(), Some((a, &"a")));
     /// assert_eq!(iter.next(), None);
@@ -311,20 +311,20 @@ impl<T> PrimaryMap<T> {
     }
 
     /// Returns an iterator visiting all entries in arbitrary order with mutable references to their values. The order of the entries is not guaranteed and may change after insertions and deletions.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::PrimaryMap;
     /// let mut map = PrimaryMap::new();
     /// let a = map.add("a");
     /// let b = map.add("b");
-    /// 
+    ///
     /// for (key, value) in map.iter_mut() {
     ///   if key == a {
     ///     *value = "modified a";
     ///   }
     /// }
-    /// 
+    ///
     /// assert_eq!(map.get(a), Some(&"modified a"));
     /// assert_eq!(map.get(b), Some(&"b"));
     /// ```
@@ -335,13 +335,13 @@ impl<T> PrimaryMap<T> {
     }
 
     /// Returns an iterator visiting all keys in arbitrary order. The order of the keys is not guaranteed and may change after insertions and deletions.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::PrimaryMap;
     /// let mut map = PrimaryMap::new();
     /// let a = map.add("a");
-    /// 
+    ///
     /// let mut iter = map.keys();
     /// assert_eq!(iter.next(), Some(a));
     /// assert_eq!(iter.next(), None);
@@ -353,13 +353,13 @@ impl<T> PrimaryMap<T> {
     }
 
     /// Returns an iterator visiting all values in arbitrary order. The order of the values is not guaranteed and may change after insertions and deletions.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::PrimaryMap;
     /// let mut map = PrimaryMap::new();
     /// let a = map.add("a");
-    /// 
+    ///
     /// let mut iter = map.values();
     /// assert_eq!(iter.next(), Some(&"a"));
     /// assert_eq!(iter.next(), None);
@@ -371,17 +371,17 @@ impl<T> PrimaryMap<T> {
     }
 
     /// Returns an iterator visiting all values in arbitrary order with mutable references to their values. The order of the values is not guaranteed and may change after insertions and deletions.
-    /// 
+    ///
     /// # Examples
     /// ```
     /// # use sparse_keyed::PrimaryMap;
     /// let mut map = PrimaryMap::new();
     /// let a = map.add("a");
-    /// 
+    ///
     /// for value in map.values_mut() {
     ///   *value = "modified a";
     /// }
-    /// 
+    ///
     /// assert_eq!(map.get(a), Some(&"modified a"));
     /// ```
     pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
@@ -433,6 +433,7 @@ impl<'a, T> IntoIterator for &'a mut PrimaryMap<T> {
 /// assert_eq!(iter.next(), Some((a, "a")));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct IntoIter<T> {
     inner: std::vec::IntoIter<DenseEntry<T>>,
 }
@@ -484,17 +485,18 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
 impl<T> FusedIterator for IntoIter<T> {}
 
 /// An iterator visiting all entries in arbitrary order. Created by [`PrimaryMap::iter()`]. The order of the entries is not guaranteed and may change after insertions and deletions.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::PrimaryMap;
 /// let mut map = PrimaryMap::new();
 /// let a = map.add("a");
-/// 
+///
 /// let mut iter = map.iter();
 /// assert_eq!(iter.next(), Some((a, &"a")));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct Iter<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
@@ -550,14 +552,14 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
 impl<'a, T> FusedIterator for Iter<'a, T> {}
 
 /// An iterator visiting all entries in arbitrary order with mutable references to their values. Created by [`PrimaryMap::iter_mut()`]. The order of the entries is not guaranteed and may change after insertions and deletions.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::PrimaryMap;
 /// let mut map = PrimaryMap::new();
 /// let a = map.add("a");
 /// let b = map.add("b");
-/// 
+///
 /// for (key, value) in map.iter_mut() {
 ///     if key == a {
 ///         *value = "modified a";
@@ -566,6 +568,7 @@ impl<'a, T> FusedIterator for Iter<'a, T> {}
 /// assert_eq!(map.get(a), Some(&"modified a"));
 /// assert_eq!(map.get(b), Some(&"b"));
 /// ```
+#[derive(Debug)]
 pub struct IterMut<'a, T> {
     inner: std::slice::IterMut<'a, DenseEntry<T>>,
 }
@@ -621,17 +624,18 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
 impl<'a, T> FusedIterator for IterMut<'a, T> {}
 
 /// An iterator visiting all keys in arbitrary order. Created by [`PrimaryMap::keys()`]. The order of the keys is not guaranteed and may change after insertions and deletions.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::PrimaryMap;
 /// let mut map = PrimaryMap::new();
 /// let a = map.add("a");
-/// 
+///
 /// let mut iter = map.keys();
 /// assert_eq!(iter.next(), Some(a));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct Keys<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
@@ -682,17 +686,18 @@ impl<'a, T> DoubleEndedIterator for Keys<'a, T> {
 impl<'a, T> FusedIterator for Keys<'a, T> {}
 
 /// An iterator visiting all values in arbitrary order. Created by [`PrimaryMap::values()`]. The order of the values is not guaranteed and may change after insertions and deletions.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::PrimaryMap;
 /// let mut map = PrimaryMap::new();
 /// let a = map.add("a");
-/// 
+///
 /// let mut iter = map.values();
 /// assert_eq!(iter.next(), Some(&"a"));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct Values<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
@@ -724,8 +729,7 @@ impl<'a, T> Iterator for Values<'a, T> {
     where
         F: FnMut(B, Self::Item) -> B,
     {
-        self.inner
-            .fold(init, |acc, entry| f(acc, &entry.value))
+        self.inner.fold(init, |acc, entry| f(acc, &entry.value))
     }
 }
 
@@ -744,19 +748,20 @@ impl<'a, T> DoubleEndedIterator for Values<'a, T> {
 impl<'a, T> FusedIterator for Values<'a, T> {}
 
 /// An iterator visiting all values in arbitrary order with mutable references to their values. Created by [`PrimaryMap::values_mut()`]. The order of the values is not guaranteed and may change after insertions and deletions.
-/// 
+///
 /// # Examples
 /// ```
 /// # use sparse_keyed::PrimaryMap;
 /// let mut map = PrimaryMap::new();
 /// let a = map.add("a");
-/// 
+///
 /// for value in map.values_mut() {
 ///  *value = "modified a";
 /// }
-/// 
+///
 /// assert_eq!(map.get(a), Some(&"modified a"));
 /// ```
+#[derive(Debug)]
 pub struct ValuesMut<'a, T> {
     inner: std::slice::IterMut<'a, DenseEntry<T>>,
 }
@@ -788,8 +793,7 @@ impl<'a, T> Iterator for ValuesMut<'a, T> {
     where
         F: FnMut(B, Self::Item) -> B,
     {
-        self.inner
-            .fold(init, |acc, entry| f(acc, &mut entry.value))
+        self.inner.fold(init, |acc, entry| f(acc, &mut entry.value))
     }
 }
 

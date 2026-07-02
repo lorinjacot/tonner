@@ -3,7 +3,7 @@ use std::iter::once;
 use std::sync::Arc;
 use std::time::Instant;
 
-use glam::{Quat, Vec3, dvec3};
+use glam::{Quat, Vec3, vec3};
 use image::DynamicImage;
 use image::codecs::hdr::HdrDecoder;
 use storm_controls::EguiControls;
@@ -43,7 +43,7 @@ fn create_shapes() -> ((Box3D, Transform), (Ball, Transform)) {
     let aab_transform = Transform::IDENTITY;
 
     let ball = Ball::from_radius(1.0);
-    let ball_transform = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
+    let ball_transform = Transform::from_translation(vec3(2.0, 0.0, 0.0));
 
     ((aab, aab_transform), (ball, ball_transform))
 }
@@ -61,13 +61,7 @@ fn create_points(
         .enumerate()
         .map(|(index, v)| {
             let entity = entity_registry.create();
-            scene_graph.add_with_transform(
-                entity,
-                None,
-                v.difference.as_vec3(),
-                Quat::IDENTITY,
-                Vec3::ONE,
-            );
+            scene_graph.add_with_transform(entity, None, v.difference, Quat::IDENTITY, Vec3::ONE);
             if VERTEX_LABELS {
                 labels.insert(entity, BillboardLabel::new(format!("Vertex {index}")));
             }
@@ -95,7 +89,7 @@ fn create_faces(
 
             let positions = face
                 .vertex_indices
-                .map(|i| epa_state.vertices[i].difference.as_vec3());
+                .map(|i| epa_state.vertices[i].difference);
             let triangle_centroid = positions.iter().sum::<Vec3>() / 3.0;
 
             if FACE_LABELS {
@@ -164,8 +158,8 @@ fn create_normals(
         .filter(|face| !face.obsolete && face.closest_is_internal())
         .map(|face| {
             let entity = entity_registry.create();
-            let origin = face.closest.as_vec3();
-            let dir = face.closest.normalize().as_vec3();
+            let origin = face.closest;
+            let dir = face.closest.normalize();
             let mut rotation = Quat::look_to_rh(dir, Vec3::Y);
             if rotation.is_nan() {
                 rotation = Quat::look_to_rh(dir, Vec3::X);

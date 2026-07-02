@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::{cmp::Reverse, collections::BinaryHeap, f64::consts::FRAC_PI_3};
+use std::{cmp::Reverse, collections::BinaryHeap, f32::consts::FRAC_PI_3};
 
-use glam::{DMat3, DVec3};
+use glam::{Mat3, Vec3};
 use log::debug;
 use tonner::{Transform, shape::ConvexShape3D};
 
@@ -11,8 +11,8 @@ use crate::gjk::SupportPoint;
 #[derive(Debug)]
 pub struct EpaEngine {
     max_iteration: usize,
-    relative_tolerance: f64,
-    tolerance_factor: f64,
+    relative_tolerance: f32,
+    tolerance_factor: f32,
     state: EpaState,
 }
 
@@ -22,8 +22,8 @@ pub struct EpaState {
     pub faces: Vec<Face>,
     priority_queue: BinaryHeap<Reverse<Entry>>,
     edges: Vec<AdjacentFace>,
-    upper_bound: f64,
-    pub closest_point: DVec3,
+    upper_bound: f32,
+    pub closest_point: Vec3,
 }
 
 impl EpaState {
@@ -32,8 +32,8 @@ impl EpaState {
         self.faces.clear();
         self.priority_queue.clear();
         self.edges.clear();
-        self.upper_bound = f64::INFINITY;
-        self.closest_point = DVec3::ZERO;
+        self.upper_bound = f32::INFINITY;
+        self.closest_point = Vec3::ZERO;
     }
 }
 
@@ -55,7 +55,7 @@ impl EpaEngine {
                 .iter()
                 .find(|v| {
                     v.difference
-                        .abs_diff_eq(support_point.difference, f64::EPSILON)
+                        .abs_diff_eq(support_point.difference, f32::EPSILON)
                 })
                 .is_none()
             {
@@ -64,7 +64,7 @@ impl EpaEngine {
         }
         if s.vertices.len() == 1 {
             // GJK returned a point -> this point must be the origin
-            s.closest_point = DVec3::ZERO;
+            s.closest_point = Vec3::ZERO;
             return s;
         } else if s.vertices.len() == 2 {
             // GJK returned a line -> construct a hexahedron
@@ -75,17 +75,17 @@ impl EpaEngine {
             let dir = b - a;
             let dir_abs = dir.abs();
 
-            let mut axis = DVec3::X;
+            let mut axis = Vec3::X;
             let mut min = dir_abs.x;
             if dir_abs.y < min {
                 min = dir_abs.y;
-                axis = DVec3::Y;
+                axis = Vec3::Y;
             }
             if dir_abs.z < min {
-                axis = DVec3::Z;
+                axis = Vec3::Z;
             }
             let v1 = dir.cross(axis);
-            let r = DMat3::from_axis_angle(dir.normalize(), 2.0 * FRAC_PI_3);
+            let r = Mat3::from_axis_angle(dir.normalize(), 2.0 * FRAC_PI_3);
             let v2 = r * v1;
             let v3 = r * v2;
 
@@ -133,13 +133,13 @@ impl EpaEngine {
             // or it might have degenerate faces
             for face in &faces[..3] {
                 if face.normal.dot(a) <= 0.0 || face.affinely_dependent() {
-                    s.closest_point = DVec3::ZERO;
+                    s.closest_point = Vec3::ZERO;
                     return s;
                 }
             }
             for face in &faces[3..] {
                 if face.normal.dot(b) <= 0.0 || face.affinely_dependent() {
-                    s.closest_point = DVec3::ZERO;
+                    s.closest_point = Vec3::ZERO;
                     return s;
                 }
             }
@@ -306,7 +306,7 @@ impl EpaEngine {
         shape2: &S2,
         transform2: &Transform,
         tetrahedron: [SupportPoint; 4],
-    ) -> (DVec3, f64) {
+    ) -> (Vec3, f32) {
         let state = self.penetration_depth_details(
             shape1,
             transform1,
@@ -321,7 +321,7 @@ impl EpaEngine {
 
 impl Default for EpaEngine {
     fn default() -> Self {
-        let relative_tolerance = f64::EPSILON;
+        let relative_tolerance = f32::EPSILON;
 
         EpaEngine {
             max_iteration: 100,
@@ -332,8 +332,8 @@ impl Default for EpaEngine {
                 faces: Vec::with_capacity(104),
                 priority_queue: BinaryHeap::with_capacity(104),
                 edges: Vec::new(),
-                closest_point: DVec3::ZERO,
-                upper_bound: f64::INFINITY,
+                closest_point: Vec3::ZERO,
+                upper_bound: f32::INFINITY,
             },
         }
     }
@@ -376,8 +376,8 @@ pub struct AdjacentFace {
 #[derive(Debug)]
 pub struct Face {
     pub vertex_indices: [usize; 3],
-    pub normal: DVec3,
-    pub closest: DVec3,
+    pub normal: Vec3,
+    pub closest: Vec3,
     pub closest_is_internal: bool,
     pub adjacents: [AdjacentFace; 3],
     pub obsolete: bool,
@@ -413,7 +413,7 @@ impl Face {
     }
 
     fn affinely_dependent(&self) -> bool {
-        self.normal.length_squared() <= f64::EPSILON * f64::EPSILON
+        self.normal.length_squared() <= f32::EPSILON * f32::EPSILON
     }
 
     pub fn closest_is_internal(&self) -> bool {
@@ -424,7 +424,7 @@ impl Face {
 #[derive(Debug)]
 struct Entry {
     face: usize,
-    distance_squared: f64,
+    distance_squared: f32,
 }
 
 impl PartialEq for Entry {
@@ -449,8 +449,8 @@ impl Ord for Entry {
 
 #[cfg(test)]
 mod tests {
-    use glam::dvec3;
     use tonner::shape::{Ball, Box3D};
+    use glam::vec3;
 
     use crate::gjk::gjk_tetrahedron;
 
@@ -470,23 +470,23 @@ mod tests {
             engine.penetration_depth(&box_, &identity, &ball, &identity, tetrahedron);
         assert_seperating_distance(2.0, distance);
 
-        let transform = Transform::from_translation(dvec3(1.99, 0.0, 0.0));
+        let transform = Transform::from_translation(vec3(1.99, 0.0, 0.0));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
         assert_seperating_vector(transform.translation.normalize(), 0.01, result);
 
-        let transform = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
+        let transform = Transform::from_translation(vec3(2.0, 0.0, 0.0));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let (_, distance) =
             engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
         assert_seperating_distance(0.0, distance);
 
-        let transform = Transform::from_translation(dvec3(1.70, 1.70, 0.0));
+        let transform = Transform::from_translation(vec3(1.70, 1.70, 0.0));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
         assert_seperating_vector(transform.translation.normalize(), 0.0101, result);
 
-        let transform = Transform::from_translation(dvec3(1.57, 1.57, 1.57));
+        let transform = Transform::from_translation(vec3(1.57, 1.57, 1.57));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
         assert_seperating_vector(transform.translation.normalize(), 0.0127, result);
@@ -507,7 +507,7 @@ mod tests {
         assert_seperating_distance_tolerance(2.0, distance, 0.1);
 
         let point_ball = Ball::from_radius(0.0);
-        let transform = Transform::from_translation(DVec3::X);
+        let transform = Transform::from_translation(Vec3::X);
 
         let tetrahedron =
             gjk_tetrahedron(&point_ball, &transform, &point_ball, &transform).unwrap();
@@ -526,21 +526,21 @@ mod tests {
         assert!(result.1.abs() <= 0.1, "Expected 0.0, got {}", result.0);
     }
 
-    fn assert_seperating_distance_tolerance(expected: f64, actual: f64, tolerance: f64) {
+    fn assert_seperating_distance_tolerance(expected: f32, actual: f32, tolerance: f32) {
         assert!(
             (actual - expected).abs() <= tolerance,
             "Expected {expected}, got {actual}",
         );
     }
 
-    fn assert_seperating_distance(expected: f64, actual: f64) {
+    fn assert_seperating_distance(expected: f32, actual: f32) {
         assert_seperating_distance_tolerance(expected, actual, 1e-3);
     }
 
     fn assert_seperating_vector(
-        expected_direction: DVec3,
-        expected_distance: f64,
-        (actual_direction, actual_distance): (DVec3, f64),
+        expected_direction: Vec3,
+        expected_distance: f32,
+        (actual_direction, actual_distance): (Vec3, f32),
     ) {
         assert!(
             actual_direction.abs_diff_eq(expected_direction, 1e-2),

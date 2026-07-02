@@ -449,8 +449,8 @@ impl Ord for Entry {
 
 #[cfg(test)]
 mod tests {
+    use glam::{DVec3, dvec3};
     use tonner::shape::{Ball, Box3D};
-    use glam::vec3;
 
     use crate::gjk::gjk_tetrahedron;
 
@@ -470,26 +470,26 @@ mod tests {
             engine.penetration_depth(&box_, &identity, &ball, &identity, tetrahedron);
         assert_seperating_distance(2.0, distance);
 
-        let transform = Transform::from_translation(vec3(1.99, 0.0, 0.0));
+        let transform = Transform::from_translation(dvec3(1.99, 0.0, 0.0));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
-        assert_seperating_vector(transform.translation.normalize(), 0.01, result);
+        assert_seperating_vector(transform.translation.normalize().as_vec3(), 0.01, result);
 
-        let transform = Transform::from_translation(vec3(2.0, 0.0, 0.0));
+        let transform = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let (_, distance) =
             engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
         assert_seperating_distance(0.0, distance);
 
-        let transform = Transform::from_translation(vec3(1.70, 1.70, 0.0));
+        let transform = Transform::from_translation(dvec3(1.70, 1.70, 0.0));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
-        assert_seperating_vector(transform.translation.normalize(), 0.0101, result);
+        assert_seperating_vector(transform.translation.normalize().as_vec3(), 0.0101, result);
 
-        let transform = Transform::from_translation(vec3(1.57, 1.57, 1.57));
+        let transform = Transform::from_translation(dvec3(1.57, 1.57, 1.57));
         let tetrahedron = gjk_tetrahedron(&box_, &identity, &ball, &transform).unwrap();
         let result = engine.penetration_depth(&box_, &identity, &ball, &transform, tetrahedron);
-        assert_seperating_vector(transform.translation.normalize(), 0.0127, result);
+        assert_seperating_vector(transform.translation.normalize().as_vec3(), 0.0127, result);
     }
 
     #[test]
@@ -507,7 +507,7 @@ mod tests {
         assert_seperating_distance_tolerance(2.0, distance, 0.1);
 
         let point_ball = Ball::from_radius(0.0);
-        let transform = Transform::from_translation(Vec3::X);
+        let transform = Transform::from_translation(DVec3::X);
 
         let tetrahedron =
             gjk_tetrahedron(&point_ball, &transform, &point_ball, &transform).unwrap();

@@ -7,11 +7,8 @@ use crate::{
     rigid_body::contact::{Contact, SolvedContact},
     shape::{Ball, Box3D},
 };
-pub(crate) use positional_correction::{PositionalConstraint, PositionalCorrection};
 
 mod contact;
-mod positional_correction;
-mod velocity_correction;
 
 #[derive(Debug, Clone)]
 #[must_use]

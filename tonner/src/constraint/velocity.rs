@@ -3,7 +3,8 @@ use sparse_keyed::SecondaryMap;
 
 use crate::{BodyId, PositionalData, rigid_body::generalized_inverse_mass};
 
-pub(crate) struct VelocityCorrection {
+pub struct VelocityCorrection {
+    /// Expressed in world frame
     pub direction: DVec3,
     pub magnitude: f64,
     /// Expressed in local frame (body space)

@@ -8,7 +8,7 @@ use sparse_keyed::{Key, PrimaryMap, SecondaryMap, primary_map::Values};
 
 use crate::{
     AngularData, BodyId, Engine, PositionalData,
-    rigid_body::{PositionalConstraint, PositionalCorrection},
+    constraint::positional::{PositionalConstraint, PositionalCorrection},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

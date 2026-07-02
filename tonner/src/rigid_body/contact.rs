@@ -4,9 +4,9 @@ use sparse_keyed::SecondaryMap;
 
 use crate::{
     AngularData, BodyId, PositionalData,
-    rigid_body::{
-        positional_correction::{PositionalCorrection, PreparedPositionalCorrection},
-        velocity_correction::VelocityCorrection,
+    constraint::{
+        positional::{PositionalCorrection, PreparedPositionalCorrection},
+        velocity::VelocityCorrection,
     },
 };
 

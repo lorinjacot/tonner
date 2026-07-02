@@ -2,7 +2,8 @@ use glam::{DMat3, DQuat, DVec3};
 use sparse_keyed::SecondaryMap;
 
 use crate::{AngularData, BodyId, PositionalData, rigid_body::generalized_inverse_mass};
-pub(crate) trait PositionalConstraint {
+
+pub trait PositionalConstraint {
     fn bodies(&self) -> &[BodyId; 2];
 
     fn correction(&self, positions: &[DVec3; 2], orientations: &[DQuat; 2])
@@ -10,7 +11,7 @@ pub(crate) trait PositionalConstraint {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PositionalCorrection {
+pub struct PositionalCorrection {
     /// Expressed in world frame. Unit vector pointing from the first body to the second body.
     pub direction: DVec3,
     pub magnitude: f64,
@@ -44,8 +45,8 @@ impl PositionalCorrection {
             ),
         ];
 
-        match self.lagrange_multiplier(w, inverse_timestep_squared) {
-            Ok(lagrange_multiplier) => Ok(PreparedPositionalCorrection {
+        self.lagrange_multiplier(w, inverse_timestep_squared)
+            .map(|lagrange_multiplier| PreparedPositionalCorrection {
                 lagrange_multiplier,
                 world_direction: self.direction,
                 local_directions,
@@ -53,9 +54,7 @@ impl PositionalCorrection {
                 inverse_masses,
                 inverse_inertias,
                 orientations,
-            }),
-            Err(_) => Err(()),
-        }
+            })
     }
 
     /// Delta_lambda = -c / (w1 + w2 + alpha_hat) in the paper

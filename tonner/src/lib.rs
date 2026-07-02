@@ -1,9 +1,7 @@
 use std::time::Duration;
 
 use glam::{DMat3, DQuat, DVec3};
-use log::info;
-#[cfg(feature = "pyo3")]
-use log::warn;
+use log::{info, warn};
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, prelude::*};
 use sparse_keyed::{Key, KeyRegistry, SecondaryMap};
@@ -24,6 +22,10 @@ mod particle;
 mod rigid_body;
 pub mod shape;
 mod transform;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "pyo3", pyclass(frozen, from_py_object))]
+pub struct BodyId(Key);
 
 #[derive(Debug, Clone)]
 struct PositionalData {
@@ -46,9 +48,9 @@ struct AngularData {
     torque: DVec3,
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
-pub struct State {
+#[derive(Debug)]
+#[cfg_attr(feature = "pyo3", pyclass)]
+pub struct Engine {
     bodies: KeyRegistry,
     particles: SecondaryMap<()>,
     rigid_bodies: RigidBodies,
@@ -56,11 +58,12 @@ pub struct State {
     angular_data: SecondaryMap<AngularData>,
     particle_constraints: ParticleConstraintManager,
     joints: JointManager,
+    substep_count: u32,
 }
 
-impl State {
+impl Engine {
     pub fn new() -> Self {
-        State {
+        Engine {
             bodies: KeyRegistry::new(),
             particles: SecondaryMap::new(),
             rigid_bodies: RigidBodies::new(),
@@ -68,6 +71,7 @@ impl State {
             angular_data: SecondaryMap::new(),
             particle_constraints: ParticleConstraintManager::new(),
             joints: JointManager::new(),
+            substep_count: 10,
         }
     }
 
@@ -174,14 +178,99 @@ impl State {
         self.particle_constraints
             .add_distance_constraint(constraint)
     }
+
+    pub fn substep_count(&self) -> u32 {
+        self.substep_count
+    }
+
+    pub fn set_substep_count(&mut self, value: u32) {
+        if value < 1 {
+            warn!("substep_count must be > 0, got {}. Setting to 1.", value);
+            self.substep_count = 1;
+        } else {
+            self.substep_count = value;
+        }
+    }
+
+    pub fn simulate(&mut self, delta_time: Duration) {
+        assert!(self.substep_count > 0, "substep_count must be > 0");
+        if delta_time.is_zero() {
+            warn!("delta_time is zero, nothing to simulate.");
+            return;
+        }
+        info!(
+            "Simulating for {:?} with {} substeps",
+            delta_time, self.substep_count
+        );
+        let substep_duration = delta_time / self.substep_count;
+        let h = substep_duration.as_secs_f64();
+        let h_squared = h * h;
+        for _ in 0..self.substep_count {
+            for d in self.positional_data.values_mut() {
+                d.previous_position = d.position;
+                d.previous_velocity = d.velocity;
+                d.velocity += h * d.force * d.inverse_mass;
+                d.position += h * d.velocity;
+            }
+
+            for d in self.angular_data.values_mut() {
+                d.previous_orientation = d.orientation;
+                d.previous_velocity = d.velocity;
+                d.velocity +=
+                    h * d.inverse_inertia * (d.torque - d.velocity.cross(d.inertia * d.velocity));
+                d.orientation = d.orientation
+                    + DQuat::from_xyzw(d.velocity.x, d.velocity.y, d.velocity.z, 0.0)
+                        * d.orientation
+                        * h
+                        * 0.5;
+                d.orientation = d.orientation.normalize();
+            }
+
+            let inverse_h_squared = 1.0 / h_squared;
+
+            self.rigid_bodies.solve_positions(
+                inverse_h_squared,
+                &mut self.positional_data,
+                &mut self.angular_data,
+            );
+
+            self.particle_constraints
+                .solve_positions(&mut self.positional_data, inverse_h_squared);
+
+            self.joints.solve_positions(
+                &mut self.positional_data,
+                &mut self.angular_data,
+                inverse_h_squared,
+            );
+
+            for d in self.positional_data.values_mut() {
+                d.velocity = (d.position - d.previous_position) / h;
+            }
+
+            for d in self.angular_data.values_mut() {
+                let delta_orientation = d.orientation * d.previous_orientation.conjugate();
+                d.velocity = 2.0 * delta_orientation.xyz() / h;
+                if delta_orientation.w < 0.0 {
+                    d.velocity = -d.velocity;
+                }
+            }
+
+            // solve velocities
+            self.rigid_bodies.solve_velocities(
+                &mut self.positional_data,
+                &mut self.angular_data,
+                h,
+            );
+        }
+    }
 }
 
 #[cfg(feature = "pyo3")]
 #[pymethods]
-impl State {
+impl Engine {
     #[new]
     fn py_new() -> Self {
-        State::new()
+        Engine::new()
     }
 
     #[pyo3(signature = (
@@ -393,129 +482,20 @@ impl State {
             .map(|i| i.to_cols_array_2d())
             .ok_or_else(|| PyValueError::new_err("Invalid body ID"))
     }
-}
 
-impl Default for State {
-    fn default() -> Self {
-        State::new()
+    #[getter(substep_count)]
+    fn py_substep_count(&self) -> u32 {
+        self.substep_count()
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "pyo3", pyclass(frozen, from_py_object))]
-pub struct BodyId(Key);
-
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "pyo3", pyclass(skip_from_py_object))]
-pub struct Solver {
-    pub substep_count: u32,
-}
-
-impl Solver {
-    pub fn simulate(&mut self, state: &mut State, delta_time: Duration) {
-        assert!(self.substep_count > 0, "substep_count must be > 0");
-        if delta_time.is_zero() {
-            return;
-        }
-        info!(
-            "Simulating for {:?} with {} substeps",
-            delta_time, self.substep_count
-        );
-        let substep_duration = delta_time / self.substep_count;
-        let h = substep_duration.as_secs_f64();
-        let h_squared = h * h;
-        for _ in 0..self.substep_count {
-            for d in state.positional_data.values_mut() {
-                d.previous_position = d.position;
-                d.previous_velocity = d.velocity;
-                d.velocity += h * d.force * d.inverse_mass;
-                d.position += h * d.velocity;
-            }
-
-            for d in state.angular_data.values_mut() {
-                d.previous_orientation = d.orientation;
-                d.previous_velocity = d.velocity;
-                d.velocity +=
-                    h * d.inverse_inertia * (d.torque - d.velocity.cross(d.inertia * d.velocity));
-                d.orientation = d.orientation
-                    + DQuat::from_xyzw(d.velocity.x, d.velocity.y, d.velocity.z, 0.0)
-                        * d.orientation
-                        * h
-                        * 0.5;
-                d.orientation = d.orientation.normalize();
-            }
-
-            let inverse_h_squared = 1.0 / h_squared;
-
-            state.rigid_bodies.solve_positions(
-                inverse_h_squared,
-                &mut state.positional_data,
-                &mut state.angular_data,
-            );
-
-            state
-                .particle_constraints
-                .solve_positions(&mut state.positional_data, inverse_h_squared);
-
-            state.joints.solve_positions(
-                &mut state.positional_data,
-                &mut state.angular_data,
-                inverse_h_squared,
-            );
-
-            for d in state.positional_data.values_mut() {
-                d.velocity = (d.position - d.previous_position) / h;
-            }
-
-            for d in state.angular_data.values_mut() {
-                let delta_orientation = d.orientation * d.previous_orientation.conjugate();
-                d.velocity = 2.0 * delta_orientation.xyz() / h;
-                if delta_orientation.w < 0.0 {
-                    d.velocity = -d.velocity;
-                }
-            }
-
-            // solve velocities
-            state.rigid_bodies.solve_velocities(
-                &mut state.positional_data,
-                &mut state.angular_data,
-                h,
-            );
-        }
-    }
-}
-
-impl Default for Solver {
-    fn default() -> Self {
-        Solver { substep_count: 10 }
-    }
-}
-
-#[cfg(feature = "pyo3")]
-#[pymethods]
-impl Solver {
-    #[new]
-    fn py_new() -> Self {
-        Solver::default()
+    #[setter(substep_count)]
+    fn py_set_substep_count(&mut self, value: u32) {
+        self.set_substep_count(value);
     }
 
     #[pyo3(name = "simulate")]
-    fn py_simulate(&mut self, state: &mut State, delta_time: Duration) {
-        self.simulate(state, delta_time);
-    }
-
-    #[getter]
-    fn substep_count(&self) -> u32 {
-        self.substep_count
-    }
-
-    #[setter]
-    fn set_substep_count(&mut self, mut value: u32) {
-        if value < 1 {
-            warn!("substep_count must be > 0, got {}. Setting to 1.", value);
-            value = 1;
-        }
-        self.substep_count = value;
+    fn py_simulate(&mut self, delta_time: Duration) {
+        self.simulate(delta_time);
     }
 }
 
@@ -531,5 +511,5 @@ mod py_tonner {
     }
 
     #[pymodule_export]
-    use super::{BodyId, Solver, State, joint::AttachJointId};
+    use super::{BodyId, Engine, joint::AttachJointId};
 }

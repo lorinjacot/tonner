@@ -2,7 +2,7 @@ use glam::{DMat3, DQuat, DVec3};
 use sparse_keyed::SecondaryMap;
 
 use crate::{
-    AngularData, BodyId, PositionalData, State, Transform,
+    AngularData, BodyId, Engine, PositionalData, Transform,
     collision::narrow::{collides_ball_ball, collides_ball_box, collides_box_box},
     rigid_body::contact::{Contact, SolvedContact},
     shape::{Ball, Box3D},
@@ -32,15 +32,15 @@ impl RigidBodyBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
     /// let pos = DVec3::new(1.0, 2.0, 3.0);
-    /// let a = RigidBodyBuilder::default().position(pos).build(&mut state);
-    /// assert_eq!(state.position(a).unwrap(), pos);
+    /// let a = RigidBodyBuilder::default().position(pos).build(&mut engine);
+    /// assert_eq!(engine.position(a).unwrap(), pos);
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.position(b).unwrap(), DVec3::ZERO);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.position(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn position(mut self, position: impl Into<DVec3>) -> Self {
         self.position = position.into();
@@ -52,15 +52,15 @@ impl RigidBodyBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
     /// let vel = DVec3::new(1.0, 2.0, 3.0);
-    /// let a = RigidBodyBuilder::default().velocity(vel).build(&mut state);
-    /// assert_eq!(state.velocity(a).unwrap(), vel);
+    /// let a = RigidBodyBuilder::default().velocity(vel).build(&mut engine);
+    /// assert_eq!(engine.velocity(a).unwrap(), vel);
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.velocity(b).unwrap(), DVec3::ZERO);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.velocity(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn velocity(mut self, velocity: impl Into<DVec3>) -> Self {
         self.velocity = velocity.into();
@@ -75,16 +75,16 @@ impl RigidBodyBuilder {
     /// # Examples
     /// ```
     /// # use glam::DVec3;
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
-    /// let a = RigidBodyBuilder::default().mass(2.0).build(&mut state);
-    /// assert_eq!(state.mass(a).unwrap(), 2.0);
-    /// assert_eq!(state.inverse_mass(a).unwrap(), 0.5);
+    /// let a = RigidBodyBuilder::default().mass(2.0).build(&mut engine);
+    /// assert_eq!(engine.mass(a).unwrap(), 2.0);
+    /// assert_eq!(engine.inverse_mass(a).unwrap(), 0.5);
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.mass(b).unwrap(), f64::INFINITY);
-    /// assert_eq!(state.inverse_mass(b).unwrap(), 0.0);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.mass(b).unwrap(), f64::INFINITY);
+    /// assert_eq!(engine.inverse_mass(b).unwrap(), 0.0);
     /// ```
     pub fn mass(mut self, mass: f64) -> Self {
         assert!(mass > 0.0, "Mass must be positive");
@@ -102,16 +102,16 @@ impl RigidBodyBuilder {
     ///
     /// ```
     /// # use glam::DVec3;
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
-    /// let a = RigidBodyBuilder::default().inverse_mass(0.5).build(&mut state);
-    /// assert_eq!(state.mass(a).unwrap(), 2.0);
-    /// assert_eq!(state.inverse_mass(a).unwrap(), 0.5);
+    /// let a = RigidBodyBuilder::default().inverse_mass(0.5).build(&mut engine);
+    /// assert_eq!(engine.mass(a).unwrap(), 2.0);
+    /// assert_eq!(engine.inverse_mass(a).unwrap(), 0.5);
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.mass(b).unwrap(), f64::INFINITY);
-    /// assert_eq!(state.inverse_mass(b).unwrap(), 0.0);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.mass(b).unwrap(), f64::INFINITY);
+    /// assert_eq!(engine.inverse_mass(b).unwrap(), 0.0);
     /// ```
     pub fn inverse_mass(mut self, inverse_mass: f64) -> Self {
         assert!(inverse_mass >= 0.0, "Inverse mass must be non-negative");
@@ -125,15 +125,15 @@ impl RigidBodyBuilder {
     ///
     /// ```
     /// # use glam::DQuat;
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
     /// let orientation = DQuat::from_rotation_y(1.0);
-    /// let a = RigidBodyBuilder::default().orientation(orientation).build(&mut state);
-    /// assert_eq!(state.orientation(a).unwrap(), orientation);
+    /// let a = RigidBodyBuilder::default().orientation(orientation).build(&mut engine);
+    /// assert_eq!(engine.orientation(a).unwrap(), orientation);
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.orientation(b).unwrap(), DQuat::IDENTITY);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.orientation(b).unwrap(), DQuat::IDENTITY);
     /// ```
     pub fn orientation(mut self, orientation: impl Into<DQuat>) -> Self {
         self.orientation = orientation.into();
@@ -146,15 +146,15 @@ impl RigidBodyBuilder {
     ///
     /// ```
     /// # use glam::DVec3;
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
     /// let angular_velocity = DVec3::new(1.0, 2.0, 3.0);
-    /// let a = RigidBodyBuilder::default().angular_velocity(angular_velocity).build(&mut state);
-    /// assert_eq!(state.angular_velocity(a).unwrap(), angular_velocity);
+    /// let a = RigidBodyBuilder::default().angular_velocity(angular_velocity).build(&mut engine);
+    /// assert_eq!(engine.angular_velocity(a).unwrap(), angular_velocity);
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.angular_velocity(b).unwrap(), DVec3::ZERO);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.angular_velocity(b).unwrap(), DVec3::ZERO);
     /// ```
     pub fn angular_velocity(mut self, angular_velocity: impl Into<DVec3>) -> Self {
         self.angular_velocity = angular_velocity.into();
@@ -171,17 +171,17 @@ impl RigidBodyBuilder {
     ///
     /// ```
     /// # use glam::{DMat3, DVec3};
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
     /// let inertia = DMat3::from_diagonal(DVec3::new(2.0, 3.0, 4.0));
-    /// let a = RigidBodyBuilder::default().inertia(inertia).build(&mut state);
-    /// assert_eq!(state.inertia(a).unwrap(), inertia);
-    /// assert_eq!(state.inverse_inertia(a).unwrap(), inertia.inverse());
+    /// let a = RigidBodyBuilder::default().inertia(inertia).build(&mut engine);
+    /// assert_eq!(engine.inertia(a).unwrap(), inertia);
+    /// assert_eq!(engine.inverse_inertia(a).unwrap(), inertia.inverse());
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.inertia(b).unwrap(), DMat3::IDENTITY);
-    /// assert_eq!(state.inverse_inertia(b).unwrap(), DMat3::IDENTITY);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.inertia(b).unwrap(), DMat3::IDENTITY);
+    /// assert_eq!(engine.inverse_inertia(b).unwrap(), DMat3::IDENTITY);
     /// ```
     pub fn inertia(mut self, inertia: impl Into<DMat3>) -> Self {
         let inertia: DMat3 = inertia.into();
@@ -204,17 +204,17 @@ impl RigidBodyBuilder {
     ///
     /// ```
     /// # use glam::{DMat3, DVec3};
-    /// # use tonner::{State, RigidBodyBuilder};
-    /// let mut state = State::new();
+    /// # use tonner::{Engine, RigidBodyBuilder};
+    /// let mut engine = Engine::new();
     ///
     /// let inverse_inertia = DMat3::from_diagonal(DVec3::new(0.5, 0.3333333333333333, 0.25));
-    /// let a = RigidBodyBuilder::default().inverse_inertia(inverse_inertia).build(&mut state);
-    /// assert_eq!(state.inverse_inertia(a).unwrap(), inverse_inertia);
-    /// assert_eq!(state.inertia(a).unwrap(), inverse_inertia.inverse());
+    /// let a = RigidBodyBuilder::default().inverse_inertia(inverse_inertia).build(&mut engine);
+    /// assert_eq!(engine.inverse_inertia(a).unwrap(), inverse_inertia);
+    /// assert_eq!(engine.inertia(a).unwrap(), inverse_inertia.inverse());
     ///
-    /// let b = RigidBodyBuilder::default().build(&mut state);
-    /// assert_eq!(state.inverse_inertia(b).unwrap(), DMat3::IDENTITY);
-    /// assert_eq!(state.inertia(b).unwrap(), DMat3::IDENTITY);
+    /// let b = RigidBodyBuilder::default().build(&mut engine);
+    /// assert_eq!(engine.inverse_inertia(b).unwrap(), DMat3::IDENTITY);
+    /// assert_eq!(engine.inertia(b).unwrap(), DMat3::IDENTITY);
     /// ```
     pub fn inverse_inertia(mut self, inverse_inertia: impl Into<DMat3>) -> Self {
         let inverse_inertia: DMat3 = inverse_inertia.into();
@@ -237,11 +237,11 @@ impl RigidBodyBuilder {
         self
     }
 
-    pub fn build(self, state: &mut State) -> BodyId {
-        let id = state.bodies.create();
+    pub fn build(self, engine: &mut Engine) -> BodyId {
+        let id = engine.bodies.create();
 
-        state.rigid_bodies.rigid_bodies.insert(id, ());
-        state.positional_data.insert(
+        engine.rigid_bodies.rigid_bodies.insert(id, ());
+        engine.positional_data.insert(
             id,
             PositionalData {
                 position: self.position,
@@ -252,7 +252,7 @@ impl RigidBodyBuilder {
                 force: DVec3::ZERO,
             },
         );
-        state.angular_data.insert(
+        engine.angular_data.insert(
             id,
             AngularData {
                 orientation: self.orientation,
@@ -266,10 +266,10 @@ impl RigidBodyBuilder {
         );
         match self.shape {
             Shape::Box(box_) => {
-                state.rigid_bodies.boxes.insert(id, box_);
+                engine.rigid_bodies.boxes.insert(id, box_);
             }
             Shape::Ball(ball) => {
-                state.rigid_bodies.balls.insert(id, ball);
+                engine.rigid_bodies.balls.insert(id, ball);
             }
         }
 

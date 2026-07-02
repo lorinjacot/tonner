@@ -7,7 +7,7 @@ use log::error;
 use sparse_keyed::{Key, PrimaryMap, SecondaryMap, primary_map::Values};
 
 use crate::{
-    AngularData, BodyId, PositionalData, State,
+    AngularData, BodyId, Engine, PositionalData,
     rigid_body::{PositionalConstraint, PositionalCorrection},
 };
 
@@ -80,8 +80,8 @@ impl AttachJointBuilder {
         self.0
     }
 
-    pub fn build_and_add(self, state: &mut State) -> AttachJointId {
-        state.add_attach_joint(self.0)
+    pub fn build_and_add(self, engine: &mut Engine) -> AttachJointId {
+        engine.add_attach_joint(self.0)
     }
 }
 
@@ -162,7 +162,7 @@ fn solve_position<C: PositionalConstraint + Debug>(
     }
 }
 
-impl State {
+impl Engine {
     fn add_attach_joint(&mut self, joint: AttachJoint) -> AttachJointId {
         let id = self.joints.attaches.add(joint);
         AttachJointId(id)

@@ -13,7 +13,9 @@ class ParticleDistanceConstraintId:
 class AttachJointId:
     pass
 
-class State:
+class Engine:
+    substep_count: int = 10
+
     def __init__(self) -> None:
         pass
 
@@ -87,11 +89,5 @@ class State:
     def add_force(self, body: BodyId, force: Vec3) -> None:
         pass
 
-class Solver:
-    substep_count: int = 10
-
-    def __init__(self) -> None:
-        pass
-
-    def simulate(self, state: State, delta_time: datetime.timedelta) -> None:
+    def simulate(self, delta_time: datetime.timedelta) -> None:
         pass

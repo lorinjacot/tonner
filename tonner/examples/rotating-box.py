@@ -5,15 +5,14 @@ import matplotlib.patches as patches
 from matplotlib.animation import FuncAnimation
 from scipy.spatial.transform import Rotation
 
-state = tonner.State()
-solver = tonner.Solver()
+engine = tonner.Engine()
 dt = datetime.timedelta(milliseconds=10)
 
 width = 1.0
 height = 2.0
 depth = 1.0
 
-box = state.add_rigid_box(
+box = engine.add_rigid_box(
     angular_velocity=[0, 0, 1],
     dimensions=[width, height, depth]
 )
@@ -25,14 +24,14 @@ ax.set_ylim(-2, 2)
 ax.set_xlabel("x")
 ax.set_ylabel("y")
 
-xy = state.position(box)[:2]
+xy = engine.position(box)[:2]
 xy = xy[0] - width / 2, xy[1] - height / 2
 rect_patch = patches.Rectangle(xy, width, height, rotation_point="center")
 
 def update(frame):
-    solver.simulate(state, dt)
-    pos = state.position(box)[:2]
-    orientation = state.orientation(box)
+    engine.simulate(dt)
+    pos = engine.position(box)[:2]
+    orientation = engine.orientation(box)
 
     xy = pos[0] - width / 2, pos[1] - height / 2
     rect_patch.set_xy(xy)

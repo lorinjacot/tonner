@@ -7,10 +7,8 @@ import matplotlib.patches as patches
 from matplotlib.animation import FuncAnimation
 from scipy.spatial.transform import Rotation
 
-
-state = tonner.State()
-solver = tonner.Solver()
-solver.substep_count = 10
+engine = tonner.Engine()
+engine.substep_count = 10
 dt = datetime.timedelta(milliseconds=20)
 
 COMPLIANCE = 0
@@ -20,31 +18,31 @@ DISTANCE = 3
 LOCAL_POINT_A = [0, 0, 0.5]
 LOCAL_POINT_B = [0.001, 0, -0.5]
 
-a = state.add_rigid_box(
+a = engine.add_rigid_box(
     position=[0, 0, 0],
     mass=math.inf,
 )
 
-b = state.add_rigid_box(
+b = engine.add_rigid_box(
     position=[0, 0, -2],
     mass=1.0,
 )
-state.add_force(b, [0, 0, -9.81])
+engine.add_force(b, [0, 0, -9.81])
 
-c = state.add_rigid_box(
+c = engine.add_rigid_box(
     position=[0, 0, -4],
     mass=1.0,
 )
-state.add_force(c, [0, 0, -9.81])
+engine.add_force(c, [0, 0, -9.81])
 
-state.add_attach_joint(
+engine.add_attach_joint(
     bodies=[a, b],
     rest_distance=DISTANCE,
     attachment_points=[LOCAL_POINT_A, LOCAL_POINT_B],
     compliance=COMPLIANCE,
 )
 
-state.add_attach_joint(
+engine.add_attach_joint(
     bodies=[b, c],
     rest_distance=DISTANCE,
     attachment_points=[LOCAL_POINT_A, LOCAL_POINT_B],
@@ -85,8 +83,8 @@ energy_history = []
 energy_line, = ax2.plot([], [], color="red", linewidth=1)
 
 def draw_box(body, rect_patch: patches.Rectangle):
-    pos = state.position(body)
-    orientation = state.orientation(body)
+    pos = engine.position(body)
+    orientation = engine.orientation(body)
 
     xy = pos[0] - 0.5, pos[2] - 0.5
     rect_patch.set_xy(xy)
@@ -96,11 +94,11 @@ def draw_box(body, rect_patch: patches.Rectangle):
     rect_patch.angle = -r.as_euler("yxz", degrees=True)[0]
 
 def draw_line(body1, body2, line):
-    pos1 = state.position(body1)
-    orientation1 = state.orientation(body1)
+    pos1 = engine.position(body1)
+    orientation1 = engine.orientation(body1)
 
-    pos2 = state.position(body2)
-    orientation2 = state.orientation(body2)
+    pos2 = engine.position(body2)
+    orientation2 = engine.orientation(body2)
     
     dot1 = pos1 + Rotation.from_quat(orientation1).apply(LOCAL_POINT_A)
     dot2 = pos2 + Rotation.from_quat(orientation2).apply(LOCAL_POINT_B)
@@ -112,26 +110,26 @@ def total_energy():
     potential = 0
 
     for body in [a, b, c]:
-        m = state.mass(body)
+        m = engine.mass(body)
         if m == math.inf:
             m = 0
-        v = np.array(state.velocity(body))
+        v = np.array(engine.velocity(body))
         kinetic += 0.5 * m * (v @ v)
 
-        I = np.array(state.inertia(body))
-        q = state.orientation(body)
+        I = np.array(engine.inertia(body))
+        q = engine.orientation(body)
         r = Rotation.from_quat(q)
 
-        angular_velocity = r.apply(np.array(state.angular_velocity(body)))
+        angular_velocity = r.apply(np.array(engine.angular_velocity(body)))
         kinetic += 0.5 * (angular_velocity @ I @ angular_velocity)
 
-        z = state.position(body)[2]
+        z = engine.position(body)[2]
         potential += m * 9.81 * z
 
     return 100 + kinetic + potential
 
 def update(frame):
-    solver.simulate(state, dt)
+    engine.simulate(dt)
     energy_history.append(total_energy())
 
     draw_box(a, a_box)

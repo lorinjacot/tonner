@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use glam::{DMat3, DQuat, DVec3, dvec3};
-use tonner::{ParticleBuilder, RigidBodyBuilder, Solver, State, shape::Box3D};
+use tonner::{Engine, ParticleBuilder, RigidBodyBuilder, shape::Box3D};
 
 #[test]
 fn implicit_euler() {
@@ -21,19 +21,18 @@ fn implicit_euler() {
         })
         .collect();
 
-    let mut state = State::new();
+    let mut engine = Engine::new();
     let body = ParticleBuilder::default()
         .position(p0)
         .velocity(v0)
         .inverse_mass(1.0)
-        .build(&mut state);
-    *state.force_mut(body).unwrap() = f;
+        .build(&mut engine);
+    *engine.force_mut(body).unwrap() = f;
 
-    let mut solver = Solver::default();
-    solver.substep_count = 1;
+    engine.set_substep_count(1);
     for (i, expected_pos) in expected.into_iter().enumerate() {
-        solver.simulate(&mut state, DELTA_TIME);
-        let actual_pos = state.position(body).unwrap();
+        engine.simulate(DELTA_TIME);
+        let actual_pos = engine.position(body).unwrap();
         assert!(
             actual_pos.abs_diff_eq(expected_pos, 1e-4),
             "Iteration {}: expected {:?}, got {:?}",
@@ -46,20 +45,19 @@ fn implicit_euler() {
 
 #[test]
 fn rotation() {
-    let mut state = State::new();
+    let mut engine = Engine::new();
     let body = RigidBodyBuilder::default()
         .mass(1.0)
         .inertia(DMat3::IDENTITY)
         .angular_velocity([0.0, 1.0, 0.0])
         .box3d(Box3D::from_dimensions(1.0, 1.0, 1.0))
-        .build(&mut state);
+        .build(&mut engine);
 
     let time_step = Duration::from_millis(100);
-    let mut solver = Solver::default();
 
     for iteration in 0..100 {
-        solver.simulate(&mut state, time_step);
-        let orientation = state.orientation(body).unwrap();
+        engine.simulate(time_step);
+        let orientation = engine.orientation(body).unwrap();
         let expected_angle = (iteration + 1) as f64 * time_step.as_secs_f64();
         let expected_orientation = DQuat::from_axis_angle(DVec3::Y, expected_angle);
         let max_abs_diff = 1e-2 + iteration as f64 * 1e-3;

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use glam::DVec3;
-use tonner::{ParticleBuilder, Solver, State, constraint::particle::ParticleDistanceConstraint};
+use tonner::{Engine, ParticleBuilder, constraint::particle::ParticleDistanceConstraint};
 
 pub const L1: f64 = 1.0;
 pub const L2: f64 = 1.0;
@@ -33,36 +33,35 @@ pub fn theta2_ddot(theta1: f64, theta1_dot: f64, theta2: f64, theta2_dot: f64) -
 
 #[test]
 fn double_pendulum() {
-    let mut state = State::new();
+    let mut engine = Engine::new();
     let a = ParticleBuilder::default()
         .mass(M0)
         .position([0.0, 0.0, 0.0])
-        .build(&mut state);
+        .build(&mut engine);
     let b = ParticleBuilder::default()
         .mass(M1)
         .position([L1, 0.0, 0.0])
-        .build(&mut state);
+        .build(&mut engine);
     let c = ParticleBuilder::default()
         .mass(M2)
         .position([L1 + L2, 0.0, 0.0])
-        .build(&mut state);
+        .build(&mut engine);
 
-    state.add_particle_distance_constraint(ParticleDistanceConstraint {
+    engine.add_particle_distance_constraint(ParticleDistanceConstraint {
         particles: [a, b],
         distance: L1,
         compliance: 0.0,
     });
-    state.add_particle_distance_constraint(ParticleDistanceConstraint {
+    engine.add_particle_distance_constraint(ParticleDistanceConstraint {
         particles: [b, c],
         distance: L2,
         compliance: 0.0,
     });
 
-    state.force_mut(b).unwrap().y -= M1 * G;
-    state.force_mut(c).unwrap().y -= M2 * G;
+    engine.force_mut(b).unwrap().y -= M1 * G;
+    engine.force_mut(c).unwrap().y -= M2 * G;
 
     let time_step = Duration::from_millis(10);
-    let mut solver = Solver::default();
 
     let mut theta1 = std::f64::consts::FRAC_PI_2;
     let mut theta1_dot = 0.0;
@@ -70,7 +69,7 @@ fn double_pendulum() {
     let mut theta2_dot = 0.0;
 
     for iteration in 0..100 {
-        solver.simulate(&mut state, time_step);
+        engine.simulate(time_step);
 
         theta1_dot += theta1_ddot(theta1, theta1_dot, theta2, theta2_dot) * time_step.as_secs_f64();
         theta2_dot += theta2_ddot(theta1, theta1_dot, theta2, theta2_dot) * time_step.as_secs_f64();
@@ -81,8 +80,8 @@ fn double_pendulum() {
         let expected_b_pos = DVec3::new(L1 * theta1.sin(), -L1 * theta1.cos(), 0.0);
         let expected_c_pos =
             expected_b_pos + DVec3::new(L2 * theta2.sin(), -L2 * theta2.cos(), 0.0);
-        let actual_b_pos = state.position(b).unwrap();
-        let actual_c_pos = state.position(c).unwrap();
+        let actual_b_pos = engine.position(b).unwrap();
+        let actual_c_pos = engine.position(c).unwrap();
 
         let max_abs_diff = 1e-2 + iteration as f64 * 1e-3;
         assert!(

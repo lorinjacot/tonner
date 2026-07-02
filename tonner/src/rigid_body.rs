@@ -3,8 +3,9 @@ use sparse_keyed::SecondaryMap;
 
 use crate::{
     AngularData, BodyId, PositionalData, State, Transform,
+    collision::narrow::{collides_ball_ball, collides_ball_box, collides_box_box},
     rigid_body::contact::{Contact, SolvedContact},
-    shape::{Ball, Box3D, collides_2balls, collision_info_2balls},
+    shape::{Ball, Box3D},
 };
 pub(crate) use positional_correction::{PositionalConstraint, PositionalCorrection};
 
@@ -356,9 +357,59 @@ impl RigidBodies {
                         rotation: angular_data[body1].orientation,
                     };
 
-                    if collides_2balls((ball0, &transform0), (ball1, &transform1)) {
-                        let info =
-                            collision_info_2balls((ball0, &transform0), (ball1, &transform1));
+                    if let Some(info) =
+                        collides_ball_ball((ball0, &transform0), (ball1, &transform1))
+                    {
+                        let contact = Contact {
+                            bodies: [BodyId(body0), BodyId(body1)],
+                            world_normal: info.world_normal,
+                            local_contact_points: info.local_contact_points,
+                            static_friction_coefficient: 0.5,
+                            dynamic_friction_coefficient: 0.3,
+                            restitution_coefficient: 0.5,
+                        };
+                        self.detected_contacts.push(contact);
+                    }
+                }
+            }
+
+            for (body1, box1) in &self.boxes {
+                let transform0 = Transform {
+                    translation: positional_data[body0].position,
+                    rotation: angular_data[body0].orientation,
+                };
+                let transform1 = Transform {
+                    translation: positional_data[body1].position,
+                    rotation: angular_data[body1].orientation,
+                };
+
+                if let Some(info) = collides_ball_box((ball0, &transform0), (box1, &transform1)) {
+                    let contact = Contact {
+                        bodies: [BodyId(body0), BodyId(body1)],
+                        world_normal: info.world_normal,
+                        local_contact_points: info.local_contact_points,
+                        static_friction_coefficient: 0.5,
+                        dynamic_friction_coefficient: 0.3,
+                        restitution_coefficient: 0.5,
+                    };
+                    self.detected_contacts.push(contact);
+                }
+            }
+        }
+
+        for (body0, box0) in &self.boxes {
+            for (body1, box1) in &self.boxes {
+                if body0 < body1 {
+                    let transform0 = Transform {
+                        translation: positional_data[body0].position,
+                        rotation: angular_data[body0].orientation,
+                    };
+                    let transform1 = Transform {
+                        translation: positional_data[body1].position,
+                        rotation: angular_data[body1].orientation,
+                    };
+
+                    if let Some(info) = collides_box_box((box0, &transform0), (box1, &transform1)) {
                         let contact = Contact {
                             bodies: [BodyId(body0), BodyId(body1)],
                             world_normal: info.world_normal,

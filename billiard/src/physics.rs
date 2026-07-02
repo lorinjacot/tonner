@@ -4,7 +4,6 @@ use glam::{Vec3, vec3};
 use numpy::{PyArray1, PyArrayMethods};
 use pyo3::prelude::*;
 use tempete::{ecs::EntityId, scene_graph::SceneGraph};
-use tonner::{Transform, collision::CollisionInfo, shape};
 
 const SUBSTEP_COUNT: usize = 10;
 
@@ -37,15 +36,19 @@ pub trait Constraint: Send + Sync {
 
 struct ContactConstraint {
     entities: [EntityId; 2],
-    shapes: [shape::Ball; 2],
+    radii_sum: f32,
 }
 
 impl ContactConstraint {
-    fn collision_info(&self, positions: &[Vec3]) -> CollisionInfo {
-        let [ball1, ball2] = &self.shapes;
-        let transform1 = &Transform::from_translation(positions[0]);
-        let transform2 = &Transform::from_translation(positions[1]);
-        shape::collision_info_2balls((ball1, transform1), (ball2, transform2))
+    fn separating_vector(&self, positions: &[Vec3]) -> (Vec3, f32) {
+        let dp = positions[1] - positions[0];
+        let (dir, dist) = dp.normalize_and_length();
+
+        if dist < self.radii_sum {
+            (dir, self.radii_sum - dist)
+        } else {
+            (Vec3::ZERO, 0.0)
+        }
     }
 }
 
@@ -55,13 +58,13 @@ impl Constraint for ContactConstraint {
     }
 
     fn value(&self, positions: &[Vec3]) -> f32 {
-        let info = self.collision_info(positions);
-        info.separating_vector.length()
+        let (_, penetration_depth) = self.separating_vector(positions);
+        penetration_depth
     }
 
     fn gradient(&self, positions: &[Vec3]) -> Vec<Vec3> {
-        let info = self.collision_info(positions);
-        let dir = info.separating_vector.normalize_or_zero();
+        let (separating_vector, _) = self.separating_vector(positions);
+        let dir = separating_vector.normalize_or_zero();
         vec![dir, -dir]
     }
 }
@@ -135,14 +138,12 @@ pub fn update<'py, 'a, F: Deref<Target = dyn Force>, C: Deref<Target = dyn Const
         for (&entity1, particle1) in &particles {
             for (&entity2, particle2) in &particles {
                 if entity1 < entity2 {
-                    let ball1 = shape::Ball::from_radius(particle1.ball.radius as f32);
-                    let transform1 = &Transform::from_translation(particle1.position);
-                    let ball2 = shape::Ball::from_radius(particle2.ball.radius as f32);
-                    let transform2 = &Transform::from_translation(particle2.position);
-                    if shape::collides_2balls((&ball1, &transform1), (&ball2, &transform2)) {
+                    let dp = particle2.position - particle1.position;
+                    let radii_sum = (particle1.ball.radius + particle2.ball.radius) as f32;
+                    if dp.length_squared() < radii_sum * radii_sum {
                         contact_constraints.push(ContactConstraint {
                             entities: [entity1, entity2],
-                            shapes: [ball1, ball2],
+                            radii_sum,
                         });
                     }
                 }

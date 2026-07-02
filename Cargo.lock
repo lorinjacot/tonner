@@ -638,7 +638,6 @@ dependencies = [
  "pyo3",
  "pyo3-ffi",
  "tempete",
- "tonner",
  "wgpu",
  "winit",
 ]

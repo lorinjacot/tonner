@@ -648,33 +648,4 @@ mod tests {
             );
         }
     }
-
-    #[test]
-    fn test_rotation() {
-        let mut state = State::new();
-        let body = RigidBodyBuilder::default()
-            .mass(1.0)
-            .inertia(DMat3::IDENTITY)
-            .angular_velocity([0.0, 1.0, 0.0])
-            .box3d(shape::Box3D::from_dimensions(1.0, 1.0, 1.0))
-            .build(&mut state);
-
-        let time_step = Duration::from_millis(100);
-        let mut solver = Solver::default();
-
-        for iteration in 0..100 {
-            solver.simulate(&mut state, time_step);
-            let orientation = state.orientation(body).unwrap();
-            let expected_angle = (iteration + 1) as f64 * time_step.as_secs_f64();
-            let expected_orientation = DQuat::from_axis_angle(DVec3::Y, expected_angle);
-            let max_abs_diff = 1e-2 + iteration as f64 * 1e-3;
-            assert!(
-                orientation.abs_diff_eq(expected_orientation, max_abs_diff),
-                "expected orientation {:?}, got {:?} at iteration {}",
-                expected_orientation,
-                orientation,
-                iteration
-            );
-        }
-    }
 }

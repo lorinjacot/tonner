@@ -632,6 +632,7 @@ impl<'a, T> IntoIterator for &'a mut SecondaryMap<T> {
 /// assert_eq!(iter.next(), Some((key, "value")));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct IntoIter<T> {
     inner: std::vec::IntoIter<DenseEntry<T>>,
 }
@@ -707,6 +708,7 @@ impl<T> FusedIterator for IntoIter<T> {}
 /// assert_eq!(iter.next(), Some((key, &"value")));
 /// assert_eq!(iter.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct Iter<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
@@ -788,6 +790,7 @@ impl<'a, T> FusedIterator for Iter<'a, T> {}
 ///    *value = "new value";
 /// }
 /// ```
+#[derive(Debug)]
 pub struct IterMut<'a, T> {
     inner: std::slice::IterMut<'a, DenseEntry<T>>,
 }
@@ -867,6 +870,7 @@ impl<'a, T> FusedIterator for IterMut<'a, T> {}
 /// assert_eq!(keys.next(), Some(key));
 /// assert_eq!(keys.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct Keys<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
@@ -944,6 +948,7 @@ impl<'a, T> FusedIterator for Keys<'a, T> {}
 /// assert_eq!(values.next(), Some(&"value 1"));
 /// assert_eq!(values.next(), None);
 /// ```
+#[derive(Debug, Clone)]
 pub struct Values<'a, T> {
     inner: std::slice::Iter<'a, DenseEntry<T>>,
 }
@@ -1020,6 +1025,7 @@ impl<'a, T> FusedIterator for Values<'a, T> {}
 ///   *value = "new value";
 /// }
 /// ```
+#[derive(Debug)]
 pub struct ValuesMut<'a, T> {
     inner: std::slice::IterMut<'a, DenseEntry<T>>,
 }

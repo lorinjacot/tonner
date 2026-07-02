@@ -5,6 +5,8 @@ use crate::{
     shape::{Ball, Box3D},
 };
 
+pub mod contact;
+
 /// Information about a collision between two objects. This is returned by the narrow phase of the collision detection process.
 #[derive(Debug, Clone)]
 pub struct CollisionInfo {
@@ -25,7 +27,7 @@ pub struct CollisionInfo {
 /// Colliding balls:
 /// ```
 /// # use glam::dvec3;
-/// # use tonner::{Transform, shape::Ball, collision::narrow::collides_ball_ball};
+/// # use tonner::{Transform, shape::{Ball, collides_ball_ball}};
 /// let ball = Ball::UNIT;
 /// let a = Transform::IDENTITY;
 /// let b = Transform::from_translation(dvec3(1.0, 0.0, 0.0));
@@ -39,7 +41,7 @@ pub struct CollisionInfo {
 /// Touching balls:
 /// ```
 /// # use glam::dvec3;
-/// # use tonner::{Transform, shape::Ball, collision::narrow::collides_ball_ball};
+/// # use tonner::{Transform, shape::{Ball, collides_ball_ball}};
 /// let ball = Ball::UNIT;
 /// let a = Transform::IDENTITY;
 /// let b = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
@@ -49,7 +51,7 @@ pub struct CollisionInfo {
 /// Non-colliding balls:
 /// ```
 /// # use glam::dvec3;
-/// # use tonner::{Transform, shape::Ball, collision::narrow::collides_ball_ball};
+/// # use tonner::{Transform, shape::{Ball, collides_ball_ball}};
 /// let ball = Ball::UNIT;
 /// let a = Transform::IDENTITY;
 /// let b = Transform::from_translation(dvec3(3.0, 0.0, 0.0));
@@ -90,7 +92,7 @@ pub fn collides_ball_ball(
 /// Colliding ball and box:
 /// ```
 /// # use glam::dvec3;
-/// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
+/// # use tonner::{Transform, shape::{Ball, Box3D, collides_ball_box}};
 /// let ball = Ball::UNIT;
 /// let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let ball_transform = Transform::IDENTITY;
@@ -105,7 +107,7 @@ pub fn collides_ball_ball(
 /// Touching ball and box:
 /// ```
 /// # use glam::dvec3;
-/// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
+/// # use tonner::{Transform, shape::{Ball, Box3D, collides_ball_box}};
 /// let ball = Ball::UNIT;
 /// let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let ball_transform = Transform::IDENTITY;
@@ -116,7 +118,7 @@ pub fn collides_ball_ball(
 /// Non-colliding ball and box:
 /// ```
 /// # use glam::dvec3;
-/// # use tonner::{Transform, shape::{Ball, Box3D}, collision::narrow::collides_ball_box};
+/// # use tonner::{Transform, shape::{Ball, Box3D, collides_ball_box}};
 /// let ball = Ball::UNIT;
 /// let box_ = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let ball_transform = Transform::IDENTITY;
@@ -197,7 +199,7 @@ pub fn collides_ball_box(
 /// Colliding boxes:
 /// ```
 /// # use glam::DVec3;
-/// # use tonner::{Transform, shape::Box3D, collision::narrow::collides_box_box};
+/// # use tonner::{Transform, shape::{Box3D, collides_box_box}};
 /// let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let transform0 = Transform::IDENTITY;
@@ -212,7 +214,7 @@ pub fn collides_ball_box(
 /// Touching boxes:
 /// ```
 /// # use glam::DVec3;
-/// # use tonner::{Transform, shape::Box3D, collision::narrow::collides_box_box};
+/// # use tonner::{Transform, shape::{Box3D, collides_box_box}};
 /// let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let transform0 = Transform::IDENTITY;
@@ -223,7 +225,7 @@ pub fn collides_ball_box(
 /// Non-colliding boxes:
 /// ```
 /// # use glam::DVec3;
-/// # use tonner::{Transform, shape::Box3D, collision::narrow::collides_box_box};
+/// # use tonner::{Transform, shape::{Box3D, collides_box_box}};
 /// let box0 = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let box1 = Box3D::from_dimensions(2.0, 2.0, 2.0);
 /// let transform0 = Transform::IDENTITY;

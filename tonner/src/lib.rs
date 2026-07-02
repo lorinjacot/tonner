@@ -15,7 +15,7 @@ pub use rigid_body::RigidBodyBuilder;
 pub use transform::Transform;
 
 mod aabb;
-pub mod collision;
+mod collision;
 pub mod constraint;
 pub mod joint;
 mod particle;

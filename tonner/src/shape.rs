@@ -1,6 +1,9 @@
 use glam::DVec3;
 
-pub use ball::{Ball, collides_2balls, collision_info_2balls, distance_2balls};
+pub use crate::collision::narrow::{
+    CollisionInfo, collides_ball_ball, collides_ball_box, collides_box_box,
+};
+pub use ball::Ball;
 pub use box3d::Box3D;
 
 use crate::{AABB, Transform};

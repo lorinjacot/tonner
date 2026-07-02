@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct Contact {
+pub struct Contact {
     pub bodies: [BodyId; 2],
     pub world_normal: DVec3,
     pub local_contact_points: [DVec3; 2],

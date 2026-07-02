@@ -3,12 +3,12 @@ use sparse_keyed::SecondaryMap;
 
 use crate::{
     AngularData, BodyId, Engine, PositionalData, Transform,
-    collision::narrow::{collides_ball_ball, collides_ball_box, collides_box_box},
-    rigid_body::contact::{Contact, SolvedContact},
+    collision::narrow::{
+        collides_ball_ball, collides_ball_box, collides_box_box,
+        contact::{Contact, SolvedContact},
+    },
     shape::{Ball, Box3D},
 };
-
-mod contact;
 
 #[derive(Debug, Clone)]
 #[must_use]

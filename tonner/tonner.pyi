@@ -1,8 +1,9 @@
 import math
 import datetime
-import numpy.typing as npt
 
-Vec3 = npt.ArrayLike
+Vec3 = list[float] | tuple[float, float, float]
+Quat = list[float] | tuple[float, float, float, float]
+Mat3 = list[list[float]] | tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
 
 class BodyId:
     pass
@@ -32,9 +33,9 @@ class Engine:
         position: Vec3 = [0, 0, 0],
         velocity: Vec3 = [0, 0, 0],
         mass: float = math.inf,
-        orientation: Vec3 = [0, 0, 0, 1],
+        orientation: Quat = [0, 0, 0, 1],
         angular_velocity: Vec3 = [0, 0, 0],
-        inertia: npt.ArrayLike = [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        inertia: Mat3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
         radius: float = 1.0
     ) -> BodyId:
         pass
@@ -44,9 +45,9 @@ class Engine:
         position: Vec3 = [0, 0, 0],
         velocity: Vec3 = [0, 0, 0],
         mass: float = math.inf,
-        orientation: Vec3 = [0, 0, 0, 1],
+        orientation: Quat = [0, 0, 0, 1],
         angular_velocity: Vec3 = [0, 0, 0],
-        inertia: npt.ArrayLike = [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        inertia: Mat3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
         dimensions: Vec3 = [1, 1, 1]
     ) -> BodyId:
         pass

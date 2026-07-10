@@ -262,7 +262,7 @@ pub fn collides_box_box(
         rot1.z_axis.cross(rot0.y_axis),
         rot1.z_axis.cross(rot0.z_axis),
     ] {
-        if axis.length_squared() < 0.1 {
+        if axis.length_squared() < 1e-12 {
             continue;
         }
         let center0 = transform0.translation.dot(axis);

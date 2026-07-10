@@ -49,7 +49,7 @@ impl Contact {
 
         let lambda_n = normal_correction.lagrange_multiplier();
         let lambda_t = tangential_correction.lagrange_multiplier();
-        if lambda_t < self.static_friction_coefficient * lambda_n {
+        if lambda_t.abs() <= self.static_friction_coefficient * lambda_n.abs() {
             tangential_correction.solve_positions(self.bodies, positional_data, angular_data);
         }
 

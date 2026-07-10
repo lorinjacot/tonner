@@ -229,8 +229,7 @@ impl Engine {
             "Simulating for {:?} with {} substeps",
             delta_time, self.substep_count
         );
-        let substep_duration = delta_time / self.substep_count;
-        let h = substep_duration.as_secs_f64();
+        let h = delta_time.as_secs_f64() / self.substep_count as f64;
         let h_squared = h * h;
         for _ in 0..self.substep_count {
             for d in self.positional_data.values_mut() {

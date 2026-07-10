@@ -365,13 +365,11 @@ mod tests {
                 .world_normal
                 .abs_diff_eq(DVec3::new(-1.0, 0.0, 0.0), 1e-6)
         );
-        assert_eq!(
-            collision_info.local_contact_points[0],
-            DVec3::new(-1.0, 0.0, 0.0)
+        assert!(
+            collision_info.local_contact_points[0].abs_diff_eq(DVec3::new(-1.0, 0.0, 0.0), 1e-6)
         );
-        assert_eq!(
-            collision_info.local_contact_points[1],
-            DVec3::new(0.0, 0.0, 1.0)
+        assert!(
+            collision_info.local_contact_points[1].abs_diff_eq(DVec3::new(0.0, 0.0, 1.0), 1e-6)
         );
     }
 

@@ -237,7 +237,21 @@ impl SolvedContact {
             application_points: self.local_contact_points,
         };
 
-        friction_correction.solve_velocities(self.bodies, positional_data, angular_data);
-        restitution_correction.solve_velocities(self.bodies, positional_data, angular_data);
+        friction_correction
+            .prepare(
+                self.bodies.map(|b| positional_data[b.0].inverse_mass),
+                orientations,
+                self.bodies.map(|b| angular_data[b.0].inverse_inertia),
+            )
+            .unwrap()
+            .solve_velocities(self.bodies, positional_data, angular_data);
+        restitution_correction
+            .prepare(
+                self.bodies.map(|b| positional_data[b.0].inverse_mass),
+                orientations,
+                self.bodies.map(|b| angular_data[b.0].inverse_inertia),
+            )
+            .unwrap()
+            .solve_velocities(self.bodies, positional_data, angular_data);
     }
 }

@@ -18,8 +18,8 @@ pub(crate) fn gjk_tetrahedron<S1: ConvexShape3D + ?Sized, S2: ConvexShape3D + ?S
     shape2: &S2,
     transform2: &Transform,
 ) -> Option<[SupportPoint; 4]> {
-    let center1 = shape1.centroid(transform1);
-    let center2 = shape2.centroid(transform2);
+    let center1 = shape1.centroid(transform1).as_vec3();
+    let center2 = shape2.centroid(transform2).as_vec3();
     let mut direction = if center1.abs_diff_eq(center2, 1e-4) {
         Vec3::X
     } else {
@@ -158,8 +158,12 @@ impl SupportPoint {
         transform2: &Transform,
         direction: Vec3,
     ) -> SupportPoint {
-        let point1 = shape1.support_point(transform1, direction);
-        let point2 = shape2.support_point(transform2, -direction);
+        let point1 = shape1
+            .support_point(transform1, direction.as_dvec3())
+            .as_vec3();
+        let point2 = shape2
+            .support_point(transform2, -direction.as_dvec3())
+            .as_vec3();
         let difference = point1 - point2;
         SupportPoint {
             point1,
@@ -171,8 +175,8 @@ impl SupportPoint {
 
 #[cfg(test)]
 mod tests {
+    use glam::{DVec3, dvec3};
     use tonner::shape::{Ball, Box3D};
-    use glam::vec3;
 
     use super::*;
 
@@ -183,21 +187,21 @@ mod tests {
 
         assert!(gjk(&ball, &origin, &ball, &origin,));
 
-        let x = Transform::from_translation(Vec3::X);
+        let x = Transform::from_translation(DVec3::X);
         assert!(gjk(&ball, &x, &ball, &x));
         assert!(gjk(&ball, &origin, &ball, &x));
 
-        let three_x = Transform::from_translation(3.0 * Vec3::X);
+        let three_x = Transform::from_translation(3.0 * DVec3::X);
         assert!(!gjk(&ball, &origin, &ball, &three_x));
         assert!(gjk(&ball, &x, &ball, &three_x));
 
-        let random_center = Transform::from_translation(vec3(-1.0312, 0.13312, 1.2));
+        let random_center = Transform::from_translation(dvec3(-1.0312, 0.13312, 1.2));
         assert!(gjk(&ball, &origin, &ball, &random_center));
         assert!(!gjk(&ball, &x, &ball, &random_center));
 
         let random_radius = 2.343;
         let random_ball = Ball::from_radius(random_radius);
-        let random_transform = Transform::from_translation(Vec3::Y * random_radius);
+        let random_transform = Transform::from_translation(DVec3::Y * random_radius);
         assert!(gjk(&ball, &origin, &random_ball, &random_transform));
         assert!(gjk(&ball, &x, &random_ball, &random_transform));
         assert!(!gjk(&ball, &three_x, &random_ball, &random_transform));
@@ -209,20 +213,20 @@ mod tests {
         let origin = Transform::IDENTITY;
         assert!(gjk(&unitary_box, &origin, &unitary_box, &origin));
 
-        let top = Transform::from_translation(0.5 * Vec3::Y);
+        let top = Transform::from_translation(0.5 * DVec3::Y);
         assert!(gjk(&unitary_box, &top, &unitary_box, &origin));
 
-        let top = Transform::from_translation(Vec3::Y);
+        let top = Transform::from_translation(DVec3::Y);
         assert!(gjk(&unitary_box, &top, &unitary_box, &origin));
 
-        let top = Transform::from_translation(1.5 * Vec3::Y);
+        let top = Transform::from_translation(1.5 * DVec3::Y);
         assert!(!gjk(&unitary_box, &top, &unitary_box, &origin));
 
         let range = [-1.5, -1.234, -1.0, -0.789, 0.0, 0.543, 1.0, 1.432, 1.5];
         for x in range {
             for y in range {
                 for z in range {
-                    let other = Transform::from_translation(vec3(x, y, z));
+                    let other = Transform::from_translation(dvec3(x, y, z));
 
                     let collision_expected = x.abs() <= 1.0 && y.abs() <= 1.0 && z.abs() <= 1.0;
                     assert_eq!(
@@ -242,21 +246,21 @@ mod tests {
         let ball = Ball::from_radius(1.0);
         assert!(gjk(&box_, &origin, &ball, &origin));
 
-        let ball_transform = Transform::from_translation(vec3(1.99, 0.0, 0.0));
+        let ball_transform = Transform::from_translation(dvec3(1.99, 0.0, 0.0));
         assert!(gjk(&box_, &origin, &ball, &ball_transform));
-        let ball_transform = Transform::from_translation(vec3(2.0, 0.0, 0.0));
+        let ball_transform = Transform::from_translation(dvec3(2.0, 0.0, 0.0));
         assert!(gjk(&box_, &origin, &ball, &ball_transform));
-        let ball_transform = Transform::from_translation(vec3(2.01, 0.0, 0.0));
+        let ball_transform = Transform::from_translation(dvec3(2.01, 0.0, 0.0));
         assert!(!gjk(&box_, &origin, &ball, &ball_transform));
 
-        let ball_transform = Transform::from_translation(vec3(1.70, 1.70, 0.0));
+        let ball_transform = Transform::from_translation(dvec3(1.70, 1.70, 0.0));
         assert!(gjk(&box_, &origin, &ball, &ball_transform));
-        let ball_transform = Transform::from_translation(vec3(1.71, 1.71, 0.0));
+        let ball_transform = Transform::from_translation(dvec3(1.71, 1.71, 0.0));
         assert!(!gjk(&box_, &origin, &ball, &ball_transform));
 
-        let ball_transform = Transform::from_translation(vec3(1.57, 1.57, 1.57));
+        let ball_transform = Transform::from_translation(dvec3(1.57, 1.57, 1.57));
         assert!(gjk(&box_, &origin, &ball, &ball_transform));
-        let ball_transform = Transform::from_translation(vec3(1.58, 1.58, 1.58));
+        let ball_transform = Transform::from_translation(dvec3(1.58, 1.58, 1.58));
         assert!(!gjk(&box_, &origin, &ball, &ball_transform));
     }
 
@@ -264,8 +268,8 @@ mod tests {
     fn test_edge_cases() {
         // Minkowski point `a` exactly on origin
         let ball = Ball::from_radius(1.0);
-        let a = Transform::from_translation(Vec3::X);
-        let b = Transform::from_translation(Vec3::X * 3.0);
+        let a = Transform::from_translation(DVec3::X);
+        let b = Transform::from_translation(DVec3::X * 3.0);
         assert!(gjk(&ball, &a, &ball, &b));
     }
 }

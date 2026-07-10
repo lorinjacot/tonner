@@ -14,12 +14,13 @@ crate-type = ["lib", "cdylib"]
 [dependencies]
 glam.workspace = true
 log.workspace = true
-numpy = { workspace = true, optional = true }
 pyo3 = { workspace = true, optional = true }
+pyo3-log = { workspace = true, optional = true }
 sparse-keyed.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true
 
 [features]
-pyo3 = ["dep:pyo3", "dep:numpy"]
+pyo3 = ["dep:pyo3", "dep:pyo3-log"]

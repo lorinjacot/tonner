@@ -1,10 +1,10 @@
-use glam::{Quat, Vec3};
+use glam::{DQuat, DVec3};
 
 /// A transform is a combination of a translation and a rotation. The translation is always applied before the rotation.
 #[derive(Debug, Clone)]
 pub struct Transform {
-    pub translation: Vec3,
-    pub rotation: Quat,
+    pub translation: DVec3,
+    pub rotation: DQuat,
 }
 
 impl Transform {
@@ -12,14 +12,14 @@ impl Transform {
     ///
     /// ## Example
     /// ```
-    /// # use glam::{Vec3, Quat};
+    /// # use glam::{DVec3, DQuat};
     /// # use tonner::Transform;
-    /// assert_eq!(Transform::IDENTITY.translation, Vec3::ZERO);
-    /// assert_eq!(Transform::IDENTITY.rotation, Quat::IDENTITY);
+    /// assert_eq!(Transform::IDENTITY.translation, DVec3::ZERO);
+    /// assert_eq!(Transform::IDENTITY.rotation, DQuat::IDENTITY);
     /// ```
     pub const IDENTITY: Transform = Transform {
-        translation: Vec3::ZERO,
-        rotation: Quat::IDENTITY,
+        translation: DVec3::ZERO,
+        rotation: DQuat::IDENTITY,
     };
 
     /// Creates a `Transform` from the given `translation` and a unit rotation. This results in a pure translation.
@@ -27,17 +27,17 @@ impl Transform {
     /// ## Example
     ///
     /// ```
-    /// # use glam::{vec3, Quat};
+    /// # use glam::{DVec3, DQuat};
     /// # use tonner::Transform;
-    /// let translation = vec3(1.0, 2.0, 3.0);
+    /// let translation = DVec3::new(1.0, 2.0, 3.0);
     /// let transform = Transform::from_translation(translation);
     /// assert_eq!(transform.translation, translation);
-    /// assert_eq!(transform.rotation, Quat::IDENTITY);
+    /// assert_eq!(transform.rotation, DQuat::IDENTITY);
     /// ```
-    pub fn from_translation(translation: Vec3) -> Transform {
+    pub fn from_translation(translation: DVec3) -> Transform {
         Transform {
             translation,
-            rotation: Quat::IDENTITY,
+            rotation: DQuat::IDENTITY,
         }
     }
 
@@ -45,16 +45,16 @@ impl Transform {
     ///
     /// ## Example
     /// ```
-    /// # use glam::{Vec3, Quat};
+    /// # use glam::{DVec3, DQuat};
     /// # use tonner::Transform;
-    /// let rotation = Quat::from_rotation_y(1.0);
+    /// let rotation = DQuat::from_rotation_y(1.0);
     /// let transform = Transform::from_rotation(rotation);
-    /// assert_eq!(transform.translation, Vec3::ZERO);  
+    /// assert_eq!(transform.translation, DVec3::ZERO);  
     /// assert_eq!(transform.rotation, rotation);
     /// ```
-    pub fn from_rotation(rotation: Quat) -> Transform {
+    pub fn from_rotation(rotation: DQuat) -> Transform {
         Transform {
-            translation: Vec3::ZERO,
+            translation: DVec3::ZERO,
             rotation,
         }
     }

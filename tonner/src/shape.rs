@@ -1,6 +1,9 @@
-use glam::Vec3;
+use glam::DVec3;
 
-pub use ball::{Ball, collides_2balls, collision_info_2balls, distance_2balls};
+pub use crate::collision::narrow::{
+    CollisionInfo, collides_ball_ball, collides_ball_box, collides_box_box,
+};
+pub use ball::Ball;
 pub use box3d::Box3D;
 
 use crate::{AABB, Transform};
@@ -15,7 +18,7 @@ pub trait Shape3D {
     fn aabb(&self, transform: &Transform) -> AABB;
 
     /// Geometric center of the shape (arithmetic mean position of all points the shape) after applying the given transform.
-    fn centroid(&self, transform: &Transform) -> Vec3;
+    fn centroid(&self, transform: &Transform) -> DVec3;
 }
 
 /// A convex shape is a region of space where for all pair of points, the segment between them is entirely inside the shape.
@@ -26,5 +29,5 @@ pub trait ConvexShape3D: Shape3D {
     /// In general this point is not unique but is always on the surface of the shape.
     ///
     /// `direction` can have any length, including `0.0`. In the latter case, any point one the surface of the shape can be returned.
-    fn support_point(&self, transform: &Transform, direction: Vec3) -> Vec3;
+    fn support_point(&self, transform: &Transform, direction: DVec3) -> DVec3;
 }

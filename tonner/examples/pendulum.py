@@ -8,9 +8,8 @@ g = 9.81
 L = 1.0
 t = 0.0
 
-state = tonner.State()
-solver = tonner.Solver()
-solver.substep_count = 10
+engine = tonner.Engine()
+engine.substep_count = 10
 TIME_STEP = datetime.timedelta(milliseconds=10)
 
 def theta1_ddot(m1, L1, theta1, theta1_dot, m2, L2, theta2, theta2_dot):
@@ -31,11 +30,11 @@ def theta2_ddot(m1, L1, theta1, theta1_dot, m2, L2, theta2, theta2_dot):
         )
     ) / (L2 * (2 * m1 + m2 - m2 * math.cos(2 * theta1 - 2 * theta2)))
 
-a = state.add_particle()
-b = state.add_particle(mass=1.0, position=[1, 0, 0])
-c = state.add_particle(mass=1.0, position=[2, 0, 0])
-state.add_distance_constraint([a, b], 1)
-state.add_distance_constraint([b, c], 1)
+a = engine.add_particle()
+b = engine.add_particle(mass=1.0, position=[1, 0, 0])
+c = engine.add_particle(mass=1.0, position=[2, 0, 0])
+engine.add_particle_distance_constraint([a, b], 1)
+engine.add_particle_distance_constraint([b, c], 1)
 
 m1 = 1.0
 L1 = L
@@ -48,10 +47,10 @@ theta2 = math.pi / 2
 theta2_dot = 0.0
 
 for body in [b, c]:
-    state.add_force(body, [0, 0, -9.81])
+    engine.add_force(body, [0, 0, -9.81])
 
 def get_pos(body):
-    pos = state.position(body)
+    pos = engine.position(body)
     return pos[0], pos[2]
 
 def get_pos_analytical():
@@ -84,7 +83,7 @@ def update(frame):
     theta1 += theta1_dot * dt
     theta2 += theta2_dot * dt
 
-    solver.simulate(state, TIME_STEP)
+    engine.simulate(TIME_STEP)
     line.set_data(*zip(get_pos(a), get_pos(b), get_pos(c)))
     analytical_line.set_data(*zip(*get_pos_analytical()))
     

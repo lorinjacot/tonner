@@ -1,7 +1,6 @@
 [project]
 name = "tonner"
 dynamic = ["version"]
-dependencies = ["numpy"]
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]

@@ -302,6 +302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a3a1fd6f75306b68087b831f025c712524bcb19aad54e557b1129cfa0a2b207"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -629,7 +638,6 @@ dependencies = [
  "pyo3",
  "pyo3-ffi",
  "tempete",
- "tonner",
  "wgpu",
  "winit",
 ]
@@ -3373,6 +3381,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyo3-log"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64083bd3a16a353d9d62335808e8e13d0552d2a2b83fdb084496192dcfa9fcd"
+dependencies = [
+ "arc-swap",
+ "log",
+ "pyo3",
+]
+
+[[package]]
 name = "pyo3-macros"
 version = "0.28.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4291,9 +4310,10 @@ dependencies = [
  "env_logger",
  "glam 0.32.1",
  "log",
- "numpy",
  "pyo3",
+ "pyo3-log",
  "sparse-keyed",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

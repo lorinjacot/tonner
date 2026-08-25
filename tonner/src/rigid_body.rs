@@ -153,7 +153,7 @@ impl RigidBodyBuilder {
         self
     }
 
-    /// Sets the inertia tensor of the rigid body. The default inertia tensor is diagonal will all non-zero entries equal to `f64::INFINITY`, which means the rigid body is immovable. The inertia tensor must be positive definite.
+    /// Sets the inertia tensor of the rigid body. The default inertia tensor is diagonal with all diagonal entries equal to `f64::INFINITY`, which prevents the rigid body from rotating. The inertia tensor must be positive definite.
     ///
     /// # Panics
     ///

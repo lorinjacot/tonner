@@ -68,8 +68,8 @@ impl Default for AngularData {
             previous_orientation: DQuat::IDENTITY,
             velocity: DVec3::ZERO,
             previous_velocity: DVec3::ZERO,
-            inertia: DMat3::IDENTITY,
-            inverse_inertia: DMat3::IDENTITY,
+            inertia: DMat3::from_diagonal(DVec3::INFINITY),
+            inverse_inertia: DMat3::ZERO,
             torque: DVec3::ZERO,
         }
     }
@@ -242,8 +242,11 @@ impl Engine {
             for d in self.angular_data.values_mut() {
                 d.previous_orientation = d.orientation;
                 d.previous_velocity = d.velocity;
-                d.velocity +=
-                    h * d.inverse_inertia * (d.torque - d.velocity.cross(d.inertia * d.velocity));
+                if d.inverse_inertia != DMat3::ZERO {
+                    d.velocity += h
+                        * d.inverse_inertia
+                        * (d.torque - d.velocity.cross(d.inertia * d.velocity))
+                };
                 d.orientation = d.orientation
                     + DQuat::from_xyzw(d.velocity.x, d.velocity.y, d.velocity.z, 0.0)
                         * d.orientation
@@ -326,7 +329,7 @@ impl Engine {
         mass=f64::INFINITY,
         orientation=[0.0, 0.0, 0.0, 1.0],
         angular_velocity=[0.0; 3],
-        inertia=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        inertia=[[f64::INFINITY, 0.0, 0.0], [0.0, f64::INFINITY, 0.0], [0.0, 0.0, f64::INFINITY]],
         radius=1.0
     ))]
     fn add_rigid_ball(
@@ -366,7 +369,7 @@ impl Engine {
         mass=f64::INFINITY,
         orientation=[0.0, 0.0, 0.0, 1.0],
         angular_velocity=[0.0; 3],
-        inertia=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        inertia=[[f64::INFINITY, 0.0, 0.0], [0.0, f64::INFINITY, 0.0], [0.0, 0.0, f64::INFINITY]],
         dimensions=[1.0; 3]
     ))]
     fn add_rigid_box(

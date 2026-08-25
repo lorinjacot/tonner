@@ -186,7 +186,7 @@ impl RigidBodyBuilder {
         self
     }
 
-    /// Sets the inverse inertia tensor of the rigid body. The default inverse inertia tensor is `DMat3::ZERO`, which means the rigid body is immovable. The inverse inertia tensor must be positive definite.
+    /// Sets the inverse inertia tensor of the rigid body. The default inverse inertia tensor is `DMat3::ZERO`, which prevents the rigid body from rotating. The inverse inertia tensor passed to this method must be positive definite.
     ///
     /// # Panics
     ///

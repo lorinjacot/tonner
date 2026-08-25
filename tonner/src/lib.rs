@@ -329,7 +329,7 @@ impl Engine {
         mass=f64::INFINITY,
         orientation=[0.0, 0.0, 0.0, 1.0],
         angular_velocity=[0.0; 3],
-        inertia=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        inertia=[[f64::INFINITY, 0.0, 0.0], [0.0, f64::INFINITY, 0.0], [0.0, 0.0, f64::INFINITY]],
         radius=1.0
     ))]
     fn add_rigid_ball(
@@ -369,7 +369,7 @@ impl Engine {
         mass=f64::INFINITY,
         orientation=[0.0, 0.0, 0.0, 1.0],
         angular_velocity=[0.0; 3],
-        inertia=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        inertia=[[f64::INFINITY, 0.0, 0.0], [0.0, f64::INFINITY, 0.0], [0.0, 0.0, f64::INFINITY]],
         dimensions=[1.0; 3]
     ))]
     fn add_rigid_box(

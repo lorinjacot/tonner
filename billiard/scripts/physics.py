@@ -93,11 +93,11 @@ def simulate(delta_time: float, balls: list, reset: bool, white_ball_impulse: np
             [0.0, 0.0, 0.0],
         ])
     else:
-        pos = np.stack([ball.node.local_translation if not ball.out else [0.0, 1e6, 0.0] for ball in balls])
+        pos = np.stack([ball.position if not ball.out else [0.0, 1e6, 0.0] for ball in balls])
         vel = np.stack([ball.velocity for ball in balls])
 
         vel[0] += white_ball_impulse
 
     for i in range(len(balls)):
-        balls[i].node.local_translation = pos[i]
+        balls[i].position = pos[i]
         balls[i].velocity = vel[i]

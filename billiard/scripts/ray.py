@@ -9,7 +9,7 @@ class Ray:
         # from https://en.wikipedia.org/wiki/Line%E2%80%93sphere_intersection
         u = self.direction
         o = self.origin
-        c = ball.node.global_transformation @ np.array([0, 0, 0, 1])
+        c = ball.position
         c = c[:3]
         r = ball.radius
 

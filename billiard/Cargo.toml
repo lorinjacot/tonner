@@ -14,5 +14,6 @@ pollster.workspace = true
 pyo3 = { workspace = true, features = ["auto-initialize"] }
 pyo3-ffi.workspace = true
 tempete = { workspace = true, features = ["pyo3"] }
+tonner.workspace = true
 wgpu.workspace = true
 winit.workspace = true

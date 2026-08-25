@@ -16,6 +16,7 @@ use crate::PhysicsEngine;
 const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
 const BALL_RADIUS: f64 = 0.025;
 const BALL_MASS: f64 = 0.170;
+const GRAVITY: f64 = 9.81;
 
 #[pyclass]
 pub struct Ball {
@@ -48,12 +49,15 @@ impl Ball {
         let position = position.into();
         let velocity = velocity.into();
 
+        let mut engine = physics_engine.lock().unwrap();
         let physics_id = tonner::RigidBodyBuilder::default()
             .ball(tonner::shape::Ball::from_radius(BALL_RADIUS))
             .mass(BALL_MASS)
             .position(position.as_dvec3())
             .velocity(velocity.as_dvec3())
-            .build(&mut physics_engine.lock().unwrap());
+            .build(&mut engine);
+        *engine.force_mut(physics_id).unwrap() = DVec3::NEG_Y * BALL_MASS * GRAVITY;
+        drop(engine);
 
         let entity_id = entity_registry.create();
 

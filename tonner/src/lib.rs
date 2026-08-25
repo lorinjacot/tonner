@@ -68,8 +68,8 @@ impl Default for AngularData {
             previous_orientation: DQuat::IDENTITY,
             velocity: DVec3::ZERO,
             previous_velocity: DVec3::ZERO,
-            inertia: DMat3::IDENTITY,
-            inverse_inertia: DMat3::IDENTITY,
+            inertia: DMat3::from_diagonal(DVec3::INFINITY),
+            inverse_inertia: DMat3::ZERO,
             torque: DVec3::ZERO,
         }
     }
@@ -242,8 +242,11 @@ impl Engine {
             for d in self.angular_data.values_mut() {
                 d.previous_orientation = d.orientation;
                 d.previous_velocity = d.velocity;
-                d.velocity +=
-                    h * d.inverse_inertia * (d.torque - d.velocity.cross(d.inertia * d.velocity));
+                if d.inverse_inertia != DMat3::ZERO {
+                    d.velocity += h
+                        * d.inverse_inertia
+                        * (d.torque - d.velocity.cross(d.inertia * d.velocity))
+                };
                 d.orientation = d.orientation
                     + DQuat::from_xyzw(d.velocity.x, d.velocity.y, d.velocity.z, 0.0)
                         * d.orientation

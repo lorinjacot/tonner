@@ -153,7 +153,7 @@ impl RigidBodyBuilder {
         self
     }
 
-    /// Sets the inertia tensor of the rigid body. The default inertia tensor is `DMat3::IDENTITY`. The inertia tensor must be positive definite.
+    /// Sets the inertia tensor of the rigid body. The default inertia tensor is diagonal will all non-zero entries equal to `f64::INFINITY`, which means the rigid body is immovable. The inertia tensor must be positive definite.
     ///
     /// # Panics
     ///
@@ -172,8 +172,8 @@ impl RigidBodyBuilder {
     /// assert_eq!(engine.inverse_inertia(a).unwrap(), inertia.inverse());
     ///
     /// let b = RigidBodyBuilder::default().build(&mut engine);
-    /// assert_eq!(engine.inertia(b).unwrap(), DMat3::IDENTITY);
-    /// assert_eq!(engine.inverse_inertia(b).unwrap(), DMat3::IDENTITY);
+    /// assert_eq!(engine.inertia(b).unwrap(), DMat3::from_diagonal(DVec3::INFINITY));
+    /// assert_eq!(engine.inverse_inertia(b).unwrap(), DMat3::ZERO);
     /// ```
     pub fn inertia(mut self, inertia: impl Into<DMat3>) -> Self {
         let inertia: DMat3 = inertia.into();
@@ -186,7 +186,7 @@ impl RigidBodyBuilder {
         self
     }
 
-    /// Sets the inverse inertia tensor of the rigid body. The default inverse inertia tensor is `DMat3::IDENTITY`. The inverse inertia tensor must be positive definite.
+    /// Sets the inverse inertia tensor of the rigid body. The default inverse inertia tensor is `DMat3::ZERO`, which means the rigid body is immovable. The inverse inertia tensor must be positive definite.
     ///
     /// # Panics
     ///
@@ -205,8 +205,8 @@ impl RigidBodyBuilder {
     /// assert_eq!(engine.inertia(a).unwrap(), inverse_inertia.inverse());
     ///
     /// let b = RigidBodyBuilder::default().build(&mut engine);
-    /// assert_eq!(engine.inverse_inertia(b).unwrap(), DMat3::IDENTITY);
-    /// assert_eq!(engine.inertia(b).unwrap(), DMat3::IDENTITY);
+    /// assert_eq!(engine.inverse_inertia(b).unwrap(), DMat3::ZERO);
+    /// assert_eq!(engine.inertia(b).unwrap(), DMat3::from_diagonal(DVec3::INFINITY));
     /// ```
     pub fn inverse_inertia(mut self, inverse_inertia: impl Into<DMat3>) -> Self {
         let inverse_inertia: DMat3 = inverse_inertia.into();

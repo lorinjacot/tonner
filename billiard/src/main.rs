@@ -96,6 +96,8 @@ impl State {
         let mut entity_registry = EntityRegistry::new();
         let mut scene_graph = SceneGraph::new(&ctx);
 
+        let mut physics_engine = tonner::Engine::new();
+
         let camera_entity = entity_registry.create();
         scene_graph.add_with_transform(camera_entity, None, Vec3::X, Quat::IDENTITY, Vec3::ONE);
         let camera = Camera::new(camera_entity);
@@ -107,7 +109,12 @@ impl State {
             .radius(0.025)
             .build(&ctx);
 
-        mesh_instances.push(table(&mut entity_registry, &mut scene_graph, &ctx));
+        mesh_instances.push(table(
+            &mut entity_registry,
+            &mut scene_graph,
+            &mut physics_engine,
+            &ctx,
+        ));
 
         let mut encoder = ctx
             .device()
@@ -126,7 +133,6 @@ impl State {
 
         let scene_graph = Arc::new(Mutex::new(scene_graph));
 
-        let physics_engine = tonner::Engine::new();
         let physics_engine = Arc::new(Mutex::new(physics_engine));
 
         let (camera_node, arrow) = Python::attach(|py| -> PyResult<(Py<NodeHandle>, Py<Arrow>)> {
@@ -253,17 +259,17 @@ impl State {
         Python::attach(|py| -> PyResult<()> {
             self.scripts
                 .update(py, delta_time.as_secs_f32(), &self.camera_node, &self.balls);
+
+            let mut physics_engine = self.physics_engine.lock().unwrap();
+            physics_engine.simulate(delta_time);
+
+            let mut scene_graph = self.scene_graph.lock().unwrap();
             let balls: Vec<_> = self
                 .balls
                 .iter()
                 .map(|ball| ball.borrow_mut(py))
                 .filter(|ball| !ball.out)
                 .collect();
-
-            let mut physics_engine = self.physics_engine.lock().unwrap();
-            physics_engine.simulate(delta_time);
-
-            let mut scene_graph = self.scene_graph.lock().unwrap();
             for ball in &balls {
                 let position = physics_engine.position(ball.physics_id()).unwrap();
                 scene_graph.set_local_transformation(

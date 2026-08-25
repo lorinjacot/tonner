@@ -27,14 +27,14 @@ use winit::{
 
 use crate::arrow::Arrow;
 use crate::ball::Ball;
-use crate::python::{ConstraintManager, ForceManager};
 use crate::table::table;
 
 mod arrow;
 mod ball;
-mod physics;
 mod python;
 mod table;
+
+type PhysicsEngine = Arc<Mutex<tonner::Engine>>;
 
 struct State {
     instance: wgpu::Instance,
@@ -52,10 +52,9 @@ struct State {
     scripts: python::PyScripts,
     camera_node: Py<NodeHandle>,
     balls: Vec<Py<Ball>>,
-    force_manager: Py<ForceManager>,
-    constraint_manager: Py<ConstraintManager>,
     arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
+    physics_engine: PhysicsEngine,
     last_render: Instant,
 }
 
@@ -127,45 +126,38 @@ impl State {
 
         let scene_graph = Arc::new(Mutex::new(scene_graph));
 
-        let (camera_node, force_manager, constraint_manager, arrow) = Python::attach(
-            |py| -> PyResult<(
-                Py<NodeHandle>,
-                Py<ForceManager>,
-                Py<ConstraintManager>,
-                Py<Arrow>,
-            )> {
-                let camera_node = Py::new(py, NodeHandle::new(camera_entity, scene_graph.clone()))?;
+        let physics_engine = tonner::Engine::new();
+        let physics_engine = Arc::new(Mutex::new(physics_engine));
 
-                Ball::settings()
-                    .iter()
-                    .for_each(|(number, name, color, position, velocity)| {
-                        let ball = Ball::new(
-                            py,
-                            *number,
-                            ball.clone(),
-                            name.to_string(),
-                            *color,
-                            *position,
-                            *velocity,
-                            &mut entity_registry,
-                            scene_graph.clone(),
-                            &ctx,
-                        );
-                        balls.push(ball.into());
-                    });
+        let (camera_node, arrow) = Python::attach(|py| -> PyResult<(Py<NodeHandle>, Py<Arrow>)> {
+            let camera_node = Py::new(py, NodeHandle::new(camera_entity, scene_graph.clone()))?;
 
-                let force_manager = Py::new(py, ForceManager::new())?;
+            ball::settings()
+                .iter()
+                .for_each(|(number, name, color, position, velocity)| {
+                    let ball = Ball::new(
+                        py,
+                        *number,
+                        ball.clone(),
+                        name.to_string(),
+                        *color,
+                        *position,
+                        *velocity,
+                        &mut entity_registry,
+                        scene_graph.clone(),
+                        physics_engine.clone(),
+                        &ctx,
+                    );
+                    balls.push(ball.into());
+                });
 
-                let constraint_manager = Py::new(py, ConstraintManager::new())?;
+            let arrow = Py::new(
+                py,
+                Arrow::new(py, &mut entity_registry, scene_graph.clone(), &ctx),
+            )?;
 
-                let arrow = Py::new(
-                    py,
-                    Arrow::new(py, &mut entity_registry, scene_graph.clone(), &ctx),
-                )?;
-
-                Ok((camera_node, force_manager, constraint_manager, arrow))
-            },
-        )
+            Ok((camera_node, arrow))
+        })
         .unwrap();
 
         let scripts = python::PyScripts::new();
@@ -188,10 +180,9 @@ impl State {
             scripts,
             camera_node,
             balls,
-            force_manager,
-            constraint_manager,
             arrow,
             mesh_instances,
+            physics_engine,
             last_render: Instant::now(),
         };
 
@@ -260,31 +251,29 @@ impl State {
                 });
 
         Python::attach(|py| -> PyResult<()> {
-            self.scripts.update(
-                py,
-                delta_time.as_secs_f32(),
-                &self.camera_node,
-                &self.balls,
-                &self.force_manager,
-                &self.constraint_manager,
-            );
-            let mut balls: Vec<_> = self
+            self.scripts
+                .update(py, delta_time.as_secs_f32(), &self.camera_node, &self.balls);
+            let balls: Vec<_> = self
                 .balls
                 .iter()
                 .map(|ball| ball.borrow_mut(py))
                 .filter(|ball| !ball.out)
                 .collect();
 
-            let mut scene_graph = self.scene_graph.lock().unwrap();
+            let mut physics_engine = self.physics_engine.lock().unwrap();
+            physics_engine.simulate(delta_time);
 
-            physics::update(
-                py,
-                delta_time,
-                &mut scene_graph,
-                balls.iter_mut().map(|ball| &mut **ball),
-                self.force_manager.borrow(py).forces(),
-                self.constraint_manager.borrow(py).constraints(),
-            );
+            let mut scene_graph = self.scene_graph.lock().unwrap();
+            for ball in &balls {
+                let position = physics_engine.position(ball.physics_id()).unwrap();
+                scene_graph.set_local_transformation(
+                    ball.entity_id(),
+                    position.as_vec3(),
+                    Quat::IDENTITY,
+                    Vec3::ONE,
+                );
+            }
+            drop(physics_engine);
 
             self.renderer
                 .render(

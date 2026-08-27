@@ -3,14 +3,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use glam::{DVec3, Quat, U8Vec4, Vec3, dvec3, vec3};
+use glam::{DVec3, Quat, Vec3, dvec3, vec3};
 use numpy::{PyArray1, PyArrayLike1};
 use pyo3::{exceptions::PyValueError, prelude::*};
 use tempete::{
     Context,
     ecs::{EntityId, EntityRegistry},
-    geometry::Geometry,
-    mesh::{Mesh, MeshBuilder, MeshInstance, material::MaterialBuilder},
+    mesh::{Mesh, MeshInstance},
     scene_graph::SceneGraph,
 };
 
@@ -19,12 +18,14 @@ use crate::PhysicsEngine;
 const ASSET_PATH: &'static str = "assets/balls/scene.gltf";
 
 const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
-const BALL_RADIUS: f64 = 0.025;
+const BALL_RADIUS: f64 = 0.018931598663330078;
 const BALL_MASS: f64 = 0.170;
 const GRAVITY: f64 = 9.81;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-enum BallColor {
+/// The color of a billiard ball, including the white cue ball, solid balls, striped balls, and the black 8-ball.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BallColor {
     White = 0,
     SolidYellow = 1,
     SolidBlue = 2,
@@ -45,7 +46,37 @@ enum BallColor {
 
 impl BallColor {
     /// The number of distinct ball colors, including the white cue ball.
-    const COUNT: usize = 16;
+    pub const COUNT: usize = 16;
+
+    /// Returns the number of the ball color.
+    ///
+    /// The white cue ball has number 0, solid balls have numbers 1-7, the black 8-ball has number 8, and striped balls have numbers 9-15.
+    pub fn number(&self) -> u8 {
+        *self as u8
+    }
+
+    /// Returns the `BallColor` corresponding to the given number, or `None` if the number is invalid (i.e., not in the range 0-15).
+    pub fn from_number(number: u8) -> Option<BallColor> {
+        match number {
+            0 => Some(BallColor::White),
+            1 => Some(BallColor::SolidYellow),
+            2 => Some(BallColor::SolidBlue),
+            3 => Some(BallColor::SolidRed),
+            4 => Some(BallColor::SolidPurple),
+            5 => Some(BallColor::SolidOrange),
+            6 => Some(BallColor::SolidGreen),
+            7 => Some(BallColor::SolidMaroon),
+            8 => Some(BallColor::Black),
+            9 => Some(BallColor::YellowStripe),
+            10 => Some(BallColor::BlueStripe),
+            11 => Some(BallColor::RedStripe),
+            12 => Some(BallColor::PurpleStripe),
+            13 => Some(BallColor::OrangeStripe),
+            14 => Some(BallColor::GreenStripe),
+            15 => Some(BallColor::MaroonStripe),
+            _ => None,
+        }
+    }
 
     fn from_asset_name(name: &str) -> Option<BallColor> {
         match name {
@@ -70,6 +101,7 @@ impl BallColor {
     }
 }
 
+/// A collection of meshes for billiard balls, indexed by their color.
 pub struct BallsAsset {
     meshes_by_color: HashMap<BallColor, Mesh>,
 }
@@ -97,14 +129,18 @@ impl BallsAsset {
 
         Ok(BallsAsset { meshes_by_color })
     }
+
+    /// Returns the mesh corresponding to the given ball color.
+    pub fn get(&self, color: BallColor) -> &Mesh {
+        &self.meshes_by_color[&color]
+    }
 }
 
 #[pyclass]
 pub struct Ball {
     physics_id: tonner::BodyId,
     entity_id: EntityId,
-    #[pyo3(get)]
-    number: u8,
+    color: BallColor,
     #[pyo3(get)]
     pub radius: f64,
     #[pyo3(get, set)]
@@ -116,16 +152,13 @@ pub struct Ball {
 impl Ball {
     pub fn new<'py>(
         py: Python<'py>,
-        number: u8,
-        geometry: Geometry,
-        name: String,
-        color: impl Into<U8Vec4>,
+        color: BallColor,
         position: impl Into<Vec3>,
         velocity: impl Into<Vec3>,
         entity_registry: &mut EntityRegistry,
         scene_graph: Arc<Mutex<SceneGraph>>,
         physics_engine: PhysicsEngine,
-        ctx: &Context,
+        balls_assets: &BallsAsset,
     ) -> Bound<'py, Ball> {
         let position = position.into();
         let velocity = velocity.into();
@@ -147,26 +180,15 @@ impl Ball {
             None,
             position,
             Quat::IDENTITY,
-            Vec3::ONE,
+            Vec3::splat(1e-3),
         );
 
-        let material = MaterialBuilder::default()
-            .name(name.clone())
-            .base_color_factor(color.into().as_vec4() / 255.0)
-            .metallic_factor(0.0)
-            .build(ctx);
-
-        let mesh_instance = MeshBuilder::default()
-            .name(name)
-            .primitive(geometry, material)
-            .build(ctx)
-            .unwrap()
-            .new_instance(entity_id);
+        let mesh_instance = balls_assets.get(color).new_instance(entity_id);
 
         let ball = Ball {
             physics_id,
             entity_id,
-            number,
+            color,
             radius: BALL_RADIUS,
             out: false,
             mesh_instance,
@@ -191,6 +213,11 @@ impl Ball {
 
 #[pymethods]
 impl Ball {
+    #[getter]
+    fn number(&self) -> u8 {
+        self.color.number()
+    }
+
     #[getter]
     fn position<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         let position = self
@@ -247,38 +274,38 @@ fn parse_dvec3<'py>(value: PyArrayLike1<'py, f64>) -> PyResult<DVec3> {
 }
 
 #[rustfmt::skip]
-pub fn settings() -> Vec<(u8, &'static str, [u8; 4], Vec3, Vec3)> {
+pub fn settings() -> Vec<(BallColor, Vec3, Vec3)> {
     // Standard spacing: dx = ball_diameter, dz = ball_diameter * sqrt(3)/2
     let d = 0.05; 
     let row_spacing = (3.0f32).sqrt() / 2.0 * d;
 
     vec![
         // white
-        (0, "white", [255; 4], vec3(0.0, 0.025, -0.8), Vec3::ZERO),
+        (BallColor::White, vec3(0.0, 0.025, -0.8), Vec3::ZERO),
         
         // Row 1
-        (1, "solid yellow", [255, 217, 15, 255], BASE_POS + vec3(0.0, 0.0, 0.0), Vec3::ZERO),
+        (BallColor::SolidYellow, BASE_POS + vec3(0.0, 0.0, 0.0), Vec3::ZERO),
 
         // Row 2
-        (2, "solid blue", [5, 7, 255, 255], BASE_POS + vec3(row_spacing, 0.0, -0.5 * d), Vec3::ZERO),
-        (9, "yellow stripe", [255, 217, 15, 255], BASE_POS + vec3(row_spacing, 0.0, 0.5 * d), Vec3::ZERO),
+        (BallColor::SolidBlue, BASE_POS + vec3(row_spacing, 0.0, -0.5 * d), Vec3::ZERO),
+        (BallColor::YellowStripe, BASE_POS + vec3(row_spacing, 0.0, 0.5 * d), Vec3::ZERO),
 
         // Row 3
-        (3, "solid red", [255, 0, 0, 255], BASE_POS + vec3(2.0 * row_spacing, 0.0, -1.0 * d), Vec3::ZERO),
-        (8, "solid black", [0, 0, 0, 255], BASE_POS + vec3(2.0 * row_spacing, 0.0, 0.0), Vec3::ZERO), 
-        (10, "blue stripe", [5, 7, 255, 255], BASE_POS + vec3(2.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
+        (BallColor::SolidRed, BASE_POS + vec3(2.0 * row_spacing, 0.0, -1.0 * d), Vec3::ZERO),
+        (BallColor::Black, BASE_POS + vec3(2.0 * row_spacing, 0.0, 0.0), Vec3::ZERO), 
+        (BallColor::BlueStripe, BASE_POS + vec3(2.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
 
         // Row 4
-        (4, "solid purple", [128, 0, 128, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, -1.5 * d), Vec3::ZERO),
-        (11, "red stripe", [255, 0, 0, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, -0.5 * d), Vec3::ZERO),
-        (5, "solid orange", [255, 165, 0, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, 0.5 * d), Vec3::ZERO),
-        (12, "purple stripe", [128, 0, 128, 255], BASE_POS + vec3(3.0 * row_spacing, 0.0, 1.5 * d), Vec3::ZERO),
+        (BallColor::SolidPurple, BASE_POS + vec3(3.0 * row_spacing, 0.0, -1.5 * d), Vec3::ZERO),
+        (BallColor::RedStripe, BASE_POS + vec3(3.0 * row_spacing, 0.0, -0.5 * d), Vec3::ZERO),
+        (BallColor::SolidOrange, BASE_POS + vec3(3.0 * row_spacing, 0.0, 0.5 * d), Vec3::ZERO),
+        (BallColor::PurpleStripe, BASE_POS + vec3(3.0 * row_spacing, 0.0, 1.5 * d), Vec3::ZERO),
 
         // Row 5
-        (6, "solid green", [0, 255, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, -2.0 * d), Vec3::ZERO),
-        (13, "orange stripe", [255, 165, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, -1.0 * d), Vec3::ZERO),
-        (7, "solid maroon", [128, 0, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 0.0), Vec3::ZERO),
-        (14, "green stripe", [0, 255, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
-        (15, "maroon stripe", [128, 0, 0, 255], BASE_POS + vec3(4.0 * row_spacing, 0.0, 2.0 * d), Vec3::ZERO),
+        (BallColor::SolidGreen, BASE_POS + vec3(4.0 * row_spacing, 0.0, -2.0 * d), Vec3::ZERO),
+        (BallColor::OrangeStripe, BASE_POS + vec3(4.0 * row_spacing, 0.0, -1.0 * d), Vec3::ZERO),
+        (BallColor::SolidMaroon, BASE_POS + vec3(4.0 * row_spacing, 0.0, 0.0), Vec3::ZERO),
+        (BallColor::GreenStripe, BASE_POS + vec3(4.0 * row_spacing, 0.0, 1.0 * d), Vec3::ZERO),
+        (BallColor::MaroonStripe, BASE_POS + vec3(4.0 * row_spacing, 0.0, 2.0 * d), Vec3::ZERO),
     ]
 }

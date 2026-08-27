@@ -8,7 +8,6 @@ use pyo3::prelude::*;
 use tempete::Context;
 use tempete::ecs::EntityRegistry;
 use tempete::environment::{Environment, EnvironmentBuilder};
-use tempete::geometry::SphereBuilder;
 use tempete::geometry::skin::SkinManager;
 use tempete::mesh::MeshInstance;
 use tempete::renderer::Renderer;
@@ -91,7 +90,7 @@ impl State {
         });
 
         let ctx = Context::from_device(device, queue);
-        let balls_asset = BallsAsset::load(&ctx, &mut encoder);
+        let balls_asset = BallsAsset::load(&ctx, &mut encoder).unwrap();
 
         ctx.queue().submit([encoder.finish()]);
 
@@ -112,10 +111,6 @@ impl State {
 
         let mut balls = Vec::new();
         let mut mesh_instances = Vec::new();
-        let ball = SphereBuilder::default()
-            .name("Ball")
-            .radius(0.025)
-            .build(&ctx);
 
         mesh_instances.push(table(
             &mut entity_registry,
@@ -148,19 +143,16 @@ impl State {
 
             ball::settings()
                 .iter()
-                .for_each(|(number, name, color, position, velocity)| {
+                .for_each(|(color, position, velocity)| {
                     let ball = Ball::new(
                         py,
-                        *number,
-                        ball.clone(),
-                        name.to_string(),
                         *color,
                         *position,
                         *velocity,
                         &mut entity_registry,
                         scene_graph.clone(),
                         physics_engine.clone(),
-                        &ctx,
+                        &balls_asset,
                     );
                     balls.push(ball.into());
                 });
@@ -283,8 +275,8 @@ impl State {
                 scene_graph.set_local_transformation(
                     ball.entity_id(),
                     position.as_vec3(),
-                    Quat::IDENTITY,
-                    Vec3::ONE,
+                    None,
+                    None,
                 );
             }
             drop(physics_engine);

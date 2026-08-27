@@ -9,7 +9,7 @@ bytemuck.workspace = true
 data-url.workspace = true
 glam.workspace = true
 image.workspace = true
-serde.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 serde_repr.workspace = true
 storm-animation.workspace = true

@@ -8,8 +8,8 @@ use crate::AnimationChannel;
 /// The `output` contains the value the node should take
 /// at time `input`.
 ///
-/// See https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#animations
-/// and https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-c-interpolation
+/// See <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#animations>
+/// and <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-c-interpolation>
 /// for more informations.
 #[derive(Debug)]
 pub enum KeyFrameChannel {

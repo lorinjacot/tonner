@@ -47,8 +47,6 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Create a new builder. If possible, a builder should be reused, as calling
-    /// [`RenderTargetBuilder::new`] is recreating multiple [`wgpu::Texture`], [`wgpu::BindGroup`] and [`wgpu::RenderPipeline`].
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: &Context) -> Self {
         let mut encoder = ctx
             .device

@@ -26,7 +26,7 @@ use winit::{
 };
 
 use crate::arrow::Arrow;
-use crate::ball::Ball;
+use crate::ball::{Ball, BallsAsset};
 use crate::table::table;
 
 mod arrow;
@@ -86,7 +86,15 @@ impl State {
             .await
             .expect("failed to get gpu device");
 
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Billiard startup command encoder"),
+        });
+
         let ctx = Context::from_device(device, queue);
+        let balls_asset = BallsAsset::load(&ctx, &mut encoder);
+
+        ctx.queue().submit([encoder.finish()]);
+
         let renderer = Renderer::new(
             size.width,
             size.height,

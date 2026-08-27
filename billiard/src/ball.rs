@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use glam::{DVec3, Quat, U8Vec4, Vec3, dvec3, vec3};
 use numpy::{PyArray1, PyArrayLike1};
@@ -7,16 +10,94 @@ use tempete::{
     Context,
     ecs::{EntityId, EntityRegistry},
     geometry::Geometry,
-    mesh::{MeshBuilder, MeshInstance, material::MaterialBuilder},
+    mesh::{Mesh, MeshBuilder, MeshInstance, material::MaterialBuilder},
     scene_graph::SceneGraph,
 };
 
 use crate::PhysicsEngine;
 
+const ASSET_PATH: &'static str = "assets/balls/scene.gltf";
+
 const BASE_POS: Vec3 = vec3(0.0, 0.025, 0.8);
 const BALL_RADIUS: f64 = 0.025;
 const BALL_MASS: f64 = 0.170;
 const GRAVITY: f64 = 9.81;
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum BallColor {
+    White = 0,
+    SolidYellow = 1,
+    SolidBlue = 2,
+    SolidRed = 3,
+    SolidPurple = 4,
+    SolidOrange = 5,
+    SolidGreen = 6,
+    SolidMaroon = 7,
+    Black = 8,
+    YellowStripe = 9,
+    BlueStripe = 10,
+    RedStripe = 11,
+    PurpleStripe = 12,
+    OrangeStripe = 13,
+    GreenStripe = 14,
+    MaroonStripe = 15,
+}
+
+impl BallColor {
+    /// The number of distinct ball colors, including the white cue ball.
+    const COUNT: usize = 16;
+
+    fn from_asset_name(name: &str) -> Option<BallColor> {
+        match name {
+            "Ball Clube_10 - Default_0" => Some(BallColor::White),
+            "Ball1_01 - Default_0" => Some(BallColor::SolidYellow),
+            "Ball2_02 - Default_0" => Some(BallColor::SolidBlue),
+            "Ball3_03 - Default_0" => Some(BallColor::SolidRed),
+            "Ball4_07 - Default_0" => Some(BallColor::SolidPurple),
+            "Ball5_08 - Default_0" => Some(BallColor::SolidOrange),
+            "Ball6_09 - Default_0" => Some(BallColor::SolidGreen),
+            "Ball7_13 - Default_0" => Some(BallColor::SolidMaroon),
+            "Ball8_14 - Default_0" => Some(BallColor::Black),
+            "Ball9_15 - Default_0" => Some(BallColor::YellowStripe),
+            "Ball10_19 - Default_0" => Some(BallColor::BlueStripe),
+            "Ball11_20 - Default_0" => Some(BallColor::RedStripe),
+            "Ball12_21 - Default_0" => Some(BallColor::PurpleStripe),
+            "Ball13_04 - Default_0" => Some(BallColor::OrangeStripe),
+            "Ball14_05 - Default_0" => Some(BallColor::GreenStripe),
+            "Ball15_06 - Default_0" => Some(BallColor::MaroonStripe),
+            _ => None,
+        }
+    }
+}
+
+pub struct BallsAsset {
+    meshes_by_color: HashMap<BallColor, Mesh>,
+}
+
+impl BallsAsset {
+    pub fn load(ctx: &Context, encoder: &mut wgpu::CommandEncoder) -> anyhow::Result<BallsAsset> {
+        let mut asset = storm_gltf::GltfAsset::open(ASSET_PATH)?;
+
+        let meshes = asset.load_meshes(ctx, encoder)?;
+        let meshes_by_color: HashMap<BallColor, Mesh> = meshes
+            .into_iter()
+            .filter_map(|mesh| {
+                let color = BallColor::from_asset_name(&mesh.name())?;
+                Some((color, mesh))
+            })
+            .collect();
+
+        if meshes_by_color.len() != BallColor::COUNT {
+            anyhow::bail!(
+                "Expected {} ball meshes, but found {}",
+                BallColor::COUNT,
+                meshes_by_color.len()
+            );
+        }
+
+        Ok(BallsAsset { meshes_by_color })
+    }
+}
 
 #[pyclass]
 pub struct Ball {

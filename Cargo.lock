@@ -628,6 +628,7 @@ dependencies = [
 name = "billiard"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "env_logger",
  "glam 0.32.1",
  "image",
@@ -637,6 +638,7 @@ dependencies = [
  "pollster",
  "pyo3",
  "pyo3-ffi",
+ "storm-gltf",
  "tempete",
  "tonner",
  "wgpu",

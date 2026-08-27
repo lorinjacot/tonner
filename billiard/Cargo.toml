@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow.workspace = true
 env_logger.workspace = true
 glam.workspace = true
 image.workspace = true
@@ -13,6 +14,7 @@ numpy.workspace = true
 pollster.workspace = true
 pyo3 = { workspace = true, features = ["auto-initialize"] }
 pyo3-ffi.workspace = true
+storm-gltf = { version = "0.1.0", path = "../storm-gltf" }
 tempete = { workspace = true, features = ["pyo3"] }
 tonner.workspace = true
 wgpu.workspace = true

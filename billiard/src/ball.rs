@@ -25,6 +25,7 @@ const GRAVITY: f64 = 9.81;
 /// The color of a billiard ball, including the white cue ball, solid balls, striped balls, and the black 8-ball.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[pyclass(eq, eq_int, skip_from_py_object)]
 pub enum BallColor {
     White = 0,
     SolidYellow = 1,
@@ -140,6 +141,7 @@ impl BallsAsset {
 pub struct Ball {
     physics_id: tonner::BodyId,
     entity_id: EntityId,
+    #[pyo3(get)]
     color: BallColor,
     #[pyo3(get)]
     pub radius: f64,

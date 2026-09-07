@@ -14,6 +14,12 @@ use tempete::scene_graph::NodeHandle;
 
 use crate::{arrow::Arrow, ball::Ball};
 
+#[pymodule]
+mod billiard {
+    #[pymodule_export]
+    use crate::ball::BallColor;
+}
+
 const SCRIPTS_DIR: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts");
 
 #[derive(Debug)]
@@ -29,9 +35,14 @@ pub struct PyScripts {
 }
 
 impl PyScripts {
+    /// Initializes the python interpreter for the billiard application. This should be called once at the start of the application.
+    /// 
     /// Adds the `scripts` folder to python import path. This allow any python file in `scripts` to
-    /// import other modules located in `scripts`.
+    /// import other modules located in `scripts. Also adds the `billiard` module to python, adding
+    /// billiard-specific functionality to python.
     pub fn init() {
+        pyo3::append_to_inittab!(billiard);
+        
         let path = Path::new(SCRIPTS_DIR);
         Python::attach(|py| {
             let syspath = py

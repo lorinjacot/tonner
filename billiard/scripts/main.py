@@ -13,6 +13,8 @@ if "ray" in sys.modules:
     importlib.reload(sys.modules["ray"])
 if "interpolation" in sys.modules:
     importlib.reload(sys.modules["interpolation"])
+if "game" in sys.modules:
+    importlib.reload(sys.modules["game"])
 
 import physics
 from ray import Ray

@@ -8,8 +8,6 @@ import quaternion
 # import debugpy
 # debugpy.listen(5678, in_process_debug_adapter=True)
 
-if "physics" in sys.modules:
-    importlib.reload(sys.modules["physics"])
 if "ray" in sys.modules:
     importlib.reload(sys.modules["ray"])
 if "interpolation" in sys.modules:
@@ -17,7 +15,6 @@ if "interpolation" in sys.modules:
 if "game" in sys.modules:
     importlib.reload(sys.modules["game"])
 
-import physics
 from ray import Ray
 from interpolation import cubic_hermite_spline, Point
 from game import Game
@@ -181,7 +178,7 @@ def update(
     global camera_state, reset, white_ball_impulse
     global camera_interpolation_start, camera_interpolation_end, camera_interpolation_fraction
     
-    physics.simulate(delta_time, balls, reset, white_ball_impulse)
+    balls[b.BallColor.White].velocity += white_ball_impulse
     if reset:
         camera_state = "Interpolating"
         reset = False

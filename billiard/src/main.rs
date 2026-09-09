@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,7 +26,7 @@ use winit::{
 };
 
 use crate::arrow::Arrow;
-use crate::ball::{Ball, BallsAsset};
+use crate::ball::{Ball, BallColor, BallsAsset};
 use crate::table::table;
 
 mod arrow;
@@ -50,7 +51,7 @@ struct State {
     environment: Environment,
     scripts: python::PyScripts,
     camera_node: Py<NodeHandle>,
-    balls: Vec<Py<Ball>>,
+    balls: HashMap<BallColor, Py<Ball>>,
     arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
     physics_engine: PhysicsEngine,
@@ -109,7 +110,7 @@ impl State {
         scene_graph.add_with_transform(camera_entity, None, Vec3::X, Quat::IDENTITY, Vec3::ONE);
         let camera = Camera::new(camera_entity);
 
-        let mut balls = Vec::new();
+        let mut balls = HashMap::new();
         let mut mesh_instances = Vec::new();
 
         mesh_instances.push(table(
@@ -154,7 +155,7 @@ impl State {
                         physics_engine.clone(),
                         &balls_asset,
                     );
-                    balls.push(ball.into());
+                    balls.insert(*color, ball.into());
                 });
 
             let arrow = Py::new(
@@ -166,7 +167,7 @@ impl State {
         })
         .unwrap();
 
-        let scripts = python::PyScripts::new();
+        let scripts = python::PyScripts::new(&balls);
 
         ctx.queue().submit([encoder.finish()]);
 
@@ -258,7 +259,7 @@ impl State {
 
         Python::attach(|py| -> PyResult<()> {
             self.scripts
-                .update(py, delta_time.as_secs_f32(), &self.camera_node, &self.balls);
+                .update(py, delta_time.as_secs_f32(), &self.camera_node);
 
             let mut physics_engine = self.physics_engine.lock().unwrap();
             physics_engine.simulate(delta_time);
@@ -266,7 +267,7 @@ impl State {
             let mut scene_graph = self.scene_graph.lock().unwrap();
             let balls: Vec<_> = self
                 .balls
-                .iter()
+                .values()
                 .map(|ball| ball.borrow_mut(py))
                 .filter(|ball| !ball.out)
                 .collect();
@@ -377,7 +378,6 @@ impl ApplicationHandler for App {
                     1.0 - 2.0 * position.y / h,
                     &state.camera_node,
                     state.camera.projection_matrix((w / h) as f32),
-                    &state.balls,
                     &state.arrow,
                 );
             }
@@ -403,7 +403,7 @@ impl ApplicationHandler for App {
 
 fn main() -> Result<(), winit::error::EventLoopError> {
     env_logger::init();
-    python::PyScripts::init();
+    python::PyScripts::init_python();
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);

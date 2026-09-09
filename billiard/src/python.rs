@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::CString,
     fs,
     path::Path,
@@ -9,10 +10,16 @@ use glam::Mat4;
 use log::{error, info};
 use notify::Watcher;
 use numpy::{PyArray2, ndarray::aview2};
-use pyo3::{prelude::*, types::PyList};
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyList},
+};
 use tempete::scene_graph::NodeHandle;
 
-use crate::{arrow::Arrow, ball::Ball};
+use crate::{
+    arrow::Arrow,
+    ball::{Ball, BallColor},
+};
 
 #[pymodule]
 mod billiard {
@@ -27,6 +34,8 @@ pub struct PyScripts {
     #[allow(dead_code)] // need to keep watcher in order to continues watching for changes
     watcher: Option<notify::RecommendedWatcher>,
     watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
+    balls: Py<PyDict>,
+    init_game: Option<Py<PyAny>>,
     update: Option<Py<PyAny>>,
     mouse_input: Option<Py<PyAny>>,
     mouse_moved: Option<Py<PyAny>>,
@@ -36,13 +45,13 @@ pub struct PyScripts {
 
 impl PyScripts {
     /// Initializes the python interpreter for the billiard application. This should be called once at the start of the application.
-    /// 
+    ///
     /// Adds the `scripts` folder to python import path. This allow any python file in `scripts` to
     /// import other modules located in `scripts. Also adds the `billiard` module to python, adding
     /// billiard-specific functionality to python.
-    pub fn init() {
+    pub fn init_python() {
         pyo3::append_to_inittab!(billiard);
-        
+
         let path = Path::new(SCRIPTS_DIR);
         Python::attach(|py| {
             let syspath = py
@@ -56,7 +65,7 @@ impl PyScripts {
         });
     }
 
-    pub fn new() -> PyScripts {
+    pub fn new(balls: &HashMap<BallColor, Py<Ball>>) -> PyScripts {
         let path = Path::new(SCRIPTS_DIR);
         let (tx, rx) = channel();
         let watcher = notify::recommended_watcher(tx)
@@ -71,16 +80,28 @@ impl PyScripts {
             .ok();
         let watcher_receiver = if watcher.is_some() { Some(rx) } else { None };
 
-        PyScripts::with_watcher(watcher, watcher_receiver)
+        Python::attach(|py| {
+            let dict = PyDict::new(py);
+            for (color, ball) in balls {
+                dict.set_item(*color, ball).unwrap();
+            }
+            let balls = dict.unbind();
+
+            PyScripts::with_watcher(py, watcher, watcher_receiver, balls)
+        })
     }
 
     fn with_watcher(
+        py: Python<'_>,
         watcher: Option<notify::RecommendedWatcher>,
         watcher_receiver: Option<Receiver<Result<notify::Event, notify::Error>>>,
+        balls: Py<PyDict>,
     ) -> PyScripts {
         let mut scripts = PyScripts {
             watcher,
             watcher_receiver,
+            balls,
+            init_game: None,
             update: None,
             mouse_input: None,
             mouse_moved: None,
@@ -104,32 +125,34 @@ impl PyScripts {
             }
         };
 
-        Python::attach(|py| {
-            let main_module = match PyModule::from_code(py, &main_content, c"main.py", c"") {
-                Ok(module) => module,
-                Err(e) => {
-                    error!("Failed to load main.py: {e}.");
-                    return;
-                }
-            };
+        match PyModule::from_code(py, &main_content, c"main.py", c"") {
+            Err(e) => {
+                error!("Failed to load main.py: {e}.");
+            }
+            Ok(main_module) => {
+                scripts.init_game = load_function(&main_module, "init_game");
+                scripts.update = load_function(&main_module, "update");
+                scripts.mouse_input = load_function(&main_module, "mouse_input");
+                scripts.mouse_moved = load_function(&main_module, "mouse_moved");
+                scripts.mouse_motion = load_function(&main_module, "mouse_motion");
+                scripts.mouse_wheel = load_function(&main_module, "mouse_wheel");
 
-            scripts.update = load_function(&main_module, "update");
-            scripts.mouse_input = load_function(&main_module, "mouse_input");
-            scripts.mouse_moved = load_function(&main_module, "mouse_moved");
-            scripts.mouse_motion = load_function(&main_module, "mouse_motion");
-            scripts.mouse_wheel = load_function(&main_module, "mouse_wheel");
-        });
+                scripts.init_game(py);
+            }
+        };
 
         scripts
     }
 
-    pub fn update(
-        &mut self,
-        py: Python,
-        delta_time: f32,
-        camera_node: &Py<NodeHandle>,
-        balls: &[Py<Ball>],
-    ) {
+    pub fn init_game(&mut self, py: Python<'_>) {
+        if let Some(func) = self.init_game.as_ref() {
+            if let Err(e) = func.call1(py, (&self.balls,)) {
+                error!("Failed to run init_game(): {e}.");
+            }
+        }
+    }
+
+    pub fn update(&mut self, py: Python, delta_time: f32, camera_node: &Py<NodeHandle>) {
         if let Some(rx) = &self.watcher_receiver {
             use notify::EventKind::*;
 
@@ -147,11 +170,16 @@ impl PyScripts {
             }
             if need_reloading {
                 info!("File change detected. Reloading python scripts.");
-                *self = PyScripts::with_watcher(self.watcher.take(), self.watcher_receiver.take());
+                *self = PyScripts::with_watcher(
+                    py,
+                    self.watcher.take(),
+                    self.watcher_receiver.take(),
+                    self.balls.clone_ref(py),
+                );
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(py, (delta_time, camera_node, balls)) {
+            if let Err(e) = func.call1(py, (delta_time, camera_node, &self.balls)) {
                 error!("Failed to run update(): {e}.");
             }
         }
@@ -171,7 +199,6 @@ impl PyScripts {
         y: f64,
         camera_node: &Py<NodeHandle>,
         projection_matrix: Mat4,
-        balls: &[Py<Ball>],
         arrow: &Py<Arrow>,
     ) {
         if let Some(func) = self.mouse_moved.as_ref() {
@@ -180,7 +207,7 @@ impl PyScripts {
                     py,
                     &aview2(&projection_matrix.transpose().to_cols_array_2d()),
                 );
-                func.call1(py, (x, y, camera_node, projection_matrix, balls, arrow))
+                func.call1(py, (x, y, camera_node, projection_matrix, &self.balls, arrow))
             }) {
                 error!("Failed to run mouse_motion(): {e}.");
             }

@@ -1,27 +1,27 @@
 from typing import Dict
-from .billiard import BallColor, Ball
+import billiard
 from numpy.typing import NDArray
 
 import numpy as np
 
 SOLID_COLORS = [
-    BallColor.SolidYellow,
-    BallColor.SolidBlue,
-    BallColor.SolidRed,
-    BallColor.SolidPurple,
-    BallColor.SolidOrange,
-    BallColor.SolidGreen,
-    BallColor.SolidMaroon,
+    billiard.BallColor.SolidYellow,
+    billiard.BallColor.SolidBlue,
+    billiard.BallColor.SolidRed,
+    billiard.BallColor.SolidPurple,
+    billiard.BallColor.SolidOrange,
+    billiard.BallColor.SolidGreen,
+    billiard.BallColor.SolidMaroon,
 ]
 
 STRIPE_COLORS = [
-    BallColor.YellowStripe,
-    BallColor.BlueStripe,
-    BallColor.RedStripe,
-    BallColor.PurpleStripe,
-    BallColor.OrangeStripe,
-    BallColor.GreenStripe,
-    BallColor.MaroonStripe,
+    billiard.BallColor.YellowStripe,
+    billiard.BallColor.BlueStripe,
+    billiard.BallColor.RedStripe,
+    billiard.BallColor.PurpleStripe,
+    billiard.BallColor.OrangeStripe,
+    billiard.BallColor.GreenStripe,
+    billiard.BallColor.MaroonStripe,
 ]
 
 BASE_POS = np.array([0.0, 0.025, 0.65])
@@ -29,15 +29,15 @@ BALL_DISTANCE = 0.05
 
 
 class Game:
-    balls: Dict[BallColor, Ball]
-    white: Ball
-    black: Ball
-    solid: Dict[BallColor, Ball]
-    stripe: Dict[BallColor, Ball]
+    balls: Dict[billiard.BallColor, Ball]
+    white: billiard.Ball
+    black: billiard.Ball
+    solid: Dict[billiard.BallColor, Ball]
+    stripe: Dict[billiard.BallColor, Ball]
 
-    def __init__(self, balls: Dict[BallColor, Ball]) -> None:
-        self.white = balls[BallColor.White]
-        self.black = balls[BallColor.Black]
+    def __init__(self, balls: Dict[billiard.BallColor, billiard.Ball]) -> None:
+        self.white = balls[billiard.BallColor.White]
+        self.black = balls[billiard.BallColor.Black]
         self.solid = {color: balls[color] for color in SOLID_COLORS}
         self.stripe = {color: balls[color] for color in STRIPE_COLORS}
         self.balls = balls.copy()
@@ -45,21 +45,21 @@ class Game:
         self.reset_balls()
 
     def reset_balls(self) -> None:
-        row0 = BallColor.SolidYellow
-        row1 = (BallColor.GreenStripe, BallColor.RedStripe)
-        row2 = (BallColor.SolidOrange, BallColor.Black, BallColor.SolidMaroon)
+        row0 = billiard.BallColor.SolidYellow
+        row1 = (billiard.BallColor.GreenStripe, billiard.BallColor.RedStripe)
+        row2 = (billiard.BallColor.SolidOrange, billiard.BallColor.Black, billiard.BallColor.SolidMaroon)
         row3 = (
-            BallColor.MaroonStripe,
-            BallColor.SolidBlue,
-            BallColor.PurpleStripe,
-            BallColor.YellowStripe,
+            billiard.BallColor.MaroonStripe,
+            billiard.BallColor.SolidBlue,
+            billiard.BallColor.PurpleStripe,
+            billiard.BallColor.YellowStripe,
         )
         row4 = (
-            BallColor.SolidPurple,
-            BallColor.BlueStripe,
-            BallColor.SolidRed,
-            BallColor.OrangeStripe,
-            BallColor.SolidGreen,
+            billiard.BallColor.SolidPurple,
+            billiard.BallColor.BlueStripe,
+            billiard.BallColor.SolidRed,
+            billiard.BallColor.OrangeStripe,
+            billiard.BallColor.SolidGreen,
         )
 
         dz = np.sqrt(3) / 2 * BALL_DISTANCE

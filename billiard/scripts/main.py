@@ -1,5 +1,5 @@
 from typing import Literal, Dict
-import billiard
+import billiard as b
 import importlib, sys
 
 import numpy as np
@@ -48,7 +48,7 @@ game: Game | None = None
 
 
 def init_game(
-    balls: Dict[billiard.BallColor, billiard.Ball],
+    balls: Dict[b.BallColor, b.Ball],
 ) -> None:
     global game
 
@@ -91,7 +91,7 @@ def mouse_moved(
         x: float, y: float,
         camera_node,
         projection_matrix: np.ndarray,
-        balls: Dict[billiard.BallColor, billiard.Ball],
+        balls: Dict[b.BallColor, b.Ball],
         arrow
     ):
     def pointer_ray():
@@ -110,14 +110,14 @@ def mouse_moved(
     if mouse_action is None:
         ray = pointer_ray()
 
-        white_ball = balls[billiard.BallColor.White]
+        white_ball = balls[b.BallColor.White]
         assert white_ball.number == 0
 
         global mouse_over_ball
         mouse_over_ball = ray.intersects_ball(white_ball)
     
     elif mouse_action == "Throw":
-        white_ball = balls[billiard.BallColor.White]
+        white_ball = balls[b.BallColor.White]
         assert white_ball.number == 0
         ball_pos = white_ball.position
 
@@ -175,7 +175,7 @@ def mouse_wheel(dx: float, dy: float):
 def update(
         delta_time: float,
         camera_node,
-        balls: Dict[billiard.BallColor, billiard.Ball],
+        balls: Dict[b.BallColor, b.Ball],
     ):
     global game
     global camera_state, reset, white_ball_impulse
@@ -195,7 +195,7 @@ def update(
         if max_motion < 1e-3:
             camera_state = "Interpolating"
     elif camera_state == "Interpolating":
-        camera_interpolation_end = balls[billiard.BallColor.White].position
+        camera_interpolation_end = balls[b.BallColor.White].position
         if camera_interpolation_fraction < 1.0:
             start = Point(0.0, camera_interpolation_speed)
             end = Point(1.0, camera_interpolation_speed)

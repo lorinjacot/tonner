@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict
-import billiard
+import billiard as b
 
 g = np.array([0.0, -1.0, 0.0])
 drag_coefficient = 0.1
@@ -30,5 +30,5 @@ def drag(pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     force[non_zero,:] = - drag_coefficient * safe_vel / norms[:,np.newaxis]
     return force
 
-def simulate(delta_time: float, balls: Dict[billiard.BallColor, billiard.Ball], reset: bool, white_ball_impulse: np.ndarray):
-    balls[billiard.BallColor.White].velocity += white_ball_impulse
+def simulate(delta_time: float, balls: Dict[b.BallColor, b.Ball], reset: bool, white_ball_impulse: np.ndarray):
+    balls[b.BallColor.White].velocity += white_ball_impulse

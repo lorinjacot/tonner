@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::iter::once;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -55,6 +56,8 @@ struct State {
     arrow: Py<Arrow>,
     mesh_instances: Vec<MeshInstance>,
     physics_engine: PhysicsEngine,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
     last_render: Instant,
 }
 
@@ -89,6 +92,21 @@ impl State {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Billiard startup command encoder"),
         });
+
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx,
+            egui::ViewportId::ROOT,
+            &window,
+            Some(window.scale_factor() as f32),
+            window.theme(),
+            Some(device.limits().max_texture_dimension_2d as usize),
+        );
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &device,
+            surface_format.remove_srgb_suffix(),
+            egui_wgpu::RendererOptions::default(),
+        );
 
         let ctx = Context::from_device(device, queue);
         let balls_asset = BallsAsset::load(&ctx, &mut encoder).unwrap();
@@ -190,10 +208,13 @@ impl State {
             arrow,
             mesh_instances,
             physics_engine,
+            egui_state,
+            egui_renderer,
             last_render: Instant::now(),
         };
 
         state.configure_surface();
+        state.ctx.queue().submit([]);
 
         state
     }
@@ -202,7 +223,10 @@ impl State {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: self.surface_format,
-            view_formats: vec![self.surface_format.add_srgb_suffix()],
+            view_formats: vec![
+                self.surface_format.add_srgb_suffix(),
+                self.surface_format.remove_srgb_suffix(),
+            ],
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             width: self.size.width,
             height: self.size.height,
@@ -218,6 +242,8 @@ impl State {
     }
 
     fn render(&mut self) {
+        let raw_input = self.egui_state.take_egui_input(&self.window);
+
         let min_delta_time = Duration::from_secs_f32(1.0 / 60.0);
         let max_delta_time = Duration::from_secs_f32(1.0 / 60.0);
 
@@ -242,13 +268,22 @@ impl State {
             }
         };
 
-        let texture_view = surface_texture
+        let srgb_texture_view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("surface texture view"),
                 format: Some(self.surface_format.add_srgb_suffix()),
                 ..Default::default()
             });
+
+        let gamma_texture_view =
+            surface_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("surface texture view"),
+                    format: Some(self.surface_format.remove_srgb_suffix()),
+                    ..Default::default()
+                });
 
         let mut encoder =
             self.ctx
@@ -285,7 +320,7 @@ impl State {
             self.renderer
                 .render(
                     &self.camera,
-                    &texture_view,
+                    &srgb_texture_view,
                     &mut scene_graph,
                     &mut self.skin_manager,
                     self.mesh_instances
@@ -303,10 +338,75 @@ impl State {
         })
         .expect("failed to run python");
 
-        self.ctx.queue().submit([encoder.finish()]);
+        let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |ui| {
+            self.ui(ui);
+        });
+
+        self.egui_state
+            .handle_platform_output(&self.window, full_output.platform_output);
+
+        let clipped_primitives = self
+            .egui_state
+            .egui_ctx()
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+
+        let window_size = self.window.inner_size();
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [window_size.width, window_size.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+
+        let command_buffers = self.egui_renderer.update_buffers(
+            self.ctx.device(),
+            self.ctx.queue(),
+            &mut encoder,
+            &clipped_primitives,
+            &screen_descriptor,
+        );
+
+        for (id, delta) in full_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(self.ctx.device(), self.ctx.queue(), id, &delta);
+        }
+        for id in full_output.textures_delta.free {
+            self.egui_renderer.free_texture(&id);
+        }
+
+        {
+            let mut egui_render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui render RenderPassDescriptor"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &gamma_texture_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime();
+
+            self.egui_renderer.render(
+                &mut egui_render_pass,
+                &clipped_primitives,
+                &screen_descriptor,
+            );
+        }
+
+        self.ctx
+            .queue()
+            .submit(command_buffers.into_iter().chain(once(encoder.finish())));
         self.window.pre_present_notify();
         surface_texture.present();
     }
+
+    fn ui(&self, _ui: &mut egui::Ui) {}
 }
 
 #[derive(Default)]

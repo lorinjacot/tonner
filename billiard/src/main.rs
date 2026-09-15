@@ -219,6 +219,15 @@ impl State {
         state
     }
 
+    #[must_use]
+    fn on_window_event(&mut self, event: &WindowEvent) -> egui_winit::EventResponse {
+        self.egui_state.on_window_event(&self.window, event)
+    }
+
+    fn on_mouse_motion(&mut self, delta: (f64, f64)) -> bool {
+        self.egui_state.on_mouse_motion(delta)
+    }
+
     fn configure_surface(&self) {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -406,7 +415,15 @@ impl State {
         surface_texture.present();
     }
 
-    fn ui(&self, _ui: &mut egui::Ui) {}
+    fn ui(&self, ui: &mut egui::Ui) {
+        egui::Panel::top("Top bar").show_inside(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                if ui.button("Click me").clicked() {
+                    println!("Clicked");
+                }
+            });
+        });
+    }
 }
 
 #[derive(Default)]
@@ -427,6 +444,13 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let state = self.state.as_mut().unwrap();
+        let response = state.on_window_event(&event);
+        if response.repaint {
+            state.window.request_redraw();
+        }
+        if response.consumed {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -493,7 +517,9 @@ impl ApplicationHandler for App {
     ) {
         let state = self.state.as_mut().unwrap();
         match event {
-            DeviceEvent::MouseMotion { delta: (x, y) } => {
+            DeviceEvent::MouseMotion { delta } => {
+                state.on_mouse_motion(delta);
+                let (x, y) = delta;
                 state.scripts.mouse_motion(x, y);
             }
             _ => (),

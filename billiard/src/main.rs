@@ -323,7 +323,7 @@ impl State {
         })
         .expect("failed to run python");
 
-        let command_buffers = self.ui.render(
+        let (_action, command_buffers) = self.ui.render(
             &self.window,
             self.ctx.device(),
             self.ctx.queue(),

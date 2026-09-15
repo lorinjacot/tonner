@@ -1,8 +1,11 @@
+use std::fmt::Display;
+
 use winit::{event::WindowEvent, window::Window};
 
 pub struct Ui {
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
+    state: UiState,
 }
 
 impl Ui {
@@ -34,6 +37,7 @@ impl Ui {
         Ui {
             egui_state,
             egui_renderer,
+            state: UiState::Startup,
         }
     }
 
@@ -65,11 +69,12 @@ impl Ui {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         render_target: &wgpu::TextureView,
-    ) -> Vec<wgpu::CommandBuffer> {
+    ) -> (Action, Vec<wgpu::CommandBuffer>) {
         let raw_input = self.egui_state.take_egui_input(window);
 
+        let mut action = Action::None;
         let full_output = self.egui_state.egui_ctx().run_ui(raw_input, |ui| {
-            ui_main(ui);
+            action = self.state.render(ui);
         });
 
         self.egui_state
@@ -128,16 +133,107 @@ impl Ui {
             );
         }
 
-        command_buffers
+        (action, command_buffers)
     }
 }
 
-fn ui_main(ui: &mut egui::Ui) {
-    egui::Panel::top("Top bar").show_inside(ui, |ui| {
-        ui.horizontal_centered(|ui| {
-            if ui.button("Click me").clicked() {
-                println!("Clicked");
+#[derive(Debug, Clone)]
+pub enum UiState {
+    Startup,
+    MainMenu,
+    InGame(GameState),
+    GameOver { winner: Player },
+}
+
+#[derive(Debug, Clone)]
+pub enum GameState {
+    Playing { turn: Player },
+    Watching { last: Player },
+}
+
+#[derive(Debug, Clone)]
+pub enum Player {
+    Solid,
+    Stripe,
+}
+
+impl Display for Player {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Player::Solid => write!(f, "Solid"),
+            Player::Stripe => write!(f, "Stripde"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Action {
+    None,
+    NewGame { first_turn: Player },
+    MainMenu,
+}
+
+impl UiState {
+    fn render(&self, ui: &mut egui::Ui) -> Action {
+        match self {
+            UiState::Startup => Self::startup(ui),
+            UiState::MainMenu => Self::main_menu(ui),
+            UiState::InGame(game_state) => Self::in_game(game_state, ui),
+            UiState::GameOver { winner } => Self::game_over(winner, ui),
+        }
+    }
+
+    fn startup(ui: &mut egui::Ui) -> Action {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.label("Loading assets and scripts ...");
+            });
+        });
+        Action::None
+    }
+
+    fn main_menu(ui: &mut egui::Ui) -> Action {
+        egui::CentralPanel::default()
+            .show_inside(ui, |ui| {
+                ui.centered_and_justified(|ui| {
+                    if ui.button("New game").clicked() {
+                        Action::NewGame {
+                            first_turn: Player::Solid,
+                        }
+                    } else {
+                        Action::None
+                    }
+                })
+                .inner
+            })
+            .inner
+    }
+
+    fn in_game(game_state: &GameState, ui: &mut egui::Ui) -> Action {
+        egui::Panel::top("Status bar").show_inside(ui, |ui| match game_state {
+            GameState::Playing { turn } => {
+                ui.label(format!("Now playing: {turn}"));
+            }
+            GameState::Watching { last } => {
+                ui.label(format!("Now playing: {last}"));
             }
         });
-    });
+        Action::None
+    }
+
+    fn game_over(winner: &Player, ui: &mut egui::Ui) -> Action {
+        egui::Panel::top("Status bar")
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{winner} won!"));
+                    if ui.button("Exit to main menu").clicked() {
+                        Action::MainMenu
+                    } else {
+                        Action::None
+                    }
+                })
+                .inner
+            })
+            .inner
+    }
 }

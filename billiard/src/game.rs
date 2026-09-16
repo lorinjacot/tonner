@@ -22,6 +22,7 @@ use crate::{
     ball::{self, Ball, BallColor, BallsAsset},
     python::{self, PyScripts},
     table::table,
+    ui::{Action, GameState, UiState},
 };
 
 pub struct Game {
@@ -154,12 +155,26 @@ impl Game {
     pub fn render(
         &mut self,
         delta_time: Duration,
+        ui_state: &mut UiState,
+        action: &Action,
         render_target: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         Python::attach(|py| -> PyResult<()> {
+            match action {
+                Action::None => (),
+                Action::MainMenu => *ui_state = UiState::MainMenu {},
+                Action::NewGame { first_turn } => {
+                    *ui_state = UiState::InGame {
+                        game_state: GameState::Playing {
+                            turn: first_turn.clone(),
+                        },
+                    }
+                }
+            }
+
             self.scripts
-                .update(py, delta_time.as_secs_f32(), &self.camera_node);
+                .update(py, delta_time.as_secs_f32(), &self.camera_node, ui_state);
 
             let mut physics_engine = self.physics_engine.lock().unwrap();
             physics_engine.simulate(delta_time);

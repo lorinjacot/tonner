@@ -173,6 +173,7 @@ def update(
         delta_time: float,
         camera_node,
         balls: Dict[b.BallColor, b.Ball],
+        ui_state: b.UiState,
     ):
     global game
     global camera_state, reset, white_ball_impulse

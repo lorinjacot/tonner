@@ -16,7 +16,7 @@ use winit::{
 };
 
 use crate::game::Game;
-use crate::ui::Ui;
+use crate::ui::{Action, Ui};
 
 mod arrow;
 mod ball;
@@ -38,6 +38,7 @@ struct State {
     game_receiver: Receiver<Game>,
     game: Option<Game>,
     ui: Ui,
+    last_action: Action,
     last_render: Instant,
 }
 
@@ -97,6 +98,7 @@ impl State {
             game_receiver,
             game: None,
             ui,
+            last_action: Action::None,
             last_render: Instant::now(),
         };
 
@@ -169,12 +171,18 @@ impl State {
                         ..Default::default()
                     });
 
-            game.render(delta_time, &srgb_texture_view, &mut encoder);
+            game.render(
+                delta_time,
+                &mut self.ui.state,
+                &self.last_action,
+                &srgb_texture_view,
+                &mut encoder,
+            );
         } else {
             match self.game_receiver.try_recv() {
                 Ok(game) => {
                     self.game = Some(game);
-                    self.ui.state = ui::UiState::MainMenu;
+                    self.ui.state = ui::UiState::MainMenu {};
                 }
                 Err(TryRecvError::Disconnected) => {
                     panic!("Game failed to initialize");
@@ -192,13 +200,14 @@ impl State {
                     ..Default::default()
                 });
 
-        let (_action, command_buffers) = self.ui.render(
+        let (action, command_buffers) = self.ui.render(
             &self.window,
             &self.device,
             &self.queue,
             &mut encoder,
             &gamma_texture_view,
         );
+        self.last_action = action;
 
         self.queue
             .submit(command_buffers.into_iter().chain(once(encoder.finish())));

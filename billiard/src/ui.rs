@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use pyo3::prelude::*;
 use winit::{event::WindowEvent, window::Window};
 
 pub struct Ui {
@@ -37,7 +38,7 @@ impl Ui {
         Ui {
             egui_state,
             egui_renderer,
-            state: UiState::Startup,
+            state: UiState::Startup {},
         }
     }
 
@@ -138,20 +139,23 @@ impl Ui {
 }
 
 #[derive(Debug, Clone)]
+#[pyclass(frozen, from_py_object)]
 pub enum UiState {
-    Startup,
-    MainMenu,
-    InGame(GameState),
+    Startup {},
+    MainMenu {},
+    InGame { game_state: GameState },
     GameOver { winner: Player },
 }
 
 #[derive(Debug, Clone)]
+#[pyclass(frozen, from_py_object)]
 pub enum GameState {
     Playing { turn: Player },
     Watching { last: Player },
 }
 
 #[derive(Debug, Clone)]
+#[pyclass(frozen, from_py_object)]
 pub enum Player {
     Solid,
     Stripe,
@@ -176,9 +180,9 @@ pub enum Action {
 impl UiState {
     fn render(&self, ui: &mut egui::Ui) -> Action {
         match self {
-            UiState::Startup => Self::startup(ui),
-            UiState::MainMenu => Self::main_menu(ui),
-            UiState::InGame(game_state) => Self::in_game(game_state, ui),
+            UiState::Startup {} => Self::startup(ui),
+            UiState::MainMenu {} => Self::main_menu(ui),
+            UiState::InGame { game_state } => Self::in_game(game_state, ui),
             UiState::GameOver { winner } => Self::game_over(winner, ui),
         }
     }

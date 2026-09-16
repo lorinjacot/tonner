@@ -19,6 +19,7 @@ use tempete::scene_graph::NodeHandle;
 use crate::{
     arrow::Arrow,
     ball::{Ball, BallColor},
+    ui::UiState,
 };
 
 #[pymodule]
@@ -152,7 +153,13 @@ impl PyScripts {
         }
     }
 
-    pub fn update(&mut self, py: Python, delta_time: f32, camera_node: &Py<NodeHandle>) {
+    pub fn update(
+        &mut self,
+        py: Python,
+        delta_time: f32,
+        camera_node: &Py<NodeHandle>,
+        ui_state: &mut UiState,
+    ) {
         if let Some(rx) = &self.watcher_receiver {
             use notify::EventKind::*;
 
@@ -179,8 +186,15 @@ impl PyScripts {
             }
         }
         if let Some(func) = self.update.as_ref() {
-            if let Err(e) = func.call1(py, (delta_time, camera_node, &self.balls)) {
-                error!("Failed to run update(): {e}.");
+            let py_ui_state = ui_state.clone().into_pyobject(py).unwrap();
+
+            match func.call1(py, (delta_time, camera_node, &self.balls, &py_ui_state)) {
+                Ok(_) => {
+                    *ui_state = py_ui_state.get().clone();
+                }
+                Err(e) => {
+                    error!("Failed to run update(): {e}.");
+                }
             }
         }
     }
@@ -207,7 +221,10 @@ impl PyScripts {
                     py,
                     &aview2(&projection_matrix.transpose().to_cols_array_2d()),
                 );
-                func.call1(py, (x, y, camera_node, projection_matrix, &self.balls, arrow))
+                func.call1(
+                    py,
+                    (x, y, camera_node, projection_matrix, &self.balls, arrow),
+                )
             }) {
                 error!("Failed to run mouse_motion(): {e}.");
             }

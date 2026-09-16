@@ -5,7 +5,7 @@ use winit::{event::WindowEvent, window::Window};
 pub struct Ui {
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
-    state: UiState,
+    pub state: UiState,
 }
 
 impl Ui {

@@ -1,21 +1,10 @@
-use std::collections::HashMap;
-use std::io::Cursor;
 use std::iter::once;
+use std::sync::mpsc::{Receiver, TryRecvError, sync_channel};
 use std::sync::{Arc, Mutex};
+use std::thread::spawn;
 use std::time::{Duration, Instant};
 
-use glam::{Quat, Vec3};
 use pollster::block_on;
-use pyo3::prelude::*;
-use tempete::Context;
-use tempete::ecs::EntityRegistry;
-use tempete::environment::{Environment, EnvironmentBuilder};
-use tempete::geometry::skin::SkinManager;
-use tempete::mesh::MeshInstance;
-use tempete::renderer::Renderer;
-use tempete::renderer::camera::Camera;
-use tempete::renderer::light::LightManager;
-use tempete::scene_graph::{NodeHandle, SceneGraph};
 use wgpu::Instance;
 use winit::dpi::PhysicalSize;
 use winit::event::{DeviceEvent, MouseScrollDelta};
@@ -26,13 +15,12 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::arrow::Arrow;
-use crate::ball::{Ball, BallColor, BallsAsset};
-use crate::table::table;
+use crate::game::Game;
 use crate::ui::Ui;
 
 mod arrow;
 mod ball;
+mod game;
 mod python;
 mod table;
 mod ui;
@@ -41,23 +29,14 @@ type PhysicsEngine = Arc<Mutex<tonner::Engine>>;
 
 struct State {
     instance: wgpu::Instance,
-    ctx: Context,
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     size: PhysicalSize<u32>,
-    renderer: Renderer,
-    camera: Camera,
-    scene_graph: Arc<Mutex<SceneGraph>>,
-    skin_manager: SkinManager,
-    light_manager: LightManager,
-    environment: Environment,
-    scripts: python::PyScripts,
-    camera_node: Py<NodeHandle>,
-    balls: HashMap<BallColor, Py<Ball>>,
-    arrow: Py<Arrow>,
-    mesh_instances: Vec<MeshInstance>,
-    physics_engine: PhysicsEngine,
+    game_receiver: Receiver<Game>,
+    game: Option<Game>,
     ui: Ui,
     last_render: Instant,
 }
@@ -90,118 +69,39 @@ impl State {
             .await
             .expect("failed to get gpu device");
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Billiard startup command encoder"),
-        });
-
         let ui = Ui::new(&window, &device, surface_format.remove_srgb_suffix());
 
-        let ctx = Context::from_device(device, queue);
-        let balls_asset = BallsAsset::load(&ctx, &mut encoder).unwrap();
+        let (sender, game_receiver) = sync_channel(1);
+        let game_device = device.clone();
+        let game_queue = queue.clone();
 
-        ctx.queue().submit([encoder.finish()]);
-
-        let renderer = Renderer::new(
-            size.width,
-            size.height,
-            surface_format.add_srgb_suffix(),
-            &ctx,
-        );
-        let mut entity_registry = EntityRegistry::new();
-        let mut scene_graph = SceneGraph::new(&ctx);
-
-        let mut physics_engine = tonner::Engine::new();
-
-        let camera_entity = entity_registry.create();
-        scene_graph.add_with_transform(camera_entity, None, Vec3::X, Quat::IDENTITY, Vec3::ONE);
-        let camera = Camera::new(camera_entity);
-
-        let mut balls = HashMap::new();
-        let mut mesh_instances = Vec::new();
-
-        mesh_instances.push(table(
-            &mut entity_registry,
-            &mut scene_graph,
-            &mut physics_engine,
-            &ctx,
-        ));
-
-        let mut encoder = ctx
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Startup command encoder"),
-            });
-        let radiance_image = image::ImageReader::with_format(
-            Cursor::new(include_bytes!("billiard_hall_1k.hdr")),
-            image::ImageFormat::Hdr,
-        )
-        .decode()
-        .unwrap();
-        let environment = EnvironmentBuilder::default()
-            .equirectangular_map(radiance_image)
-            .build(&ctx, &mut encoder);
-
-        let scene_graph = Arc::new(Mutex::new(scene_graph));
-
-        let physics_engine = Arc::new(Mutex::new(physics_engine));
-
-        let (camera_node, arrow) = Python::attach(|py| -> PyResult<(Py<NodeHandle>, Py<Arrow>)> {
-            let camera_node = Py::new(py, NodeHandle::new(camera_entity, scene_graph.clone()))?;
-
-            ball::settings()
-                .iter()
-                .for_each(|(color, position, velocity)| {
-                    let ball = Ball::new(
-                        py,
-                        *color,
-                        *position,
-                        *velocity,
-                        &mut entity_registry,
-                        scene_graph.clone(),
-                        physics_engine.clone(),
-                        &balls_asset,
-                    );
-                    balls.insert(*color, ball.into());
-                });
-
-            let arrow = Py::new(
-                py,
-                Arrow::new(py, &mut entity_registry, scene_graph.clone(), &ctx),
-            )?;
-
-            Ok((camera_node, arrow))
-        })
-        .unwrap();
-
-        let scripts = python::PyScripts::new(&balls);
-
-        ctx.queue().submit([encoder.finish()]);
+        spawn(move || {
+            let game = Game::new(
+                game_device,
+                game_queue,
+                size.width,
+                size.height,
+                surface_format.add_srgb_suffix(),
+            );
+            sender.send(game).unwrap();
+        });
 
         let state = State {
             instance,
             window,
             surface,
             surface_format,
+            device,
+            queue,
             size,
-            renderer,
-            camera,
-            scene_graph,
-            skin_manager: SkinManager::new(&ctx),
-            light_manager: LightManager::new(&ctx),
-            environment,
-            ctx: ctx,
-            scripts,
-            camera_node,
-            balls,
-            arrow,
-            mesh_instances,
-            physics_engine,
+            game_receiver,
+            game: None,
             ui,
             last_render: Instant::now(),
         };
 
         state.configure_surface();
-        state.ctx.queue().submit([]);
+        state.queue.submit([]);
 
         state
     }
@@ -220,7 +120,7 @@ impl State {
             desired_maximum_frame_latency: 2,
             present_mode: wgpu::PresentMode::AutoVsync,
         };
-        self.surface.configure(self.ctx.device(), &surface_config);
+        self.surface.configure(&self.device, &surface_config);
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -253,13 +153,35 @@ impl State {
             }
         };
 
-        let srgb_texture_view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor {
-                label: Some("surface texture view"),
-                format: Some(self.surface_format.add_srgb_suffix()),
-                ..Default::default()
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("render command encoder"),
             });
+
+        if let Some(game) = self.game.as_mut() {
+            let srgb_texture_view =
+                surface_texture
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor {
+                        label: Some("surface texture view"),
+                        format: Some(self.surface_format.add_srgb_suffix()),
+                        ..Default::default()
+                    });
+
+            game.render(delta_time, &srgb_texture_view, &mut encoder);
+        } else {
+            match self.game_receiver.try_recv() {
+                Ok(game) => {
+                    self.game = Some(game);
+                    self.ui.state = ui::UiState::MainMenu;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    panic!("Game failed to initialize");
+                }
+                Err(TryRecvError::Empty) => (),
+            }
+        }
 
         let gamma_texture_view =
             surface_texture
@@ -270,69 +192,15 @@ impl State {
                     ..Default::default()
                 });
 
-        let mut encoder =
-            self.ctx
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("render command encoder"),
-                });
-
-        Python::attach(|py| -> PyResult<()> {
-            self.scripts
-                .update(py, delta_time.as_secs_f32(), &self.camera_node);
-
-            let mut physics_engine = self.physics_engine.lock().unwrap();
-            physics_engine.simulate(delta_time);
-
-            let mut scene_graph = self.scene_graph.lock().unwrap();
-            let balls: Vec<_> = self
-                .balls
-                .values()
-                .map(|ball| ball.borrow_mut(py))
-                .filter(|ball| !ball.out)
-                .collect();
-            for ball in &balls {
-                let position = physics_engine.position(ball.physics_id()).unwrap();
-                scene_graph.set_local_transformation(
-                    ball.entity_id(),
-                    position.as_vec3(),
-                    None,
-                    None,
-                );
-            }
-            drop(physics_engine);
-
-            self.renderer
-                .render(
-                    &self.camera,
-                    &srgb_texture_view,
-                    &mut scene_graph,
-                    &mut self.skin_manager,
-                    self.mesh_instances
-                        .iter()
-                        .chain(balls.iter().map(|ball| ball.mesh_instance()))
-                        .chain(self.arrow.borrow(py).mesh_instances()),
-                    &mut self.light_manager,
-                    &self.environment,
-                    &self.ctx,
-                    &mut encoder,
-                )
-                .expect("failed to render");
-
-            Ok(())
-        })
-        .expect("failed to run python");
-
         let (_action, command_buffers) = self.ui.render(
             &self.window,
-            self.ctx.device(),
-            self.ctx.queue(),
+            &self.device,
+            &self.queue,
             &mut encoder,
             &gamma_texture_view,
         );
 
-        self.ctx
-            .queue()
+        self.queue
             .submit(command_buffers.into_iter().chain(once(encoder.finish())));
         self.window.pre_present_notify();
         surface_texture.present();
@@ -380,15 +248,17 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 const LINE_HEIGHT: f64 = 24.0;
-                state
-                    .scripts
-                    .mouse_wheel(x as f64 * LINE_HEIGHT, y as f64 * LINE_HEIGHT);
+                if let Some(game) = state.game.as_mut() {
+                    game.on_mouse_wheel(x as f64 * LINE_HEIGHT, y as f64 * LINE_HEIGHT);
+                }
             }
             WindowEvent::MouseWheel {
                 delta: MouseScrollDelta::PixelDelta(delta),
                 ..
             } => {
-                state.scripts.mouse_wheel(delta.x, delta.y);
+                if let Some(game) = state.game.as_mut() {
+                    game.on_mouse_wheel(delta.x, delta.y);
+                }
             }
             WindowEvent::MouseInput {
                 button,
@@ -405,18 +275,20 @@ impl ApplicationHandler for App {
                     winit::event::ElementState::Pressed => "Pressed",
                     winit::event::ElementState::Released => "Released",
                 };
-                state.scripts.mouse_input(button, elt_state, &state.arrow);
+                if let Some(game) = state.game.as_mut() {
+                    game.on_mouse_input(button, elt_state);
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let w = state.size.width as f64;
-                let h = state.size.height as f64;
-                state.scripts.mouse_moved(
-                    2.0 * position.x / w - 1.0,
-                    1.0 - 2.0 * position.y / h,
-                    &state.camera_node,
-                    state.camera.projection_matrix((w / h) as f32),
-                    &state.arrow,
-                );
+                if let Some(game) = state.game.as_mut() {
+                    let w = state.size.width as f64;
+                    let h = state.size.height as f64;
+                    game.on_mouse_moved(
+                        2.0 * position.x / w - 1.0,
+                        1.0 - 2.0 * position.y / h,
+                        (w / h) as f32,
+                    );
+                }
             }
             _ => (),
         }
@@ -432,8 +304,9 @@ impl ApplicationHandler for App {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 state.ui.on_mouse_motion(delta);
-                let (x, y) = delta;
-                state.scripts.mouse_motion(x, y);
+                if let Some(game) = state.game.as_mut() {
+                    game.on_mouse_motion(delta.0, delta.1);
+                }
             }
             _ => (),
         }

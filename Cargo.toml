@@ -2,6 +2,7 @@
 members = [
     "sparse-keyed",
     "tonner",
+    "mogra",
     "tempete",
     "storm-animation",
     "storm-controls",
@@ -58,6 +59,7 @@ wgpu = "29.0.1"
 
 sparse-keyed = { path = "sparse-keyed" }
 tonner = { path = "tonner" }
+mogra = { path = "mogra" }
 tempete = { path = "tempete" }
 storm-animation = { path = "storm-animation" }
 storm-controls = { path = "storm-controls" }

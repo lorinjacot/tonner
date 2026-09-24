@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use pyo3::prelude::*;
 use winit::{event::WindowEvent, window::Window};
 
@@ -142,30 +140,42 @@ impl Ui {
 #[pyclass(frozen, from_py_object)]
 pub enum UiState {
     Startup {},
-    MainMenu {},
-    InGame { game_state: GameState },
-    GameOver { winner: Player },
+    MainMenu {
+        first_player: String,
+        second_player: String,
+    },
+    InGame {
+        first_player: String,
+        second_player: String,
+        game_state: GameState,
+    },
+    GameOver {
+        first_player: String,
+        second_player: String,
+        winner: Player,
+    },
 }
 
 #[derive(Debug, Clone)]
 #[pyclass(frozen, from_py_object)]
 pub enum GameState {
-    Playing { turn: Player },
-    Watching { last: Player },
+    Breaking { player: Player, thrown: bool },
+    Shooting { player: Player, thrown: bool },
+    Placing { player: Player },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[pyclass(frozen, from_py_object)]
 pub enum Player {
-    Solid,
-    Stripe,
+    First,
+    Second,
 }
 
-impl Display for Player {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Player::Solid => write!(f, "Solid"),
-            Player::Stripe => write!(f, "Stripde"),
+impl Player {
+    fn name<'a>(&self, first_player: &'a str, second_player: &'a str) -> &'a str {
+        match *self {
+            Player::First => first_player,
+            Player::Second => second_player,
         }
     }
 }
@@ -173,17 +183,34 @@ impl Display for Player {
 #[derive(Debug, Clone)]
 pub enum Action {
     None,
-    NewGame { first_turn: Player },
-    MainMenu,
+    NewGame {
+        first_player: String,
+        second_player: String,
+    },
+    MainMenu {
+        first_player: String,
+        second_player: String,
+    },
 }
 
 impl UiState {
-    fn render(&self, ui: &mut egui::Ui) -> Action {
+    fn render(&mut self, ui: &mut egui::Ui) -> Action {
         match self {
             UiState::Startup {} => Self::startup(ui),
-            UiState::MainMenu {} => Self::main_menu(ui),
-            UiState::InGame { game_state } => Self::in_game(game_state, ui),
-            UiState::GameOver { winner } => Self::game_over(winner, ui),
+            UiState::MainMenu {
+                first_player,
+                second_player,
+            } => Self::main_menu(ui, first_player, second_player),
+            UiState::InGame {
+                first_player,
+                second_player,
+                game_state,
+            } => Self::in_game(first_player, second_player, game_state, ui),
+            UiState::GameOver {
+                winner,
+                first_player,
+                second_player,
+            } => Self::game_over(*winner, first_player, second_player, ui),
         }
     }
 
@@ -196,42 +223,97 @@ impl UiState {
         Action::None
     }
 
-    fn main_menu(ui: &mut egui::Ui) -> Action {
+    fn main_menu(
+        ui: &mut egui::Ui,
+        first_player: &mut String,
+        second_player: &mut String,
+    ) -> Action {
         egui::CentralPanel::default()
             .show_inside(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    if ui.button("New game").clicked() {
-                        Action::NewGame {
-                            first_turn: Player::Solid,
-                        }
-                    } else {
-                        Action::None
+                egui::Grid::new("new game grid").show(ui, |ui| {
+                    ui.label("First player name");
+                    ui.text_edit_singleline(first_player);
+                    ui.end_row();
+
+                    ui.label("Second player name");
+                    ui.text_edit_singleline(second_player);
+                    ui.end_row();
+                });
+
+                if ui.button("Start game").clicked() {
+                    Action::NewGame {
+                        first_player: first_player.to_string(),
+                        second_player: second_player.to_string(),
                     }
+                } else {
+                    Action::None
+                }
+            })
+            .inner
+    }
+
+    fn in_game(
+        first_player: &str,
+        second_player: &str,
+        game_state: &GameState,
+        ui: &mut egui::Ui,
+    ) -> Action {
+        egui::Panel::top("Status bar")
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    match game_state {
+                        GameState::Breaking { player, .. } => {
+                            ui.label(format!(
+                                "Now playing: {}",
+                                player.name(first_player, second_player)
+                            ));
+                        }
+                        GameState::Shooting { player, .. } => {
+                            ui.label(format!(
+                                "Now playing: {}",
+                                player.name(first_player, second_player)
+                            ));
+                        }
+                        GameState::Placing { player } => {
+                            ui.label(format!(
+                                "{} can choose where to place the white ball",
+                                player.name(first_player, second_player)
+                            ));
+                        }
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+                        if ui.button("Stop and exit game").clicked() {
+                            Action::MainMenu {
+                                first_player: first_player.to_string(),
+                                second_player: second_player.to_string(),
+                            }
+                        } else {
+                            Action::None
+                        }
+                    })
+                    .inner
                 })
                 .inner
             })
             .inner
     }
 
-    fn in_game(game_state: &GameState, ui: &mut egui::Ui) -> Action {
-        egui::Panel::top("Status bar").show_inside(ui, |ui| match game_state {
-            GameState::Playing { turn } => {
-                ui.label(format!("Now playing: {turn}"));
-            }
-            GameState::Watching { last } => {
-                ui.label(format!("Now playing: {last}"));
-            }
-        });
-        Action::None
-    }
-
-    fn game_over(winner: &Player, ui: &mut egui::Ui) -> Action {
+    fn game_over(
+        winner: Player,
+        first_player: &str,
+        second_player: &str,
+        ui: &mut egui::Ui,
+    ) -> Action {
         egui::Panel::top("Status bar")
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(format!("{winner} won!"));
+                    ui.label(format!("{} won!", winner.name(first_player, second_player)));
                     if ui.button("Exit to main menu").clicked() {
-                        Action::MainMenu
+                        Action::MainMenu {
+                            first_player: first_player.to_string(),
+                            second_player: second_player.to_string(),
+                        }
                     } else {
                         Action::None
                     }

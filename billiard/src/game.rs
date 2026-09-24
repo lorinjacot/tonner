@@ -22,7 +22,7 @@ use crate::{
     ball::{self, Ball, BallColor, BallsAsset},
     python::{self, PyScripts},
     table::table,
-    ui::{Action, GameState, UiState},
+    ui::{Action, GameState, Player, UiState},
 };
 
 pub struct Game {
@@ -163,11 +163,25 @@ impl Game {
         Python::attach(|py| -> PyResult<()> {
             match action {
                 Action::None => (),
-                Action::MainMenu => *ui_state = UiState::MainMenu {},
-                Action::NewGame { first_turn } => {
+                Action::MainMenu {
+                    first_player,
+                    second_player,
+                } => {
+                    *ui_state = UiState::MainMenu {
+                        first_player: first_player.clone(),
+                        second_player: second_player.clone(),
+                    }
+                }
+                Action::NewGame {
+                    first_player,
+                    second_player,
+                } => {
                     *ui_state = UiState::InGame {
-                        game_state: GameState::Playing {
-                            turn: first_turn.clone(),
+                        first_player: first_player.clone(),
+                        second_player: second_player.clone(),
+                        game_state: GameState::Breaking {
+                            player: Player::First,
+                            thrown: false,
                         },
                     }
                 }

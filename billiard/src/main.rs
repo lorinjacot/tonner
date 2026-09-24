@@ -182,7 +182,10 @@ impl State {
             match self.game_receiver.try_recv() {
                 Ok(game) => {
                     self.game = Some(game);
-                    self.ui.state = ui::UiState::MainMenu {};
+                    self.ui.state = ui::UiState::MainMenu {
+                        first_player: "Alice".to_string(),
+                        second_player: "Bob".to_string(),
+                    };
                 }
                 Err(TryRecvError::Disconnected) => {
                     panic!("Game failed to initialize");

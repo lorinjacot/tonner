@@ -8,6 +8,7 @@ bitflags.workspace = true
 bytemuck.workspace = true
 glam = { workspace = true, features = ["bytemuck"] }
 mikktspace = { version = "0.3.0", default-features = false, features = ["glam"] }
+slotmap.workspace = true
 sparse-keyed.workspace = true
 thiserror.workspace = true
 wgpu.workspace = true

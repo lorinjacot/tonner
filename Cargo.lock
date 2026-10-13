@@ -2458,6 +2458,7 @@ dependencies = [
  "env_logger",
  "glam 0.32.1",
  "mikktspace",
+ "slotmap",
  "sparse-keyed",
  "thiserror 2.0.18",
  "wgpu",

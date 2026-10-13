@@ -1,6 +1,7 @@
 use crate::camera::Camera;
 
 pub mod camera;
+pub mod scene_graph;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Context {

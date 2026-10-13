@@ -4,4 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitflags.workspace = true
+bytemuck.workspace = true
+glam = { workspace = true, features = ["bytemuck"] }
+mikktspace = { version = "0.3.0", default-features = false, features = ["glam"] }
+sparse-keyed.workspace = true
+thiserror.workspace = true
 wgpu.workspace = true
+
+[features]
+
+[dev-dependencies]
+env_logger.workspace = true

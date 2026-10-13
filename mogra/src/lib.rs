@@ -1,4 +1,4 @@
-use crate::camera::Camera;
+use crate::{camera::Camera, scene_graph::SceneGraph};
 
 pub mod camera;
 pub mod scene_graph;
@@ -45,11 +45,13 @@ impl Renderer {
 
 pub struct Scene {
     ctx: Context,
+    scene_graph: SceneGraph,
 }
 
 impl Scene {
     pub fn new(ctx: Context) -> Self {
-        Scene { ctx }
+        let scene_graph = SceneGraph::new();
+        Scene { ctx, scene_graph }
     }
 
     pub fn render(&self, camera: &Camera, renderer: &mut Renderer, target: &wgpu::TextureView) {

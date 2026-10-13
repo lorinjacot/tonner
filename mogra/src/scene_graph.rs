@@ -217,45 +217,45 @@ struct DeleteIterState {
 mod tests {
     use super::*;
 
-    struct Setup {
-        scene_graph: SceneGraph,
-        root_0: NodeId,
-        child_0_0: NodeId,
-        child_0_0_0: NodeId,
-        root_1: NodeId,
-        child_1_0: NodeId,
-        child_1_0_0: NodeId,
-        child_1_0_1: NodeId,
-        child_1_1: NodeId,
-    }
+    // struct Setup {
+    //     scene_graph: SceneGraph,
+    //     root_0: NodeId,
+    //     child_0_0: NodeId,
+    //     child_0_0_0: NodeId,
+    //     root_1: NodeId,
+    //     child_1_0: NodeId,
+    //     child_1_0_0: NodeId,
+    //     child_1_0_1: NodeId,
+    //     child_1_1: NodeId,
+    // }
 
-    impl Setup {
-        fn new() -> Setup {
-            let mut scene_graph = SceneGraph::new();
+    // impl Setup {
+    //     fn new() -> Setup {
+    //         let mut scene_graph = SceneGraph::new();
 
-            let root_0 = scene_graph.add(None);
-            let child_0_0 = scene_graph.add(root_0);
-            let child_0_0_0 = scene_graph.add(child_0_0);
+    //         let root_0 = scene_graph.add(None);
+    //         let child_0_0 = scene_graph.add(root_0);
+    //         let child_0_0_0 = scene_graph.add(child_0_0);
 
-            let root_1 = scene_graph.add(None);
-            let child_1_0 = scene_graph.add(root_1);
-            let child_1_0_0 = scene_graph.add(child_1_0);
-            let child_1_0_1 = scene_graph.add(child_1_0);
-            let child_1_1 = scene_graph.add(root_1);
+    //         let root_1 = scene_graph.add(None);
+    //         let child_1_0 = scene_graph.add(root_1);
+    //         let child_1_0_0 = scene_graph.add(child_1_0);
+    //         let child_1_0_1 = scene_graph.add(child_1_0);
+    //         let child_1_1 = scene_graph.add(root_1);
 
-            Setup {
-                scene_graph,
-                root_0,
-                child_0_0,
-                child_0_0_0,
-                root_1,
-                child_1_0,
-                child_1_0_0,
-                child_1_0_1,
-                child_1_1,
-            }
-        }
-    }
+    //         Setup {
+    //             scene_graph,
+    //             root_0,
+    //             child_0_0,
+    //             child_0_0_0,
+    //             root_1,
+    //             child_1_0,
+    //             child_1_0_0,
+    //             child_1_0_1,
+    //             child_1_1,
+    //         }
+    //     }
+    // }
 
     #[test]
     fn test_scene_graph_roots() {

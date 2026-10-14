@@ -171,11 +171,24 @@ impl SceneGraph {
         }
     }
 
+    /// Returns `true` iff the scene graph contains the node.
     pub fn get(&self, node: NodeId) -> Option<&Node> {
         self.nodes.get(node.0)
     }
 
-    /// Returns an iterator visiting all root nodes once. A root node is a node with no parent.
+    /// Returns `true` iff the scene graph contains the node.
+    pub fn contains(&self, node: NodeId) -> bool {
+        self.nodes.contains_key(node.0)
+    }
+
+    /// Returns an iterator visiting all nodes in the scene graph once in arbitrary order.
+    pub fn iter(&self) -> Iter<'_> {
+        Iter {
+            inner: self.nodes.iter(),
+        }
+    }
+
+    /// Returns an iterator visiting all root nodes once in arbitrary order. A root node is a node with no parent.
     pub fn roots(&self) -> RootsIter<'_> {
         RootsIter {
             scene_graph: self,
@@ -196,7 +209,7 @@ impl SceneGraph {
         }
     }
 
-    /// Returns an iterator visiting all sibling nodes once. A sibling is a node with the same parent.
+    /// Returns an iterator visiting all sibling nodes once in arbitrary order. A sibling is a node with the same parent.
     ///
     /// ## Panics
     ///
@@ -209,7 +222,7 @@ impl SceneGraph {
         }
     }
 
-    /// Returns an iterator visiting all direct children nodes once.
+    /// Returns an iterator visiting all direct children nodes once in arbitrary order.
     ///
     /// ## Panics
     ///
@@ -224,9 +237,7 @@ impl SceneGraph {
         }
     }
 
-    
-
-    /// Returns an iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
+    /// Returns an iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes. The order of siblings is arbitrary.
     ///
     /// ## Panics
     ///
@@ -282,7 +293,34 @@ struct DeleteIterState {
     remaining: usize,
 }
 
-/// An iterator visiting all root nodes once. A root node is a node with no parent.
+/// An iterator visiting all nodes in the scene graph once in arbitrary order.
+#[derive(Debug, Clone)]
+pub struct Iter<'a> {
+    inner: slotmap::basic::Iter<'a, NodeKey, Node>,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|(key, node)| (NodeId(key), node))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<'a> ExactSizeIterator for Iter<'a> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<'a> FusedIterator for Iter<'a> {}
+
+/// An iterator visiting all root nodes once in arbitrary order. A root node is a node with no parent.
+#[derive(Debug, Clone)]
 pub struct RootsIter<'a> {
     scene_graph: &'a SceneGraph,
     next: Option<NodeKey>,
@@ -318,6 +356,7 @@ impl<'a> ExactSizeIterator for RootsIter<'a> {
 impl<'a> FusedIterator for RootsIter<'a> {}
 
 /// An iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.
+#[derive(Debug, Clone)]
 pub struct ParentsIter<'a> {
     scene_graph: &'a SceneGraph,
     next: Option<NodeKey>,
@@ -338,7 +377,8 @@ impl<'a> Iterator for ParentsIter<'a> {
 
 impl<'a> FusedIterator for ParentsIter<'a> {}
 
-/// An iterator visiting all sibling nodes once. A sibling is a node with the same direct parent.
+/// An iterator visiting all sibling nodes once in arbitrary order. A sibling is a node with the same direct parent.
+#[derive(Debug, Clone)]
 pub struct SiblingsIter<'a> {
     scene_graph: &'a SceneGraph,
     first: NodeId,
@@ -362,7 +402,8 @@ impl<'a> Iterator for SiblingsIter<'a> {
 
 impl<'a> FusedIterator for SiblingsIter<'a> {}
 
-/// An iterator visiting all direct children nodes once.
+/// An iterator visiting all direct children nodes once in arbitrary order.
+#[derive(Debug, Clone)]
 pub struct DirectChildrenIter<'a> {
     scene_graph: &'a SceneGraph,
     next: NodeId,
@@ -393,12 +434,14 @@ impl<'a> ExactSizeIterator for DirectChildrenIter<'a> {
 
 impl<'a> FusedIterator for DirectChildrenIter<'a> {}
 
-/// An iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
+/// An iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes. The order of siblings is arbitrary.
+#[derive(Debug, Clone)]
 pub struct AllChildrenIter<'a> {
     scene_graph: &'a SceneGraph,
     states: Vec<DepthIterState>,
 }
 
+#[derive(Debug, Clone)]
 struct DepthIterState {
     next: NodeId,
     remaining: usize,
@@ -584,16 +627,16 @@ mod tests {
     fn test_scene_graph_iters() {
         let s = Setup::new();
 
-        // let mut iter = s.scene_graph.iter();
-        // assert_eq!(s.root_0, iter.next().unwrap().0);
-        // assert_eq!(s.child_0_0, iter.next().unwrap().0);
-        // assert_eq!(s.child_0_0_0, iter.next().unwrap().0);
-        // assert_eq!(s.root_1, iter.next().unwrap().0);
-        // assert_eq!(s.child_1_0, iter.next().unwrap().0);
-        // assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
-        // assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
-        // assert_eq!(s.child_1_1, iter.next().unwrap().0);
-        // assert!(iter.next().is_none());
+        let mut iter = s.scene_graph.iter();
+        assert_eq!(s.root_0, iter.next().unwrap().0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_0_0_0, iter.next().unwrap().0);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        assert_eq!(s.child_1_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
 
         let mut iter = s.scene_graph.roots();
         assert_eq!(s.root_0, iter.next().unwrap().0);
@@ -645,5 +688,27 @@ mod tests {
         assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
         assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
         assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_scene_graph_remove_children() {
+        let mut s = Setup::new();
+
+        s.scene_graph.remove(s.child_1_0);
+        assert!(!s.scene_graph.contains(s.child_1_0));
+        assert!(!s.scene_graph.contains(s.child_1_0_0));
+        assert!(!s.scene_graph.contains(s.child_1_0_1));
+        assert_eq!(5, s.scene_graph.iter().len());
+
+        s.scene_graph.remove(s.root_1);
+        assert!(!s.scene_graph.contains(s.root_1));
+        assert!(!s.scene_graph.contains(s.child_1_1));
+        assert_eq!(3, s.scene_graph.iter().len());
+
+        s.scene_graph.remove(s.root_0);
+        assert!(!s.scene_graph.contains(s.root_0));
+        assert!(!s.scene_graph.contains(s.child_0_0));
+        assert!(!s.scene_graph.contains(s.child_0_0_0));
+        assert_eq!(0, s.scene_graph.iter().len());
     }
 }

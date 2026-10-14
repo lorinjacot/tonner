@@ -254,6 +254,65 @@ impl SceneGraph {
             states,
         }
     }
+
+    pub fn try_set_local_transform(
+        &mut self,
+        node: NodeId,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
+    ) -> Result<(), ()> {
+        let parent_transform = match self[node].parent {
+            Some(parent) => self.nodes[parent].global_transform,
+            None => Mat4::IDENTITY,
+        };
+
+        let node = &mut self.nodes[node.0];
+        node.local_translation = translation.into().unwrap_or(node.local_translation);
+        node.local_rotation = rotation.into().unwrap_or(node.local_rotation);
+        node.local_scale = scale.into().unwrap_or(node.local_scale);
+        node.global_transform = parent_transform * node.local_transform();
+
+        // update children global_transform
+        if let Some(next) = node.first_child {
+            let mut states = vec![UpdateTransformIterState {
+                next,
+                remaining: node.children_count,
+                parent_transform: node.global_transform,
+            }];
+
+            while let Some(state) = states.last_mut() {
+                if state.remaining > 0 {
+                    state.remaining -= 1;
+                    let node = &mut self.nodes[state.next];
+                    node.global_transform = state.parent_transform * node.local_transform();
+                    state.next = node.next_sibling;
+                    if let Some(next) = node.first_child {
+                        states.push(UpdateTransformIterState {
+                            next,
+                            remaining: node.children_count,
+                            parent_transform: node.global_transform,
+                        });
+                    }
+                } else {
+                    states.pop();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_local_transform(
+        &mut self,
+        node: NodeId,
+        translation: impl Into<Option<Vec3>>,
+        rotation: impl Into<Option<Quat>>,
+        scale: impl Into<Option<Vec3>>,
+    ) {
+        self.try_set_local_transform(node, translation, rotation, scale)
+            .expect("entity should be part of the scene graph");
+    }
 }
 
 impl Index<NodeId> for SceneGraph {
@@ -288,9 +347,62 @@ pub struct Node {
     global_transform: Mat4,
 }
 
+impl Node {
+    /// Returns the parent's node id or `None` if the node is a root node.
+    pub fn parent(&self) -> Option<NodeId> {
+        self.parent.map(|key| NodeId(key))
+    }
+
+    /// Returns the local translation of the node.
+    /// See [`local_transform`][Self::local_transform] for more informations.
+    pub fn local_translation(&self) -> Vec3 {
+        self.local_translation
+    }
+
+    /// Returns the local rotation of the node.
+    /// See [`local_transform`][Self::local_transform] for more informations.
+    pub fn local_rotation(&self) -> Quat {
+        self.local_rotation
+    }
+
+    /// Returns the local scale of the node.
+    /// See [`local_transform`][Self::local_transform] for more informations.
+    pub fn local_scale(&self) -> Vec3 {
+        self.local_scale
+    }
+
+    /// Returns the local transformation of the node. The returns matrix can be used transform points
+    /// from local space to the parent node's space. The local transformation is made up of
+    /// the [local translation (`T`)][Self::local_translation], the [local rotation (`R`)][Self::local_rotation]
+    /// and the [local scale (`S`)][Self::local_scale] in the `T * R * S` order (first the scale is applied to the point,
+    /// then the rotation, and then the translation).
+    /// When the node contains no parent, the local transformation is identical to the global transformation.
+    pub fn local_transform(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(
+            self.local_scale,
+            self.local_rotation,
+            self.local_translation,
+        )
+    }
+
+    /// Returns the global transformation of the node. The returns matrix can be used transform points
+    /// from local space to the global space. The global transformation of a node is the product of the
+    /// global transformation matrix of its parent and its own [local transformation matrix][Self::local_transform].
+    /// When the node contains no parent, the global transformation is identical to the local transformation.
+    pub fn global_transform(&self) -> Mat4 {
+        self.global_transform
+    }
+}
+
 struct DeleteIterState {
     next: NodeKey,
     remaining: usize,
+}
+
+struct UpdateTransformIterState {
+    next: NodeKey,
+    remaining: usize,
+    parent_transform: Mat4,
 }
 
 /// An iterator visiting all nodes in the scene graph once in arbitrary order.
@@ -710,5 +822,44 @@ mod tests {
         assert!(!s.scene_graph.contains(s.child_0_0));
         assert!(!s.scene_graph.contains(s.child_0_0_0));
         assert_eq!(0, s.scene_graph.iter().len());
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_scene_graph_set_local_transform() {
+        let mut s = Setup::new();
+
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_0_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_0_0_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_1].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_1].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_1].global_transform);
+
+        let trans_1 = Mat4::from_scale_rotation_translation(Vec3::ONE, Quat::IDENTITY, Vec3::X);
+        s.scene_graph.set_local_transform(s.root_0, Vec3::X, None, None);
+
+        assert_eq!(trans_1, s.scene_graph[s.root_0].global_transform);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0].global_transform);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_1].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_0_1].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_1].global_transform);
+
+        let trans_2 = Mat4::from_scale_rotation_translation(Vec3::ONE, Quat::IDENTITY, Vec3::Y);
+        s.scene_graph.set_local_transform(s.child_1_0, Vec3::Y, None, None);
+
+        assert_eq!(trans_1, s.scene_graph[s.root_0].global_transform);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0].global_transform);
+        assert_eq!(trans_1, s.scene_graph[s.child_0_0_0].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.root_1].global_transform);
+        assert_eq!(trans_2, s.scene_graph[s.child_1_0].global_transform);
+        assert_eq!(trans_2, s.scene_graph[s.child_1_0_0].global_transform);
+        assert_eq!(trans_2, s.scene_graph[s.child_1_0_1].global_transform);
+        assert_eq!(Mat4::IDENTITY, s.scene_graph[s.child_1_1].global_transform);
     }
 }

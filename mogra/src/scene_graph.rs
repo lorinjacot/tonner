@@ -3,13 +3,84 @@ use std::{iter::FusedIterator, ops::Index};
 use glam::{Mat4, Quat, Vec3};
 use slotmap::{SlotMap, new_key_type};
 
+/// A unique identifier for a node in the scene graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId(NodeKey);
+
+new_key_type! { struct NodeKey; }
+
+/// A scene graph node. See [SceneGraph] for more information.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node {
+    parent: Option<NodeId>,
+    children_count: usize,
+    first_child: Option<NodeId>,
+    /// the previous sibling in the list of children for the parent
+    previous_sibling: NodeId,
+    /// the next sibling in the list of children for the parent
+    next_sibling: NodeId,
+
+    local_translation: Vec3,
+    local_rotation: Quat,
+    local_scale: Vec3,
+
+    global_transform: Mat4,
+}
+
+impl Node {
+    /// Returns the parent's node id or `None` if the node is a root node.
+    pub fn parent(&self) -> Option<NodeId> {
+        self.parent
+    }
+
+    /// Returns the local translation of the node.
+    /// See [`local_transform`][Self::local_transform] for more informations.
+    pub fn local_translation(&self) -> Vec3 {
+        self.local_translation
+    }
+
+    /// Returns the local rotation of the node.
+    /// See [`local_transform`][Self::local_transform] for more informations.
+    pub fn local_rotation(&self) -> Quat {
+        self.local_rotation
+    }
+
+    /// Returns the local scale of the node.
+    /// See [`local_transform`][Self::local_transform] for more informations.
+    pub fn local_scale(&self) -> Vec3 {
+        self.local_scale
+    }
+
+    /// Returns the local transformation of the node. The returns matrix can be used transform points
+    /// from local space to the parent node's space. The local transformation is made up of
+    /// the [local translation (`T`)][Self::local_translation], the [local rotation (`R`)][Self::local_rotation]
+    /// and the [local scale (`S`)][Self::local_scale] in the `T * R * S` order (first the scale is applied to the point,
+    /// then the rotation, and then the translation).
+    /// When the node contains no parent, the local transformation is identical to the global transformation.
+    pub fn local_transform(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(
+            self.local_scale,
+            self.local_rotation,
+            self.local_translation,
+        )
+    }
+
+    /// Returns the global transformation of the node. The returns matrix can be used transform points
+    /// from local space to the global space. The global transformation of a node is the product of the
+    /// global transformation matrix of its parent and its own [local transformation matrix][Self::local_transform].
+    /// When the node contains no parent, the global transformation is identical to the local transformation.
+    pub fn global_transform(&self) -> Mat4 {
+        self.global_transform
+    }
+}
+
 /// A Scene Graph works as a tree-like structure establishing parent-child relationships between scene elements,
 /// creating logical groupings where transformations (position, rotation, scale) applied to parent nodes automatically
 /// affect all their children - simplifying complex object manipulation and animation.
 #[derive(Debug, Clone)]
 pub struct SceneGraph {
     nodes: SlotMap<NodeKey, Node>,
-    first_root: Option<NodeKey>,
+    first_root: Option<NodeId>,
     root_count: usize,
 }
 
@@ -60,23 +131,23 @@ impl SceneGraph {
         let local_transform =
             Mat4::from_scale_rotation_translation(local_scale, local_rotation, local_translation);
 
-        let parent = parent.into().map(|id| id.0);
+        let parent = parent.into();
         let node = Node {
             parent,
             children_count: 0,
             first_child: None,
-            previous_sibling: NodeKey::default(),
-            next_sibling: NodeKey::default(),
+            previous_sibling: NodeId(NodeKey::default()),
+            next_sibling: NodeId(NodeKey::default()),
             local_translation,
             local_rotation,
             local_scale,
             global_transform: local_transform,
         };
-        let key = self.nodes.insert(node);
+        let id = NodeId(self.nodes.insert(node));
 
         let (global_transform, next_sibling) = match parent {
             Some(parent) => {
-                let parent = &mut self.nodes[parent];
+                let parent = &mut self.nodes[parent.0];
                 parent.children_count += 1;
                 (
                     parent.global_transform * local_transform,
@@ -92,35 +163,35 @@ impl SceneGraph {
         let (previous_sibling, next_sibling) = match *next_sibling {
             Some(next_sibling) => {
                 // parent already contains another child -> patch double linked list
-                let next = &mut self.nodes[next_sibling];
+                let next = &mut self.nodes[next_sibling.0];
                 let previous_sibling = next.previous_sibling;
-                next.previous_sibling = key;
-                self.nodes[previous_sibling].next_sibling = key;
+                next.previous_sibling = id;
+                self.nodes[previous_sibling.0].next_sibling = id;
                 (previous_sibling, next_sibling)
             }
             None => {
-                *next_sibling = Some(key);
-                (key, key)
+                *next_sibling = Some(id);
+                (id, id)
             }
         };
 
-        let node = &mut self.nodes[key];
+        let node = &mut self.nodes[id.0];
         node.global_transform = global_transform;
         node.previous_sibling = previous_sibling;
         node.next_sibling = next_sibling;
 
-        NodeId(key)
+        id
     }
 
     /// Removes the node from the scene graph and returns it.
     /// Returns `None` if the node is not part of the scene graph.
     pub fn remove(&mut self, node: NodeId) -> Option<Node> {
-        let key = node.0;
-        let node = self.nodes.remove(key);
+        let id = node;
+        let node = self.nodes.remove(id.0);
         if let Some(node) = &node {
-            let parent = node.parent.map(|id| &mut self.nodes[id]);
+            let parent = node.parent.map(|id| &mut self.nodes[id.0]);
 
-            if node.next_sibling == key {
+            if node.next_sibling == id {
                 if let Some(parent) = parent {
                     parent.children_count = 0;
                     parent.first_child = None;
@@ -137,8 +208,8 @@ impl SceneGraph {
                     self.first_root = Some(node.next_sibling);
                 }
 
-                self.nodes[node.previous_sibling].next_sibling = node.next_sibling;
-                self.nodes[node.next_sibling].previous_sibling = node.previous_sibling;
+                self.nodes[node.previous_sibling.0].next_sibling = node.next_sibling;
+                self.nodes[node.next_sibling.0].previous_sibling = node.previous_sibling;
             }
 
             self.remove_children(node);
@@ -156,7 +227,7 @@ impl SceneGraph {
             while let Some(state) = states.last_mut() {
                 if state.remaining > 0 {
                     state.remaining -= 1;
-                    let node = self.nodes.remove(state.next).unwrap();
+                    let node = self.nodes.remove(state.next.0).unwrap();
                     state.next = node.next_sibling;
                     if let Some(next) = node.first_child {
                         states.push(DeleteIterState {
@@ -218,7 +289,7 @@ impl SceneGraph {
         SiblingsIter {
             scene_graph: self,
             first: node,
-            next: NodeId(self[node].next_sibling),
+            next: self[node].next_sibling,
         }
     }
 
@@ -229,10 +300,10 @@ impl SceneGraph {
     /// Panics if `node` is not part of the scene graph.
     pub fn direct_children(&self, node: NodeId) -> DirectChildrenIter<'_> {
         let parent = &self[node];
-        let next = parent.first_child.unwrap_or(node.0);
+        let next = parent.first_child.unwrap_or(node);
         DirectChildrenIter {
             scene_graph: self,
-            next: NodeId(next),
+            next,
             remaining: parent.children_count,
         }
     }
@@ -244,9 +315,9 @@ impl SceneGraph {
     /// Panics if `node` is not part of the scene graph.
     pub fn all_children(&self, node: NodeId) -> AllChildrenIter<'_> {
         let parent = &self[node];
-        let next = parent.first_child.unwrap_or(node.0);
+        let next = parent.first_child.unwrap_or(node);
         let states = vec![DepthIterState {
-            next: NodeId(next),
+            next,
             remaining: parent.children_count,
         }];
         AllChildrenIter {
@@ -263,7 +334,7 @@ impl SceneGraph {
         scale: impl Into<Option<Vec3>>,
     ) -> Result<(), ()> {
         let parent_transform = match self[node].parent {
-            Some(parent) => self.nodes[parent].global_transform,
+            Some(parent) => self[parent].global_transform,
             None => Mat4::IDENTITY,
         };
 
@@ -284,7 +355,7 @@ impl SceneGraph {
             while let Some(state) = states.last_mut() {
                 if state.remaining > 0 {
                     state.remaining -= 1;
-                    let node = &mut self.nodes[state.next];
+                    let node = &mut self.nodes[state.next.0];
                     node.global_transform = state.parent_transform * node.local_transform();
                     state.next = node.next_sibling;
                     if let Some(next) = node.first_child {
@@ -323,84 +394,13 @@ impl Index<NodeId> for SceneGraph {
     }
 }
 
-/// A unique identifier for a node in the scene graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeId(NodeKey);
-
-new_key_type! { struct NodeKey; }
-
-/// A scene graph node. See [SceneGraph] for more information.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Node {
-    parent: Option<NodeKey>,
-    children_count: usize,
-    first_child: Option<NodeKey>,
-    /// the previous sibling in the list of children for the parent
-    previous_sibling: NodeKey,
-    /// the next sibling in the list of children for the parent
-    next_sibling: NodeKey,
-
-    local_translation: Vec3,
-    local_rotation: Quat,
-    local_scale: Vec3,
-
-    global_transform: Mat4,
-}
-
-impl Node {
-    /// Returns the parent's node id or `None` if the node is a root node.
-    pub fn parent(&self) -> Option<NodeId> {
-        self.parent.map(|key| NodeId(key))
-    }
-
-    /// Returns the local translation of the node.
-    /// See [`local_transform`][Self::local_transform] for more informations.
-    pub fn local_translation(&self) -> Vec3 {
-        self.local_translation
-    }
-
-    /// Returns the local rotation of the node.
-    /// See [`local_transform`][Self::local_transform] for more informations.
-    pub fn local_rotation(&self) -> Quat {
-        self.local_rotation
-    }
-
-    /// Returns the local scale of the node.
-    /// See [`local_transform`][Self::local_transform] for more informations.
-    pub fn local_scale(&self) -> Vec3 {
-        self.local_scale
-    }
-
-    /// Returns the local transformation of the node. The returns matrix can be used transform points
-    /// from local space to the parent node's space. The local transformation is made up of
-    /// the [local translation (`T`)][Self::local_translation], the [local rotation (`R`)][Self::local_rotation]
-    /// and the [local scale (`S`)][Self::local_scale] in the `T * R * S` order (first the scale is applied to the point,
-    /// then the rotation, and then the translation).
-    /// When the node contains no parent, the local transformation is identical to the global transformation.
-    pub fn local_transform(&self) -> Mat4 {
-        Mat4::from_scale_rotation_translation(
-            self.local_scale,
-            self.local_rotation,
-            self.local_translation,
-        )
-    }
-
-    /// Returns the global transformation of the node. The returns matrix can be used transform points
-    /// from local space to the global space. The global transformation of a node is the product of the
-    /// global transformation matrix of its parent and its own [local transformation matrix][Self::local_transform].
-    /// When the node contains no parent, the global transformation is identical to the local transformation.
-    pub fn global_transform(&self) -> Mat4 {
-        self.global_transform
-    }
-}
-
 struct DeleteIterState {
-    next: NodeKey,
+    next: NodeId,
     remaining: usize,
 }
 
 struct UpdateTransformIterState {
-    next: NodeKey,
+    next: NodeId,
     remaining: usize,
     parent_transform: Mat4,
 }
@@ -435,7 +435,7 @@ impl<'a> FusedIterator for Iter<'a> {}
 #[derive(Debug, Clone)]
 pub struct RootsIter<'a> {
     scene_graph: &'a SceneGraph,
-    next: Option<NodeKey>,
+    next: Option<NodeId>,
     remaining: usize,
 }
 
@@ -445,7 +445,7 @@ impl<'a> Iterator for RootsIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining > 0 {
             self.remaining -= 1;
-            let id = NodeId(self.next.unwrap());
+            let id = self.next.unwrap();
             let node = &self.scene_graph[id];
             self.next = Some(node.next_sibling);
             Some((id, node))
@@ -471,7 +471,7 @@ impl<'a> FusedIterator for RootsIter<'a> {}
 #[derive(Debug, Clone)]
 pub struct ParentsIter<'a> {
     scene_graph: &'a SceneGraph,
-    next: Option<NodeKey>,
+    next: Option<NodeId>,
 }
 
 impl<'a> Iterator for ParentsIter<'a> {
@@ -479,7 +479,7 @@ impl<'a> Iterator for ParentsIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next.map(|key| {
-            let id = NodeId(key);
+            let id = key;
             let node = &self.scene_graph[id];
             self.next = node.parent;
             (id, node)
@@ -506,7 +506,7 @@ impl<'a> Iterator for SiblingsIter<'a> {
         } else {
             let node = &self.scene_graph[self.next];
             let item = (self.next, node);
-            self.next = NodeId(node.next_sibling);
+            self.next = node.next_sibling;
             Some(item)
         }
     }
@@ -530,7 +530,7 @@ impl<'a> Iterator for DirectChildrenIter<'a> {
             self.remaining -= 1;
             let node = &self.scene_graph[self.next];
             let item = (self.next, node);
-            self.next = NodeId(node.next_sibling);
+            self.next = node.next_sibling;
             Some(item)
         } else {
             None
@@ -568,10 +568,10 @@ impl<'a> Iterator for AllChildrenIter<'a> {
                 state.remaining -= 1;
                 let node = &self.scene_graph[state.next];
                 let item = (state.next, node);
-                state.next = NodeId(node.next_sibling);
+                state.next = node.next_sibling;
                 if let Some(next) = node.first_child {
                     self.states.push(DepthIterState {
-                        next: NodeId(next),
+                        next,
                         remaining: node.children_count,
                     });
                 }
@@ -636,43 +636,43 @@ mod tests {
 
         let root_0 = scene_graph.add(None);
         assert_eq!(1, scene_graph.root_count);
-        assert_eq!(Some(root_0.0), scene_graph.first_root);
-        assert_eq!(root_0.0, scene_graph[root_0].previous_sibling);
-        assert_eq!(root_0.0, scene_graph[root_0].next_sibling);
+        assert_eq!(Some(root_0), scene_graph.first_root);
+        assert_eq!(root_0, scene_graph[root_0].previous_sibling);
+        assert_eq!(root_0, scene_graph[root_0].next_sibling);
 
         let root_1 = scene_graph.add(None);
         assert_eq!(2, scene_graph.root_count);
-        assert_eq!(Some(root_0.0), scene_graph.first_root);
-        assert_eq!(root_1.0, scene_graph[root_0].previous_sibling);
-        assert_eq!(root_0.0, scene_graph[root_1].previous_sibling);
-        assert_eq!(root_1.0, scene_graph[root_0].next_sibling);
-        assert_eq!(root_0.0, scene_graph[root_1].next_sibling);
+        assert_eq!(Some(root_0), scene_graph.first_root);
+        assert_eq!(root_1, scene_graph[root_0].previous_sibling);
+        assert_eq!(root_0, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_0].next_sibling);
+        assert_eq!(root_0, scene_graph[root_1].next_sibling);
 
         let root_2 = scene_graph.add(None);
         assert_eq!(3, scene_graph.root_count);
-        assert_eq!(Some(root_0.0), scene_graph.first_root);
-        assert_eq!(root_2.0, scene_graph[root_0].previous_sibling);
-        assert_eq!(root_1.0, scene_graph[root_2].previous_sibling);
-        assert_eq!(root_0.0, scene_graph[root_1].previous_sibling);
-        assert_eq!(root_1.0, scene_graph[root_0].next_sibling);
-        assert_eq!(root_2.0, scene_graph[root_1].next_sibling);
-        assert_eq!(root_0.0, scene_graph[root_2].next_sibling);
+        assert_eq!(Some(root_0), scene_graph.first_root);
+        assert_eq!(root_2, scene_graph[root_0].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_2].previous_sibling);
+        assert_eq!(root_0, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_0].next_sibling);
+        assert_eq!(root_2, scene_graph[root_1].next_sibling);
+        assert_eq!(root_0, scene_graph[root_2].next_sibling);
 
         let result = scene_graph.remove(root_0);
         assert!(result.is_some());
         assert_eq!(2, scene_graph.root_count);
-        assert_eq!(Some(root_1.0), scene_graph.first_root);
-        assert_eq!(root_2.0, scene_graph[root_1].previous_sibling);
-        assert_eq!(root_1.0, scene_graph[root_2].previous_sibling);
-        assert_eq!(root_2.0, scene_graph[root_1].next_sibling);
-        assert_eq!(root_1.0, scene_graph[root_2].next_sibling);
+        assert_eq!(Some(root_1), scene_graph.first_root);
+        assert_eq!(root_2, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_2].previous_sibling);
+        assert_eq!(root_2, scene_graph[root_1].next_sibling);
+        assert_eq!(root_1, scene_graph[root_2].next_sibling);
 
         let result = scene_graph.remove(root_2);
         assert!(result.is_some());
         assert_eq!(1, scene_graph.root_count);
-        assert_eq!(Some(root_1.0), scene_graph.first_root);
-        assert_eq!(root_1.0, scene_graph[root_1].previous_sibling);
-        assert_eq!(root_1.0, scene_graph[root_1].next_sibling);
+        assert_eq!(Some(root_1), scene_graph.first_root);
+        assert_eq!(root_1, scene_graph[root_1].previous_sibling);
+        assert_eq!(root_1, scene_graph[root_1].next_sibling);
 
         let result = scene_graph.remove(root_1);
         assert!(result.is_some());
@@ -691,43 +691,43 @@ mod tests {
 
         let child_0 = scene_graph.add(root);
         assert_eq!(1, scene_graph[root].children_count);
-        assert_eq!(Some(child_0.0), scene_graph[root].first_child);
-        assert_eq!(child_0.0, scene_graph[child_0].previous_sibling);
-        assert_eq!(child_0.0, scene_graph[child_0].next_sibling);
+        assert_eq!(Some(child_0), scene_graph[root].first_child);
+        assert_eq!(child_0, scene_graph[child_0].previous_sibling);
+        assert_eq!(child_0, scene_graph[child_0].next_sibling);
 
         let child_1 = scene_graph.add(root);
         assert_eq!(2, scene_graph[root].children_count);
-        assert_eq!(Some(child_0.0), scene_graph[root].first_child);
-        assert_eq!(child_1.0, scene_graph[child_0].previous_sibling);
-        assert_eq!(child_0.0, scene_graph[child_1].previous_sibling);
-        assert_eq!(child_1.0, scene_graph[child_0].next_sibling);
-        assert_eq!(child_0.0, scene_graph[child_1].next_sibling);
+        assert_eq!(Some(child_0), scene_graph[root].first_child);
+        assert_eq!(child_1, scene_graph[child_0].previous_sibling);
+        assert_eq!(child_0, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_0].next_sibling);
+        assert_eq!(child_0, scene_graph[child_1].next_sibling);
 
         let child_2 = scene_graph.add(root);
         assert_eq!(3, scene_graph[root].children_count);
-        assert_eq!(Some(child_0.0), scene_graph[root].first_child);
-        assert_eq!(child_2.0, scene_graph[child_0].previous_sibling);
-        assert_eq!(child_1.0, scene_graph[child_2].previous_sibling);
-        assert_eq!(child_0.0, scene_graph[child_1].previous_sibling);
-        assert_eq!(child_1.0, scene_graph[child_0].next_sibling);
-        assert_eq!(child_2.0, scene_graph[child_1].next_sibling);
-        assert_eq!(child_0.0, scene_graph[child_2].next_sibling);
+        assert_eq!(Some(child_0), scene_graph[root].first_child);
+        assert_eq!(child_2, scene_graph[child_0].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_2].previous_sibling);
+        assert_eq!(child_0, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_0].next_sibling);
+        assert_eq!(child_2, scene_graph[child_1].next_sibling);
+        assert_eq!(child_0, scene_graph[child_2].next_sibling);
 
         let result = scene_graph.remove(child_0);
         assert!(result.is_some());
         assert_eq!(2, scene_graph[root].children_count);
-        assert_eq!(Some(child_1.0), scene_graph[root].first_child);
-        assert_eq!(child_2.0, scene_graph[child_1].previous_sibling);
-        assert_eq!(child_1.0, scene_graph[child_2].previous_sibling);
-        assert_eq!(child_2.0, scene_graph[child_1].next_sibling);
-        assert_eq!(child_1.0, scene_graph[child_2].next_sibling);
+        assert_eq!(Some(child_1), scene_graph[root].first_child);
+        assert_eq!(child_2, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_2].previous_sibling);
+        assert_eq!(child_2, scene_graph[child_1].next_sibling);
+        assert_eq!(child_1, scene_graph[child_2].next_sibling);
 
         let result = scene_graph.remove(child_2);
         assert!(result.is_some());
         assert_eq!(1, scene_graph[root].children_count);
-        assert_eq!(Some(child_1.0), scene_graph[root].first_child);
-        assert_eq!(child_1.0, scene_graph[child_1].previous_sibling);
-        assert_eq!(child_1.0, scene_graph[child_1].next_sibling);
+        assert_eq!(Some(child_1), scene_graph[root].first_child);
+        assert_eq!(child_1, scene_graph[child_1].previous_sibling);
+        assert_eq!(child_1, scene_graph[child_1].next_sibling);
 
         let result = scene_graph.remove(child_1);
         assert!(result.is_some());

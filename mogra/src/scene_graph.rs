@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::{iter::FusedIterator, ops::Index};
 
 use glam::{Mat4, Quat, Vec3};
 use slotmap::{SlotMap, new_key_type};
@@ -174,6 +174,75 @@ impl SceneGraph {
     pub fn get(&self, node: NodeId) -> Option<&Node> {
         self.nodes.get(node.0)
     }
+
+    /// Returns an iterator visiting all root nodes once. A root node is a node with no parent.
+    pub fn roots(&self) -> RootsIter<'_> {
+        RootsIter {
+            scene_graph: self,
+            next: self.first_root,
+            remaining: self.root_count,
+        }
+    }
+
+    /// Returns n iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the node is not part of the scene graph.
+    pub fn parents(&self, node: NodeId) -> ParentsIter<'_> {
+        ParentsIter {
+            scene_graph: &self,
+            next: self[node].parent,
+        }
+    }
+
+    /// Returns an iterator visiting all sibling nodes once. A sibling is a node with the same parent.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `node` is not part of the scene graph.
+    pub fn siblings(&self, node: NodeId) -> SiblingsIter<'_> {
+        SiblingsIter {
+            scene_graph: self,
+            first: node,
+            next: NodeId(self[node].next_sibling),
+        }
+    }
+
+    /// Returns an iterator visiting all direct children nodes once.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `node` is not part of the scene graph.
+    pub fn direct_children(&self, node: NodeId) -> DirectChildrenIter<'_> {
+        let parent = &self[node];
+        let next = parent.first_child.unwrap_or(node.0);
+        DirectChildrenIter {
+            scene_graph: self,
+            next: NodeId(next),
+            remaining: parent.children_count,
+        }
+    }
+
+    
+
+    /// Returns an iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if `node` is not part of the scene graph.
+    pub fn all_children(&self, node: NodeId) -> AllChildrenIter<'_> {
+        let parent = &self[node];
+        let next = parent.first_child.unwrap_or(node.0);
+        let states = vec![DepthIterState {
+            next: NodeId(next),
+            remaining: parent.children_count,
+        }];
+        AllChildrenIter {
+            scene_graph: self,
+            states,
+        }
+    }
 }
 
 impl Index<NodeId> for SceneGraph {
@@ -213,49 +282,198 @@ struct DeleteIterState {
     remaining: usize,
 }
 
+/// An iterator visiting all root nodes once. A root node is a node with no parent.
+pub struct RootsIter<'a> {
+    scene_graph: &'a SceneGraph,
+    next: Option<NodeKey>,
+    remaining: usize,
+}
+
+impl<'a> Iterator for RootsIter<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            let id = NodeId(self.next.unwrap());
+            let node = &self.scene_graph[id];
+            self.next = Some(node.next_sibling);
+            Some((id, node))
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for RootsIter<'a> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
+
+impl<'a> FusedIterator for RootsIter<'a> {}
+
+/// An iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.
+pub struct ParentsIter<'a> {
+    scene_graph: &'a SceneGraph,
+    next: Option<NodeKey>,
+}
+
+impl<'a> Iterator for ParentsIter<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next.map(|key| {
+            let id = NodeId(key);
+            let node = &self.scene_graph[id];
+            self.next = node.parent;
+            (id, node)
+        })
+    }
+}
+
+impl<'a> FusedIterator for ParentsIter<'a> {}
+
+/// An iterator visiting all sibling nodes once. A sibling is a node with the same direct parent.
+pub struct SiblingsIter<'a> {
+    scene_graph: &'a SceneGraph,
+    first: NodeId,
+    next: NodeId,
+}
+
+impl<'a> Iterator for SiblingsIter<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == self.first {
+            None
+        } else {
+            let node = &self.scene_graph[self.next];
+            let item = (self.next, node);
+            self.next = NodeId(node.next_sibling);
+            Some(item)
+        }
+    }
+}
+
+impl<'a> FusedIterator for SiblingsIter<'a> {}
+
+/// An iterator visiting all direct children nodes once.
+pub struct DirectChildrenIter<'a> {
+    scene_graph: &'a SceneGraph,
+    next: NodeId,
+    remaining: usize,
+}
+
+impl<'a> Iterator for DirectChildrenIter<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            let node = &self.scene_graph[self.next];
+            let item = (self.next, node);
+            self.next = NodeId(node.next_sibling);
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for DirectChildrenIter<'a> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
+
+impl<'a> FusedIterator for DirectChildrenIter<'a> {}
+
+/// An iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes.
+pub struct AllChildrenIter<'a> {
+    scene_graph: &'a SceneGraph,
+    states: Vec<DepthIterState>,
+}
+
+struct DepthIterState {
+    next: NodeId,
+    remaining: usize,
+}
+
+impl<'a> Iterator for AllChildrenIter<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(state) = self.states.last_mut() {
+            if state.remaining > 0 {
+                state.remaining -= 1;
+                let node = &self.scene_graph[state.next];
+                let item = (state.next, node);
+                state.next = NodeId(node.next_sibling);
+                if let Some(next) = node.first_child {
+                    self.states.push(DepthIterState {
+                        next: NodeId(next),
+                        remaining: node.children_count,
+                    });
+                }
+                return Some(item);
+            } else {
+                self.states.pop();
+            }
+        }
+        None
+    }
+}
+
+impl<'a> FusedIterator for AllChildrenIter<'a> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // struct Setup {
-    //     scene_graph: SceneGraph,
-    //     root_0: NodeId,
-    //     child_0_0: NodeId,
-    //     child_0_0_0: NodeId,
-    //     root_1: NodeId,
-    //     child_1_0: NodeId,
-    //     child_1_0_0: NodeId,
-    //     child_1_0_1: NodeId,
-    //     child_1_1: NodeId,
-    // }
+    struct Setup {
+        scene_graph: SceneGraph,
+        root_0: NodeId,
+        child_0_0: NodeId,
+        child_0_0_0: NodeId,
+        root_1: NodeId,
+        child_1_0: NodeId,
+        child_1_0_0: NodeId,
+        child_1_0_1: NodeId,
+        child_1_1: NodeId,
+    }
 
-    // impl Setup {
-    //     fn new() -> Setup {
-    //         let mut scene_graph = SceneGraph::new();
+    impl Setup {
+        fn new() -> Setup {
+            let mut scene_graph = SceneGraph::new();
 
-    //         let root_0 = scene_graph.add(None);
-    //         let child_0_0 = scene_graph.add(root_0);
-    //         let child_0_0_0 = scene_graph.add(child_0_0);
+            let root_0 = scene_graph.add(None);
+            let child_0_0 = scene_graph.add(root_0);
+            let child_0_0_0 = scene_graph.add(child_0_0);
 
-    //         let root_1 = scene_graph.add(None);
-    //         let child_1_0 = scene_graph.add(root_1);
-    //         let child_1_0_0 = scene_graph.add(child_1_0);
-    //         let child_1_0_1 = scene_graph.add(child_1_0);
-    //         let child_1_1 = scene_graph.add(root_1);
+            let root_1 = scene_graph.add(None);
+            let child_1_0 = scene_graph.add(root_1);
+            let child_1_0_0 = scene_graph.add(child_1_0);
+            let child_1_0_1 = scene_graph.add(child_1_0);
+            let child_1_1 = scene_graph.add(root_1);
 
-    //         Setup {
-    //             scene_graph,
-    //             root_0,
-    //             child_0_0,
-    //             child_0_0_0,
-    //             root_1,
-    //             child_1_0,
-    //             child_1_0_0,
-    //             child_1_0_1,
-    //             child_1_1,
-    //         }
-    //     }
-    // }
+            Setup {
+                scene_graph,
+                root_0,
+                child_0_0,
+                child_0_0_0,
+                root_1,
+                child_1_0,
+                child_1_0_0,
+                child_1_0_1,
+                child_1_1,
+            }
+        }
+    }
 
     #[test]
     fn test_scene_graph_roots() {
@@ -360,5 +578,72 @@ mod tests {
         assert!(result.is_some());
         assert_eq!(0, scene_graph[root].children_count);
         assert_eq!(None, scene_graph[root].first_child);
+    }
+
+    #[test]
+    fn test_scene_graph_iters() {
+        let s = Setup::new();
+
+        // let mut iter = s.scene_graph.iter();
+        // assert_eq!(s.root_0, iter.next().unwrap().0);
+        // assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        // assert_eq!(s.child_0_0_0, iter.next().unwrap().0);
+        // assert_eq!(s.root_1, iter.next().unwrap().0);
+        // assert_eq!(s.child_1_0, iter.next().unwrap().0);
+        // assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        // assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        // assert_eq!(s.child_1_1, iter.next().unwrap().0);
+        // assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.roots();
+        assert_eq!(s.root_0, iter.next().unwrap().0);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.parents(s.child_0_0_0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert_eq!(s.root_0, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.parents(s.child_1_1);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.siblings(s.root_0);
+        assert_eq!(s.root_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.siblings(s.child_0_0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.siblings(s.child_1_0);
+        assert_eq!(s.child_1_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.direct_children(s.root_0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.direct_children(s.child_1_0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.all_children(s.root_0);
+        assert_eq!(s.child_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_0_0_0, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.all_children(s.root_1);
+        assert_eq!(s.child_1_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        assert_eq!(s.child_1_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
+
+        let mut iter = s.scene_graph.all_children(s.child_1_0);
+        assert_eq!(s.child_1_0_0, iter.next().unwrap().0);
+        assert_eq!(s.child_1_0_1, iter.next().unwrap().0);
+        assert!(iter.next().is_none());
     }
 }

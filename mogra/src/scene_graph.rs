@@ -253,15 +253,15 @@ impl SceneGraph {
     }
 
     /// Returns an iterator visiting all nodes in the scene graph once in arbitrary order.
-    pub fn iter(&self) -> Iter<'_> {
-        Iter {
+    pub fn iter(&self) -> NodeIter<'_> {
+        NodeIter {
             inner: self.nodes.iter(),
         }
     }
 
     /// Returns an iterator visiting all root nodes once in arbitrary order. A root node is a node with no parent.
-    pub fn roots(&self) -> RootsIter<'_> {
-        RootsIter {
+    pub fn roots(&self) -> RootNodeIter<'_> {
+        RootNodeIter {
             scene_graph: self,
             next: self.first_root,
             remaining: self.root_count,
@@ -273,8 +273,8 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if the node is not part of the scene graph.
-    pub fn parents(&self, node: NodeId) -> ParentsIter<'_> {
-        ParentsIter {
+    pub fn parents(&self, node: NodeId) -> ParentNodeIter<'_> {
+        ParentNodeIter {
             scene_graph: &self,
             next: self[node].parent,
         }
@@ -285,8 +285,8 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if `node` is not part of the scene graph.
-    pub fn siblings(&self, node: NodeId) -> SiblingsIter<'_> {
-        SiblingsIter {
+    pub fn siblings(&self, node: NodeId) -> SiblingNodeIter<'_> {
+        SiblingNodeIter {
             scene_graph: self,
             first: node,
             next: self[node].next_sibling,
@@ -298,10 +298,10 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if `node` is not part of the scene graph.
-    pub fn direct_children(&self, node: NodeId) -> DirectChildrenIter<'_> {
+    pub fn direct_children(&self, node: NodeId) -> DirectChildrenNodeIter<'_> {
         let parent = &self[node];
         let next = parent.first_child.unwrap_or(node);
-        DirectChildrenIter {
+        DirectChildrenNodeIter {
             scene_graph: self,
             next,
             remaining: parent.children_count,
@@ -313,14 +313,14 @@ impl SceneGraph {
     /// ## Panics
     ///
     /// Panics if `node` is not part of the scene graph.
-    pub fn all_children(&self, node: NodeId) -> AllChildrenIter<'_> {
+    pub fn all_children(&self, node: NodeId) -> AllChildrenNodeIter<'_> {
         let parent = &self[node];
         let next = parent.first_child.unwrap_or(node);
         let states = vec![DepthIterState {
             next,
             remaining: parent.children_count,
         }];
-        AllChildrenIter {
+        AllChildrenNodeIter {
             scene_graph: self,
             states,
         }
@@ -407,11 +407,11 @@ struct UpdateTransformIterState {
 
 /// An iterator visiting all nodes in the scene graph once in arbitrary order.
 #[derive(Debug, Clone)]
-pub struct Iter<'a> {
+pub struct NodeIter<'a> {
     inner: slotmap::basic::Iter<'a, NodeKey, Node>,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl<'a> Iterator for NodeIter<'a> {
     type Item = (NodeId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -423,23 +423,23 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for Iter<'a> {
+impl<'a> ExactSizeIterator for NodeIter<'a> {
     fn len(&self) -> usize {
         self.inner.len()
     }
 }
 
-impl<'a> FusedIterator for Iter<'a> {}
+impl<'a> FusedIterator for NodeIter<'a> {}
 
 /// An iterator visiting all root nodes once in arbitrary order. A root node is a node with no parent.
 #[derive(Debug, Clone)]
-pub struct RootsIter<'a> {
+pub struct RootNodeIter<'a> {
     scene_graph: &'a SceneGraph,
     next: Option<NodeId>,
     remaining: usize,
 }
 
-impl<'a> Iterator for RootsIter<'a> {
+impl<'a> Iterator for RootNodeIter<'a> {
     type Item = (NodeId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -459,22 +459,22 @@ impl<'a> Iterator for RootsIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for RootsIter<'a> {
+impl<'a> ExactSizeIterator for RootNodeIter<'a> {
     fn len(&self) -> usize {
         self.remaining
     }
 }
 
-impl<'a> FusedIterator for RootsIter<'a> {}
+impl<'a> FusedIterator for RootNodeIter<'a> {}
 
 /// An iterator visiting all parent nodes in bottom up order. The last elements will always be a root node.
 #[derive(Debug, Clone)]
-pub struct ParentsIter<'a> {
+pub struct ParentNodeIter<'a> {
     scene_graph: &'a SceneGraph,
     next: Option<NodeId>,
 }
 
-impl<'a> Iterator for ParentsIter<'a> {
+impl<'a> Iterator for ParentNodeIter<'a> {
     type Item = (NodeId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -487,17 +487,17 @@ impl<'a> Iterator for ParentsIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for ParentsIter<'a> {}
+impl<'a> FusedIterator for ParentNodeIter<'a> {}
 
 /// An iterator visiting all sibling nodes once in arbitrary order. A sibling is a node with the same direct parent.
 #[derive(Debug, Clone)]
-pub struct SiblingsIter<'a> {
+pub struct SiblingNodeIter<'a> {
     scene_graph: &'a SceneGraph,
     first: NodeId,
     next: NodeId,
 }
 
-impl<'a> Iterator for SiblingsIter<'a> {
+impl<'a> Iterator for SiblingNodeIter<'a> {
     type Item = (NodeId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -512,17 +512,17 @@ impl<'a> Iterator for SiblingsIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for SiblingsIter<'a> {}
+impl<'a> FusedIterator for SiblingNodeIter<'a> {}
 
 /// An iterator visiting all direct children nodes once in arbitrary order.
 #[derive(Debug, Clone)]
-pub struct DirectChildrenIter<'a> {
+pub struct DirectChildrenNodeIter<'a> {
     scene_graph: &'a SceneGraph,
     next: NodeId,
     remaining: usize,
 }
 
-impl<'a> Iterator for DirectChildrenIter<'a> {
+impl<'a> Iterator for DirectChildrenNodeIter<'a> {
     type Item = (NodeId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -538,17 +538,17 @@ impl<'a> Iterator for DirectChildrenIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for DirectChildrenIter<'a> {
+impl<'a> ExactSizeIterator for DirectChildrenNodeIter<'a> {
     fn len(&self) -> usize {
         self.remaining
     }
 }
 
-impl<'a> FusedIterator for DirectChildrenIter<'a> {}
+impl<'a> FusedIterator for DirectChildrenNodeIter<'a> {}
 
 /// An iterator visition all children nodes once. Deeper children will always be visited after all their parent nodes. The order of siblings is arbitrary.
 #[derive(Debug, Clone)]
-pub struct AllChildrenIter<'a> {
+pub struct AllChildrenNodeIter<'a> {
     scene_graph: &'a SceneGraph,
     states: Vec<DepthIterState>,
 }
@@ -559,7 +559,7 @@ struct DepthIterState {
     remaining: usize,
 }
 
-impl<'a> Iterator for AllChildrenIter<'a> {
+impl<'a> Iterator for AllChildrenNodeIter<'a> {
     type Item = (NodeId, &'a Node);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -584,7 +584,7 @@ impl<'a> Iterator for AllChildrenIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for AllChildrenIter<'a> {}
+impl<'a> FusedIterator for AllChildrenNodeIter<'a> {}
 
 #[cfg(test)]
 mod tests {

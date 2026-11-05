@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use glam::Mat4;
 use thiserror::Error;
+
+use crate::NodeId;
 
 /// In this projection mode, an object's size in the rendered image decreases as its distance from the camera increases, creating a sense of depth and perspective.
 ///
@@ -255,6 +259,29 @@ impl Camera {
         projection.check()?;
         let projection = projection.matrix();
         Ok(Camera { projection })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CameraManager {
+    cameras: HashMap<NodeId, Camera>,
+}
+
+impl CameraManager {
+    pub fn new() -> Self {
+        CameraManager {
+            cameras: HashMap::new(),
+        }
+    }
+
+    /// Returns the camera associated with the given node, if it exists.
+    pub fn get(&self, node: NodeId) -> Option<&Camera> {
+        self.cameras.get(&node)
+    }
+
+    /// Sets the camera associated with the given node. If a camera already exists for that node, it will be replaced and the old camera will be returned.
+    pub fn set(&mut self, node: NodeId, camera: Camera) -> Option<Camera> {
+        self.cameras.insert(node, camera)
     }
 }
 

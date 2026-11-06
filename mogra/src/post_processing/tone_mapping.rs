@@ -1,5 +1,20 @@
+//! Tone mapping post-processing effect.
+//! 
+//! Tone mapping is the process of converting high dynamic range (HDR) images to low dynamic range (LDR) images.
+//! This is necessary because most displays can only show a limited range of brightness values, while HDR images
+//! can contain a much wider range of brightness values. Tone mapping algorithms are used to compress the dynamic
+//! range of HDR images so that they can be displayed on LDR displays without losing important details or
+//! introducing artifacts.
+//! 
+//! The supported tone mapping algorithm are:
+//! - Reinhard tone mapping
+
 use crate::Context;
 
+/// Maps HDR textures to LDR ones. Currently only the *Reinhard tone mapping* is available.
+/// 
+/// Colors of HDR textures are represented by float allowed to take any value, including one higher than `1.0`.
+/// Colors of LDR textures must be in the `[0.0, 1.0]` range.
 #[derive(Debug, Clone)]
 pub struct ToneMapping {
     pipeline: wgpu::RenderPipeline,
@@ -8,6 +23,10 @@ pub struct ToneMapping {
 }
 
 impl ToneMapping {
+    /// Creates a new tone mapping instance using the *Reinhard tone mapping* algorithm.
+    /// 
+    /// The `width` and `height` parameters specify the dimensions of the input and output textures.
+    /// The `output_format` parameter specifies the format of the output texture.
     pub fn new(width: u32, height: u32, output_format: wgpu::TextureFormat, ctx: &Context) -> Self {
         let pipeline: wgpu::RenderPipeline =
             ctx.device
@@ -55,15 +74,23 @@ impl ToneMapping {
         }
     }
 
+    /// Changes the size of the input and output textures. The new width and height must be non-zero.
     pub fn resize(&mut self, width: u32, height: u32, ctx: &Context) {
         self.input_texture = create_input_texture(width, height, ctx);
         self.bind_group = create_bind_group(&self.input_texture, ctx);
     }
 
+    /// Returns the input texture of the tone mapping. When the tone mapping is applied, the input texture is mapped to the output texture.
     pub fn input_texture_view(&self) -> &wgpu::TextureView {
         &self.input_texture
     }
 
+    /// Applies the tone mapping to the input texture and writes the result to the output texture.
+    /// 
+    /// The output texture must have the same dimensions and format given to `ToneMapping::new()`.
+    /// 
+    /// # Panics
+    /// This function will panic if the output texture has different dimensions or format than the input texture.
     pub fn render(&self, output: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Tone mapping render pass"),
@@ -88,6 +115,7 @@ impl ToneMapping {
     }
 }
 
+/// Resources shared between all tone mapping instances.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToneMappingContext {
     shader_module: wgpu::ShaderModule,
@@ -97,6 +125,7 @@ pub struct ToneMappingContext {
 }
 
 impl ToneMappingContext {
+    /// Creates the shared resources for tone mapping.
     pub fn new(device: &wgpu::Device) -> Self {
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("tone_mapping.wgsl"));
 

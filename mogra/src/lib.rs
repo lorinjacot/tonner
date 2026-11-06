@@ -17,17 +17,29 @@ mod node;
 mod primitive;
 mod scene_graph;
 
+mod post_processing {
+    pub use tone_mapping::*;
+
+    mod tone_mapping;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    tone_mapping: post_processing::ToneMappingContext,
 }
 
 impl Context {
     /// Create the context using the provided `device` and `queue`. All GPU resourcces and
     /// GPU operations will be created on them.
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        Context { device, queue }
+        let tone_mapping = post_processing::ToneMappingContext::new(&device);
+        Context {
+            device,
+            queue,
+            tone_mapping,
+        }
     }
 }
 
@@ -144,17 +156,18 @@ impl Scene {
 pub struct Renderer {
     width: u32,
     height: u32,
-    format: wgpu::TextureFormat,
     ctx: Context,
+    tone_mapping: post_processing::ToneMapping,
 }
 
 impl Renderer {
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: Context) -> Self {
+        let tone_mapping = post_processing::ToneMapping::new(width, height, format, &ctx);
         Renderer {
             width,
             height,
-            format,
             ctx,
+            tone_mapping,
         }
     }
 
@@ -175,8 +188,19 @@ impl Renderer {
     /// # Panics
     /// This function will panic if the new width or height is zero.
     pub fn resize(&mut self, width: u32, height: u32) {
+        // resizing is expensive
+        if self.width == width && self.height == height {
+            return;
+        }
+        if width == 0 || height == 0 {
+            panic!(
+                "Renderer dimensions must be non-zero, got width: {}, height: {}",
+                width, height
+            );
+        }
         self.width = width;
         self.height = height;
+        self.tone_mapping.resize(width, height, &self.ctx);
     }
 
     /// Renders the scene to the given target from the `camera` point of view.
@@ -189,7 +213,6 @@ impl Renderer {
     pub fn render(&mut self, scene: &Scene, camera: NodeId, target: &wgpu::TextureView) {
         assert!(self.ctx == scene.ctx);
 
-        let _ = self.format;
         let _ = camera;
         let _ = target;
         let _ = scene.meshes;
@@ -202,24 +225,8 @@ impl Renderer {
                 label: Some("mogra render command encoder"),
             });
 
-        let renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-
-        drop(renderpass);
+        let _ = self.tone_mapping.input_texture_view();
+        self.tone_mapping.render(target, &mut encoder);
 
         self.ctx.queue.submit([encoder.finish()]);
     }

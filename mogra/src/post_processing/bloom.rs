@@ -1,9 +1,22 @@
+//! Bloom post-processing effect.
+//! 
+//! "Bright light sources and brightly lit regions are often difficult to convey to the viewer
+//! as the intensity range of a monitor is limited. One way to distinguish bright light sources
+//! on a monitor is by making them glow; the light then bleeds around the light source. This
+//! effectively gives the viewer the illusion these light sources or bright regions are intensely
+//! bright." learnopengl.com bloom description.
+//! 
+//! The supported bloom algorithms are:
+//! - Physically Based Bloom (based on the ACM Siggraph presentation in 2014 by Jorge Jimenez for
+//! Call of Duty: Advanced Warfare)
+
 use bytemuck::{Pod, Zeroable, bytes_of};
 use glam::{Vec2, vec2};
 use wgpu::util::DeviceExt;
 
 use crate::Context;
 
+/// Applies bloom effect. Currently only the *Physically Based Bloom* algorithm is available.
 #[derive(Debug, Clone)]
 pub struct Bloom {
     buffers: Vec<wgpu::Buffer>,
@@ -16,6 +29,11 @@ pub struct Bloom {
 }
 
 impl Bloom {
+    /// Creates a new bloom instance using the *Physically Based Bloom* algorithm.
+    /// 
+    /// The `width` and `height` parameters specify the dimensions of the input and output textures.
+    /// The `mips` parameter specifies how many times the texture will be up/down-sampled.
+    /// The `filter_radius` parameter specifies the radius of the filter used for upsampling.
     pub fn new(width: u32, height: u32, mips: u32, filter_radius: f32, ctx: &Context) -> Self {
         assert!(mips > 0);
         let buffers = create_buffers(width, height, mips, filter_radius, &ctx.device);
@@ -37,6 +55,7 @@ impl Bloom {
         }
     }
 
+    /// Changes the size of the input and output textures. The new width and height must be strictly positive.
     pub fn resize(&mut self, width: u32, height: u32, ctx: &Context) {
         let IO {
             input_texture,
@@ -50,10 +69,17 @@ impl Bloom {
         self.last_bind_group = last_bind_group;
     }
 
+    /// Returns the input texture of the bloom effect.
     pub fn input_texture_view(&self) -> &wgpu::TextureView {
         &self.input_texture
     }
 
+    ///Applies the bloom effect to the input texture and writes the result to the output texture.
+    /// 
+    /// The output texture must have the same dimensions as given to `Bloom::new` or `Bloom::resize`.
+    /// 
+    /// # Panics
+    /// This function will panic if the output texture has a different size than the input texture.
     pub fn render(&self, output: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
         for (input, output) in &self.downsample_io {
             self.downsample(input, output, encoder);
@@ -122,6 +148,7 @@ impl Bloom {
     }
 }
 
+/// Resources shared between all bloom instances.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BloomContext {
     bind_group_layout: wgpu::BindGroupLayout,
@@ -131,6 +158,7 @@ pub struct BloomContext {
 }
 
 impl BloomContext {
+    /// Creates the shared resources for bloom.
     pub fn new(device: &wgpu::Device) -> Self {
         let shader_module = device.create_shader_module(wgpu::include_wgsl!("bloom.wgsl"));
 

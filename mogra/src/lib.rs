@@ -18,8 +18,10 @@ mod primitive;
 mod scene_graph;
 
 mod post_processing {
+    pub use bloom::*;
     pub use tone_mapping::*;
 
+    mod bloom;
     mod tone_mapping;
 }
 
@@ -27,6 +29,7 @@ mod post_processing {
 pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    bloom: post_processing::BloomContext,
     tone_mapping: post_processing::ToneMappingContext,
 }
 
@@ -34,10 +37,12 @@ impl Context {
     /// Create the context using the provided `device` and `queue`. All GPU resourcces and
     /// GPU operations will be created on them.
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let bloom = post_processing::BloomContext::new(&device);
         let tone_mapping = post_processing::ToneMappingContext::new(&device);
         Context {
             device,
             queue,
+            bloom,
             tone_mapping,
         }
     }
@@ -157,16 +162,19 @@ pub struct Renderer {
     width: u32,
     height: u32,
     ctx: Context,
+    bloom: post_processing::Bloom,
     tone_mapping: post_processing::ToneMapping,
 }
 
 impl Renderer {
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: Context) -> Self {
+        let bloom = post_processing::Bloom::new(width, height, 5, 0.02, &ctx);
         let tone_mapping = post_processing::ToneMapping::new(width, height, format, &ctx);
         Renderer {
             width,
             height,
             ctx,
+            bloom,
             tone_mapping,
         }
     }
@@ -200,6 +208,7 @@ impl Renderer {
         }
         self.width = width;
         self.height = height;
+        self.bloom.resize(width, height, &self.ctx);
         self.tone_mapping.resize(width, height, &self.ctx);
     }
 
@@ -225,7 +234,9 @@ impl Renderer {
                 label: Some("mogra render command encoder"),
             });
 
-        let _ = self.tone_mapping.input_texture_view();
+        let _ = self.bloom.input_texture_view();
+        self.bloom
+            .render(self.tone_mapping.input_texture_view(), &mut encoder);
         self.tone_mapping.render(target, &mut encoder);
 
         self.ctx.queue.submit([encoder.finish()]);

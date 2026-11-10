@@ -1,5 +1,10 @@
 use crate::{
-    camera::{Camera, CameraManager}, light::LightManager, mesh::{MeshInstance, MeshManager}, primitive::PrimitiveRenderer, scene_graph::{SceneGraph, SiblingNodeIter},
+    buffer::WritableBuffer,
+    camera::{Camera, CameraManager},
+    light::{LightManager, create_point_light_buffer},
+    mesh::{MeshInstance, MeshManager},
+    primitive::PrimitiveRenderer,
+    scene_graph::{SceneGraph, SiblingNodeIter},
 };
 use glam::{Quat, Vec3};
 pub use node::NodeBuilder;
@@ -8,14 +13,14 @@ pub use scene_graph::{
     RootNodeIter,
 };
 
+mod buffer;
 pub mod camera;
 pub mod geometry;
+pub mod light;
 pub mod mesh;
 mod node;
 mod primitive;
 mod scene_graph;
-pub mod light;
-mod buffer;
 
 mod post_processing {
     pub use bloom::*;
@@ -62,7 +67,7 @@ impl Scene {
         let scene_graph = SceneGraph::new();
         let meshes = MeshManager::new(&ctx);
         let cameras = CameraManager::new();
-        let lights = LightManager::new(&ctx);
+        let lights = LightManager::new();
 
         Scene {
             ctx,
@@ -167,6 +172,7 @@ pub struct Renderer {
     width: u32,
     height: u32,
     ctx: Context,
+    point_light_buffer: WritableBuffer,
     primitive: PrimitiveRenderer,
     bloom: post_processing::Bloom,
     tone_mapping: post_processing::ToneMapping,
@@ -174,6 +180,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: Context) -> Self {
+        let point_light_buffer = create_point_light_buffer(&ctx.device);
         let primitive = PrimitiveRenderer::new(&ctx);
         let bloom = post_processing::Bloom::new(width, height, 5, 0.02, &ctx);
         let tone_mapping = post_processing::ToneMapping::new(width, height, format, &ctx);
@@ -182,6 +189,7 @@ impl Renderer {
             width,
             height,
             ctx,
+            point_light_buffer,
             primitive,
             bloom,
             tone_mapping,
@@ -243,6 +251,13 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mogra render command encoder"),
             });
+
+        scene.lights.write_point_light(
+            &scene.scene_graph,
+            &mut self.point_light_buffer,
+            &self.ctx,
+            &mut encoder,
+        );
 
         let _prepared_primitives =
             self.primitive

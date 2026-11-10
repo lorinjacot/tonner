@@ -72,6 +72,14 @@ impl Node {
     pub fn global_transform(&self) -> Mat4 {
         self.global_transform
     }
+
+    /// Returns the global position of the node.
+    ///
+    /// The global position is the origin of the node local space in the scene space.
+    /// In other words, it corresponds to the node's global transformation applied to the point (0, 0, 0).
+    pub fn global_position(&self) -> Vec3 {
+        self.global_transform.w_axis.truncate()
+    }
 }
 
 /// A Scene Graph works as a tree-like structure establishing parent-child relationships between scene elements,

@@ -1,9 +1,25 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
+use glam::Mat4;
 use sparse_keyed::PrimaryMap;
 use thiserror::Error;
 
-use crate::{Context, NodeId, geometry::GeometryIndices, primitive::PrimitiveInstance};
+use crate::{
+    Context, NodeId,
+    geometry::GeometryIndices,
+    primitive::{Primitive, PrimitiveInstance},
+};
+
+#[derive(Debug, Clone)]
+pub struct Mesh {
+    primitives: Vec<Arc<Primitive>>,
+}
+
+impl Mesh {
+    pub fn primitives(&self) -> &[Arc<Primitive>] {
+        &self.primitives
+    }
+}
 
 /// A mesh represents a 3D object instance in a scene.
 ///
@@ -17,6 +33,8 @@ pub struct MeshInstance {
     node: NodeId,
     vertex_data: PrimitiveInstance,
     morph_target_count: usize,
+    primitives: Vec<Arc<Primitive>>,
+    mesh: Arc<Mesh>,
 }
 
 impl MeshInstance {
@@ -27,6 +45,22 @@ impl MeshInstance {
 
     pub fn weights(&self) -> &[f32] {
         &self.vertex_data.weights[..self.morph_target_count]
+    }
+
+    pub fn mesh(&self) -> &Mesh {
+        &self.mesh
+    }
+
+    pub fn model_matrix(&self) -> Mat4 {
+        self.vertex_data.model_matrix
+    }
+
+    pub fn primitives(&self) -> &[Arc<Primitive>] {
+        &self.primitives
+    }
+
+    pub(super) fn vertex_data(&self) -> &PrimitiveInstance {
+        &self.vertex_data
     }
 }
 
@@ -151,6 +185,10 @@ impl MeshManager {
     pub fn set_weights(&mut self, node: NodeId, weights: &[f32]) {
         let mesh = self.instances.get_mut(&node).expect("no such mesh");
         mesh.vertex_data.weights[..mesh.morph_target_count].copy_from_slice(weights);
+    }
+
+    pub fn meshes(&self) -> impl Iterator<Item = &MeshInstance> {
+        self.instances.values()
     }
 
     pub fn remove(&mut self, node: NodeId) -> Option<MeshInstance> {

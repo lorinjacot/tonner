@@ -7,6 +7,7 @@ edition = "2024"
 bitflags.workspace = true
 bytemuck.workspace = true
 glam = { workspace = true, features = ["bytemuck"] }
+log.workspace = true
 mikktspace = { version = "0.3.0", default-features = false, features = ["glam"] }
 slotmap.workspace = true
 sparse-keyed.workspace = true

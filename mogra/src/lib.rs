@@ -1,6 +1,7 @@
 use crate::{
     camera::{Camera, CameraManager},
     mesh::{MeshInstance, MeshManager},
+    primitive::PrimitiveRenderer,
     scene_graph::{SceneGraph, SiblingNodeIter},
 };
 use glam::{Quat, Vec3};
@@ -157,23 +158,27 @@ impl Scene {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Renderer {
     width: u32,
     height: u32,
     ctx: Context,
+    primitive: PrimitiveRenderer,
     bloom: post_processing::Bloom,
     tone_mapping: post_processing::ToneMapping,
 }
 
 impl Renderer {
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: Context) -> Self {
+        let primitive = PrimitiveRenderer::new(&ctx);
         let bloom = post_processing::Bloom::new(width, height, 5, 0.02, &ctx);
         let tone_mapping = post_processing::ToneMapping::new(width, height, format, &ctx);
+
         Renderer {
             width,
             height,
             ctx,
+            primitive,
             bloom,
             tone_mapping,
         }
@@ -234,6 +239,10 @@ impl Renderer {
                 label: Some("mogra render command encoder"),
             });
 
+        let _prepared_primitives =
+            self.primitive
+                .prepare(scene.meshes.meshes(), &self.ctx, &mut encoder);
+
         let _ = self.bloom.input_texture_view();
         self.bloom
             .render(self.tone_mapping.input_texture_view(), &mut encoder);
@@ -244,5 +253,12 @@ impl Renderer {
 
     pub fn context(&self) -> &Context {
         &self.ctx
+    }
+}
+
+impl Clone for Renderer {
+    fn clone(&self) -> Self {
+        // should create a deep copy
+        todo!()
     }
 }

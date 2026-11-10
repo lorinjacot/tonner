@@ -14,6 +14,7 @@ use crate::{
 
 const DEFAULT_INSTANCE_BUFFER_SIZE: wgpu::BufferAddress =
     8 * size_of::<PrimitiveInstance>() as wgpu::BufferAddress;
+const DEFAULT_STAGING_BUFFER_COUNT: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum AlphaMode {
@@ -231,6 +232,12 @@ impl PrimitiveRenderer {
     pub fn new(ctx: &Context) -> Self {
         let instance_buffer = create_instance_buffer(DEFAULT_INSTANCE_BUFFER_SIZE, &ctx.device);
         let (sender, receiver) = channel();
+        for _ in 0..DEFAULT_STAGING_BUFFER_COUNT {
+            let _ = sender.send(create_staging_buffer(
+                DEFAULT_INSTANCE_BUFFER_SIZE,
+                &ctx.device,
+            ));
+        }
 
         PrimitiveRenderer {
             staging_buffer_receiver: receiver,
@@ -276,17 +283,26 @@ impl PrimitiveRenderer {
         }
 
         let required_sized = (primitive_count * size_of::<PrimitiveInstance>()) as u64;
-        if self.instance_buffer.size() < required_sized {
-            log::debug!("Creating larger instance buffer and deleting staging buffers");
+        let staging_buffer = if self.instance_buffer.size() < required_sized {
+            log::info!(
+                "Instance buffer is too small. Creating larger instance and staging buffers"
+            );
             let size = wgpu::util::align_to(required_sized, wgpu::COPY_BUFFER_ALIGNMENT)
                 .max(2 * self.instance_buffer.size());
             self.instance_buffer = create_instance_buffer(size, &ctx.device);
             (self.staging_buffer_sender, self.staging_buffer_receiver) = channel();
-        }
-        let staging_buffer = self.staging_buffer_receiver.try_recv().unwrap_or_else(|_| {
-            log::debug!("Creating new staging buffer");
-            create_staging_buffer(self.instance_buffer.size(), &ctx.device)
-        });
+            for _ in 0..DEFAULT_STAGING_BUFFER_COUNT - 1 {
+                let _ = self
+                    .staging_buffer_sender
+                    .send(create_staging_buffer(size, &ctx.device));
+            }
+            create_staging_buffer(size, &ctx.device)
+        } else {
+            self.staging_buffer_receiver.try_recv().unwrap_or_else(|_| {
+                log::warn!("No available staging buffer. Creating a new one");
+                create_staging_buffer(self.instance_buffer.size(), &ctx.device)
+            })
+        };
 
         let mut prepared = PreparedPrimitives {
             instance_buffer: &self.instance_buffer,

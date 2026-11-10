@@ -1,8 +1,5 @@
 use crate::{
-    camera::{Camera, CameraManager},
-    mesh::{MeshInstance, MeshManager},
-    primitive::PrimitiveRenderer,
-    scene_graph::{SceneGraph, SiblingNodeIter},
+    camera::{Camera, CameraManager}, light::LightManager, mesh::{MeshInstance, MeshManager}, primitive::PrimitiveRenderer, scene_graph::{SceneGraph, SiblingNodeIter},
 };
 use glam::{Quat, Vec3};
 pub use node::NodeBuilder;
@@ -17,6 +14,8 @@ pub mod mesh;
 mod node;
 mod primitive;
 mod scene_graph;
+pub mod light;
+mod buffer;
 
 mod post_processing {
     pub use bloom::*;
@@ -55,6 +54,7 @@ pub struct Scene {
     scene_graph: SceneGraph,
     meshes: MeshManager,
     cameras: CameraManager,
+    lights: LightManager,
 }
 
 impl Scene {
@@ -62,11 +62,14 @@ impl Scene {
         let scene_graph = SceneGraph::new();
         let meshes = MeshManager::new(&ctx);
         let cameras = CameraManager::new();
+        let lights = LightManager::new(&ctx);
+
         Scene {
             ctx,
             scene_graph,
             meshes,
             cameras,
+            lights,
         }
     }
 
@@ -80,7 +83,8 @@ impl Scene {
     /// This function will panic if:
     /// - the renderer and the target have different dimensions;
     /// - the renderer and the target have different texture format;
-    /// - the scene and the render are using different [Context]s.
+    /// - the scene and the render are using different [Context]s;
+    /// - the camera is not part of the scene.
     pub fn render(&self, camera: NodeId, target: &wgpu::TextureView, renderer: &mut Renderer) {
         renderer.render(self, camera, target)
     }
@@ -223,7 +227,8 @@ impl Renderer {
     /// This function will panic if:
     /// - the renderer and the target have different dimensions;
     /// - the renderer and the target have different texture format;
-    /// - the scene and the render are using different [Context]s.
+    /// - the scene and the render are using different [Context]s;
+    /// - the camera is not part of the scene.
     pub fn render(&mut self, scene: &Scene, camera: NodeId, target: &wgpu::TextureView) {
         assert!(self.ctx == scene.ctx);
 

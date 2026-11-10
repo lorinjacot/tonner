@@ -9,7 +9,8 @@ use glam::Mat4;
 use wgpu::BufferViewMut;
 
 use crate::{
-    Context, geometry::MAX_MORPH_TARGET_COUNT, mesh::MeshInstance, scene_graph::SceneGraph,
+    Context, buffer::WritableBuffer, geometry::MAX_MORPH_TARGET_COUNT, mesh::MeshInstance,
+    scene_graph::SceneGraph,
 };
 
 const DEFAULT_INSTANCE_BUFFER_SIZE: wgpu::BufferAddress =
@@ -223,27 +224,19 @@ impl<'a> PreparedPrimitives<'a> {
 
 #[derive(Debug)]
 pub(super) struct PrimitiveRenderer {
-    staging_buffer_receiver: Receiver<wgpu::Buffer>,
-    staging_buffer_sender: Sender<wgpu::Buffer>,
-    instance_buffer: wgpu::Buffer,
+    instance_buffer: WritableBuffer,
 }
 
 impl PrimitiveRenderer {
     pub fn new(ctx: &Context) -> Self {
-        let instance_buffer = create_instance_buffer(DEFAULT_INSTANCE_BUFFER_SIZE, &ctx.device);
-        let (sender, receiver) = channel();
-        for _ in 0..DEFAULT_STAGING_BUFFER_COUNT {
-            let _ = sender.send(create_staging_buffer(
-                DEFAULT_INSTANCE_BUFFER_SIZE,
-                &ctx.device,
-            ));
-        }
+        let instance_buffer = WritableBuffer::new(
+            Some("mogra primitive instance buffer"),
+            DEFAULT_INSTANCE_BUFFER_SIZE,
+            wgpu::BufferUsages::VERTEX,
+            &ctx.device,
+        );
 
-        PrimitiveRenderer {
-            staging_buffer_receiver: receiver,
-            staging_buffer_sender: sender,
-            instance_buffer,
-        }
+        PrimitiveRenderer { instance_buffer }
     }
 
     pub fn prepare<'a, 'b>(
@@ -282,66 +275,34 @@ impl PrimitiveRenderer {
             }
         }
 
-        let required_sized = (primitive_count * size_of::<PrimitiveInstance>()) as u64;
-        let staging_buffer = if self.instance_buffer.size() < required_sized {
-            log::info!(
-                "Instance buffer is too small. Creating larger instance and staging buffers"
-            );
-            let size = wgpu::util::align_to(required_sized, wgpu::COPY_BUFFER_ALIGNMENT)
-                .max(2 * self.instance_buffer.size());
-            self.instance_buffer = create_instance_buffer(size, &ctx.device);
-            (self.staging_buffer_sender, self.staging_buffer_receiver) = channel();
-            for _ in 0..DEFAULT_STAGING_BUFFER_COUNT - 1 {
-                let _ = self
-                    .staging_buffer_sender
-                    .send(create_staging_buffer(size, &ctx.device));
-            }
-            create_staging_buffer(size, &ctx.device)
-        } else {
-            self.staging_buffer_receiver.try_recv().unwrap_or_else(|_| {
-                log::warn!("No available staging buffer. Creating a new one");
-                create_staging_buffer(self.instance_buffer.size(), &ctx.device)
-            })
-        };
+        let size = ((primitive_count + 1) * size_of::<PrimitiveInstance>()) as wgpu::BufferAddress;
+        let (opaque, transparent) =
+            self.instance_buffer
+                .write_with(0..size, &ctx.device, encoder, |buffer_view| {
+                    let mut offset: wgpu::BufferAddress = 0;
 
-        let mut prepared = PreparedPrimitives {
-            instance_buffer: &self.instance_buffer,
-            opaque: PipelineBatches::new(),
-            transparent: PipelineBatches::new(),
-        };
-        let mut offset: wgpu::BufferAddress = 0;
-        let mut buffer_view = staging_buffer.get_mapped_range_mut(..);
-        for ((pipeline, _), batch_builder) in opaque_primitives {
-            let batch = batch_builder.build(&mut buffer_view, offset);
-            offset = batch.instance_bound.end;
-            prepared.opaque.add_batch(pipeline, batch);
+                    let mut opaque = PipelineBatches::new();
+                    for ((pipeline, _), batch_builder) in opaque_primitives {
+                        let batch = batch_builder.build(buffer_view, offset);
+                        offset = batch.instance_bound.end;
+                        opaque.add_batch(pipeline, batch);
+                    }
+
+                    let mut transparent = PipelineBatches::new();
+                    for ((pipeline, _), batch_builder) in transparent_primitives {
+                        let batch = batch_builder.build(buffer_view, offset);
+                        offset = batch.instance_bound.end;
+                        transparent.add_batch(pipeline, batch);
+                    }
+
+                    (opaque, transparent)
+                });
+
+        PreparedPrimitives {
+            instance_buffer: self.instance_buffer.buffer(),
+            opaque,
+            transparent,
         }
-        for ((pipeline, _), batch_builder) in transparent_primitives {
-            let batch = batch_builder.build(&mut buffer_view, offset);
-            offset = batch.instance_bound.end;
-            prepared.transparent.add_batch(pipeline, batch);
-        }
-        drop(buffer_view);
-
-        staging_buffer.unmap();
-
-        encoder.copy_buffer_to_buffer(&staging_buffer, 0, &self.instance_buffer, 0, required_sized);
-
-        let sender = self.staging_buffer_sender.clone();
-        encoder.map_buffer_on_submit(
-            &staging_buffer.clone(),
-            wgpu::MapMode::Write,
-            ..,
-            move |result| match result {
-                Ok(()) => {
-                    let _ = sender.send(staging_buffer);
-                }
-                Err(err) => {
-                    log::error!("{err}");
-                }
-            },
-        );
-        prepared
     }
 }
 

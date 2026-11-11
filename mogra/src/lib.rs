@@ -1,12 +1,13 @@
 use crate::{
     buffer::WritableBuffer,
-    camera::{Camera, CameraManager},
-    light::{LightManager, create_point_light_buffer},
+    camera::{Camera, CameraManager, CameraUniform},
+    light::{LightContext, LightManager, create_point_light_buffer},
     mesh::{MeshInstance, MeshManager},
     primitive::PrimitiveRenderer,
     scene_graph::{SceneGraph, SiblingNodeIter},
 };
-use glam::{Quat, Vec3};
+use bytemuck::bytes_of;
+use glam::{Mat4, Quat, Vec3};
 pub use node::NodeBuilder;
 pub use scene_graph::{
     AllChildrenNodeIter, DirectChildrenNodeIter, Node, NodeId, NodeIter, ParentNodeIter,
@@ -34,6 +35,8 @@ mod post_processing {
 pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    light: LightContext,
+    render_bind_group_layout: wgpu::BindGroupLayout,
     bloom: post_processing::BloomContext,
     tone_mapping: post_processing::ToneMappingContext,
 }
@@ -42,11 +45,22 @@ impl Context {
     /// Create the context using the provided `device` and `queue`. All GPU resourcces and
     /// GPU operations will be created on them.
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mogra context command encoder"),
+        });
+
+        let light = LightContext::new(&device, &mut encoder);
+        let render_bind_group_layout = create_render_bind_group_layout(&device);
         let bloom = post_processing::BloomContext::new(&device);
         let tone_mapping = post_processing::ToneMappingContext::new(&device);
+
+        queue.submit([encoder.finish()]);
+
         Context {
             device,
             queue,
+            light,
+            render_bind_group_layout,
             bloom,
             tone_mapping,
         }
@@ -172,6 +186,9 @@ pub struct Renderer {
     width: u32,
     height: u32,
     ctx: Context,
+    render_bind_group_layout: wgpu::BindGroupLayout,
+    dummy_joint_buffer: wgpu::Buffer,
+    camera_buffer: wgpu::Buffer,
     point_light_buffer: WritableBuffer,
     primitive: PrimitiveRenderer,
     bloom: post_processing::Bloom,
@@ -180,15 +197,31 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: Context) -> Self {
+        let render_bind_group_layout = ctx.render_bind_group_layout.clone();
         let point_light_buffer = create_point_light_buffer(&ctx.device);
-        let primitive = PrimitiveRenderer::new(&ctx);
+        let primitive = PrimitiveRenderer::new(width, height, &ctx);
         let bloom = post_processing::Bloom::new(width, height, 5, 0.02, &ctx);
         let tone_mapping = post_processing::ToneMapping::new(width, height, format, &ctx);
+        let dummy_joint_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mogra dummy joint buffer"),
+            size: size_of::<Mat4>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let camera_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mogra camera buffer"),
+            size: size_of::<CameraUniform>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Renderer {
             width,
             height,
             ctx,
+            render_bind_group_layout,
+            dummy_joint_buffer,
+            camera_buffer,
             point_light_buffer,
             primitive,
             bloom,
@@ -225,6 +258,7 @@ impl Renderer {
         }
         self.width = width;
         self.height = height;
+        self.primitive.resize(width, height, &self.ctx);
         self.bloom.resize(width, height, &self.ctx);
         self.tone_mapping.resize(width, height, &self.ctx);
     }
@@ -240,11 +274,6 @@ impl Renderer {
     pub fn render(&mut self, scene: &Scene, camera: NodeId, target: &wgpu::TextureView) {
         assert!(self.ctx == scene.ctx);
 
-        let _ = camera;
-        let _ = target;
-        let _ = scene.meshes;
-        let _ = scene.scene_graph;
-
         let mut encoder = self
             .ctx
             .device
@@ -252,12 +281,95 @@ impl Renderer {
                 label: Some("mogra render command encoder"),
             });
 
+        let projection = scene
+            .cameras
+            .get(camera)
+            .expect("scene should contain the camera")
+            .projection_matrix();
+        let camera_transform = scene.scene_graph[camera].global_transform();
+        let camera_position = camera_transform.w_axis.truncate();
+        let view = Mat4::look_at_rh(
+            camera_position,
+            camera_transform.transform_vector3(-Vec3::Z),
+            camera_transform.transform_vector3(Vec3::Y),
+        );
+        let camera_uniform = CameraUniform {
+            view_projection: projection * view,
+            view,
+            projection_inverse: projection.inverse(),
+            position: camera_position,
+            _pad: 0,
+        };
+        self.ctx
+            .queue
+            .write_buffer(&self.camera_buffer, 0, bytes_of(&camera_uniform));
+
         scene.lights.write_point_light(
             &scene.scene_graph,
             &mut self.point_light_buffer,
             &self.ctx,
             &mut encoder,
         );
+
+        let _render_bind_group = self
+            .ctx
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mogra render bind group"),
+                layout: &self.render_bind_group_layout,
+                entries: &[
+                    // skins
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.dummy_joint_buffer.as_entire_binding(),
+                    },
+                    // camera
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.camera_buffer.as_entire_binding(),
+                    },
+                    // lights
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.point_light_buffer.buffer().as_entire_binding(),
+                    },
+                    // // irradiance map
+                    // wgpu::BindGroupEntry {
+                    //     binding: 4,
+                    //     resource: wgpu::BindingResource::TextureView(
+                    //         environment.irradiance_map_view(),
+                    //     ),
+                    // },
+                    // wgpu::BindGroupEntry {
+                    //     binding: 5,
+                    //     resource: wgpu::BindingResource::Sampler(
+                    //         environment.irradiance_map_sampler(),
+                    //     ),
+                    // },
+                    // // prefilter map
+                    // wgpu::BindGroupEntry {
+                    //     binding: 6,
+                    //     resource: wgpu::BindingResource::TextureView(
+                    //         environment.prefilter_map_view(),
+                    //     ),
+                    // },
+                    // wgpu::BindGroupEntry {
+                    //     binding: 7,
+                    //     resource: wgpu::BindingResource::Sampler(
+                    //         environment.prefilter_map_sampler(),
+                    //     ),
+                    // },
+                    // // BRDF LUT
+                    // wgpu::BindGroupEntry {
+                    //     binding: 8,
+                    //     resource: wgpu::BindingResource::TextureView(environment.brdf_lut_view()),
+                    // },
+                    // wgpu::BindGroupEntry {
+                    //     binding: 9,
+                    //     resource: wgpu::BindingResource::Sampler(environment.brdf_lut_sampler()),
+                    // },
+                ],
+            });
 
         let _prepared_primitives =
             self.primitive
@@ -281,4 +393,96 @@ impl Clone for Renderer {
         // should create a deep copy
         todo!()
     }
+}
+
+fn create_render_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("render bind group layout"),
+        entries: &[
+            // skins
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // camera
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // lights
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // // irradiance map
+            // wgpu::BindGroupLayoutEntry {
+            //     binding: 4,
+            //     visibility: wgpu::ShaderStages::FRAGMENT,
+            //     ty: wgpu::BindingType::Texture {
+            //         sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            //         view_dimension: wgpu::TextureViewDimension::Cube,
+            //         multisampled: false,
+            //     },
+            //     count: None,
+            // },
+            // wgpu::BindGroupLayoutEntry {
+            //     binding: 5,
+            //     visibility: wgpu::ShaderStages::FRAGMENT,
+            //     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            //     count: None,
+            // },
+            // // prefilter map
+            // wgpu::BindGroupLayoutEntry {
+            //     binding: 6,
+            //     visibility: wgpu::ShaderStages::FRAGMENT,
+            //     ty: wgpu::BindingType::Texture {
+            //         sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            //         view_dimension: wgpu::TextureViewDimension::Cube,
+            //         multisampled: false,
+            //     },
+            //     count: None,
+            // },
+            // wgpu::BindGroupLayoutEntry {
+            //     binding: 7,
+            //     visibility: wgpu::ShaderStages::FRAGMENT,
+            //     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            //     count: None,
+            // },
+            // // BRDF LUT
+            // wgpu::BindGroupLayoutEntry {
+            //     binding: 8,
+            //     visibility: wgpu::ShaderStages::FRAGMENT,
+            //     ty: wgpu::BindingType::Texture {
+            //         sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            //         view_dimension: wgpu::TextureViewDimension::D2,
+            //         multisampled: false,
+            //     },
+            //     count: None,
+            // },
+            // wgpu::BindGroupLayoutEntry {
+            //     binding: 9,
+            //     visibility: wgpu::ShaderStages::FRAGMENT,
+            //     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            //     count: None,
+            // },
+        ],
+    })
 }

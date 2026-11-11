@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use glam::Mat4;
+use bytemuck::{Pod, Zeroable};
+use glam::{Mat4, Vec3};
 use thiserror::Error;
 
 use crate::NodeId;
@@ -260,6 +261,10 @@ impl Camera {
         let projection = projection.matrix();
         Ok(Camera { projection })
     }
+
+    pub fn projection_matrix(&self) -> Mat4 {
+        self.projection
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -378,4 +383,14 @@ mod tests {
             Err(OrthographicProjectionError::InvalidNearFar)
         );
     }
+}
+
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
+#[repr(C)]
+pub(super) struct CameraUniform {
+    pub view_projection: Mat4,
+    pub view: Mat4,
+    pub projection_inverse: Mat4,
+    pub position: Vec3,
+    pub _pad: u32,
 }

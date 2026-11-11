@@ -3,7 +3,17 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable, bytes_of};
 use glam::Vec3;
 
-use crate::{Context, NodeId, buffer::WritableBuffer, scene_graph::SceneGraph};
+use crate::{
+    Context, NodeId,
+    buffer::WritableBuffer,
+    light::image_based_lightning::{
+        create_brdf_lut_sampler, create_brdf_lut_texture, create_ibl_bind_group_layout,
+        create_irradiance_map_sampler, create_prefilter_map_sampler,
+    },
+    scene_graph::SceneGraph,
+};
+
+mod image_based_lightning;
 
 const DEFAULT_POINT_LIGHT_BUFFER_SIZE: wgpu::BufferAddress = point_lights_size(8);
 
@@ -66,6 +76,36 @@ pub fn create_point_light_buffer(device: &wgpu::Device) -> WritableBuffer {
         wgpu::BufferUsages::STORAGE,
         device,
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LightContext {
+    ibl_bind_group_layout: wgpu::BindGroupLayout,
+    irradiance_map_sampler: wgpu::Sampler,
+    prefilter_map_sampler: wgpu::Sampler,
+    brdf_lut_texture: wgpu::TextureView,
+    brdf_lut_sampler: wgpu::Sampler,
+}
+
+impl LightContext {
+    pub fn new(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) -> Self {
+        let ibl_module =
+            device.create_shader_module(wgpu::include_wgsl!("light/image_based_lightning.wgsl"));
+
+        let ibl_bind_group_layout = create_ibl_bind_group_layout(device);
+        let irradiance_map_sampler = create_irradiance_map_sampler(device);
+        let prefilter_map_sampler = create_prefilter_map_sampler(device);
+        let brdf_lut_texture = create_brdf_lut_texture(device, &ibl_module, encoder);
+        let brdf_lut_sampler = create_brdf_lut_sampler(device);
+
+        LightContext {
+            ibl_bind_group_layout,
+            irradiance_map_sampler,
+            prefilter_map_sampler,
+            brdf_lut_sampler,
+            brdf_lut_texture,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]

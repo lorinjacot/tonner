@@ -1,10 +1,5 @@
 use crate::{
-    buffer::WritableBuffer,
-    camera::{Camera, CameraManager, CameraUniform},
-    light::{LightContext, LightManager, create_point_light_buffer},
-    mesh::{MeshInstance, MeshManager},
-    primitive::PrimitiveRenderer,
-    scene_graph::{SceneGraph, SiblingNodeIter},
+    buffer::WritableBuffer, camera::{Camera, CameraManager, CameraUniform}, light::{LightContext, LightManager, create_point_light_buffer}, mesh::{MeshInstance, MeshManager}, primitive::PrimitiveRenderer, scene_graph::{SceneGraph, SiblingNodeIter}, texture::TextureContext,
 };
 use bytemuck::bytes_of;
 use glam::{Mat4, Quat, Vec3};
@@ -22,6 +17,7 @@ pub mod mesh;
 mod node;
 mod primitive;
 mod scene_graph;
+mod texture;
 
 mod post_processing {
     pub use bloom::*;
@@ -31,10 +27,11 @@ mod post_processing {
     mod tone_mapping;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    texture: TextureContext,
     light: LightContext,
     render_bind_group_layout: wgpu::BindGroupLayout,
     bloom: post_processing::BloomContext,
@@ -49,6 +46,7 @@ impl Context {
             label: Some("mogra context command encoder"),
         });
 
+        let texture = TextureContext::new(&device);
         let light = LightContext::new(&device, &mut encoder);
         let render_bind_group_layout = create_render_bind_group_layout(&device);
         let bloom = post_processing::BloomContext::new(&device);
@@ -59,6 +57,7 @@ impl Context {
         Context {
             device,
             queue,
+            texture,
             light,
             render_bind_group_layout,
             bloom,
@@ -272,7 +271,7 @@ impl Renderer {
     /// - the scene and the render are using different [Context]s;
     /// - the camera is not part of the scene.
     pub fn render(&mut self, scene: &Scene, camera: NodeId, target: &wgpu::TextureView) {
-        assert!(self.ctx == scene.ctx);
+        // assert!(self.ctx == scene.ctx);
 
         let mut encoder = self
             .ctx

@@ -1026,6 +1026,7 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
+ "rayon",
 ]
 
 [[package]]
@@ -2455,11 +2456,14 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.12.1",
  "bytemuck",
+ "dashmap",
  "env_logger",
  "glam 0.32.1",
+ "image",
  "log",
  "mikktspace",
  "pollster",
+ "rayon",
  "slotmap",
  "sparse-keyed",
  "thiserror 2.0.18",

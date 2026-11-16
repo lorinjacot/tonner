@@ -6,15 +6,19 @@ edition = "2024"
 [dependencies]
 bitflags.workspace = true
 bytemuck.workspace = true
+dashmap.workspace = true
 glam = { workspace = true, features = ["bytemuck"] }
+image = { workspace = true, default-features = false }
 log.workspace = true
 mikktspace = { version = "0.3.0", default-features = false, features = ["glam"] }
+rayon = { workspace = true, optional = true }
 slotmap.workspace = true
 sparse-keyed.workspace = true
 thiserror.workspace = true
 wgpu.workspace = true
 
 [features]
+rayon = ["dep:rayon", "dashmap/rayon", "image/rayon"]
 
 [dev-dependencies]
 env_logger.workspace = true

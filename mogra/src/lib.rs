@@ -1,5 +1,12 @@
 use crate::{
-    buffer::WritableBuffer, camera::{Camera, CameraManager, CameraUniform}, light::{LightContext, LightManager, create_point_light_buffer}, mesh::{MeshInstance, MeshManager}, primitive::PrimitiveRenderer, scene_graph::{SceneGraph, SiblingNodeIter}, texture::TextureContext,
+    buffer::WritableBuffer,
+    camera::{Camera, CameraManager, CameraUniform},
+    light::{LightContext, LightManager, create_point_light_buffer},
+    mesh::{MeshInstance, MeshManager},
+    primitive::PrimitiveRenderer,
+    scene_graph::{SceneGraph, SiblingNodeIter},
+    skybox::SkyboxContext,
+    texture::TextureContext,
 };
 use bytemuck::bytes_of;
 use glam::{Mat4, Quat, Vec3};
@@ -8,6 +15,7 @@ pub use scene_graph::{
     AllChildrenNodeIter, DirectChildrenNodeIter, Node, NodeId, NodeIter, ParentNodeIter,
     RootNodeIter,
 };
+pub use skybox::Skybox;
 
 mod buffer;
 pub mod camera;
@@ -17,6 +25,7 @@ pub mod mesh;
 mod node;
 mod primitive;
 mod scene_graph;
+mod skybox;
 mod texture;
 
 mod post_processing {
@@ -32,6 +41,7 @@ pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: TextureContext,
+    skybox: SkyboxContext,
     light: LightContext,
     render_bind_group_layout: wgpu::BindGroupLayout,
     bloom: post_processing::BloomContext,
@@ -45,10 +55,11 @@ impl Context {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mogra context command encoder"),
         });
+        let render_bind_group_layout = create_render_bind_group_layout(&device);
 
         let texture = TextureContext::new(&device);
+        let skybox = SkyboxContext::new(&render_bind_group_layout, &device);
         let light = LightContext::new(&device, &mut encoder);
-        let render_bind_group_layout = create_render_bind_group_layout(&device);
         let bloom = post_processing::BloomContext::new(&device);
         let tone_mapping = post_processing::ToneMappingContext::new(&device);
 
@@ -58,6 +69,7 @@ impl Context {
             device,
             queue,
             texture,
+            skybox,
             light,
             render_bind_group_layout,
             bloom,
@@ -70,6 +82,7 @@ impl Context {
 pub struct Scene {
     ctx: Context,
     scene_graph: SceneGraph,
+    skybox: Skybox,
     meshes: MeshManager,
     cameras: CameraManager,
     lights: LightManager,
@@ -78,6 +91,7 @@ pub struct Scene {
 impl Scene {
     pub fn new(ctx: Context) -> Self {
         let scene_graph = SceneGraph::new();
+        let skybox = Skybox::black(&ctx);
         let meshes = MeshManager::new(&ctx);
         let cameras = CameraManager::new();
         let lights = LightManager::new();
@@ -85,6 +99,7 @@ impl Scene {
         Scene {
             ctx,
             scene_graph,
+            skybox,
             meshes,
             cameras,
             lights,
@@ -148,6 +163,18 @@ impl Scene {
     ) {
         self.scene_graph
             .set_local_transform(node, translation, rotation, scale);
+    }
+
+    pub fn skybox(&self) -> &Skybox {
+        &self.skybox
+    }
+
+    pub fn skybox_mut(&mut self) -> &mut Skybox {
+        &mut self.skybox
+    }
+
+    pub fn set_skybox(&mut self, skybox: Skybox) {
+        self.skybox = skybox;
     }
 
     pub fn mesh<'a>(&'a self, node: NodeId) -> Option<&'a MeshInstance> {
@@ -310,22 +337,22 @@ impl Renderer {
             &mut encoder,
         );
 
-        let _render_bind_group = self
+        let render_bind_group = self
             .ctx
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("mogra render bind group"),
                 layout: &self.render_bind_group_layout,
                 entries: &[
+                    // camera
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.camera_buffer.as_entire_binding(),
+                    },
                     // skins
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: self.dummy_joint_buffer.as_entire_binding(),
-                    },
-                    // camera
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self.camera_buffer.as_entire_binding(),
                     },
                     // lights
                     wgpu::BindGroupEntry {
@@ -370,9 +397,18 @@ impl Renderer {
                 ],
             });
 
-        let _prepared_primitives =
+        let prepared_primitives =
             self.primitive
                 .prepare(scene.meshes.meshes(), &self.ctx, &mut encoder);
+
+        let mut opaque_pass = prepared_primitives.opaque_render_pass(&mut encoder);
+        opaque_pass.set_bind_group(0, &render_bind_group, &[]);
+        scene.skybox.render(&mut opaque_pass);
+        drop(opaque_pass);
+
+        let mut transparent_pass = prepared_primitives.transparent_render_pass(&mut encoder);
+        transparent_pass.set_bind_group(0, &render_bind_group, &[]);
+        drop(transparent_pass);
 
         let _ = self.bloom.input_texture_view();
         self.bloom
@@ -398,23 +434,23 @@ fn create_render_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("render bind group layout"),
         entries: &[
+            // camera
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
             // skins
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            // camera
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },

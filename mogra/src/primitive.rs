@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::Range,
-    sync::mpsc::{Receiver, Sender, channel},
-};
+use std::{collections::HashMap, ops::Range};
 
 use bytemuck::{Pod, Zeroable, cast_slice};
 use glam::Mat4;
@@ -182,6 +178,7 @@ impl PipelineBatches {
 
 pub struct PreparedPrimitives<'a> {
     instance_buffer: &'a wgpu::Buffer,
+    renderer: &'a PrimitiveRenderer,
     opaque: PipelineBatches,
     transparent: PipelineBatches,
 }
@@ -211,6 +208,80 @@ impl<'a> PreparedPrimitives<'a> {
         todo!()
     }
 
+    pub fn opaque_render_pass<'b>(
+        &self,
+        encoder: &'b mut wgpu::CommandEncoder,
+    ) -> wgpu::RenderPass<'b> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mogra opaque render pass"),
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &self.renderer.opaque_texture,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                None,
+                None,
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.renderer.depth_texture,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
+    }
+
+    pub fn transparent_render_pass<'b>(
+        &self,
+        encoder: &'b mut wgpu::CommandEncoder,
+    ) -> wgpu::RenderPass<'b> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mogra transparent render pass"),
+            color_attachments: &[
+                None,
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &self.renderer.accumulation_texture,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &self.renderer.revealage_texture,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.renderer.depth_texture,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
+    }
+
     /// Renders all opaque primitives to the provided render pass.
     pub fn render_opaque(&self, render_pass: &mut wgpu::RenderPass) {
         self.opaque.render(&self.instance_buffer, render_pass);
@@ -225,10 +296,14 @@ impl<'a> PreparedPrimitives<'a> {
 #[derive(Debug)]
 pub(super) struct PrimitiveRenderer {
     instance_buffer: WritableBuffer,
+    opaque_texture: wgpu::TextureView,
+    accumulation_texture: wgpu::TextureView,
+    revealage_texture: wgpu::TextureView,
+    depth_texture: wgpu::TextureView,
 }
 
 impl PrimitiveRenderer {
-    pub fn new(ctx: &Context) -> Self {
+    pub fn new(width: u32, height: u32, ctx: &Context) -> Self {
         let instance_buffer = WritableBuffer::new(
             Some("mogra primitive instance buffer"),
             DEFAULT_INSTANCE_BUFFER_SIZE,
@@ -236,7 +311,25 @@ impl PrimitiveRenderer {
             &ctx.device,
         );
 
-        PrimitiveRenderer { instance_buffer }
+        let opaque_texture = create_opaque_texture(width, height, &ctx.device);
+        let accumulation_texture = create_accumulation_texture(width, height, &ctx.device);
+        let revealage_texture = create_revealage_texture(width, height, &ctx.device);
+        let depth_texture = create_depth_texture(width, height, &ctx.device);
+
+        PrimitiveRenderer {
+            instance_buffer,
+            opaque_texture,
+            accumulation_texture,
+            revealage_texture,
+            depth_texture,
+        }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32, ctx: &Context) {
+        self.opaque_texture = create_opaque_texture(width, height, &ctx.device);
+        self.accumulation_texture = create_accumulation_texture(width, height, &ctx.device);
+        self.revealage_texture = create_revealage_texture(width, height, &ctx.device);
+        self.depth_texture = create_depth_texture(width, height, &ctx.device);
     }
 
     pub fn prepare<'a, 'b>(
@@ -300,29 +393,111 @@ impl PrimitiveRenderer {
 
         PreparedPrimitives {
             instance_buffer: self.instance_buffer.buffer(),
+            renderer: self,
             opaque,
             transparent,
         }
     }
 }
 
-fn create_staging_buffer(size: wgpu::BufferAddress, device: &wgpu::Device) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mogra primitive renderer staging buffer"),
-        size,
-        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
-        mapped_at_creation: true,
+fn create_opaque_texture(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mogra opaque texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mogra opaque texture view"),
+        ..Default::default()
     })
 }
 
-fn create_instance_buffer(size: wgpu::BufferAddress, device: &wgpu::Device) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mogra primitive renderer staging buffer"),
-        size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::VERTEX,
-        mapped_at_creation: false,
+fn create_accumulation_texture(
+    width: u32,
+    height: u32,
+    device: &wgpu::Device,
+) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mogra accumulation texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mogra accumulation texture view"),
+        ..Default::default()
+    })
+}
+
+fn create_revealage_texture(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mogra revealage texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mogra revealage texture view"),
+        ..Default::default()
+    })
+}
+
+fn create_depth_texture(width: u32, height: u32, device: &wgpu::Device) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mogra depth texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth24Plus,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+
+    texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("mogra depth texture view"),
+        ..Default::default()
     })
 }
 
 #[derive(Debug, Clone)]
 pub struct PrimitiveContext {}
+
+impl PrimitiveContext {
+    pub fn new(device: &wgpu::Device) -> Self {
+
+        PrimitiveContext {}
+    }
+}

@@ -49,8 +49,8 @@ struct VertexOutput {
     @location(5) color_0: vec4<f32>,
 }
 
+@group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(0) @binding(1) var<storage, read> joint_matrices: array<mat4x4<f32>>;
-@group(0) @binding(2) var<uniform> camera: CameraUniform;
 @group(0) @binding(3) var<storage, read> point_lights: PointLightStorage;
 @group(0) @binding(4) var irradiance_map_texture: texture_cube<f32>;
 @group(0) @binding(5) var irradiance_map_sampler: sampler;

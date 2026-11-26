@@ -23,6 +23,7 @@ pub mod geometry;
 pub mod light;
 pub mod mesh;
 mod node;
+mod order_independent_transparency;
 mod primitive;
 mod scene_graph;
 mod skybox;
@@ -41,6 +42,7 @@ pub struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     texture: TextureContext,
+    oit: order_independent_transparency::OITContext,
     skybox: SkyboxContext,
     light: LightContext,
     render_bind_group_layout: wgpu::BindGroupLayout,
@@ -58,6 +60,7 @@ impl Context {
         let render_bind_group_layout = create_render_bind_group_layout(&device);
 
         let texture = TextureContext::new(&device);
+        let oit = order_independent_transparency::OITContext::new(&device);
         let skybox = SkyboxContext::new(&render_bind_group_layout, &device);
         let light = LightContext::new(&device, &mut encoder);
         let bloom = post_processing::BloomContext::new(&device);
@@ -69,6 +72,7 @@ impl Context {
             device,
             queue,
             texture,
+            oit,
             skybox,
             light,
             render_bind_group_layout,
@@ -216,6 +220,7 @@ pub struct Renderer {
     dummy_joint_buffer: wgpu::Buffer,
     camera_buffer: wgpu::Buffer,
     point_light_buffer: WritableBuffer,
+    oit: order_independent_transparency::OITRenderer,
     primitive: PrimitiveRenderer,
     bloom: post_processing::Bloom,
     tone_mapping: post_processing::ToneMapping,
@@ -225,6 +230,7 @@ impl Renderer {
     pub fn new(width: u32, height: u32, format: wgpu::TextureFormat, ctx: Context) -> Self {
         let render_bind_group_layout = ctx.render_bind_group_layout.clone();
         let point_light_buffer = create_point_light_buffer(&ctx.device);
+        let oit = order_independent_transparency::OITRenderer::new(width, height, &ctx);
         let primitive = PrimitiveRenderer::new(width, height, &ctx);
         let bloom = post_processing::Bloom::new(width, height, 5, 0.02, &ctx);
         let tone_mapping = post_processing::ToneMapping::new(width, height, format, &ctx);
@@ -249,6 +255,7 @@ impl Renderer {
             dummy_joint_buffer,
             camera_buffer,
             point_light_buffer,
+            oit,
             primitive,
             bloom,
             tone_mapping,
@@ -284,6 +291,7 @@ impl Renderer {
         }
         self.width = width;
         self.height = height;
+        self.oit.resize(width, height, &self.ctx);
         self.primitive.resize(width, height, &self.ctx);
         self.bloom.resize(width, height, &self.ctx);
         self.tone_mapping.resize(width, height, &self.ctx);
@@ -401,16 +409,18 @@ impl Renderer {
             self.primitive
                 .prepare(scene.meshes.meshes(), &self.ctx, &mut encoder);
 
-        let mut opaque_pass = prepared_primitives.opaque_render_pass(&mut encoder);
+        let raw_output = self.bloom.input_texture_view();
+
+        let mut opaque_pass = self.oit.opaque_render_pass(raw_output, &mut encoder);
         opaque_pass.set_bind_group(0, &render_bind_group, &[]);
         scene.skybox.render(&mut opaque_pass);
         drop(opaque_pass);
 
-        let mut transparent_pass = prepared_primitives.transparent_render_pass(&mut encoder);
+        let mut transparent_pass = self.oit.transparent_render_pass(raw_output, &mut encoder);
         transparent_pass.set_bind_group(0, &render_bind_group, &[]);
         drop(transparent_pass);
 
-        let _ = self.bloom.input_texture_view();
+        self.oit.render(raw_output, &mut encoder);
         self.bloom
             .render(self.tone_mapping.input_texture_view(), &mut encoder);
         self.tone_mapping.render(target, &mut encoder);

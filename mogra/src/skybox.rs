@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 
 use crate::Context;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Skybox {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -65,6 +65,10 @@ impl Skybox {
             pipeline: ctx.skybox.pipeline.clone(),
             bind_group,
         }
+    }
+
+    pub(super) fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
     }
 
     /// Renders the skybox using the provided render pass.
@@ -173,5 +177,9 @@ impl SkyboxContext {
             pipeline,
             sampler,
         }
+    }
+
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
     }
 }

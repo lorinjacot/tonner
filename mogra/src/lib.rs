@@ -62,7 +62,7 @@ impl Context {
         let texture = TextureContext::new(&device);
         let oit = order_independent_transparency::OITContext::new(&device);
         let skybox = SkyboxContext::new(&render_bind_group_layout, &device);
-        let light = LightContext::new(&device, &mut encoder);
+        let light = LightContext::new(skybox.bind_group_layout(), &device, &mut encoder);
         let bloom = post_processing::BloomContext::new(&device);
         let tone_mapping = post_processing::ToneMappingContext::new(&device);
 
@@ -94,11 +94,19 @@ pub struct Scene {
 
 impl Scene {
     pub fn new(ctx: Context) -> Self {
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mogra new scene encoder"),
+            });
+
         let scene_graph = SceneGraph::new();
         let skybox = Skybox::black(&ctx);
         let meshes = MeshManager::new(&ctx);
         let cameras = CameraManager::new();
-        let lights = LightManager::new();
+        let lights = LightManager::new(&skybox, &ctx, &mut encoder);
+
+        ctx.queue.submit([encoder.finish()]);
 
         Scene {
             ctx,
@@ -173,12 +181,20 @@ impl Scene {
         &self.skybox
     }
 
-    pub fn skybox_mut(&mut self) -> &mut Skybox {
-        &mut self.skybox
-    }
-
     pub fn set_skybox(&mut self, skybox: Skybox) {
-        self.skybox = skybox;
+        if skybox != self.skybox {
+            let mut encoder =
+                self.ctx
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("mogra scene skybox encoder"),
+                    });
+
+            self.lights.set_skybox(&skybox, &self.ctx, &mut encoder);
+            self.skybox = skybox;
+
+            self.ctx.queue.submit([encoder.finish()]);
+        }
     }
 
     pub fn mesh<'a>(&'a self, node: NodeId) -> Option<&'a MeshInstance> {
